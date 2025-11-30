@@ -17,6 +17,11 @@ Ripperdoc is an AI-powered terminal assistant for coding tasks, providing an int
 - **Background Commands** - Run commands in background and monitor output
 - **Permission System** - Safe mode with permission prompts for operations
 - **Multi-Edit Support** - Batch edit operations on files
+- **MCP Server Support** - Connect to Model Context Protocol servers for extended capabilities
+- **MCP Server Support** - Integration with Model Context Protocol servers
+- **Subagent System** - Delegate tasks to specialized agents
+- **Session Management** - Persistent session history and usage tracking
+- **Jupyter Notebook Support** - Edit .ipynb files directly
 
 ## Available Tools
 
@@ -26,12 +31,23 @@ Ripperdoc is an AI-powered terminal assistant for coding tasks, providing an int
 - **View** - Read file contents
 - **Edit** - Edit files by replacing exact matches
 - **MultiEdit** - Batch edit operations on files
+- **NotebookEdit** - Edit Jupyter notebook cells
 - **Write** - Create new files
 - **Glob** - Find files matching patterns
 - **Grep** - Search for patterns in files
 - **LS** - List directory contents
 - **TodoRead** - Read the current todo list or the next actionable task
 - **TodoWrite** - Create and update persistent todo lists
+- **Task** - Delegate work to specialized subagents
+- **ListMcpServers** - List configured MCP servers and their tools
+- **ListMcpResources** - List available resources from MCP servers
+- **ReadMcpResource** - Read specific resources from MCP servers
+- **Dynamic MCP Tools** - Runtime-loaded tools from connected MCP servers
+- **Task** - Delegate tasks to specialized subagents
+- **NotebookEdit** - Edit Jupyter notebook files
+- **ListMcpServers** - List configured MCP servers
+- **ListMcpResources** - List available MCP resources
+- **ReadMcpResource** - Read specific MCP resources
 
 ## Project Structure
 
@@ -43,7 +59,9 @@ ripperdoc/
 │   ├── config.py           # Configuration management
 │   ├── commands.py         # Command definitions
 │   ├── permissions.py      # Permission system
-│   └── system_prompt.py    # System prompts
+│   ├── system_prompt.py    # System prompts
+│   ├── agents.py           # Subagent management
+│   └── default_tools.py    # Default tool configurations
 ├── tools/                  # Tool implementations
 │   ├── bash_tool.py
 │   ├── bash_output_tool.py
@@ -56,18 +74,38 @@ ripperdoc/
 │   ├── grep_tool.py
 │   ├── ls_tool.py
 │   ├── todo_tool.py
+│   ├── notebook_edit_tool.py
+│   ├── task_tool.py
+│   ├── mcp_tools.py
 │   └── background_shell.py
 ├── utils/                  # Utility functions
 │   ├── messages.py
 │   ├── message_compaction.py
 │   ├── log.py
-│   └── todo.py
-└── cli/                    # CLI interface
-    ├── cli.py             # Main CLI entry point
-    └── ui/                # UI components
-        ├── rich_ui.py     # Rich terminal UI
-        ├── context_display.py
-        └── spinner.py     # Loading spinners
+│   ├── todo.py
+│   ├── memory.py
+│   ├── session_history.py
+│   ├── session_usage.py
+│   └── mcp.py
+├── cli/                    # CLI interface
+│   ├── cli.py             # Main CLI entry point
+│   └── ui/                # UI components
+│       ├── rich_ui.py     # Rich terminal UI
+│       ├── context_display.py
+│       └── spinner.py     # Loading spinners
+│   └── commands/          # CLI commands
+│       ├── agents_cmd.py
+│       ├── config_cmd.py
+│       ├── context_cmd.py
+│       ├── cost_cmd.py
+│       ├── help_cmd.py
+│       ├── mcp_cmd.py
+│       ├── models_cmd.py
+│       ├── status_cmd.py
+│       ├── tools_cmd.py
+│       └── ...
+└── sdk/                   # Python SDK
+    └── client.py         # SDK client
 ```
 
 ## Installation
@@ -115,9 +153,32 @@ For a guided introduction, check out the [QUICKSTART.md](QUICKSTART.md) guide.
 
 Use Ripperdoc without the terminal UI via the new Python SDK. See [SDK_USAGE.md](SDK_USAGE.md) for examples of the one-shot `query` helper and the session-based `RipperdocClient`. 中文指南见 [SDK_USAGE_CN.md](SDK_USAGE_CN.md)。
 
+#### SDK Examples
+
+- **Basic Usage**: Simple one-shot queries
+- **Session Management**: Persistent sessions with context
+- **Tool Integration**: Direct tool access and customization
+- **Configuration**: Custom model providers and settings
+
+See the [examples/](examples/) directory for complete SDK usage examples.
+
 ### Safe Mode Permissions
 
 Safe mode is the default. Use `--unsafe` to skip permission prompts. Choose `a`/`always` to allow a tool for the current session (not persisted across sessions).
+
+### MCP Server Support
+
+Ripperdoc supports Model Context Protocol (MCP) servers for extended functionality:
+
+```bash
+# List available MCP servers
+ripperdoc mcp list
+
+# List resources from a specific server
+ripperdoc mcp resources <server-name>
+```
+
+Configure MCP servers in your configuration file or environment variables.
 
 ## Examples
 
