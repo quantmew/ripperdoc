@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 from ripperdoc.core.config import GlobalConfig, ModelProfile
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
     MessageContent,
@@ -17,6 +18,9 @@ from ripperdoc.utils.messages import (
     UserMessage,
     normalize_messages_for_api,
 )
+
+
+logger = get_logger()
 
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
@@ -142,7 +146,8 @@ def _estimate_tool_schema_tokens(tools: Sequence[Any]) -> int:
             schema = tool.input_schema.model_json_schema()
             schema_text = json.dumps(schema, sort_keys=True)
             total += estimate_tokens_from_text(schema_text)
-        except Exception:
+        except Exception as exc:
+            logger.error(f"Failed to estimate tokens for tool schema: {exc}")
             continue
     return total
 

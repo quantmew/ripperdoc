@@ -11,6 +11,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from ripperdoc.utils.log import get_logger
+
+
+logger = get_logger()
+
 
 @dataclass
 class BackgroundTask:
@@ -55,11 +60,13 @@ async def _monitor_task(task: BackgroundTask) -> None:
             await task.process.wait()
         task.exit_code = task.process.returncode
     except asyncio.TimeoutError:
+        logger.warning(f"Background task {task.id} timed out after {task.timeout}s: {task.command}")
         task.timed_out = True
         task.process.kill()
         await task.process.wait()
         task.exit_code = -1
-    except Exception:
+    except Exception as exc:
+        logger.error(f"Error monitoring background task {task.id}: {exc}")
         task.exit_code = -1
     finally:
         # Ensure readers are finished before marking done.

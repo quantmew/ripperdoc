@@ -18,6 +18,10 @@ from ripperdoc.core.tool import (
     ToolOutput,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
+
+
+logger = get_logger()
 
 
 def _resolve_path(path_str: str) -> Path:
@@ -139,7 +143,8 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
         try:
             raw = path.read_text(encoding="utf-8")
             nb_json = json.loads(raw)
-        except Exception:
+        except Exception as exc:
+            logger.error(f"Failed to parse notebook {path}: {exc}")
             return ValidationResult(
                 result=False, message="Notebook is not valid JSON.", error_code=6
             )
@@ -262,6 +267,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
         except Exception as exc:  # pragma: no cover - error path
+            logger.error(f"Error editing notebook {input_data.notebook_path}: {exc}")
             output = NotebookEditOutput(
                 new_source=new_source,
                 cell_type=cell_type or "code",

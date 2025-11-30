@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
-import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ripperdoc import __version__
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.message_compaction import estimate_tokens_from_text
 
 try:
@@ -27,6 +27,9 @@ except Exception:  # pragma: no cover - handled gracefully at runtime
     MCP_AVAILABLE = False
     ClientSession = object  # type: ignore
     mcp_types = None  # type: ignore
+
+
+logger = get_logger()
 
 
 @dataclass
@@ -72,7 +75,7 @@ def _load_json_file(path: Path) -> Dict[str, Any]:
     try:
         return json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"[mcp] Failed to load JSON from {path}: {exc}", file=sys.stderr)
+        logger.error(f"Failed to load JSON from {path}: {exc}")
         return {}
 
 
@@ -269,6 +272,7 @@ class McpRuntime:
                 ]
 
         except Exception as exc:  # pragma: no cover - network/process errors
+            logger.error(f"Failed to connect to MCP server '{config.name}': {exc}")
             info.status = "failed"
             info.error = str(exc)
 

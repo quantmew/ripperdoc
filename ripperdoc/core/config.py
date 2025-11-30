@@ -11,6 +11,11 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 
+from ripperdoc.utils.log import get_logger
+
+
+logger = get_logger()
+
 
 class ProviderType(str, Enum):
     """Supported AI providers."""
@@ -111,7 +116,7 @@ class ConfigManager:
                     data = json.loads(self.global_config_path.read_text())
                     self._global_config = GlobalConfig(**data)
                 except Exception as e:
-                    print(f"Error loading global config: {e}")
+                    logger.error(f"Error loading global config: {e}")
                     self._global_config = GlobalConfig()
             else:
                 self._global_config = GlobalConfig()
@@ -141,7 +146,7 @@ class ConfigManager:
                     data = json.loads(config_path.read_text())
                     self._project_config = ProjectConfig(**data)
                 except Exception as e:
-                    print(f"Error loading project config: {e}")
+                    logger.error(f"Error loading project config: {e}")
                     self._project_config = ProjectConfig()
             else:
                 self._project_config = ProjectConfig()

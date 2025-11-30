@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import logging
 import os
 import tempfile
 from pathlib import Path
@@ -20,6 +19,7 @@ from ripperdoc.core.tool import (
     ToolOutput,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.mcp import (
     McpResourceInfo,
     McpServerInfo,
@@ -37,7 +37,7 @@ except Exception:  # pragma: no cover - SDK may be missing at runtime
     mcp_types = None
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def _content_block_to_text(block: Any) -> str:
@@ -295,7 +295,7 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
                         for res in response.resources
                     ]
                 except Exception as exc:  # pragma: no cover - runtime errors
-                    logger.warning("Failed to fetch resources from %s: %s", server.name, exc)
+                    logger.error(f"Failed to fetch resources from {server.name}: {exc}")
                     fetched = []
 
             candidate_resources = fetched if fetched else server.resources
@@ -493,6 +493,7 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
                 text_parts = [p.text for p in parts if p.text]
                 content_text = "\n".join([p for p in text_parts if p]) or None
             except Exception as exc:  # pragma: no cover - runtime errors
+                logger.error(f"Error reading MCP resource {input_data.uri} from {input_data.server}: {exc}")
                 content_text = f"Error reading MCP resource: {exc}"
         else:
             resource = find_mcp_resource(runtime.servers, input_data.server, input_data.uri)
@@ -672,7 +673,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                 structured_content=None,
                 is_error=True,
             )
-            logger.warning("Error calling MCP tool %s on %s: %s", self.tool_info.name, self.server_name, exc)
+            logger.error(f"Error calling MCP tool {self.tool_info.name} on {self.server_name}: {exc}")
             yield ToolResult(
                 data=output,
                 result_for_assistant=f"Error calling MCP tool '{self.tool_info.name}' on '{self.server_name}': {exc}",
@@ -718,7 +719,7 @@ def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[Dyn
     try:
         return asyncio.run(_load_and_cleanup())
     except Exception as exc:  # pragma: no cover - SDK/runtime failures
-        logger.warning("Failed to initialize MCP runtime for dynamic tools: %s", exc)
+        logger.error(f"Failed to initialize MCP runtime for dynamic tools: {exc}")
         return []
 
 
@@ -727,7 +728,7 @@ async def load_dynamic_mcp_tools_async(project_path: Optional[Path] = None) -> L
     try:
         runtime = await ensure_mcp_runtime(project_path)
     except Exception as exc:  # pragma: no cover - SDK/runtime failures
-        logger.warning("Failed to initialize MCP runtime for dynamic tools: %s", exc)
+        logger.error(f"Failed to initialize MCP runtime for dynamic tools: {exc}")
         return []
     return _build_dynamic_mcp_tools(runtime)
 
