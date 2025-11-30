@@ -1,0 +1,163 @@
+import os
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+from ripperdoc import __version__
+from ripperdoc.cli.ui.helpers import get_profile_for_pointer
+from ripperdoc.core.config import ModelProfile, ProviderType, get_global_config
+from ripperdoc.utils.memory import MAX_CONTENT_LENGTH, MemoryFile, collect_all_memory_files
+
+from .base import SlashCommand
+
+
+def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[str]]:
+    """Return a safe auth token summary and the env var used, if any."""
+    if not profile:
+        return ("Not configured", None)
+
+    provider_value = profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
+    provider_lower = provider_value.lower()
+
+    env_candidates: list[str] = []
+    if provider_lower == ProviderType.ANTHROPIC.value:
+        env_candidates = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+    elif provider_lower == ProviderType.OPENAI.value:
+        env_candidates = ["OPENAI_API_KEY"]
+    else:
+        env_candidates = [f"{provider_value.upper()}_API_KEY"] if provider_value else []
+
+    env_var = next((name for name in env_candidates if os.environ.get(name)), None)
+    if env_var:
+        return (f"{env_var} (env)", env_var)
+    if profile.api_key:
+        return ("Configured in profile", None)
+    return ("Missing", None)
+
+
+def _api_base_display(profile: Optional[ModelProfile]) -> str:
+    """Return a human-readable API base URL line."""
+    if not profile:
+        return "API base URL: Not configured"
+
+    label = "API base URL"
+    provider_value = profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
+    provider_lower = provider_value.lower()
+    env_candidates: list[str] = []
+    if provider_lower == ProviderType.ANTHROPIC.value:
+        label = "Anthropic base URL"
+        env_candidates = ["ANTHROPIC_API_URL", "ANTHROPIC_BASE_URL"]
+    elif provider_lower == ProviderType.OPENAI.value:
+        label = "OpenAI base URL"
+        env_candidates = ["OPENAI_BASE_URL", "OPENAI_API_BASE"]
+    else:
+        label = f"{provider_value.title()} base URL" if provider_value else "API base URL"
+        env_candidates = [f"{provider_value.upper()}_BASE_URL"] if provider_value else []
+
+    base_url = profile.api_base
+    if not base_url:
+        base_url = next((os.environ.get(name) for name in env_candidates if os.environ.get(name)), None)
+
+    return f"{label}: {base_url or 'default'}"
+
+def _memory_status_lines(memory_files: List[MemoryFile]) -> List[str]:
+    """Summarize RIPPERDOC memory files and any issues."""
+    if not memory_files:
+        return ["None detected"]
+
+    lines = [f"{len(memory_files)} file(s) loaded"]
+    oversized = [
+        memory for memory in memory_files
+        if len(memory.content) > MAX_CONTENT_LENGTH
+    ]
+    for memory in oversized:
+        lines.append(
+            f"! {memory.path} ({len(memory.content)} chars > {MAX_CONTENT_LENGTH})"
+        )
+    return lines
+
+
+def _setting_sources_summary(
+    config,
+    profile: Optional[ModelProfile],
+    memory_files: List[MemoryFile],
+    auth_env_var: Optional[str],
+    safe_mode: bool,
+    verbose: bool,
+    project_path: Path,
+) -> str:
+    """Describe where settings for this session were sourced from."""
+    sources: list[str] = []
+    if (Path.home() / ".ripperdoc.json").exists():
+        sources.append("User settings")
+
+    project_config_path = project_path / ".ripperdoc" / "config.json"
+    if project_config_path.exists():
+        sources.append("Project settings")
+
+    if any(memory.type == "Local" for memory in memory_files):
+        sources.append("Local memory")
+    if any(memory.type == "Project" for memory in memory_files):
+        sources.append("Project memory")
+    if auth_env_var:
+        sources.append("Environment variables")
+
+    config_safe_mode = getattr(config, "safe_mode", True)
+    config_verbose = getattr(config, "verbose", False)
+    if safe_mode != config_safe_mode or verbose != config_verbose:
+        sources.append("Command line arguments")
+
+    if profile and profile.api_key and not auth_env_var:
+        sources.append("Profile configuration")
+
+    if not sources:
+        sources.append("Defaults")
+
+    unique_sources = list(dict.fromkeys(sources))
+    return ", ".join(unique_sources)
+
+
+def _handle(ui, _: str) -> bool:
+    config = get_global_config()
+    profile = get_profile_for_pointer("main")
+    memory_files = collect_all_memory_files()
+
+    auth_summary, auth_env_var = _auth_token_display(profile)
+    api_base_summary = _api_base_display(profile)
+    memory_lines = _memory_status_lines(memory_files)
+    setting_sources = _setting_sources_summary(
+        config,
+        profile,
+        memory_files,
+        auth_env_var,
+        ui.safe_mode,
+        ui.verbose,
+        ui.project_path,
+    )
+
+    model_label = profile.model if profile else "Not configured"
+
+    ui.console.print()
+    ui.console.rule()
+    ui.console.print(" Status:\n")
+    ui.console.print(f" Version: {__version__}")
+    ui.console.print(f" Session ID: {ui.session_id}")
+    ui.console.print(f" cwd: {Path.cwd()}")
+    ui.console.print(f" Auth token: {auth_summary}")
+    ui.console.print(f" {api_base_summary}")
+    ui.console.print()
+    ui.console.print(f" Model: {model_label}")
+    ui.console.print(" Memory:")
+    for line in memory_lines:
+        ui.console.print(f"  {line}")
+    ui.console.print(f" Setting sources: {setting_sources}")
+    return True
+
+
+command = SlashCommand(
+    name="status",
+    description="Show session status",
+    handler=_handle,
+)
+
+
+__all__ = ["command"]
