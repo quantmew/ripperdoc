@@ -23,94 +23,15 @@ Ripperdoc is an AI-powered terminal assistant for coding tasks, providing an int
 - **Session Management** - Persistent session history and usage tracking
 - **Jupyter Notebook Support** - Edit .ipynb files directly
 
-## Available Tools
-
-- **Bash** - Execute shell commands
-- **BashOutput** - Read output from background commands
-- **KillBash** - Terminate background commands
-- **View** - Read file contents
-- **Edit** - Edit files by replacing exact matches
-- **MultiEdit** - Batch edit operations on files
-- **NotebookEdit** - Edit Jupyter notebook cells
-- **Write** - Create new files
-- **Glob** - Find files matching patterns
-- **Grep** - Search for patterns in files
-- **LS** - List directory contents
-- **TodoRead** - Read the current todo list or the next actionable task
-- **TodoWrite** - Create and update persistent todo lists
-- **Task** - Delegate work to specialized subagents
-- **ListMcpServers** - List configured MCP servers and their tools
-- **ListMcpResources** - List available resources from MCP servers
-- **ReadMcpResource** - Read specific resources from MCP servers
-- **Dynamic MCP Tools** - Runtime-loaded tools from connected MCP servers
-- **Task** - Delegate tasks to specialized subagents
-- **NotebookEdit** - Edit Jupyter notebook files
-- **ListMcpServers** - List configured MCP servers
-- **ListMcpResources** - List available MCP resources
-- **ReadMcpResource** - Read specific MCP resources
-
-## Project Structure
-
-```
-ripperdoc/
-├── core/                    # Core functionality
-│   ├── tool.py             # Base Tool interface
-│   ├── query.py            # AI query system
-│   ├── config.py           # Configuration management
-│   ├── commands.py         # Command definitions
-│   ├── permissions.py      # Permission system
-│   ├── system_prompt.py    # System prompts
-│   ├── agents.py           # Subagent management
-│   └── default_tools.py    # Default tool configurations
-├── tools/                  # Tool implementations
-│   ├── bash_tool.py
-│   ├── bash_output_tool.py
-│   ├── kill_bash_tool.py
-│   ├── file_edit_tool.py
-│   ├── multi_edit_tool.py
-│   ├── file_read_tool.py
-│   ├── file_write_tool.py
-│   ├── glob_tool.py
-│   ├── grep_tool.py
-│   ├── ls_tool.py
-│   ├── todo_tool.py
-│   ├── notebook_edit_tool.py
-│   ├── task_tool.py
-│   ├── mcp_tools.py
-│   └── background_shell.py
-├── utils/                  # Utility functions
-│   ├── messages.py
-│   ├── message_compaction.py
-│   ├── log.py
-│   ├── todo.py
-│   ├── memory.py
-│   ├── session_history.py
-│   ├── session_usage.py
-│   └── mcp.py
-├── cli/                    # CLI interface
-│   ├── cli.py             # Main CLI entry point
-│   └── ui/                # UI components
-│       ├── rich_ui.py     # Rich terminal UI
-│       ├── context_display.py
-│       └── spinner.py     # Loading spinners
-│   └── commands/          # CLI commands
-│       ├── agents_cmd.py
-│       ├── config_cmd.py
-│       ├── context_cmd.py
-│       ├── cost_cmd.py
-│       ├── help_cmd.py
-│       ├── mcp_cmd.py
-│       ├── models_cmd.py
-│       ├── status_cmd.py
-│       ├── tools_cmd.py
-│       └── ...
-└── sdk/                   # Python SDK
-    └── client.py         # SDK client
-```
-
 ## Installation
 
 ### Quick Installation
+Install from git repository:
+```bash
+pip install git+https://github.com/quantmew/ripperdoc.git
+```
+
+Or install from source:
 ```bash
 # Clone the repository
 git clone <repository-url>
@@ -118,9 +39,6 @@ cd Ripperdoc
 
 # Install from source
 pip install -e .
-
-# Or use the install script
-./install.sh
 ```
 
 ### Configuration
@@ -145,13 +63,9 @@ This launches an interactive session where you can:
 - Execute commands
 - Navigate and explore files
 
-### Quick Start
-
-For a guided introduction, check out the [QUICKSTART.md](QUICKSTART.md) guide.
-
 ### Python SDK (headless)
 
-Use Ripperdoc without the terminal UI via the new Python SDK. See [SDK_USAGE.md](SDK_USAGE.md) for examples of the one-shot `query` helper and the session-based `RipperdocClient`. 中文指南见 [SDK_USAGE_CN.md](SDK_USAGE_CN.md)。
+Use Ripperdoc without the terminal UI via the new Python SDK. See [docs/SDK_USAGE.md](docs/SDK_USAGE.md) for examples of the one-shot `query` helper and the session-based `RipperdocClient`. 中文指南见 [docs/SDK_USAGE_CN.md](docs/SDK_USAGE_CN.md)。
 
 #### SDK Examples
 
@@ -165,20 +79,6 @@ See the [examples/](examples/) directory for complete SDK usage examples.
 ### Safe Mode Permissions
 
 Safe mode is the default. Use `--unsafe` to skip permission prompts. Choose `a`/`always` to allow a tool for the current session (not persisted across sessions).
-
-### MCP Server Support
-
-Ripperdoc supports Model Context Protocol (MCP) servers for extended functionality:
-
-```bash
-# List available MCP servers
-ripperdoc mcp list
-
-# List resources from a specific server
-ripperdoc mcp resources <server-name>
-```
-
-Configure MCP servers in your configuration file or environment variables.
 
 ## Examples
 
@@ -222,17 +122,21 @@ black ripperdoc
 ruff ripperdoc
 ```
 
-### Project Documentation
-- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Development guidelines
-- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
-- [PYTERMGUI_USAGE.md](PYTERMGUI_USAGE.md) - PyTermGUI usage examples
-- [CHANGELOG.md](CHANGELOG.md) - Release history
-- [TODO.md](TODO.md) - Current development tasks
-
 ## License
 
-Apache 2.0 License - see [LICENSE](LICENSE) file for details
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+### Key License Terms
+
+- **Commercial Use**: Permitted
+- **Distribution**: Permitted
+- **Modification**: Permitted
+- **Patent Grant**: Included
+- **Private Use**: Permitted
+- **Sublicensing**: Permitted
+- **Trademark Use**: Not granted
+
+For full license terms and conditions, please refer to the [LICENSE](LICENSE) file.
 
 ## Credits
 

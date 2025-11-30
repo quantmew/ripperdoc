@@ -17,99 +17,25 @@ Ripperdoc 是一个 AI 驱动的终端助手，专为编码任务设计，提供
 - **后台命令** - 在后台运行命令并监控输出
 - **权限系统** - 安全模式，操作需要权限确认
 - **批量编辑支持** - 对文件进行批量编辑操作
-- **MCP 服务器支持** - 与 MCP（Model Context Protocol）服务器集成，扩展工具能力
+- **MCP 服务器支持** - 连接 Model Context Protocol 服务器以扩展功能
+- **MCP 服务器支持** - 与 Model Context Protocol 服务器集成
+- **子代理系统** - 将任务委托给专用代理
+- **会话管理** - 持久化会话历史和用量跟踪
+- **Jupyter Notebook 支持** - 直接编辑 .ipynb 文件
 
-## 可用工具
 
-- **Bash** - 执行 shell 命令
-- **BashOutput** - 读取后台命令的输出
-- **KillBash** - 终止后台命令
-- **View** - 读取文件内容
-- **Edit** - 通过精确匹配编辑文件
-- **MultiEdit** - 对文件进行批量编辑操作
-- **NotebookEdit** - 编辑 Jupyter notebook 文件
-- **Write** - 创建新文件
-- **Glob** - 查找匹配模式的文件
-- **Grep** - 在文件中搜索模式
-- **LS** - 列出目录内容
-- **TodoRead** - 读取当前任务列表或下一个可执行任务
-- **TodoWrite** - 创建和更新持久化任务列表
-- **Task** - 将任务委托给专用子代理
-- **ListMcpServers** - 列出配置的 MCP 服务器及其工具
-- **ListMcpResources** - 列出 MCP 服务器提供的资源
-- **ReadMcpResource** - 从 MCP 服务器读取特定资源
 
-## 项目结构
 
-```
-ripperdoc/
-├── core/                    # 核心功能
-│   ├── tool.py             # 基础工具接口
-│   ├── query.py            # AI 查询系统
-│   ├── config.py           # 配置管理
-│   ├── commands.py         # 命令定义
-│   ├── permissions.py      # 权限系统
-│   ├── agents.py           # 代理管理
-│   ├── default_tools.py    # 默认工具配置
-│   └── system_prompt.py    # 系统提示
-├── tools/                  # 工具实现
-│   ├── bash_tool.py
-│   ├── bash_output_tool.py
-│   ├── kill_bash_tool.py
-│   ├── file_edit_tool.py
-│   ├── multi_edit_tool.py
-│   ├── notebook_edit_tool.py
-│   ├── file_read_tool.py
-│   ├── file_write_tool.py
-│   ├── glob_tool.py
-│   ├── grep_tool.py
-│   ├── ls_tool.py
-│   ├── todo_tool.py
-│   ├── task_tool.py
-│   ├── mcp_tools.py
-│   └── background_shell.py
-├── utils/                  # 工具函数
-│   ├── messages.py
-│   ├── message_compaction.py
-│   ├── log.py
-│   ├── todo.py
-│   ├── memory.py
-│   ├── mcp.py
-│   ├── session_history.py
-│   └── session_usage.py
-├── cli/                    # CLI 接口
-│   ├── cli.py             # 主 CLI 入口点
-│   ├── commands/          # 命令实现
-│   │   ├── agents_cmd.py
-│   │   ├── base.py
-│   │   ├── clear_cmd.py
-│   │   ├── compact_cmd.py
-│   │   ├── config_cmd.py
-│   │   ├── context_cmd.py
-│   │   ├── cost_cmd.py
-│   │   ├── exit_cmd.py
-│   │   ├── help_cmd.py
-│   │   ├── mcp_cmd.py
-│   │   ├── models_cmd.py
-│   │   ├── resume_cmd.py
-│   │   ├── status_cmd.py
-│   │   └── tools_cmd.py
-│   └── ui/                # UI 组件
-│       ├── rich_ui.py     # Rich 终端 UI
-│       ├── context_display.py
-│       ├── spinner.py     # 加载动画
-│       └── helpers.py
-├── sdk/                   # Python SDK
-│   ├── client.py
-│   └── __init__.py
-└── examples/              # 示例代码
-    ├── config_examples.py
-    └── tool_examples.py
-```
 
 ## 安装
 
 ### 快速安装
+从 git 仓库安装：
+```bash
+pip install git+https://github.com/quantmew/ripperdoc.git
+```
+
+或从源码安装：
 ```bash
 # 克隆仓库
 git clone <repository-url>
@@ -117,9 +43,6 @@ cd Ripperdoc
 
 # 从源码安装
 pip install -e .
-
-# 或使用安装脚本
-./install.sh
 ```
 
 ### 配置
@@ -150,11 +73,16 @@ ripperdoc
 
 ### Python SDK（无头模式）
 
-通过新的 Python SDK 使用 Ripperdoc，无需终端 UI。查看 [SDK_USAGE.md](SDK_USAGE.md) 了解一次性 `query` 助手和基于会话的 `RipperdocClient` 的示例。中文指南见 [SDK_USAGE_CN.md](SDK_USAGE_CN.md)。
+通过新的 Python SDK 使用 Ripperdoc，无需终端 UI。查看 [docs/SDK_USAGE.md](docs/SDK_USAGE.md) 了解一次性 `query` 助手和基于会话的 `RipperdocClient` 的示例。中文指南见 [docs/SDK_USAGE_CN.md](docs/SDK_USAGE_CN.md)。
 
-### MCP 服务器支持
+#### SDK 示例
 
-Ripperdoc 支持 MCP（Model Context Protocol）服务器集成，可以动态加载和使用 MCP 服务器提供的工具和资源。使用 `ListMcpServers`、`ListMcpResources` 和 `ReadMcpResource` 工具来探索和使用 MCP 功能。
+- **基础用法**：简单的一次性查询
+- **会话管理**：具有上下文的持久化会话
+- **工具集成**：直接工具访问和自定义
+- **配置**：自定义模型提供商和设置
+
+查看 [examples/](examples/) 目录获取完整的 SDK 使用示例。
 
 ### 安全模式权限
 
@@ -202,17 +130,23 @@ black ripperdoc
 ruff ripperdoc
 ```
 
-### 项目文档
-- [QUICKSTART.md](QUICKSTART.md) - 快速开始指南
-- [DEVELOPMENT.md](DEVELOPMENT.md) - 开发指南
-- [CONTRIBUTING.md](CONTRIBUTING.md) - 贡献指南
-- [PYTERMGUI_USAGE.md](PYTERMGUI_USAGE.md) - PyTermGUI 使用示例
-- [CHANGELOG.md](CHANGELOG.md) - 发布历史
-- [TODO.md](TODO.md) - 当前开发任务
+
 
 ## 许可证
 
-Apache 2.0 许可证 - 详见 [LICENSE](LICENSE) 文件
+本项目采用 Apache 2.0 许可证 - 详见 [LICENSE](LICENSE) 文件。
+
+### 主要许可证条款
+
+- **商业使用**：允许
+- **分发**：允许
+- **修改**：允许
+- **专利授权**：包含
+- **私人使用**：允许
+- **子许可**：允许
+- **商标使用**：不授予
+
+有关完整的许可证条款和条件，请参阅 [LICENSE](LICENSE) 文件。
 
 ## 致谢
 
