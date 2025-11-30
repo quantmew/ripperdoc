@@ -6,6 +6,7 @@ via the KillBash tool.
 """
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -108,6 +109,17 @@ def _compute_status(task: BackgroundTask) -> str:
     return "completed" if task.exit_code == 0 else "failed"
 
 
+def _loop_time() -> float:
+    """Return a monotonic timestamp without requiring a running event loop."""
+    try:
+        return asyncio.get_running_loop().time()
+    except RuntimeError:
+        try:
+            return asyncio.get_event_loop().time()
+        except Exception:
+            return time.monotonic()
+
+
 def get_background_status(task_id: str, consume: bool = True) -> dict:
     """Fetch the current status and buffered output of a background command.
 
@@ -133,7 +145,7 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
         "exit_code": task.exit_code,
         "timed_out": task.timed_out,
         "killed": task.killed,
-        "duration_ms": (asyncio.get_running_loop().time() - task.start_time) * 1000.0,
+        "duration_ms": (_loop_time() - task.start_time) * 1000.0,
     }
 
 

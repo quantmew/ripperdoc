@@ -16,7 +16,9 @@ from .help_cmd import command as help_command
 from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
 from .resume_cmd import command as resume_command
+from .tasks_cmd import command as tasks_command
 from .status_cmd import command as status_command
+from .todos_cmd import command as todos_command
 from .tools_cmd import command as tools_command
 
 
@@ -38,6 +40,8 @@ ALL_COMMANDS: List[SlashCommand] = [
     models_command,
     exit_command,
     status_command,
+    tasks_command,
+    todos_command,
     mcp_command,
     cost_command,
     context_command,
