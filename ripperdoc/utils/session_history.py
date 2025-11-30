@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +13,7 @@ from ripperdoc.utils.messages import (
     ProgressMessage,
     UserMessage,
 )
+from ripperdoc.utils.path_utils import project_storage_dir
 
 ConversationMessage = UserMessage | AssistantMessage | ProgressMessage
 
@@ -28,20 +28,12 @@ class SessionSummary:
     first_prompt: str
 
 
-def _sanitize_project_path(project_path: Path) -> str:
-    """Turn an absolute project path into a filesystem-safe directory name."""
-    normalized = str(project_path.resolve())
-    # Replace any path separator or non-alphanumeric with "-"
-    return re.sub(r"[^a-zA-Z0-9]+", "-", normalized).strip("-") or "project"
-
-
 def _sessions_root() -> Path:
     return Path.home() / ".ripperdoc" / "sessions"
 
 
 def _session_file(project_path: Path, session_id: str) -> Path:
-    directory = _sessions_root() / _sanitize_project_path(project_path)
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = project_storage_dir(_sessions_root(), project_path, ensure=True)
     return directory / f"{session_id}.jsonl"
 
 
@@ -137,7 +129,7 @@ class SessionHistory:
 
 def list_session_summaries(project_path: Path) -> List[SessionSummary]:
     """Return available sessions for the project ordered by last update desc."""
-    directory = _sessions_root() / _sanitize_project_path(project_path)
+    directory = project_storage_dir(_sessions_root(), project_path)
     if not directory.exists():
         return []
 

@@ -1,5 +1,7 @@
 """Tests for todo storage and tools."""
 
+from pathlib import Path
+
 import pytest
 
 from ripperdoc.core.tool import ToolUseContext
@@ -15,6 +17,7 @@ from ripperdoc.utils.todo import TodoItem, format_todo_summary, load_todos, set_
 
 def test_todo_storage_roundtrip(tmp_path, monkeypatch):
     """Todos should persist to disk and retain ordering rules."""
+    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     todos = [
@@ -29,13 +32,15 @@ def test_todo_storage_roundtrip(tmp_path, monkeypatch):
     assert saved[0].id == "a"
     assert loaded[0].id == "a"
     assert "total 2" in format_todo_summary(loaded)
-    assert (tmp_path / ".ripperdoc" / "todos.json").exists()
+    todo_files = list((Path.home() / ".ripperdoc" / "todos").rglob("todos.json"))
+    assert todo_files, "todos should be stored in the global ~/.ripperdoc/todos directory"
 
 
 def test_todo_tools_flow(tmp_path, monkeypatch):
     """Todo tools should write and read tasks, surfacing next action."""
     import asyncio
 
+    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     write_tool = TodoWriteTool()
     read_tool = TodoReadTool()

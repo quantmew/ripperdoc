@@ -1,8 +1,9 @@
 """Todo storage and utilities for Ripperdoc.
 
 This module provides simple, file-based todo management so tools can
-persist and query tasks between turns. Todos are stored in
-`.ripperdoc/todos.json` relative to the working directory.
+persist and query tasks between turns. Todos are stored under the user's
+home directory at `~/.ripperdoc/todos/<project>/todos.json`, where
+`<project>` is a sanitized form of the project path.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import time
 from pathlib import Path
 from typing import List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from ripperdoc.utils.path_utils import project_storage_dir
 
 TodoStatus = Literal["pending", "in_progress", "completed"]
 TodoPriority = Literal["high", "medium", "low"]
@@ -40,9 +43,8 @@ MAX_TODOS = 200
 def _storage_path(project_root: Optional[Path], ensure_dir: bool) -> Path:
     """Return the todo storage path, optionally ensuring the directory exists."""
     root = project_root or Path.cwd()
-    storage_dir = root / ".ripperdoc"
-    if ensure_dir:
-        storage_dir.mkdir(exist_ok=True)
+    base_dir = Path.home() / ".ripperdoc" / "todos"
+    storage_dir = project_storage_dir(base_dir, root, ensure=ensure_dir)
     return storage_dir / "todos.json"
 
 
