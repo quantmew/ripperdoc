@@ -28,6 +28,7 @@ from ripperdoc.utils.mcp import (
     format_mcp_instructions,
     get_existing_mcp_runtime,
     load_mcp_servers_async,
+    shutdown_mcp_runtime,
 )
 
 try:
@@ -705,12 +706,20 @@ def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[Dyn
     except RuntimeError:
         pass
 
+    async def _load_and_cleanup() -> List[DynamicMcpTool]:
+        runtime = await ensure_mcp_runtime(project_path)
+        try:
+            return _build_dynamic_mcp_tools(runtime)
+        finally:
+            # Close the runtime inside the same event loop to avoid asyncgen
+            # shutdown errors when asyncio.run tears down the loop.
+            await shutdown_mcp_runtime()
+
     try:
-        runtime = asyncio.run(ensure_mcp_runtime(project_path))
+        return asyncio.run(_load_and_cleanup())
     except Exception as exc:  # pragma: no cover - SDK/runtime failures
         logger.warning("Failed to initialize MCP runtime for dynamic tools: %s", exc)
         return []
-    return _build_dynamic_mcp_tools(runtime)
 
 
 async def load_dynamic_mcp_tools_async(project_path: Optional[Path] = None) -> List[DynamicMcpTool]:
