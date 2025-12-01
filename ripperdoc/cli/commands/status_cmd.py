@@ -15,7 +15,9 @@ def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[
     if not profile:
         return ("Not configured", None)
 
-    provider_value = profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
+    provider_value = (
+        profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
+    )
     provider_lower = provider_value.lower()
 
     env_candidates: list[str] = []
@@ -40,7 +42,9 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
         return "API base URL: Not configured"
 
     label = "API base URL"
-    provider_value = profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
+    provider_value = (
+        profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
+    )
     provider_lower = provider_value.lower()
     env_candidates: list[str] = []
     if provider_lower == ProviderType.ANTHROPIC.value:
@@ -55,9 +59,12 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
 
     base_url = profile.api_base
     if not base_url:
-        base_url = next((os.environ.get(name) for name in env_candidates if os.environ.get(name)), None)
+        base_url = next(
+            (os.environ.get(name) for name in env_candidates if os.environ.get(name)), None
+        )
 
     return f"{label}: {base_url or 'default'}"
+
 
 def _memory_status_lines(memory_files: List[MemoryFile]) -> List[str]:
     """Summarize RIPPERDOC memory files and any issues."""
@@ -65,14 +72,9 @@ def _memory_status_lines(memory_files: List[MemoryFile]) -> List[str]:
         return ["None detected"]
 
     lines = [f"{len(memory_files)} file(s) loaded"]
-    oversized = [
-        memory for memory in memory_files
-        if len(memory.content) > MAX_CONTENT_LENGTH
-    ]
+    oversized = [memory for memory in memory_files if len(memory.content) > MAX_CONTENT_LENGTH]
     for memory in oversized:
-        lines.append(
-            f"! {memory.path} ({len(memory.content)} chars > {MAX_CONTENT_LENGTH})"
-        )
+        lines.append(f"! {memory.path} ({len(memory.content)} chars > {MAX_CONTENT_LENGTH})")
     return lines
 
 

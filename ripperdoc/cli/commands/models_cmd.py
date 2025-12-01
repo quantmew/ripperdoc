@@ -63,9 +63,11 @@ def _handle(ui, trimmed_arg: str) -> bool:
         overwrite = False
         existing_profile = config.model_profiles.get(profile_name)
         if existing_profile:
-            confirm = console.input(
-                f"Profile '{profile_name}' exists. Overwrite? [y/N]: "
-            ).strip().lower()
+            confirm = (
+                console.input(f"Profile '{profile_name}' exists. Overwrite? [y/N]: ")
+                .strip()
+                .lower()
+            )
             if confirm not in ("y", "yes"):
                 return True
             overwrite = True
@@ -74,9 +76,14 @@ def _handle(ui, trimmed_arg: str) -> bool:
         default_provider = (
             (current_profile.provider.value) if current_profile else ProviderType.ANTHROPIC.value
         )
-        provider_input = console.input(
-            f"Provider ({', '.join(p.value for p in ProviderType)}) [{default_provider}]: "
-        ).strip().lower() or default_provider
+        provider_input = (
+            console.input(
+                f"Provider ({', '.join(p.value for p in ProviderType)}) [{default_provider}]: "
+            )
+            .strip()
+            .lower()
+            or default_provider
+        )
         try:
             provider = ProviderType(provider_input)
         except ValueError:
@@ -84,7 +91,11 @@ def _handle(ui, trimmed_arg: str) -> bool:
             print_models_usage()
             return True
 
-        default_model = existing_profile.model if existing_profile else (current_profile.model if current_profile else "")
+        default_model = (
+            existing_profile.model
+            if existing_profile
+            else (current_profile.model if current_profile else "")
+        )
         model_prompt = f"Model name to send{f' [{default_model}]' if default_model else ''}: "
         model_name = console.input(model_prompt).strip() or default_model
         if not model_name:
@@ -95,15 +106,22 @@ def _handle(ui, trimmed_arg: str) -> bool:
         api_key = api_key_input or (existing_profile.api_key if existing_profile else None)
 
         api_base_default = existing_profile.api_base if existing_profile else ""
-        api_base = console.input(
-            f"API base (optional){f' [{api_base_default}]' if api_base_default else ''}: "
-        ).strip() or api_base_default or None
+        api_base = (
+            console.input(
+                f"API base (optional){f' [{api_base_default}]' if api_base_default else ''}: "
+            ).strip()
+            or api_base_default
+            or None
+        )
 
         max_tokens_default = existing_profile.max_tokens if existing_profile else 4096
-        max_tokens = parse_int(
-            f"Max output tokens [{max_tokens_default}]: ",
-            max_tokens_default,
-        ) or max_tokens_default
+        max_tokens = (
+            parse_int(
+                f"Max output tokens [{max_tokens_default}]: ",
+                max_tokens_default,
+            )
+            or max_tokens_default
+        )
 
         temp_default = existing_profile.temperature if existing_profile else 0.7
         temperature = parse_float(
@@ -122,14 +140,12 @@ def _handle(ui, trimmed_arg: str) -> bool:
             not config.model_profiles
             or getattr(config.model_pointers, "main", "") not in config.model_profiles
         )
-        set_main_input = console.input(
-            f"Set as main model? [{'Y' if default_set_main else 'y'}/N]: "
-        ).strip().lower()
-        set_as_main = (
-            set_main_input in ("y", "yes")
-            if set_main_input
-            else default_set_main
+        set_main_input = (
+            console.input(f"Set as main model? [{'Y' if default_set_main else 'y'}/N]: ")
+            .strip()
+            .lower()
         )
+        set_as_main = set_main_input in ("y", "yes") if set_main_input else default_set_main
 
         profile = ModelProfile(
             provider=provider,
@@ -165,18 +181,24 @@ def _handle(ui, trimmed_arg: str) -> bool:
             return True
 
         provider_default = existing_profile.provider.value
-        provider_input = console.input(
-            f"Provider ({', '.join(p.value for p in ProviderType)}) [{provider_default}]: "
-        ).strip().lower() or provider_default
+        provider_input = (
+            console.input(
+                f"Provider ({', '.join(p.value for p in ProviderType)}) [{provider_default}]: "
+            )
+            .strip()
+            .lower()
+            or provider_default
+        )
         try:
             provider = ProviderType(provider_input)
         except ValueError:
             console.print(f"[red]Invalid provider: {escape(provider_input)}[/red]")
             return True
 
-        model_name = console.input(
-            f"Model name to send [{existing_profile.model}]: "
-        ).strip() or existing_profile.model
+        model_name = (
+            console.input(f"Model name to send [{existing_profile.model}]: ").strip()
+            or existing_profile.model
+        )
 
         api_key_label = "[set]" if existing_profile.api_key else "[not set]"
         api_key_prompt = f"API key {api_key_label} (Enter=keep, '-'=clear): "
@@ -188,16 +210,20 @@ def _handle(ui, trimmed_arg: str) -> bool:
         else:
             api_key = existing_profile.api_key
 
-        api_base = console.input(
-            f"API base (optional) [{existing_profile.api_base or ''}]: "
-        ).strip() or existing_profile.api_base
+        api_base = (
+            console.input(f"API base (optional) [{existing_profile.api_base or ''}]: ").strip()
+            or existing_profile.api_base
+        )
         if api_base == "":
             api_base = None
 
-        max_tokens = parse_int(
-            f"Max output tokens [{existing_profile.max_tokens}]: ",
-            existing_profile.max_tokens,
-        ) or existing_profile.max_tokens
+        max_tokens = (
+            parse_int(
+                f"Max output tokens [{existing_profile.max_tokens}]: ",
+                existing_profile.max_tokens,
+            )
+            or existing_profile.max_tokens
+        )
 
         temperature = parse_float(
             f"Temperature [{existing_profile.temperature}]: ",

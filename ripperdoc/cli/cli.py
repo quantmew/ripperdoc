@@ -15,7 +15,7 @@ from ripperdoc.core.config import (
     save_global_config,
     get_project_config,
     ModelProfile,
-    ProviderType
+    ProviderType,
 )
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
@@ -39,10 +39,7 @@ console = Console()
 
 
 async def run_query(
-    prompt: str,
-    tools: list,
-    safe_mode: bool = False,
-    verbose: bool = False
+    prompt: str, tools: list, safe_mode: bool = False, verbose: bool = False
 ) -> None:
     """Run a single query and print the response."""
 
@@ -53,11 +50,7 @@ async def run_query(
     messages = [create_user_message(prompt)]
 
     # Create query context
-    query_context = QueryContext(
-        tools=tools,
-        safe_mode=safe_mode,
-        verbose=verbose
-    )
+    query_context = QueryContext(tools=tools, safe_mode=safe_mode, verbose=verbose)
 
     try:
         context = {}
@@ -84,37 +77,39 @@ async def run_query(
         # Run the query
         try:
             async for message in query(
-                messages,
-                system_prompt,
-                context,
-                query_context,
-                can_use_tool
+                messages, system_prompt, context, query_context, can_use_tool
             ):
                 if message.type == "assistant":
                     # Print assistant message
                     if isinstance(message.message.content, str):
-                        console.print(Panel(
-                            Markdown(message.message.content),
-                            title="Ripperdoc",
-                            border_style="cyan"
-                        ))
+                        console.print(
+                            Panel(
+                                Markdown(message.message.content),
+                                title="Ripperdoc",
+                                border_style="cyan",
+                            )
+                        )
                     else:
                         # Handle structured content
                         for block in message.message.content:
                             if isinstance(block, dict):
                                 if block.get("type") == "text":
-                                    console.print(Panel(
-                                        Markdown(block["text"]),
-                                        title="Ripperdoc",
-                                        border_style="cyan"
-                                    ))
+                                    console.print(
+                                        Panel(
+                                            Markdown(block["text"]),
+                                            title="Ripperdoc",
+                                            border_style="cyan",
+                                        )
+                                    )
                             else:
-                                if hasattr(block, 'type') and block.type == "text":
-                                    console.print(Panel(
-                                        Markdown(block.text),
-                                        title="Ripperdoc",
-                                        border_style="cyan"
-                                    ))
+                                if hasattr(block, "type") and block.type == "text":
+                                    console.print(
+                                        Panel(
+                                            Markdown(block.text),
+                                            title="Ripperdoc",
+                                            border_style="cyan",
+                                        )
+                                    )
 
                 elif message.type == "progress":
                     # Print progress
@@ -130,6 +125,7 @@ async def run_query(
             console.print(f"[red]Error: {escape(str(e))}[/red]")
             if verbose:
                 import traceback
+
                 console.print(traceback.format_exc(), markup=False)
     finally:
         await shutdown_mcp_runtime()
@@ -149,33 +145,21 @@ def check_onboarding() -> bool:
     provider = click.prompt(
         "Choose your AI provider",
         type=click.Choice(["anthropic", "openai", "deepseek", "custom"]),
-        default="anthropic"
+        default="anthropic",
     )
 
     api_key = click.prompt("Enter your API key", hide_input=True)
 
     # Get model name
     if provider == "anthropic":
-        model = click.prompt(
-            "Model name",
-            default="claude-3-5-sonnet-20241022"
-        )
+        model = click.prompt("Model name", default="claude-3-5-sonnet-20241022")
         api_base = None
     elif provider == "openai":
-        model = click.prompt(
-            "Model name",
-            default="gpt-4"
-        )
+        model = click.prompt("Model name", default="gpt-4")
         api_base = None
     elif provider == "deepseek":
-        model = click.prompt(
-            "Model name",
-            default="deepseek-chat"
-        )
-        api_base = click.prompt(
-            "API Base URL",
-            default="https://api.deepseek.com"
-        )
+        model = click.prompt("Model name", default="deepseek-chat")
+        api_base = click.prompt("API Base URL", default="https://api.deepseek.com")
         provider = "openai"  # DeepSeek uses OpenAI-compatible API
     else:  # custom
         model = click.prompt("Model name")
@@ -183,13 +167,11 @@ def check_onboarding() -> bool:
         provider = click.prompt(
             "Provider type (for API compatibility)",
             type=click.Choice(["anthropic", "openai"]),
-            default="openai"
+            default="openai",
         )
 
     context_window_input = click.prompt(
-        "Context window in tokens (optional, press Enter to skip)",
-        default="",
-        show_default=False
+        "Context window in tokens (optional, press Enter to skip)", default="", show_default=False
     )
     context_window = None
     if context_window_input.strip():
@@ -204,7 +186,7 @@ def check_onboarding() -> bool:
         model=model,
         api_key=api_key,
         api_base=api_base,
-        context_window=context_window
+        context_window=context_window,
     )
 
     config.has_completed_onboarding = True
@@ -219,16 +201,18 @@ def check_onboarding() -> bool:
 
 @click.group(invoke_without_command=True)
 @click.version_option(version=__version__)
-@click.option('--cwd', type=click.Path(exists=True), help='Working directory')
+@click.option("--cwd", type=click.Path(exists=True), help="Working directory")
 @click.option(
-    '--unsafe',
+    "--unsafe",
     is_flag=True,
-    help='Disable safe mode (skip permission prompts for tools)',
+    help="Disable safe mode (skip permission prompts for tools)",
 )
-@click.option('--verbose', is_flag=True, help='Verbose output')
-@click.option('-p', '--prompt', type=str, help='Direct prompt (non-interactive)')
+@click.option("--verbose", is_flag=True, help="Verbose output")
+@click.option("-p", "--prompt", type=str, help="Direct prompt (non-interactive)")
 @click.pass_context
-def cli(ctx: click.Context, cwd: Optional[str], unsafe: bool, verbose: bool, prompt: Optional[str]) -> None:
+def cli(
+    ctx: click.Context, cwd: Optional[str], unsafe: bool, verbose: bool, prompt: Optional[str]
+) -> None:
     """Ripperdoc - AI-powered coding agent"""
 
     # Ensure onboarding is complete
@@ -238,6 +222,7 @@ def cli(ctx: click.Context, cwd: Optional[str], unsafe: bool, verbose: bool, pro
     # Set working directory
     if cwd:
         import os
+
         os.chdir(cwd)
 
     # Initialize project configuration for the current working directory
@@ -256,11 +241,12 @@ def cli(ctx: click.Context, cwd: Optional[str], unsafe: bool, verbose: bool, pro
     if ctx.invoked_subcommand is None:
         # Use Rich interface by default
         from ripperdoc.cli.ui.rich_ui import main_rich
+
         main_rich(safe_mode=safe_mode, verbose=verbose)
         return
 
 
-@cli.command(name='config')
+@cli.command(name="config")
 def config_cmd() -> None:
     """Show current configuration"""
     config = get_global_config()
@@ -282,7 +268,7 @@ def config_cmd() -> None:
         console.print()
 
 
-@cli.command(name='version')
+@cli.command(name="version")
 def version_cmd() -> None:
     """Show version information"""
     console.print(f"Ripperdoc version {__version__}")
@@ -300,5 +286,5 @@ def main() -> None:
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

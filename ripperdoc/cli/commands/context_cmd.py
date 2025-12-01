@@ -49,9 +49,7 @@ def _handle(ui, _: str) -> bool:
         mcp_instructions=mcp_instructions,
     )
     memory_instructions = build_memory_instructions()
-    memory_tokens = (
-        estimate_tokens_from_text(memory_instructions) if memory_instructions else 0
-    )
+    memory_tokens = estimate_tokens_from_text(memory_instructions) if memory_instructions else 0
     mcp_tokens = estimate_mcp_tokens(servers) if mcp_instructions else 0
 
     breakdown = summarize_context_usage(

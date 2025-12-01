@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional, List
 from pydantic import BaseModel, Field
 
-from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress, ToolOutput, ValidationResult
+from ripperdoc.core.tool import (
+    Tool,
+    ToolUseContext,
+    ToolResult,
+    ToolProgress,
+    ToolOutput,
+    ValidationResult,
+)
 
 
 GLOB_USAGE = (
@@ -22,15 +29,16 @@ GLOB_USAGE = (
 
 class GlobToolInput(BaseModel):
     """Input schema for GlobTool."""
+
     pattern: str = Field(description="Glob pattern to match files (e.g., '**/*.py')")
     path: Optional[str] = Field(
-        default=None,
-        description="Directory to search in (default: current working directory)"
+        default=None, description="Directory to search in (default: current working directory)"
     )
 
 
 class GlobToolOutput(BaseModel):
     """Output from glob pattern matching."""
+
     matches: List[str]
     pattern: str
     count: int
@@ -63,9 +71,7 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
         return False
 
     async def validate_input(
-        self,
-        input_data: GlobToolInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: GlobToolInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         return ValidationResult(result=True)
 
@@ -79,18 +85,12 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
 
         return result
 
-    def render_tool_use_message(
-        self,
-        input_data: GlobToolInput,
-        verbose: bool = False
-    ) -> str:
+    def render_tool_use_message(self, input_data: GlobToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
         return f"Glob: {input_data.pattern}"
 
     async def call(
-        self,
-        input_data: GlobToolInput,
-        context: ToolUseContext
+        self, input_data: GlobToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Find files matching the pattern."""
 
@@ -108,25 +108,15 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
 
             matches = [str(p) for p in sorted(paths, key=_mtime, reverse=True)]
 
-            output = GlobToolOutput(
-                matches=matches,
-                pattern=input_data.pattern,
-                count=len(matches)
-            )
+            output = GlobToolOutput(matches=matches, pattern=input_data.pattern, count=len(matches))
 
             yield ToolResult(
-                data=output,
-                result_for_assistant=self.render_result_for_assistant(output)
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
         except Exception as e:
-            error_output = GlobToolOutput(
-                matches=[],
-                pattern=input_data.pattern,
-                count=0
-            )
+            error_output = GlobToolOutput(matches=[], pattern=input_data.pattern, count=0)
 
             yield ToolResult(
-                data=error_output,
-                result_for_assistant=f"Error executing glob: {str(e)}"
+                data=error_output, result_for_assistant=f"Error executing glob: {str(e)}"
             )

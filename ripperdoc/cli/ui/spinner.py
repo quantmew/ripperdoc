@@ -18,7 +18,9 @@ class Spinner:
 
         if self._status is not None:
             return
-        self._status = self.console.status(f"[cyan]{escape(self.text)}[/cyan]", spinner=self.spinner)
+        self._status = self.console.status(
+            f"[cyan]{escape(self.text)}[/cyan]", spinner=self.spinner
+        )
         self._status.__enter__()
 
     def update(self, text: Optional[str] = None) -> None:

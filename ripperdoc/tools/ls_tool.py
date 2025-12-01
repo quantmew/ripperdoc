@@ -231,9 +231,7 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
         return False
 
     async def validate_input(
-        self,
-        input_data: LSToolInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: LSToolInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         root_path = Path(input_data.path).expanduser()
         if not root_path.is_absolute():
@@ -250,20 +248,14 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
         warning_prefix = output.warning or ""
         return f"{warning_prefix}{output.tree}"
 
-    def render_tool_use_message(
-        self,
-        input_data: LSToolInput,
-        verbose: bool = False
-    ) -> str:
+    def render_tool_use_message(self, input_data: LSToolInput, verbose: bool = False) -> str:
         ignore_display = ""
         if input_data.ignore:
             ignore_display = f", ignore: \"{', '.join(input_data.ignore)}\""
-        return f"path: \"{input_data.path}\"{ignore_display}"
+        return f'path: "{input_data.path}"{ignore_display}'
 
     async def call(
-        self,
-        input_data: LSToolInput,
-        context: ToolUseContext
+        self, input_data: LSToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """List directory contents."""
         root_path = Path(input_data.path).expanduser()
@@ -284,7 +276,4 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
             warning=warning,
         )
 
-        yield ToolResult(
-            data=output,
-            result_for_assistant=self.render_result_for_assistant(output)
-        )
+        yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))

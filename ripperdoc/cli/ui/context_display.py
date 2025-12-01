@@ -93,13 +93,48 @@ def make_segment_grid(
     total_slots = max(1, per_row * per_row)  # default 100 slots
 
     categories = [
-        {"label": "System prompt", "glyph": "⛁", "color": "grey58", "tokens": breakdown.system_prompt_tokens},
-        {"label": "MCP instructions", "glyph": "⛁", "color": "cyan", "tokens": getattr(breakdown, "mcp_tokens", 0)},
-        {"label": "System tools", "glyph": "⛁", "color": "green3", "tokens": breakdown.tool_schema_tokens},
-        {"label": "Memory files", "glyph": "⛁", "color": "dark_orange3", "tokens": breakdown.memory_tokens},
-        {"label": "Messages", "glyph": "⛁", "color": "medium_purple", "tokens": breakdown.message_tokens},
-        {"label": "Free space", "glyph": "⛶", "color": "grey46", "tokens": max(breakdown.free_tokens, 0)},
-        {"label": "Autocompact buffer", "glyph": "⛝", "color": "yellow3", "tokens": max(breakdown.reserved_tokens, 0)},
+        {
+            "label": "System prompt",
+            "glyph": "⛁",
+            "color": "grey58",
+            "tokens": breakdown.system_prompt_tokens,
+        },
+        {
+            "label": "MCP instructions",
+            "glyph": "⛁",
+            "color": "cyan",
+            "tokens": getattr(breakdown, "mcp_tokens", 0),
+        },
+        {
+            "label": "System tools",
+            "glyph": "⛁",
+            "color": "green3",
+            "tokens": breakdown.tool_schema_tokens,
+        },
+        {
+            "label": "Memory files",
+            "glyph": "⛁",
+            "color": "dark_orange3",
+            "tokens": breakdown.memory_tokens,
+        },
+        {
+            "label": "Messages",
+            "glyph": "⛁",
+            "color": "medium_purple",
+            "tokens": breakdown.message_tokens,
+        },
+        {
+            "label": "Free space",
+            "glyph": "⛶",
+            "color": "grey46",
+            "tokens": max(breakdown.free_tokens, 0),
+        },
+        {
+            "label": "Autocompact buffer",
+            "glyph": "⛝",
+            "color": "yellow3",
+            "tokens": max(breakdown.reserved_tokens, 0),
+        },
     ]
 
     max_tokens = max(breakdown.max_context_tokens, 1)
@@ -169,14 +204,12 @@ def make_segment_grid(
 
     rows: List[str] = []
     for start in range(0, total_slots, per_row):
-        rows.append(" ".join(icons[start:start + per_row]))
+        rows.append(" ".join(icons[start : start + per_row]))
     return rows
 
 
 def context_usage_lines(
-    breakdown: ContextBreakdown,
-    model_label: str,
-    auto_compact_enabled: bool
+    breakdown: ContextBreakdown, model_label: str, auto_compact_enabled: bool
 ) -> List[str]:
     """Build a stylized context usage block using a fixed 10x10 grid."""
     grid_lines: List[str] = []
@@ -245,9 +278,7 @@ def context_usage_lines(
         if tokens is None:
             stats_lines.append(f"{label}: disabled")
         else:
-            stats_lines.append(
-                f"{label}: {format_tokens(tokens)} tokens ({percent:.1f}%)"
-            )
+            stats_lines.append(f"{label}: {format_tokens(tokens)} tokens ({percent:.1f}%)")
 
     total_rows = max(len(grid_lines), len(stats_lines))
     padded_grid = [""] * (total_rows - len(grid_lines)) + grid_lines

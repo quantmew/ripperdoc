@@ -108,7 +108,11 @@ class RipperdocOptions:
                     return filtered_base
 
                 filtered = [
-                    TaskTool(_filtered_base_provider) if getattr(tool, "name", None) == "Task" else tool
+                    (
+                        TaskTool(_filtered_base_provider)
+                        if getattr(tool, "name", None) == "Task"
+                        else tool
+                    )
                     for tool in filtered
                 ]
 
@@ -190,7 +194,9 @@ class RipperdocClient:
     async def query(self, prompt: str) -> None:
         """Send a prompt and start streaming the response."""
         if self._current_task and not self._current_task.done():
-            raise RuntimeError("A query is already in progress; wait for it to finish or interrupt it.")
+            raise RuntimeError(
+                "A query is already in progress; wait for it to finish or interrupt it."
+            )
 
         if not self._connected:
             await self.connect()

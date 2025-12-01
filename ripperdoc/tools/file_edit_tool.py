@@ -7,22 +7,30 @@ import os
 from typing import AsyncGenerator, Optional
 from pydantic import BaseModel, Field
 
-from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress, ToolOutput, ValidationResult
+from ripperdoc.core.tool import (
+    Tool,
+    ToolUseContext,
+    ToolResult,
+    ToolProgress,
+    ToolOutput,
+    ValidationResult,
+)
 
 
 class FileEditToolInput(BaseModel):
     """Input schema for FileEditTool."""
+
     file_path: str = Field(description="Absolute path to the file to edit")
     old_string: str = Field(description="The text to replace (must match exactly)")
     new_string: str = Field(description="The text to replace it with")
     replace_all: bool = Field(
-        default=False,
-        description="Replace all occurrences (default: false, only first)"
+        default=False, description="Replace all occurrences (default: false, only first)"
     )
 
 
 class FileEditToolOutput(BaseModel):
     """Output from file editing."""
+
     file_path: str
     replacements_made: int
     success: bool
@@ -70,29 +78,22 @@ match exactly (including whitespace and indentation)."""
         return True
 
     async def validate_input(
-        self,
-        input_data: FileEditToolInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: FileEditToolInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         # Check if file exists
         if not os.path.exists(input_data.file_path):
-            return ValidationResult(
-                result=False,
-                message=f"File not found: {input_data.file_path}"
-            )
+            return ValidationResult(result=False, message=f"File not found: {input_data.file_path}")
 
         # Check if it's a file
         if not os.path.isfile(input_data.file_path):
             return ValidationResult(
-                result=False,
-                message=f"Path is not a file: {input_data.file_path}"
+                result=False, message=f"Path is not a file: {input_data.file_path}"
             )
 
         # Check that old_string and new_string are different
         if input_data.old_string == input_data.new_string:
             return ValidationResult(
-                result=False,
-                message="old_string and new_string must be different"
+                result=False, message="old_string and new_string must be different"
             )
 
         return ValidationResult(result=True)
@@ -103,24 +104,18 @@ match exactly (including whitespace and indentation)."""
         # The UI will extract the structured data from the output object
         return output.message
 
-    def render_tool_use_message(
-        self,
-        input_data: FileEditToolInput,
-        verbose: bool = False
-    ) -> str:
+    def render_tool_use_message(self, input_data: FileEditToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
         return f"Editing: {input_data.file_path}"
 
     async def call(
-        self,
-        input_data: FileEditToolInput,
-        context: ToolUseContext
+        self, input_data: FileEditToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Edit the file."""
 
         try:
             # Read the file
-            with open(input_data.file_path, 'r', encoding='utf-8') as f:
+            with open(input_data.file_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Check if old_string exists
@@ -129,11 +124,10 @@ match exactly (including whitespace and indentation)."""
                     file_path=input_data.file_path,
                     replacements_made=0,
                     success=False,
-                    message=f"String not found in file: {input_data.file_path}"
+                    message=f"String not found in file: {input_data.file_path}",
                 )
                 yield ToolResult(
-                    data=output,
-                    result_for_assistant=self.render_result_for_assistant(output)
+                    data=output, result_for_assistant=self.render_result_for_assistant(output)
                 )
                 return
 
@@ -147,11 +141,10 @@ match exactly (including whitespace and indentation)."""
                     replacements_made=0,
                     success=False,
                     message=f"String appears {occurrence_count} times in file. "
-                           f"Either provide a unique string or use replace_all=true"
+                    f"Either provide a unique string or use replace_all=true",
                 )
                 yield ToolResult(
-                    data=output,
-                    result_for_assistant=self.render_result_for_assistant(output)
+                    data=output, result_for_assistant=self.render_result_for_assistant(output)
                 )
                 return
 
@@ -164,25 +157,32 @@ match exactly (including whitespace and indentation)."""
                 replacements = 1
 
             # Write the file
-            with open(input_data.file_path, 'w', encoding='utf-8') as f:
+            with open(input_data.file_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
 
             # Generate diff for display
             import difflib
+
             old_lines = content.splitlines(keepends=True)
             new_lines = new_content.splitlines(keepends=True)
 
-            diff = list(difflib.unified_diff(
-                old_lines,
-                new_lines,
-                fromfile=input_data.file_path,
-                tofile=input_data.file_path,
-                lineterm=''
-            ))
+            diff = list(
+                difflib.unified_diff(
+                    old_lines,
+                    new_lines,
+                    fromfile=input_data.file_path,
+                    tofile=input_data.file_path,
+                    lineterm="",
+                )
+            )
 
             # Count additions and deletions from diff
-            additions = sum(1 for line in diff if line.startswith('+') and not line.startswith('+++'))
-            deletions = sum(1 for line in diff if line.startswith('-') and not line.startswith('---'))
+            additions = sum(
+                1 for line in diff if line.startswith("+") and not line.startswith("+++")
+            )
+            deletions = sum(
+                1 for line in diff if line.startswith("-") and not line.startswith("---")
+            )
 
             # Store diff lines for display
             diff_lines = []
@@ -195,29 +195,36 @@ match exactly (including whitespace and indentation)."""
             new_line_num = None
 
             for line in diff[3:]:  # Skip header lines
-                if line.startswith('@@'):
+                if line.startswith("@@"):
                     # Parse line numbers from diff header
                     import re
-                    match = re.search(r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@', line)
+
+                    match = re.search(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@", line)
                     if match:
                         old_line_num = int(match.group(1))
                         new_line_num = int(match.group(3))
                         diff_with_line_numbers.append(f"      [dim]{line}[/dim]")
-                elif line.startswith('+') and not line.startswith('+++'):
+                elif line.startswith("+") and not line.startswith("+++"):
                     if new_line_num is not None:
-                        diff_with_line_numbers.append(f"      [green]{new_line_num:6d} + {line[1:]}[/green]")
+                        diff_with_line_numbers.append(
+                            f"      [green]{new_line_num:6d} + {line[1:]}[/green]"
+                        )
                         new_line_num += 1
                     else:
                         diff_with_line_numbers.append(f"      [green]{line}[/green]")
-                elif line.startswith('-') and not line.startswith('---'):
+                elif line.startswith("-") and not line.startswith("---"):
                     if old_line_num is not None:
-                        diff_with_line_numbers.append(f"      [red]{old_line_num:6d} - {line[1:]}[/red]")
+                        diff_with_line_numbers.append(
+                            f"      [red]{old_line_num:6d} - {line[1:]}[/red]"
+                        )
                         old_line_num += 1
                     else:
                         diff_with_line_numbers.append(f"      [red]{line}[/red]")
                 elif line.strip():
                     if old_line_num is not None and new_line_num is not None:
-                        diff_with_line_numbers.append(f"      {old_line_num:6d}   {new_line_num:6d}   {line}")
+                        diff_with_line_numbers.append(
+                            f"      {old_line_num:6d}   {new_line_num:6d}   {line}"
+                        )
                         old_line_num += 1
                         new_line_num += 1
                     else:
@@ -231,12 +238,11 @@ match exactly (including whitespace and indentation)."""
                 additions=additions,
                 deletions=deletions,
                 diff_lines=diff_lines,
-                diff_with_line_numbers=diff_with_line_numbers
+                diff_with_line_numbers=diff_with_line_numbers,
             )
 
             yield ToolResult(
-                data=output,
-                result_for_assistant=self.render_result_for_assistant(output)
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
         except Exception as e:
@@ -244,10 +250,10 @@ match exactly (including whitespace and indentation)."""
                 file_path=input_data.file_path,
                 replacements_made=0,
                 success=False,
-                message=f"Error editing file: {str(e)}"
+                message=f"Error editing file: {str(e)}",
             )
 
             yield ToolResult(
                 data=error_output,
-                result_for_assistant=self.render_result_for_assistant(error_output)
+                result_for_assistant=self.render_result_for_assistant(error_output),
             )

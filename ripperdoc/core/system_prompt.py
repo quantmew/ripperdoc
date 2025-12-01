@@ -77,7 +77,9 @@ def get_git_signature() -> Dict[str, str]:
     }
 
 
-def build_commit_workflow_prompt(bash_tool_name: str, todo_tool_name: str, task_tool_name: str) -> str:
+def build_commit_workflow_prompt(
+    bash_tool_name: str, todo_tool_name: str, task_tool_name: str
+) -> str:
     """Build instructions for committing and creating pull requests."""
     signatures = get_git_signature()
     commit_signature = signatures.get("commit") or ""
@@ -341,7 +343,7 @@ def build_system_prompt(
 
     tool_usage_lines = [
         "# Tool usage policy",
-        "- You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. When making multiple bash tool calls, you MUST send a single message with multiple tools calls to run the calls in parallel. For example, if you need to run \"git status\" and \"git diff\", send a single message with two tool calls to run the calls in parallel.",
+        '- You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. When making multiple bash tool calls, you MUST send a single message with multiple tools calls to run the calls in parallel. For example, if you need to run "git status" and "git diff", send a single message with two tool calls to run the calls in parallel.',
         "",
         "You MUST answer concisely with fewer than 4 lines of text (not including tool use or code generation), unless user asks for detail.",
     ]
@@ -362,7 +364,9 @@ def build_system_prompt(
         try:
             agent_definitions = load_agent_definitions()
             if agent_definitions.active_agents:
-                agent_lines = "\n".join(summarize_agent(agent) for agent in agent_definitions.active_agents)
+                agent_lines = "\n".join(
+                    summarize_agent(agent) for agent in agent_definitions.active_agents
+                )
                 agent_section = dedent(
                     f"""\
                     # Subagents
@@ -373,7 +377,9 @@ def build_system_prompt(
                 ).strip()
         except Exception as exc:
             logger.error(f"Failed to load agent definitions: {exc}")
-            agent_section = "# Subagents\nTask tool available, but agent definitions could not be loaded."
+            agent_section = (
+                "# Subagents\nTask tool available, but agent definitions could not be loaded."
+            )
 
     code_references = dedent(
         """\

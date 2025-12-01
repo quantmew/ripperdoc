@@ -88,10 +88,7 @@ def _extract_relative_paths_from_markdown(markdown_content: str, base_path: Path
             mention.startswith("./")
             or mention.startswith("~/")
             or (mention.startswith("/") and mention != "/")
-            or (
-                not _PUNCT_START_RE.match(mention)
-                and _VALID_START_RE.match(mention)
-            )
+            or (not _PUNCT_START_RE.match(mention) and _VALID_START_RE.match(mention))
         ):
             continue
 
@@ -134,9 +131,7 @@ def _collect_files(
     visited.add(resolved_key)
 
     collected: List[MemoryFile] = [current_file]
-    relative_paths = _extract_relative_paths_from_markdown(
-        current_file.content, resolved_path
-    )
+    relative_paths = _extract_relative_paths_from_markdown(current_file.content, resolved_path)
     for nested_path in relative_paths:
         if not allow_outside_cwd and not _is_path_under_directory(nested_path, Path.cwd()):
             continue
@@ -206,10 +201,7 @@ def collect_all_memory_files(force_include_external: bool = False) -> List[Memor
 
 def get_oversized_memory_files() -> List[MemoryFile]:
     """Return memory files that exceed the recommended length."""
-    return [
-        file for file in collect_all_memory_files()
-        if len(file.content) > MAX_CONTENT_LENGTH
-    ]
+    return [file for file in collect_all_memory_files() if len(file.content) > MAX_CONTENT_LENGTH]
 
 
 def build_memory_instructions() -> str:
@@ -222,9 +214,11 @@ def build_memory_instructions() -> str:
         type_description = (
             " (project instructions, checked into the codebase)"
             if memory_file.type == "Project"
-            else " (user's private project instructions, not checked in)"
-            if memory_file.type == "Local"
-            else " (user's private global instructions)"
+            else (
+                " (user's private project instructions, not checked in)"
+                if memory_file.type == "Local"
+                else " (user's private global instructions)"
+            )
         )
         snippets.append(
             f"Contents of {memory_file.path}{type_description}:\n\n{memory_file.content}"

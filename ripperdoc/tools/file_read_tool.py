@@ -8,24 +8,29 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional
 from pydantic import BaseModel, Field
 
-from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress, ToolOutput, ValidationResult
+from ripperdoc.core.tool import (
+    Tool,
+    ToolUseContext,
+    ToolResult,
+    ToolProgress,
+    ToolOutput,
+    ValidationResult,
+)
 
 
 class FileReadToolInput(BaseModel):
     """Input schema for FileReadTool."""
+
     file_path: str = Field(description="Absolute path to the file to read")
     offset: Optional[int] = Field(
-        default=None,
-        description="Line number to start reading from (optional)"
+        default=None, description="Line number to start reading from (optional)"
     )
-    limit: Optional[int] = Field(
-        default=None,
-        description="Number of lines to read (optional)"
-    )
+    limit: Optional[int] = Field(default=None, description="Number of lines to read (optional)")
 
 
 class FileReadToolOutput(BaseModel):
     """Output from file reading."""
+
     content: str
     file_path: str
     line_count: int
@@ -70,29 +75,23 @@ and limit to read only a portion of the file."""
         return False
 
     async def validate_input(
-        self,
-        input_data: FileReadToolInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: FileReadToolInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         # Check if file exists
         if not os.path.exists(input_data.file_path):
-            return ValidationResult(
-                result=False,
-                message=f"File not found: {input_data.file_path}"
-            )
+            return ValidationResult(result=False, message=f"File not found: {input_data.file_path}")
 
         # Check if it's a file (not a directory)
         if not os.path.isfile(input_data.file_path):
             return ValidationResult(
-                result=False,
-                message=f"Path is not a file: {input_data.file_path}"
+                result=False, message=f"Path is not a file: {input_data.file_path}"
             )
 
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: FileReadToolOutput) -> str:
         """Format output for the AI."""
-        lines = output.content.split('\n')
+        lines = output.content.split("\n")
         numbered_lines = []
 
         for i, line in enumerate(lines, start=output.offset + 1):
@@ -103,11 +102,7 @@ and limit to read only a portion of the file."""
 
         return "\n".join(numbered_lines)
 
-    def render_tool_use_message(
-        self,
-        input_data: FileReadToolInput,
-        verbose: bool = False
-    ) -> str:
+    def render_tool_use_message(self, input_data: FileReadToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
         msg = f"Reading: {input_data.file_path}"
         if input_data.offset or input_data.limit:
@@ -115,14 +110,12 @@ and limit to read only a portion of the file."""
         return msg
 
     async def call(
-        self,
-        input_data: FileReadToolInput,
-        context: ToolUseContext
+        self, input_data: FileReadToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Read the file."""
 
         try:
-            with open(input_data.file_path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(input_data.file_path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
             total_lines = len(lines)
@@ -131,23 +124,22 @@ and limit to read only a portion of the file."""
 
             # Apply offset and limit
             if limit is not None:
-                selected_lines = lines[offset:offset + limit]
+                selected_lines = lines[offset : offset + limit]
             else:
                 selected_lines = lines[offset:]
 
-            content = ''.join(selected_lines)
+            content = "".join(selected_lines)
 
             output = FileReadToolOutput(
                 content=content,
                 file_path=input_data.file_path,
                 line_count=len(selected_lines),
                 offset=offset,
-                limit=limit
+                limit=limit,
             )
 
             yield ToolResult(
-                data=output,
-                result_for_assistant=self.render_result_for_assistant(output)
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
         except Exception as e:
@@ -157,10 +149,10 @@ and limit to read only a portion of the file."""
                 file_path=input_data.file_path,
                 line_count=0,
                 offset=0,
-                limit=None
+                limit=None,
             )
 
             yield ToolResult(
                 data=error_output,
-                result_for_assistant=f"Error reading file {input_data.file_path}: {str(e)}"
+                result_for_assistant=f"Error reading file {input_data.file_path}: {str(e)}",
             )

@@ -69,15 +69,21 @@ class KillBashTool(Tool[KillBashInput, KillBashOutput]):
     def needs_permissions(self, input_data: Optional[KillBashInput] = None) -> bool:
         return True
 
-    async def check_permissions(self, input_data: KillBashInput, permission_context: object) -> dict:
+    async def check_permissions(
+        self, input_data: KillBashInput, permission_context: object
+    ) -> dict:
         # Killing is destructive; require explicit confirmation upstream.
         return PermissionDecision(behavior="allow", updated_input=input_data)
 
-    async def validate_input(self, input_data: KillBashInput, context: ToolUseContext) -> ValidationResult:
+    async def validate_input(
+        self, input_data: KillBashInput, context: ToolUseContext
+    ) -> ValidationResult:
         try:
             get_background_status(input_data.task_id, consume=False)
         except KeyError:
-            return ValidationResult(result=False, message=f"No background task found with id '{input_data.task_id}'")
+            return ValidationResult(
+                result=False, message=f"No background task found with id '{input_data.task_id}'"
+            )
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: KillBashOutput) -> str:
@@ -87,9 +93,7 @@ class KillBashTool(Tool[KillBashInput, KillBashOutput]):
         return f"$ kill-background {input_data.task_id}"
 
     async def call(
-        self,
-        input_data: KillBashInput,
-        context: ToolUseContext
+        self, input_data: KillBashInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolResult, None]:
         try:
             status = get_background_status(input_data.task_id, consume=False)
@@ -100,7 +104,9 @@ class KillBashTool(Tool[KillBashInput, KillBashOutput]):
                 message=f"No shell found with ID: {input_data.task_id}",
                 status=None,
             )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+            yield ToolResult(
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
+            )
             return
 
         if status["status"] != "running":
@@ -110,7 +116,9 @@ class KillBashTool(Tool[KillBashInput, KillBashOutput]):
                 message=f"Shell {input_data.task_id} is not running (status: {status['status']}).",
                 status=status["status"],
             )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+            yield ToolResult(
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
+            )
             return
 
         killed = await kill_background_task(input_data.task_id)

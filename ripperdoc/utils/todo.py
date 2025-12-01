@@ -52,7 +52,9 @@ def _storage_path(project_root: Optional[Path], ensure_dir: bool) -> Path:
     return storage_dir / "todos.json"
 
 
-def validate_todos(todos: Sequence[TodoItem], max_items: int = MAX_TODOS) -> Tuple[bool, str | None]:
+def validate_todos(
+    todos: Sequence[TodoItem], max_items: int = MAX_TODOS
+) -> Tuple[bool, str | None]:
     """Basic validation for a todo list."""
     if len(todos) > max_items:
         return False, f"Too many todos; limit is {max_items}."
@@ -124,7 +126,9 @@ def set_todos(
                     "created_at": previous.created_at if previous else todo.created_at or now,
                     "updated_at": now,
                     "previous_status": (
-                        previous.status if previous and previous.status != todo.status else todo.previous_status
+                        previous.status
+                        if previous and previous.status != todo.status
+                        else todo.previous_status
                     ),
                 }
             )

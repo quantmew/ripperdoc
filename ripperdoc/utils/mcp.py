@@ -244,7 +244,9 @@ class McpRuntime:
             info.status = "connected"
             info.instructions = init_result.instructions or info.instructions
             info.server_version = getattr(init_result.serverInfo, "version", None)
-            info.capabilities = capabilities.model_dump() if hasattr(capabilities, "model_dump") else {}
+            info.capabilities = (
+                capabilities.model_dump() if hasattr(capabilities, "model_dump") else {}
+            )
             self.sessions[config.name] = session
 
             tools_result = await session.list_tools()

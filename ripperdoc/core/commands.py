@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 
 from ripperdoc.cli.commands import list_slash_commands
 
+
 @dataclass(frozen=True)
 class CommandDef:
     """Simple definition of a slash command."""

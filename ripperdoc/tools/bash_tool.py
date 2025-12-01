@@ -60,6 +60,7 @@ ORIGINAL_CWD = Path(get_original_cwd())
 
 class BashToolInput(BaseModel):
     """Input schema for BashTool."""
+
     command: str = Field(description="The bash command to execute")
     timeout: Optional[int] = Field(
         default=None,
@@ -248,7 +249,9 @@ build projects, run tests, and interact with the file system."""
             """
         ).strip()
 
-        return "\n\n".join(section for section in [base_prompt, read_only_section, sandbox_section] if section)
+        return "\n\n".join(
+            section for section in [base_prompt, read_only_section, sandbox_section] if section
+        )
 
     def is_read_only(self) -> bool:
         return getattr(self, "_current_is_read_only", False)
@@ -271,7 +274,9 @@ build projects, run tests, and interact with the file system."""
             return False
         return True
 
-    async def check_permissions(self, input_data: BashToolInput, permission_context: dict[str, Any]) -> Any:
+    async def check_permissions(
+        self, input_data: BashToolInput, permission_context: dict[str, Any]
+    ) -> Any:
         """Evaluate permissions using reference-style rules."""
         if getattr(input_data, "sandbox", False):
             return {"behavior": "allow", "updated_input": input_data}
@@ -293,7 +298,9 @@ build projects, run tests, and interact with the file system."""
         # Background executions need an explicit confirmation even if heuristics
         # would normally auto-allow (e.g., read-only detection).
         _, auto_background = self._detect_auto_background(input_data.command)
-        if (input_data.run_in_background or auto_background) and getattr(decision, "behavior", None) == "allow":
+        if (input_data.run_in_background or auto_background) and getattr(
+            decision, "behavior", None
+        ) == "allow":
             reason = getattr(decision, "decision_reason", {}) or {}
             if reason.get("type") != "rule":
                 return PermissionDecision(
@@ -307,9 +314,7 @@ build projects, run tests, and interact with the file system."""
         return decision
 
     async def validate_input(
-        self,
-        input_data: BashToolInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: BashToolInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         if not input_data.command.strip():
             return ValidationResult(result=False, message="Command cannot be empty")
@@ -343,8 +348,7 @@ build projects, run tests, and interact with the file system."""
             parts = normalized.split(maxsplit=1)
             if normalized in IGNORED_COMMANDS or (len(parts) == 1 and parts[0] in IGNORED_COMMANDS):
                 return ValidationResult(
-                    result=False,
-                    message="This command cannot be run in background"
+                    result=False, message="This command cannot be run in background"
                 )
 
         validation = validate_shell_command(input_data.command)
@@ -395,17 +399,13 @@ build projects, run tests, and interact with the file system."""
 
         return "\n\n".join(result_parts)
 
-    def render_tool_use_message(
-        self,
-        input_data: BashToolInput,
-        verbose: bool = False
-    ) -> str:
+    def render_tool_use_message(self, input_data: BashToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
         command = input_data.command or ""
 
         if not verbose and command:
             formatted = command
-            if '"$(cat <<\'EOF\'' in command:
+            if "\"$(cat <<'EOF'" in command:
                 heredoc_match = command.split("$(cat <<'EOF'", 1)
                 if len(heredoc_match) == 2:
                     prefix, rest = heredoc_match
@@ -461,9 +461,7 @@ build projects, run tests, and interact with the file system."""
         return command, False
 
     async def call(
-        self,
-        input_data: BashToolInput,
-        context: ToolUseContext
+        self, input_data: BashToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Execute the bash command."""
 
@@ -530,14 +528,14 @@ build projects, run tests, and interact with the file system."""
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     stdin=asyncio.subprocess.DEVNULL,
-                    start_new_session=False
+                    start_new_session=False,
                 )
             return await asyncio.create_subprocess_shell(
                 final_command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.DEVNULL,
-                start_new_session=False
+                start_new_session=False,
             )
 
         try:
@@ -552,19 +550,21 @@ build projects, run tests, and interact with the file system."""
                         exit_code=-1,
                         command=effective_command,
                         sandbox=sandbox_requested,
-                        is_error=True
+                        is_error=True,
                     )
                     yield ToolResult(
                         data=error_output,
-                        result_for_assistant=self.render_result_for_assistant(error_output)
+                        result_for_assistant=self.render_result_for_assistant(error_output),
                     )
                     return
 
-                bg_timeout = None if input_data.timeout is None else (timeout_seconds if timeout_seconds > 0 else None)
+                bg_timeout = (
+                    None
+                    if input_data.timeout is None
+                    else (timeout_seconds if timeout_seconds > 0 else None)
+                )
                 task_id = await start_background_command(
-                    final_command,
-                    timeout=bg_timeout,
-                    shell_executable=input_data.shell_executable
+                    final_command, timeout=bg_timeout, shell_executable=input_data.shell_executable
                 )
 
                 output = BashToolOutput(
@@ -579,12 +579,11 @@ build projects, run tests, and interact with the file system."""
                     return_code_interpretation=None,
                     summary=f"Command running in background with ID: {task_id}",
                     interrupted=False,
-                    is_image=False
+                    is_image=False,
                 )
 
                 yield ToolResult(
-                    data=output,
-                    result_for_assistant=self.render_result_for_assistant(output)
+                    data=output, result_for_assistant=self.render_result_for_assistant(output)
                 )
                 return
 
@@ -595,11 +594,15 @@ build projects, run tests, and interact with the file system."""
             stderr_lines: list[str] = []
             queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
             loop = asyncio.get_running_loop()
-            deadline = loop.time() + timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
+            deadline = (
+                loop.time() + timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
+            )
             timed_out = False
             last_progress_time = loop.time()
 
-            async def _pump_stream(stream: Optional[asyncio.StreamReader], sink: list[str], label: str) -> None:
+            async def _pump_stream(
+                stream: Optional[asyncio.StreamReader], sink: list[str], label: str
+            ) -> None:
                 if not stream:
                     return
                 async for raw in stream:
@@ -618,9 +621,7 @@ build projects, run tests, and interact with the file system."""
             # Main execution loop with progress reporting
             while True:
                 done, _ = await asyncio.wait(
-                    {wait_task, *pump_tasks},
-                    timeout=0.1,
-                    return_when=asyncio.FIRST_COMPLETED
+                    {wait_task, *pump_tasks}, timeout=0.1, return_when=asyncio.FIRST_COMPLETED
                 )
 
                 now = loop.time()
@@ -637,9 +638,7 @@ build projects, run tests, and interact with the file system."""
                         # Show last few lines as progress
                         preview = get_last_n_lines(combined_output, 5)
                         elapsed = format_duration((now - start) * 1000)
-                        yield ToolProgress(
-                            content=f"Running... ({elapsed})\n{preview}"
-                        )
+                        yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")
                     last_progress_time = now
 
                 # Check timeout
@@ -669,7 +668,9 @@ build projects, run tests, and interact with the file system."""
                         await task
 
             # Drain any remaining data from streams
-            async def _drain_remaining(stream: Optional[asyncio.StreamReader], sink: list[str]) -> None:
+            async def _drain_remaining(
+                stream: Optional[asyncio.StreamReader], sink: list[str]
+            ) -> None:
                 if not stream:
                     return
                 try:
@@ -703,10 +704,7 @@ build projects, run tests, and interact with the file system."""
 
             # Interpret exit code
             exit_result = interpret_exit_code(
-                input_data.command,
-                exit_code,
-                trimmed_stdout,
-                trimmed_stderr
+                input_data.command, exit_code, trimmed_stdout, trimmed_stderr
             )
 
             summary = None
@@ -719,20 +717,19 @@ build projects, run tests, and interact with the file system."""
             # Truncate outputs if needed
             stdout_result = truncate_output(trimmed_stdout, max_chars=MAX_OUTPUT_CHARS)
             stderr_result = truncate_output(trimmed_stderr, max_chars=MAX_OUTPUT_CHARS)
-            is_image = stdout_result.get('is_image', False) or stderr_result.get('is_image', False)
+            is_image = stdout_result.get("is_image", False) or stderr_result.get("is_image", False)
 
             # Determine if truncated
-            is_truncated = stdout_result['is_truncated'] or stderr_result['is_truncated']
+            is_truncated = stdout_result["is_truncated"] or stderr_result["is_truncated"]
             original_length = None
             if is_truncated:
-                original_length = (
-                    stdout_result.get('original_length', 0) +
-                    stderr_result.get('original_length', 0)
+                original_length = stdout_result.get("original_length", 0) + stderr_result.get(
+                    "original_length", 0
                 )
 
             output = BashToolOutput(
-                stdout=stdout_result['truncated_content'],
-                stderr=stderr_result['truncated_content'],
+                stdout=stdout_result["truncated_content"],
+                stderr=stderr_result["truncated_content"],
                 exit_code=exit_code,
                 command=effective_command,
                 duration_ms=duration_ms,
@@ -745,12 +742,11 @@ build projects, run tests, and interact with the file system."""
                 interrupted=timed_out,
                 is_image=is_image,
                 sandbox=sandbox_requested,
-                is_error=exit_result.is_error or timed_out
+                is_error=exit_result.is_error or timed_out,
             )
 
             yield ToolResult(
-                data=output,
-                result_for_assistant=self.render_result_for_assistant(output)
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
         except Exception as e:
@@ -764,12 +760,12 @@ build projects, run tests, and interact with the file system."""
                 return_code_interpretation=None,
                 interrupted=False,
                 is_image=False,
-                is_error=True
+                is_error=True,
             )
 
             yield ToolResult(
                 data=error_output,
-                result_for_assistant=self.render_result_for_assistant(error_output)
+                result_for_assistant=self.render_result_for_assistant(error_output),
             )
         finally:
             # Restore read-only flag to prior state.
@@ -778,7 +774,9 @@ build projects, run tests, and interact with the file system."""
                 with contextlib.suppress(Exception):
                     sandbox_cleanup()
 
-    async def _force_kill_process(self, process: asyncio.subprocess.Process, grace_seconds: float = KILL_GRACE_SECONDS) -> None:
+    async def _force_kill_process(
+        self, process: asyncio.subprocess.Process, grace_seconds: float = KILL_GRACE_SECONDS
+    ) -> None:
         """Attempt to terminate a process group and avoid hanging waits."""
         if process.returncode is not None:
             return

@@ -82,7 +82,9 @@ def _validate_path(raw_path: str, cwd: str, allowed_dirs: Set[str]) -> tuple[boo
     return _is_path_allowed(resolved, allowed_dirs), str(resolved)
 
 
-def _extract_paths_for_command(command: str, args: List[str], cwd: str, allowed_dirs: Set[str]) -> ValidationResponse:
+def _extract_paths_for_command(
+    command: str, args: List[str], cwd: str, allowed_dirs: Set[str]
+) -> ValidationResponse:
     if command == "cd":
         target = args[0] if args else os.path.expanduser("~")
         allowed, resolved = _validate_path(target, cwd, allowed_dirs)
@@ -133,7 +135,9 @@ def _extract_paths_for_command(command: str, args: List[str], cwd: str, allowed_
     )
 
 
-def validate_shell_command_paths(shell_command: str | object, cwd: str | None = None, allowed_dirs: Set[str] | None = None) -> ValidationResponse:
+def validate_shell_command_paths(
+    shell_command: str | object, cwd: str | None = None, allowed_dirs: Set[str] | None = None
+) -> ValidationResponse:
     """Validate path-oriented shell commands against allowed working directories."""
     command_str = shell_command.command if hasattr(shell_command, "command") else str(shell_command)
     cwd = cwd or safe_get_cwd()

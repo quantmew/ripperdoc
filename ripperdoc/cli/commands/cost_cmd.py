@@ -57,10 +57,7 @@ def _handle(ui, _: str) -> bool:
             line += f", {_fmt_tokens(stats.cache_read_input_tokens)} cache read"
         if stats.cache_creation_input_tokens:
             line += f", {_fmt_tokens(stats.cache_creation_input_tokens)} cache write"
-        line += (
-            f" ({stats.requests} call"
-            f"{'' if stats.requests == 1 else 's'}"
-        )
+        line += f" ({stats.requests} call" f"{'' if stats.requests == 1 else 's'}"
         if stats.duration_ms:
             line += f", {_format_duration(stats.duration_ms)} total"
         line += ")"

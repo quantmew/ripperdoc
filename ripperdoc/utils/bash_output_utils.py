@@ -34,4 +34,11 @@ def reset_cwd_if_needed(allowed_directories: set[str] | None = None) -> bool:
     return True
 
 
-__all__ = ["append_cwd_reset_message", "reset_cwd_if_needed", "trim_blank_lines", "truncate_output", "safe_get_cwd", "get_original_cwd"]
+__all__ = [
+    "append_cwd_reset_message",
+    "reset_cwd_if_needed",
+    "trim_blank_lines",
+    "truncate_output",
+    "safe_get_cwd",
+    "get_original_cwd",
+]

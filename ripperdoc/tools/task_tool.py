@@ -104,7 +104,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         clear_agent_cache()
         agents = load_agent_definitions()
         target_agent = next(
-            (agent for agent in agents.active_agents if agent.agent_type == input_data.subagent_type),
+            (
+                agent
+                for agent in agents.active_agents
+                if agent.agent_type == input_data.subagent_type
+            ),
             None,
         )
         if not target_agent:
@@ -150,27 +154,43 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 blocks = getattr(msg_content, "content", []) if msg_content else []
                 if isinstance(blocks, list):
                     for block in blocks:
-                        block_type = getattr(block, "type", None) or (block.get("type") if isinstance(block, Dict) else None)
+                        block_type = getattr(block, "type", None) or (
+                            block.get("type") if isinstance(block, Dict) else None
+                        )
                         if block_type == "tool_use":
-                            tool_name = getattr(block, "name", None) or (block.get("name") if isinstance(block, Dict) else "unknown tool")
-                            block_input = getattr(block, "input", None) if hasattr(block, "input") else (block.get("input") if isinstance(block, Dict) else None)
+                            tool_name = getattr(block, "name", None) or (
+                                block.get("name") if isinstance(block, Dict) else "unknown tool"
+                            )
+                            block_input = (
+                                getattr(block, "input", None)
+                                if hasattr(block, "input")
+                                else (block.get("input") if isinstance(block, Dict) else None)
+                            )
                             summary = self._summarize_tool_input(block_input)
                             label = f"Subagent requesting {tool_name}"
                             if summary:
                                 label += f" — {summary}"
                             yield ToolProgress(content=label)
                         if block_type == "text":
-                            text_val = getattr(block, "text", None) or (block.get("text") if isinstance(block, Dict) else "")
+                            text_val = getattr(block, "text", None) or (
+                                block.get("text") if isinstance(block, Dict) else ""
+                            )
                             if text_val:
                                 snippet = str(text_val).strip()
                                 if snippet:
-                                    short = snippet if len(snippet) <= 200 else snippet[:197] + "..."
+                                    short = (
+                                        snippet if len(snippet) <= 200 else snippet[:197] + "..."
+                                    )
                                     yield ToolProgress(content=f"Subagent: {short}")
                 assistant_messages.append(message)  # type: ignore[arg-type]
                 tool_use_count += self._count_tool_uses(message)
 
         duration_ms = (time.time() - start) * 1000
-        result_text = self._extract_text(assistant_messages[-1]) if assistant_messages else "Agent returned no response."
+        result_text = (
+            self._extract_text(assistant_messages[-1])
+            if assistant_messages
+            else "Agent returned no response."
+        )
 
         output = TaskToolOutput(
             agent_type=target_agent.agent_type,
@@ -209,7 +229,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         if isinstance(content, list):
             parts: List[str] = []
             for block in content:
-                text = getattr(block, "text", None) or (block.get("text") if isinstance(block, Dict) else None)
+                text = getattr(block, "text", None) or (
+                    block.get("text") if isinstance(block, Dict) else None
+                )
                 if text:
                     parts.append(str(text))
             return "\n".join(parts)
@@ -221,7 +243,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             return 0
         count = 0
         for block in content:
-            block_type = getattr(block, "type", None) or (block.get("type") if isinstance(block, Dict) else None)
+            block_type = getattr(block, "type", None) or (
+                block.get("type") if isinstance(block, Dict) else None
+            )
             if block_type == "tool_use":
                 count += 1
         return count
@@ -248,6 +272,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         if not pieces:
             # Fallback to truncated dict representation
             import json
+
             try:
                 serialized = json.dumps(inp, ensure_ascii=False)
             except Exception:

@@ -134,9 +134,7 @@ def _collect_rule_suggestions(command: str) -> List[ToolRule]:
     suggestions: list[ToolRule] = [ToolRule(tool_name="Bash", rule_content=command)]
     tokens = parse_and_clean_shell_tokens(command)
     if tokens:
-        suggestions.append(
-            ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(tokens[0]))
-        )
+        suggestions.append(ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(tokens[0])))
     return suggestions
 
 
@@ -154,7 +152,9 @@ def evaluate_shell_command_permissions(
     command = tool_request.command if hasattr(tool_request, "command") else str(tool_request)
     trimmed_command = command.strip()
     allowed_working_dirs = allowed_working_dirs or {safe_get_cwd()}
-    injection_detector = injection_detector or (lambda cmd: validate_shell_command(cmd).behavior != "passthrough")
+    injection_detector = injection_detector or (
+        lambda cmd: validate_shell_command(cmd).behavior != "passthrough"
+    )
     read_only_detector = read_only_detector or _is_command_read_only
 
     merged_denied = _merge_rules(denied_rules)
@@ -176,7 +176,9 @@ def evaluate_shell_command_permissions(
             message="Command approved by configured rule.",
         )
 
-    path_result = validate_shell_command_paths(trimmed_command, safe_get_cwd(), allowed_working_dirs)
+    path_result = validate_shell_command_paths(
+        trimmed_command, safe_get_cwd(), allowed_working_dirs
+    )
     if path_result.behavior != "passthrough":
         return PermissionDecision(
             behavior="ask",

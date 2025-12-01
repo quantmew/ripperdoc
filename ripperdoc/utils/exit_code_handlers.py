@@ -15,6 +15,7 @@ from dataclasses import dataclass
 @dataclass
 class ExitCodeResult:
     """Result of exit code interpretation."""
+
     is_error: bool
     message: Optional[str] = None
     semantic_meaning: Optional[str] = None
@@ -66,16 +67,14 @@ class BashCommandSchema(BaseModel):
 
     command: str = Field(description="The command to execute")
     timeout: Optional[int] = Field(
-        default=None,
-        description=f"Optional timeout in milliseconds (max {MAX_BASH_TIMEOUT_MS})"
+        default=None, description=f"Optional timeout in milliseconds (max {MAX_BASH_TIMEOUT_MS})"
     )
     description: Optional[str] = Field(
         default=None,
-        description="Clear, concise description of what this command does in 5-10 words."
+        description="Clear, concise description of what this command does in 5-10 words.",
     )
     run_in_background: bool = Field(
-        default=False,
-        description="Set to true to run this command in the background."
+        default=False, description="Set to true to run this command in the background."
     )
 
 
@@ -83,12 +82,10 @@ class ExtendedBashCommandSchema(BashCommandSchema):
     """Schema describing an extended bash command request."""
 
     sandbox: Optional[bool] = Field(
-        default=None,
-        description="Whether to request sandboxed execution (read-only)."
+        default=None, description="Whether to request sandboxed execution (read-only)."
     )
     shell_executable: Optional[str] = Field(
-        default=None,
-        description="Optional shell path to use instead of the default shell."
+        default=None, description="Optional shell path to use instead of the default shell."
     )
 
 
@@ -97,29 +94,20 @@ class CommandResultSchema(BaseModel):
 
     stdout: str = Field(description="The standard output of the command")
     stderr: str = Field(description="The standard error output of the command")
-    summary: Optional[str] = Field(
-        default=None,
-        description="Summarized output when available"
-    )
-    interrupted: bool = Field(
-        default=False,
-        description="Whether the command was interrupted"
-    )
+    summary: Optional[str] = Field(default=None, description="Summarized output when available")
+    interrupted: bool = Field(default=False, description="Whether the command was interrupted")
     is_image: Optional[bool] = Field(
-        default=None,
-        description="Flag to indicate if stdout contains image data"
+        default=None, description="Flag to indicate if stdout contains image data"
     )
     background_task_id: Optional[str] = Field(
-        default=None,
-        description="ID of the background task if command is running in background"
+        default=None, description="ID of the background task if command is running in background"
     )
     sandbox: Optional[bool] = Field(
-        default=None,
-        description="Flag to indicate if the command was run in sandbox mode"
+        default=None, description="Flag to indicate if the command was run in sandbox mode"
     )
     return_code_interpretation: Optional[str] = Field(
         default=None,
-        description="Semantic interpretation for non-error exit codes with special meaning"
+        description="Semantic interpretation for non-error exit codes with special meaning",
     )
 
 
@@ -127,7 +115,7 @@ def default_handler(exit_code: int, stdout: str, stderr: str) -> ExitCodeResult:
     """Default exit code handler - non-zero is error."""
     return ExitCodeResult(
         is_error=exit_code != 0,
-        message=f"Command failed with exit code {exit_code}" if exit_code != 0 else None
+        message=f"Command failed with exit code {exit_code}" if exit_code != 0 else None,
     )
 
 
@@ -136,15 +124,9 @@ def grep_handler(exit_code: int, stdout: str, stderr: str) -> ExitCodeResult:
     if exit_code == 0:
         return ExitCodeResult(is_error=False)
     elif exit_code == 1:
-        return ExitCodeResult(
-            is_error=False,
-            semantic_meaning="No matches found"
-        )
+        return ExitCodeResult(is_error=False, semantic_meaning="No matches found")
     else:
-        return ExitCodeResult(
-            is_error=True,
-            message=f"grep failed with exit code {exit_code}"
-        )
+        return ExitCodeResult(is_error=True, message=f"grep failed with exit code {exit_code}")
 
 
 def diff_handler(exit_code: int, stdout: str, stderr: str) -> ExitCodeResult:
@@ -154,10 +136,7 @@ def diff_handler(exit_code: int, stdout: str, stderr: str) -> ExitCodeResult:
     elif exit_code == 1:
         return ExitCodeResult(is_error=False, semantic_meaning="Files differ")
     else:
-        return ExitCodeResult(
-            is_error=True,
-            message=f"diff failed with exit code {exit_code}"
-        )
+        return ExitCodeResult(is_error=True, message=f"diff failed with exit code {exit_code}")
 
 
 def test_handler(exit_code: int, stdout: str, stderr: str) -> ExitCodeResult:
@@ -168,8 +147,7 @@ def test_handler(exit_code: int, stdout: str, stderr: str) -> ExitCodeResult:
         return ExitCodeResult(is_error=False, semantic_meaning="Condition is false")
     else:
         return ExitCodeResult(
-            is_error=True,
-            message=f"test command failed with exit code {exit_code}"
+            is_error=True, message=f"test command failed with exit code {exit_code}"
         )
 
 
@@ -178,26 +156,20 @@ def find_handler(exit_code: int, stdout: str, stderr: str) -> ExitCodeResult:
     if exit_code == 0:
         return ExitCodeResult(is_error=False)
     elif exit_code == 1:
-        return ExitCodeResult(
-            is_error=False,
-            semantic_meaning="Some directories were inaccessible"
-        )
+        return ExitCodeResult(is_error=False, semantic_meaning="Some directories were inaccessible")
     else:
-        return ExitCodeResult(
-            is_error=True,
-            message=f"find failed with exit code {exit_code}"
-        )
+        return ExitCodeResult(is_error=True, message=f"find failed with exit code {exit_code}")
 
 
 # Command-specific handlers
 COMMAND_HANDLERS: dict[str, ExitCodeHandler] = {
-    'grep': grep_handler,
-    'rg': grep_handler,
-    'ripgrep': grep_handler,
-    'diff': diff_handler,
-    'test': test_handler,
-    '[': test_handler,
-    'find': find_handler,
+    "grep": grep_handler,
+    "rg": grep_handler,
+    "ripgrep": grep_handler,
+    "diff": diff_handler,
+    "test": test_handler,
+    "[": test_handler,
+    "find": find_handler,
 }
 
 
@@ -211,11 +183,11 @@ def normalize_command(command: str) -> str:
         'ls -la' -> 'ls'
     """
     # Get the last command in a pipe chain
-    if '|' in command:
-        command = command.split('|')[-1].strip()
+    if "|" in command:
+        command = command.split("|")[-1].strip()
 
     # Get the first word (the actual command)
-    command = command.strip().split()[0] if command.strip() else ''
+    command = command.strip().split()[0] if command.strip() else ""
 
     return command
 

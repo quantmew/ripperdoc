@@ -151,29 +151,38 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
 
         payloads = [entry.get("payload") or {} for entry in messages]
         conversation_payloads = [
-            payload for payload in payloads
-            if payload.get("type") in ("user", "assistant")
+            payload for payload in payloads if payload.get("type") in ("user", "assistant")
         ]
         if not conversation_payloads:
             continue
 
         created_raw = messages[0].get("logged_at")
         updated_raw = messages[-1].get("logged_at")
-        created_at = datetime.fromisoformat(created_raw.replace("Z", "+00:00")) if isinstance(created_raw, str) else datetime.fromtimestamp(jsonl_path.stat().st_ctime)
-        updated_at = datetime.fromisoformat(updated_raw.replace("Z", "+00:00")) if isinstance(updated_raw, str) else datetime.fromtimestamp(jsonl_path.stat().st_mtime)
+        created_at = (
+            datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+            if isinstance(created_raw, str)
+            else datetime.fromtimestamp(jsonl_path.stat().st_ctime)
+        )
+        updated_at = (
+            datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
+            if isinstance(updated_raw, str)
+            else datetime.fromtimestamp(jsonl_path.stat().st_mtime)
+        )
         first_prompt = ""
         for payload in conversation_payloads:
             first_prompt = _extract_prompt(payload)
             if first_prompt:
                 break
-        summaries.append(SessionSummary(
-            session_id=jsonl_path.stem,
-            path=jsonl_path,
-            message_count=len(conversation_payloads),
-            created_at=created_at,
-            updated_at=updated_at,
-            first_prompt=first_prompt or "(no prompt)",
-        ))
+        summaries.append(
+            SessionSummary(
+                session_id=jsonl_path.stem,
+                path=jsonl_path,
+                message_count=len(conversation_payloads),
+                created_at=created_at,
+                updated_at=updated_at,
+                first_prompt=first_prompt or "(no prompt)",
+            )
+        )
 
     return sorted(summaries, key=lambda s: s.updated_at, reverse=True)
 

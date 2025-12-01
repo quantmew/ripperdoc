@@ -197,7 +197,9 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
 
         return current, total_replacements
 
-    def _build_diff(self, original: str, updated: str, file_path: str) -> tuple[list[str], list[str], int, int]:
+    def _build_diff(
+        self, original: str, updated: str, file_path: str
+    ) -> tuple[list[str], list[str], int, int]:
         old_lines = original.splitlines(keepends=True)
         new_lines = updated.splitlines(keepends=True)
 
@@ -231,13 +233,17 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                     diff_with_line_numbers.append(f"      [dim]{line}[/dim]")
             elif line.startswith("+") and not line.startswith("+++"):
                 if new_line_num is not None:
-                    diff_with_line_numbers.append(f"      [green]{new_line_num:6d} + {line[1:]}[/green]")
+                    diff_with_line_numbers.append(
+                        f"      [green]{new_line_num:6d} + {line[1:]}[/green]"
+                    )
                     new_line_num += 1
                 else:
                     diff_with_line_numbers.append(f"      [green]{line}[/green]")
             elif line.startswith("-") and not line.startswith("---"):
                 if old_line_num is not None:
-                    diff_with_line_numbers.append(f"      [red]{old_line_num:6d} - {line[1:]}[/red]")
+                    diff_with_line_numbers.append(
+                        f"      [red]{old_line_num:6d} - {line[1:]}[/red]"
+                    )
                     old_line_num += 1
                 else:
                     diff_with_line_numbers.append(f"      [red]{line}[/red]")
@@ -276,7 +282,9 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                 success=False,
                 message=f"Error reading file: {exc}",
             )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+            yield ToolResult(
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
+            )
             return
 
         applied = input_data.edits
@@ -291,7 +299,9 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                 applied_edits=applied,
                 created=not existing and original_content == "",
             )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+            yield ToolResult(
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
+            )
             return
 
         if updated_content == original_content:
@@ -303,7 +313,9 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                 applied_edits=applied,
                 created=not existing and original_content == "",
             )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+            yield ToolResult(
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
+            )
             return
 
         # Ensure parent exists (validated earlier) and write the file.
@@ -319,7 +331,9 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                 applied_edits=applied,
                 created=not existing and original_content == "",
             )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+            yield ToolResult(
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
+            )
             return
 
         diff_lines, diff_with_line_numbers, additions, deletions = self._build_diff(

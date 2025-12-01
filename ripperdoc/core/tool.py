@@ -12,6 +12,7 @@ from enum import Enum
 
 class ToolResult(BaseModel):
     """Result from a tool execution."""
+
     type: str = "result"
     data: Any
     result_for_assistant: Optional[str] = None
@@ -19,6 +20,7 @@ class ToolResult(BaseModel):
 
 class ToolProgress(BaseModel):
     """Progress update from a tool execution."""
+
     type: str = "progress"
     content: Any
     normalized_messages: list = []
@@ -27,6 +29,7 @@ class ToolProgress(BaseModel):
 
 class ToolUseContext(BaseModel):
     """Context for tool execution."""
+
     message_id: Optional[str] = None
     agent_id: Optional[str] = None
     safe_mode: bool = False
@@ -38,14 +41,15 @@ class ToolUseContext(BaseModel):
 
 class ValidationResult(BaseModel):
     """Result of input validation."""
+
     result: bool
     message: Optional[str] = None
     error_code: Optional[int] = None
     meta: Optional[Dict[str, Any]] = None
 
 
-TInput = TypeVar('TInput', bound=BaseModel)
-TOutput = TypeVar('TOutput')
+TInput = TypeVar("TInput", bound=BaseModel)
+TOutput = TypeVar("TOutput")
 ToolOutput = Union[ToolResult, ToolProgress]
 
 
@@ -102,9 +106,7 @@ class Tool(ABC, Generic[TInput, TOutput]):
         return not self.is_read_only()
 
     async def validate_input(
-        self,
-        input_data: TInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: TInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         """Validate the input before execution."""
         return ValidationResult(result=True)
@@ -121,9 +123,7 @@ class Tool(ABC, Generic[TInput, TOutput]):
 
     @abstractmethod
     async def call(
-        self,
-        input_data: TInput,
-        context: ToolUseContext
+        self, input_data: TInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Execute the tool with the given input.
 
@@ -139,5 +139,5 @@ def create_tool_schema(tool: Tool[Any, Any]) -> Dict[str, Any]:
     return {
         "name": tool.name,
         "description": "",  # Will be populated async
-        "input_schema": tool.input_schema.model_json_schema()
+        "input_schema": tool.input_schema.model_json_schema(),
     }

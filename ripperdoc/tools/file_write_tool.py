@@ -8,17 +8,26 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional
 from pydantic import BaseModel, Field
 
-from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress, ToolOutput, ValidationResult
+from ripperdoc.core.tool import (
+    Tool,
+    ToolUseContext,
+    ToolResult,
+    ToolProgress,
+    ToolOutput,
+    ValidationResult,
+)
 
 
 class FileWriteToolInput(BaseModel):
     """Input schema for FileWriteTool."""
+
     file_path: str = Field(description="Absolute path to the file to create")
     content: str = Field(description="Content to write to the file")
 
 
 class FileWriteToolOutput(BaseModel):
     """Output from file writing."""
+
     file_path: str
     bytes_written: int
     success: bool
@@ -59,9 +68,7 @@ NEVER write new files unless explicitly required by the user."""
         return True
 
     async def validate_input(
-        self,
-        input_data: FileWriteToolInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: FileWriteToolInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         # Check if file already exists (warning)
         if os.path.exists(input_data.file_path):
@@ -72,8 +79,7 @@ NEVER write new files unless explicitly required by the user."""
         parent = Path(input_data.file_path).parent
         if not parent.exists():
             return ValidationResult(
-                result=False,
-                message=f"Parent directory does not exist: {parent}"
+                result=False, message=f"Parent directory does not exist: {parent}"
             )
 
         return ValidationResult(result=True)
@@ -82,38 +88,31 @@ NEVER write new files unless explicitly required by the user."""
         """Format output for the AI."""
         return output.message
 
-    def render_tool_use_message(
-        self,
-        input_data: FileWriteToolInput,
-        verbose: bool = False
-    ) -> str:
+    def render_tool_use_message(self, input_data: FileWriteToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
         return f"Writing: {input_data.file_path} ({len(input_data.content)} bytes)"
 
     async def call(
-        self,
-        input_data: FileWriteToolInput,
-        context: ToolUseContext
+        self, input_data: FileWriteToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Write the file."""
 
         try:
             # Write the file
-            with open(input_data.file_path, 'w', encoding='utf-8') as f:
+            with open(input_data.file_path, "w", encoding="utf-8") as f:
                 f.write(input_data.content)
 
-            bytes_written = len(input_data.content.encode('utf-8'))
+            bytes_written = len(input_data.content.encode("utf-8"))
 
             output = FileWriteToolOutput(
                 file_path=input_data.file_path,
                 bytes_written=bytes_written,
                 success=True,
-                message=f"Successfully wrote {bytes_written} bytes to {input_data.file_path}"
+                message=f"Successfully wrote {bytes_written} bytes to {input_data.file_path}",
             )
 
             yield ToolResult(
-                data=output,
-                result_for_assistant=self.render_result_for_assistant(output)
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
         except Exception as e:
@@ -121,10 +120,10 @@ NEVER write new files unless explicitly required by the user."""
                 file_path=input_data.file_path,
                 bytes_written=0,
                 success=False,
-                message=f"Error writing file: {str(e)}"
+                message=f"Error writing file: {str(e)}",
             )
 
             yield ToolResult(
                 data=error_output,
-                result_for_assistant=self.render_result_for_assistant(error_output)
+                result_for_assistant=self.render_result_for_assistant(error_output),
             )

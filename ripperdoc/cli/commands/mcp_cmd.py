@@ -16,7 +16,9 @@ def _handle(ui, _: str) -> bool:
 
     servers = asyncio.run(_load())
     if not servers:
-        ui.console.print("[yellow]No MCP servers configured. Add servers to ~/.ripperdoc/mcp.json, ~/.mcp.json, or a project .mcp.json file.[/yellow]")
+        ui.console.print(
+            "[yellow]No MCP servers configured. Add servers to ~/.ripperdoc/mcp.json, ~/.mcp.json, or a project .mcp.json file.[/yellow]"
+        )
         return True
 
     ui.console.print("\n[bold]MCP servers[/bold]")
@@ -44,7 +46,9 @@ def _handle(ui, _: str) -> bool:
         else:
             ui.console.print("    Tools: none discovered")
         if server.resources:
-            ui.console.print("    Resources: " + ", ".join(res.uri for res in server.resources), markup=False)
+            ui.console.print(
+                "    Resources: " + ", ".join(res.uri for res in server.resources), markup=False
+            )
         elif not server.tools:
             ui.console.print("    Resources: none")
     return True

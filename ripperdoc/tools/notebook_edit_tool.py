@@ -55,9 +55,7 @@ NOTEBOOK_EDIT_DESCRIPTION = dedent(
 class NotebookEditInput(BaseModel):
     """Input schema for NotebookEditTool."""
 
-    notebook_path: str = Field(
-        description="Absolute path to the Jupyter notebook file to edit"
-    )
+    notebook_path: str = Field(description="Absolute path to the Jupyter notebook file to edit")
     cell_id: Optional[str] = Field(
         default=None,
         description="Cell ID or 0-based index. For insert, omitted means insert at start.",
@@ -173,9 +171,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             return f"Inserted cell {cell_label}"
         return f"Updated cell {cell_label}"
 
-    def render_tool_use_message(
-        self, input_data: NotebookEditInput, verbose: bool = False
-    ) -> str:
+    def render_tool_use_message(self, input_data: NotebookEditInput, verbose: bool = False) -> str:
         parts = [f"path: {input_data.notebook_path}"]
         if input_data.cell_id:
             parts.append(f"cell_id: {input_data.cell_id}")
@@ -248,9 +244,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
 
             nb_json["cells"] = cells
             notebook_language = (
-                nb_json.get("metadata", {})
-                .get("language_info", {})
-                .get("name", "python")
+                nb_json.get("metadata", {}).get("language_info", {}).get("name", "python")
             )
 
             path.write_text(json.dumps(nb_json, indent=1), encoding="utf-8")

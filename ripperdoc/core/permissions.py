@@ -126,7 +126,10 @@ def make_permission_checker(
             "Bash": set(config.bash_allow_rules or []) | session_tool_rules.get("Bash", set())
         }
         deny_rules = {"Bash": set(config.bash_deny_rules or [])}
-        allowed_working_dirs = {str(project_path.resolve()), *[str(Path(p).resolve()) for p in config.working_directories or []]}
+        allowed_working_dirs = {
+            str(project_path.resolve()),
+            *[str(Path(p).resolve()) for p in config.working_directories or []],
+        }
 
         # Persisted approvals
         if tool.name in allowed_tools or tool.name in session_allowed_tools:
@@ -143,7 +146,9 @@ def make_permission_checker(
                         "allowed_working_directories": allowed_working_dirs,
                     },
                 )
-                decision = await maybe_decision if asyncio.iscoroutine(maybe_decision) else maybe_decision
+                decision = (
+                    await maybe_decision if asyncio.iscoroutine(maybe_decision) else maybe_decision
+                )
                 # Allow tools to return a plain dict shaped like PermissionDecision.
                 if isinstance(decision, dict) and "behavior" in decision:
                     decision = PermissionDecision(**decision)
@@ -162,7 +167,12 @@ def make_permission_checker(
             )
 
         if decision.behavior == "allow":
-            return PermissionResult(result=True, message=decision.message, updated_input=decision.updated_input, decision=decision)
+            return PermissionResult(
+                result=True,
+                message=decision.message,
+                updated_input=decision.updated_input,
+                decision=decision,
+            )
 
         if decision.behavior == "deny":
             return PermissionResult(
@@ -190,17 +200,23 @@ def make_permission_checker(
         ]
 
         answer = (await _prompt_user(prompt, options=options)).strip().lower()
-        rule_suggestions = _rule_strings(decision.rule_suggestions) or [permission_key(tool, parsed_input)]
+        rule_suggestions = _rule_strings(decision.rule_suggestions) or [
+            permission_key(tool, parsed_input)
+        ]
 
         if answer in ("1", "y", "yes"):
-            return PermissionResult(result=True, updated_input=decision.updated_input, decision=decision)
+            return PermissionResult(
+                result=True, updated_input=decision.updated_input, decision=decision
+            )
 
         if answer in ("2", "s", "session", "a"):
             if tool.name == "Bash":
                 session_tool_rules["Bash"].update(rule_suggestions)
             else:
                 session_allowed_tools.add(tool.name)
-            return PermissionResult(result=True, updated_input=decision.updated_input, decision=decision)
+            return PermissionResult(
+                result=True, updated_input=decision.updated_input, decision=decision
+            )
 
         return PermissionResult(
             result=False,

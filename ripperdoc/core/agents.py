@@ -129,7 +129,9 @@ def _normalize_tools(value: object) -> List[str]:
     return ["*"]
 
 
-def _parse_agent_file(path: Path, location: AgentLocation) -> Tuple[Optional[AgentDefinition], Optional[str]]:
+def _parse_agent_file(
+    path: Path, location: AgentLocation
+) -> Tuple[Optional[AgentDefinition], Optional[str]]:
     """Parse a single agent file."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -165,7 +167,9 @@ def _parse_agent_file(path: Path, location: AgentLocation) -> Tuple[Optional[Age
     return agent, None
 
 
-def _load_agent_dir(path: Path, location: AgentLocation) -> Tuple[List[AgentDefinition], List[Tuple[Path, str]]]:
+def _load_agent_dir(
+    path: Path, location: AgentLocation
+) -> Tuple[List[AgentDefinition], List[Tuple[Path, str]]]:
     agents: List[AgentDefinition] = []
     errors: List[Tuple[Path, str]] = []
     if not path.exists():
@@ -219,7 +223,9 @@ def summarize_agent(agent: AgentDefinition) -> str:
     return f"- {agent.agent_type} ({location}): {agent.when_to_use} [{'; '.join(details)}]"
 
 
-def resolve_agent_tools(agent: AgentDefinition, available_tools: Iterable[object], task_tool_name: str) -> Tuple[List[object], List[str]]:
+def resolve_agent_tools(
+    agent: AgentDefinition, available_tools: Iterable[object], task_tool_name: str
+) -> Tuple[List[object], List[str]]:
     """Map tool names from an agent to Tool instances, filtering out the task tool itself."""
     tool_map: Dict[str, object] = {}
     ordered_tools: List[object] = []

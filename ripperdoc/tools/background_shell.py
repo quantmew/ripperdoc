@@ -103,7 +103,9 @@ async def _finalize_reader_tasks(reader_tasks: List[asyncio.Task], timeout: floa
         return
 
     try:
-        await asyncio.wait_for(asyncio.gather(*reader_tasks, return_exceptions=True), timeout=timeout)
+        await asyncio.wait_for(
+            asyncio.gather(*reader_tasks, return_exceptions=True), timeout=timeout
+        )
     except asyncio.TimeoutError:
         for task in reader_tasks:
             if not task.done():
@@ -141,9 +143,7 @@ async def _monitor_task(task: BackgroundTask) -> None:
 
 
 async def _start_background_command(
-    command: str,
-    timeout: Optional[float] = None,
-    shell_executable: Optional[str] = None
+    command: str, timeout: Optional[float] = None, shell_executable: Optional[str] = None
 ) -> str:
     """Launch a background shell command on the dedicated loop."""
     if shell_executable:
@@ -178,18 +178,20 @@ async def _start_background_command(
 
     # Start stream pumps and monitor task.
     if process.stdout:
-        record.reader_tasks.append(asyncio.create_task(_pump_stream(process.stdout, record.stdout_chunks)))
+        record.reader_tasks.append(
+            asyncio.create_task(_pump_stream(process.stdout, record.stdout_chunks))
+        )
     if process.stderr:
-        record.reader_tasks.append(asyncio.create_task(_pump_stream(process.stderr, record.stderr_chunks)))
+        record.reader_tasks.append(
+            asyncio.create_task(_pump_stream(process.stderr, record.stderr_chunks))
+        )
     asyncio.create_task(_monitor_task(record))
 
     return task_id
 
 
 async def start_background_command(
-    command: str,
-    timeout: Optional[float] = None,
-    shell_executable: Optional[str] = None
+    command: str, timeout: Optional[float] = None, shell_executable: Optional[str] = None
 ) -> str:
     """Launch a background shell command and return its task id."""
     future = _submit_to_background_loop(

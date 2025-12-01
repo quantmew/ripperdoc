@@ -86,7 +86,9 @@ def _list_tasks(ui) -> bool:
     task_ids = list_background_tasks()
 
     if not task_ids:
-        console.print(Panel("No tasks currently running", title="Background tasks", box=box.ROUNDED))
+        console.print(
+            Panel("No tasks currently running", title="Background tasks", box=box.ROUNDED)
+        )
         return True
 
     table = Table(box=box.SIMPLE_HEAVY, expand=True)
@@ -221,7 +223,9 @@ def _handle(ui, args: str) -> bool:
             return True
         return _show_task(ui, parts[1])
 
-    ui.console.print("[red]Unknown subcommand. Use /tasks, /tasks show <id>, or /tasks kill <id>.[/red]")
+    ui.console.print(
+        "[red]Unknown subcommand. Use /tasks, /tasks show <id>, or /tasks kill <id>.[/red]"
+    )
     return True
 
 

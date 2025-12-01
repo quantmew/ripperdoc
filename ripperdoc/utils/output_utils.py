@@ -1,7 +1,7 @@
 """Utilities for processing and truncating command output."""
 
 import re
-from typing import Optional
+from typing import Optional, Any
 
 
 # Maximum output length to prevent token overflow
@@ -24,7 +24,7 @@ def trim_blank_lines(text: str) -> str:
     Returns:
         Text with leading/trailing blank lines removed
     """
-    lines = text.split('\n')
+    lines = text.split("\n")
 
     # Remove leading blank lines
     start = 0
@@ -36,7 +36,7 @@ def trim_blank_lines(text: str) -> str:
     while end > start and not lines[end - 1].strip():
         end -= 1
 
-    return '\n'.join(lines[start:end])
+    return "\n".join(lines[start:end])
 
 
 def is_image_data(text: str) -> bool:
@@ -54,7 +54,7 @@ def is_image_data(text: str) -> bool:
     stripped = text.strip()
 
     # Check for data URI scheme (most reliable indicator)
-    if stripped.startswith('data:image/'):
+    if stripped.startswith("data:image/"):
         return True
 
     # Don't treat arbitrary long text as base64 unless it has image indicators
@@ -64,7 +64,7 @@ def is_image_data(text: str) -> bool:
 
     # Check for common image base64 patterns
     # Real base64 images usually have variety of characters and padding
-    base64_chars = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=')
+    base64_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
     text_chars = set(stripped)
 
     # If text only uses a small subset of base64 chars, it's probably not base64
@@ -77,14 +77,18 @@ def is_image_data(text: str) -> bool:
         return False
 
     # Must end with proper base64 padding or no padding
-    if not (stripped.endswith('==') or stripped.endswith('=') or stripped[-1] in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'):
+    if not (
+        stripped.endswith("==")
+        or stripped.endswith("=")
+        or stripped[-1] in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    ):
         return False
 
     # If all checks pass and it's very long, might be base64 image
     return len(stripped) > 10000
 
 
-def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, any]:
+def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, Any]:
     """Truncate output if it exceeds max length.
 
     Keeps both the beginning and end of output to preserve context.
@@ -102,29 +106,29 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, a
     """
     if not text:
         return {
-            'truncated_content': text,
-            'is_truncated': False,
-            'original_length': 0,
-            'is_image': False
+            "truncated_content": text,
+            "is_truncated": False,
+            "original_length": 0,
+            "is_image": False,
         }
 
     # Check if it's image data
     if is_image_data(text):
         return {
-            'truncated_content': text,
-            'is_truncated': False,
-            'original_length': len(text),
-            'is_image': True
+            "truncated_content": text,
+            "is_truncated": False,
+            "original_length": len(text),
+            "is_image": True,
         }
 
     original_length = len(text)
 
     if original_length <= max_chars:
         return {
-            'truncated_content': text,
-            'is_truncated': False,
-            'original_length': original_length,
-            'is_image': False
+            "truncated_content": text,
+            "is_truncated": False,
+            "original_length": original_length,
+            "is_image": False,
         }
 
     # Truncate: keep start and end
@@ -138,10 +142,10 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, a
     )
 
     return {
-        'truncated_content': truncated,
-        'is_truncated': True,
-        'original_length': original_length,
-        'is_image': False
+        "truncated_content": truncated,
+        "is_truncated": True,
+        "original_length": original_length,
+        "is_image": False,
     }
 
 
@@ -183,7 +187,7 @@ def count_lines(text: str) -> int:
     """
     if not text:
         return 0
-    return text.count('\n') + 1
+    return text.count("\n") + 1
 
 
 def get_last_n_lines(text: str, n: int) -> str:
@@ -199,11 +203,11 @@ def get_last_n_lines(text: str, n: int) -> str:
     if not text:
         return text
 
-    lines = text.split('\n')
+    lines = text.split("\n")
     if len(lines) <= n:
         return text
 
-    return '\n'.join(lines[-n:])
+    return "\n".join(lines[-n:])
 
 
 def sanitize_output(text: str) -> str:
@@ -221,9 +225,9 @@ def sanitize_output(text: str) -> str:
         """,
         re.VERBOSE,
     )
-    text = ansi_escape.sub('', text)
+    text = ansi_escape.sub("", text)
 
     # Remove remaining control characters except newline, tab, carriage return
-    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
+    text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
 
     return text

@@ -153,8 +153,7 @@ def _estimate_tool_schema_tokens(tools: Sequence[Any]) -> int:
 
 
 def get_model_context_limit(
-    model_profile: Optional[ModelProfile],
-    explicit_limit: Optional[int] = None
+    model_profile: Optional[ModelProfile], explicit_limit: Optional[int] = None
 ) -> int:
     """Best-effort guess of the model context window."""
     env_override = os.getenv("RIPPERDOC_CONTEXT_TOKENS")
@@ -203,9 +202,7 @@ def resolve_auto_compact_enabled(config: GlobalConfig) -> bool:
 
 
 def get_context_usage_status(
-    messages: Sequence[ConversationMessage],
-    max_context_tokens: int,
-    auto_compact_enabled: bool
+    messages: Sequence[ConversationMessage], max_context_tokens: int, auto_compact_enabled: bool
 ) -> ContextUsageStatus:
     """Compute context usage and thresholds."""
     max_context_tokens = max(max_context_tokens, MIN_CONTEXT_TOKENS)
@@ -264,7 +261,7 @@ def summarize_context_usage(
 
 
 def _collect_tool_metadata(
-    messages: Sequence[ConversationMessage]
+    messages: Sequence[ConversationMessage],
 ) -> Tuple[List[str], Dict[str, str]]:
     """Collect tool use order and names keyed by tool_use_id."""
     tool_use_order: List[str] = []
@@ -289,7 +286,7 @@ def compact_messages(
     max_context_tokens: int,
     *,
     preserve_tool_uses: int = MAX_TOOL_USES_TO_PRESERVE,
-    force: bool = False
+    force: bool = False,
 ) -> CompactionResult:
     """Compact old tool results to save context tokens."""
     tokens_before = estimate_conversation_tokens(messages)
@@ -325,7 +322,10 @@ def compact_messages(
                     "occurrences": [],
                 },
             )
-            entry["tokens"] = int(entry["tokens"]) + estimate_tokens_from_text(text)
+            try:
+                entry["tokens"] = int(entry["tokens"]) + estimate_tokens_from_text(text)
+            except (TypeError, ValueError):
+                entry["tokens"] = estimate_tokens_from_text(text)
             entry["occurrences"].append((message_index, content_index))
 
     if not results_by_tool_id:
@@ -344,7 +344,10 @@ def compact_messages(
         max_context_tokens - max(5_000, int(max_context_tokens * 0.05)),
     )
     tokens_to_reclaim = (
-        sum(int(meta["tokens"]) for meta in results_by_tool_id.values())
+        sum(
+            int(meta["tokens"]) if isinstance(meta["tokens"], (int, float, str)) else 0
+            for meta in results_by_tool_id.values()
+        )
         if force
         else max(0, tokens_before - target_tokens)
     )
@@ -359,14 +362,21 @@ def compact_messages(
         )
 
     sorted_results = sorted(
-        results_by_tool_id.items(), key=lambda item: int(item[1]["order"])
+        results_by_tool_id.items(),
+        key=lambda item: (
+            int(item[1]["order"]) if isinstance(item[1]["order"], (int, float, str)) else 0
+        ),
     )
 
     ids_to_clear: Set[str] = set()
     reclaimed = 0
     for tool_use_id, meta in sorted_results:
         ids_to_clear.add(tool_use_id)
-        reclaimed += int(meta["tokens"])
+        try:
+            reclaimed += int(meta["tokens"])
+        except (TypeError, ValueError):
+            # If tokens is not convertible to int, skip it
+            pass
         if not force and reclaimed >= tokens_to_reclaim:
             break
 
@@ -397,13 +407,18 @@ def compact_messages(
                 new_content.append(block)
 
         if modified:
-            compacted_messages.append(
-                UserMessage(
-                    message=message.message.model_copy(update={"content": new_content}),
-                    tool_use_result=getattr(message, "tool_use_result", None),
-                    uuid=getattr(message, "uuid", None),
+            # Check if message has .message attribute (ProgressMessage doesn't)
+            if hasattr(message, "message"):
+                compacted_messages.append(
+                    UserMessage(
+                        message=message.message.model_copy(update={"content": new_content}),
+                        tool_use_result=getattr(message, "tool_use_result", None),
+                        uuid=getattr(message, "uuid", None),
+                    )
                 )
-            )
+            else:
+                # For ProgressMessage or other messages without .message, keep as is
+                compacted_messages.append(message)
         else:
             compacted_messages.append(message)
 

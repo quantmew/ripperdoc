@@ -19,11 +19,19 @@ def _handle(ui, trimmed_arg: str) -> bool:
 
     def print_agents_usage():
         console.print("[bold]/agents[/bold] — list configured agents")
-        console.print("[bold]/agents create <name> [location] [model][/bold] — create agent (location: user|project, default user)")
+        console.print(
+            "[bold]/agents create <name> [location] [model][/bold] — create agent (location: user|project, default user)"
+        )
         console.print("[bold]/agents edit <name> [location][/bold] — edit an existing agent")
-        console.print("[bold]/agents delete <name> [location][/bold] — delete agent (location: user|project, default user)")
-        console.print(f"[dim]Agent files live in ~/.ripperdoc/{AGENT_DIR_NAME} or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]")
-        console.print("[dim]Model can be a profile name or pointer (task/main/etc). Defaults to 'task'.[/dim]")
+        console.print(
+            "[bold]/agents delete <name> [location][/bold] — delete agent (location: user|project, default user)"
+        )
+        console.print(
+            f"[dim]Agent files live in ~/.ripperdoc/{AGENT_DIR_NAME} or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
+        )
+        console.print(
+            "[dim]Model can be a profile name or pointer (task/main/etc). Defaults to 'task'.[/dim]"
+        )
 
     if subcmd in ("help", "-h", "--help"):
         print_agents_usage()
@@ -63,9 +71,10 @@ def _handle(ui, trimmed_arg: str) -> bool:
         config = get_global_config()
         pointer_map = config.model_pointers.model_dump()
         default_model_value = model_arg or pointer_map.get("task", "task")
-        model_input = console.input(
-            f"Model profile or pointer [{default_model_value}]: "
-        ).strip() or default_model_value
+        model_input = (
+            console.input(f"Model profile or pointer [{default_model_value}]: ").strip()
+            or default_model_value
+        )
         if (
             model_input
             and model_input not in config.model_profiles
@@ -93,14 +102,18 @@ def _handle(ui, trimmed_arg: str) -> bool:
         return True
 
     if subcmd in ("delete", "del", "remove"):
-        agent_name = tokens[1] if len(tokens) > 1 else console.input("Agent name to delete: ").strip()
+        agent_name = (
+            tokens[1] if len(tokens) > 1 else console.input("Agent name to delete: ").strip()
+        )
         if not agent_name:
             console.print("[red]Agent name is required.[/red]")
             print_agents_usage()
             return True
 
         location_raw = (
-            tokens[2] if len(tokens) > 2 else console.input("Location to delete from [user/project, default user]: ").strip()
+            tokens[2]
+            if len(tokens) > 2
+            else console.input("Location to delete from [user/project, default user]: ").strip()
         ).lower()
         location = AgentLocation.PROJECT if location_raw == "project" else AgentLocation.USER
         try:
@@ -134,33 +147,41 @@ def _handle(ui, trimmed_arg: str) -> bool:
 
         default_location = target_agent.location
         location_raw = (
-            tokens[2] if len(tokens) > 2 else console.input(f"Location to save [user/project, default {default_location.value}]: ").strip()
+            tokens[2]
+            if len(tokens) > 2
+            else console.input(
+                f"Location to save [user/project, default {default_location.value}]: "
+            ).strip()
         ).lower()
-        location = (
-            AgentLocation.PROJECT if location_raw == "project" else AgentLocation.USER
+        location = AgentLocation.PROJECT if location_raw == "project" else AgentLocation.USER
+
+        description = (
+            console.input(f"Description (when to use) [{target_agent.when_to_use}]: ").strip()
+            or target_agent.when_to_use
         )
 
-        description = console.input(
-            f"Description (when to use) [{target_agent.when_to_use}]: "
-        ).strip() or target_agent.when_to_use
-
         tools_default = "*" if "*" in target_agent.tools else ", ".join(target_agent.tools)
-        tools_input = console.input(f"Tools (comma-separated, * for all) [{tools_default}]: ").strip() or tools_default
+        tools_input = (
+            console.input(f"Tools (comma-separated, * for all) [{tools_default}]: ").strip()
+            or tools_default
+        )
         tools = [t.strip() for t in tools_input.split(",") if t.strip()] or ["*"]
 
         console.print("[dim]Current system prompt:[/dim]")
         console.print(escape(target_agent.system_prompt or "(empty)"), markup=False)
-        system_prompt = console.input(
-            "System prompt (single line, use \\n for newlines) "
-            "[Enter to keep current]: "
-        ).strip() or target_agent.system_prompt
+        system_prompt = (
+            console.input(
+                "System prompt (single line, use \\n for newlines) " "[Enter to keep current]: "
+            ).strip()
+            or target_agent.system_prompt
+        )
 
         config = get_global_config()
         pointer_map = config.model_pointers.model_dump()
         model_default = target_agent.model or pointer_map.get("task", "task")
-        model_input = console.input(
-            f"Model profile or pointer [{model_default}]: "
-        ).strip() or model_default
+        model_input = (
+            console.input(f"Model profile or pointer [{model_default}]: ").strip() or model_default
+        )
 
         try:
             path = save_agent_definition(

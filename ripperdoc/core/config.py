@@ -19,6 +19,7 @@ logger = get_logger()
 
 class ProviderType(str, Enum):
     """Supported AI providers."""
+
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     MISTRAL = "mistral"
@@ -43,6 +44,7 @@ class ModelProfile(BaseModel):
 
 class ModelPointers(BaseModel):
     """Pointers to different model profiles for different purposes."""
+
     main: str = "default"
     task: str = "default"
     reasoning: str = "default"
@@ -157,9 +159,7 @@ class ConfigManager:
         return self._project_config
 
     def save_project_config(
-        self,
-        config: ProjectConfig,
-        project_path: Optional[Path] = None
+        self, config: ProjectConfig, project_path: Optional[Path] = None
     ) -> None:
         """Save project configuration."""
         if project_path is not None:

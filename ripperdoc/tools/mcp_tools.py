@@ -41,7 +41,9 @@ logger = get_logger()
 
 
 def _content_block_to_text(block: Any) -> str:
-    block_type = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
+    block_type = getattr(block, "type", None) or (
+        block.get("type") if isinstance(block, dict) else None
+    )
     if block_type == "text":
         return str(getattr(block, "text", None) or block.get("text", ""))
     if block_type == "resource":
@@ -68,10 +70,14 @@ def _content_block_to_text(block: Any) -> str:
         uri = getattr(block, "uri", None) or (block.get("uri") if isinstance(block, dict) else None)
         return f"[Resource link] {uri}" if uri else "[Resource link]"
     if block_type == "image":
-        mime = getattr(block, "mimeType", None) or (block.get("mimeType") if isinstance(block, dict) else None)
+        mime = getattr(block, "mimeType", None) or (
+            block.get("mimeType") if isinstance(block, dict) else None
+        )
         return f"[Image content {mime or ''}]".strip()
     if block_type == "audio":
-        mime = getattr(block, "mimeType", None) or (block.get("mimeType") if isinstance(block, dict) else None)
+        mime = getattr(block, "mimeType", None) or (
+            block.get("mimeType") if isinstance(block, dict) else None
+        )
         return f"[Audio content {mime or ''}]".strip()
     return str(block)
 
@@ -88,7 +94,17 @@ def _normalize_content_block(block: Any) -> Any:
     if isinstance(block, dict):
         return block
     result: Dict[str, Any] = {}
-    for attr in ("type", "text", "mimeType", "data", "name", "uri", "description", "resource", "blob"):
+    for attr in (
+        "type",
+        "text",
+        "mimeType",
+        "data",
+        "name",
+        "uri",
+        "description",
+        "resource",
+        "blob",
+    ):
         if hasattr(block, attr):
             result[attr] = getattr(block, attr)
     if result:
@@ -105,10 +121,7 @@ def _normalize_content_blocks(blocks: Optional[List[Any]]) -> Optional[List[Any]
 class ListMcpServersInput(BaseModel):
     """Input for listing MCP servers."""
 
-    server: Optional[str] = Field(
-        default=None,
-        description="Optional server name to filter"
-    )
+    server: Optional[str] = Field(default=None, description="Optional server name to filter")
 
 
 class ListMcpServersOutput(BaseModel):
@@ -156,7 +169,9 @@ class ListMcpServersTool(Tool[ListMcpServersInput, ListMcpServersOutput]):
             lines.append(f"- {name} ({status}) tools: {tool_part}")
         return "\n".join(lines)
 
-    def render_tool_use_message(self, input_data: ListMcpServersInput, verbose: bool = False) -> str:
+    def render_tool_use_message(
+        self, input_data: ListMcpServersInput, verbose: bool = False
+    ) -> str:
         return f"List MCP servers{f' for {input_data.server}' if input_data.server else ''}"
 
     async def call(
@@ -171,29 +186,30 @@ class ListMcpServersTool(Tool[ListMcpServersInput, ListMcpServersOutput]):
 
         payload = []
         for server in servers:
-            payload.append({
-                "name": server.name,
-                "status": server.status,
-                "command": server.command,
-                "args": server.args,
-                "tools": [tool.name for tool in server.tools],
-                "resources": [resource.uri for resource in server.resources],
-                "error": server.error,
-            })
+            payload.append(
+                {
+                    "name": server.name,
+                    "status": server.status,
+                    "command": server.command,
+                    "args": server.args,
+                    "tools": [tool.name for tool in server.tools],
+                    "resources": [resource.uri for resource in server.resources],
+                    "error": server.error,
+                }
+            )
 
         yield ToolResult(
             data=ListMcpServersOutput(servers=payload),
-            result_for_assistant=self.render_result_for_assistant(ListMcpServersOutput(servers=payload)),
+            result_for_assistant=self.render_result_for_assistant(
+                ListMcpServersOutput(servers=payload)
+            ),
         )
 
 
 class ListMcpResourcesInput(BaseModel):
     """Input for listing MCP resources."""
 
-    server: Optional[str] = Field(
-        default=None,
-        description="Optional server name to filter"
-    )
+    server: Optional[str] = Field(default=None, description="Optional server name to filter")
 
 
 class ListMcpResourcesOutput(BaseModel):
@@ -240,14 +256,14 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
         return False
 
     async def validate_input(
-        self,
-        input_data: ListMcpResourcesInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: ListMcpResourcesInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         runtime = await ensure_mcp_runtime()
         server_names = {s.name for s in runtime.servers}
         if input_data.server and input_data.server not in server_names:
-            return ValidationResult(result=False, message=f"Unknown MCP server '{input_data.server}'.")
+            return ValidationResult(
+                result=False, message=f"Unknown MCP server '{input_data.server}'."
+            )
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: ListMcpResourcesOutput) -> str:
@@ -258,7 +274,9 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
         except Exception:
             return str(output.resources)
 
-    def render_tool_use_message(self, input_data: ListMcpResourcesInput, verbose: bool = False) -> str:
+    def render_tool_use_message(
+        self, input_data: ListMcpResourcesInput, verbose: bool = False
+    ) -> str:
         return f"List MCP resources{f' for {input_data.server}' if input_data.server else ''}"
 
     async def call(
@@ -301,14 +319,16 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
             candidate_resources = fetched if fetched else server.resources
 
             for resource in candidate_resources:
-                resources.append({
-                    "server": server.name,
-                    "uri": getattr(resource, "uri", None),
-                    "name": getattr(resource, "name", None),
-                    "description": getattr(resource, "description", None),
-                    "mime_type": getattr(resource, "mime_type", None),
-                    "size": getattr(resource, "size", None),
-                })
+                resources.append(
+                    {
+                        "server": server.name,
+                        "uri": getattr(resource, "uri", None),
+                        "name": getattr(resource, "name", None),
+                        "description": getattr(resource, "description", None),
+                        "mime_type": getattr(resource, "mime_type", None),
+                        "size": getattr(resource, "size", None),
+                    }
+                )
 
         result = ListMcpResourcesOutput(resources=resources)
         yield ToolResult(
@@ -324,7 +344,7 @@ class ReadMcpResourceInput(BaseModel):
     uri: str = Field(description="Resource URI")
     save_blobs: bool = Field(
         default=False,
-        description="If true, binary resource contents will be written to a temporary file in addition to Base64."
+        description="If true, binary resource contents will be written to a temporary file in addition to Base64.",
     )
 
 
@@ -399,17 +419,20 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
         return False
 
     async def validate_input(
-        self,
-        input_data: ReadMcpResourceInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: ReadMcpResourceInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         runtime = await ensure_mcp_runtime()
         server_names = {s.name for s in runtime.servers}
         if input_data.server not in server_names:
-            return ValidationResult(result=False, message=f"Unknown MCP server '{input_data.server}'.")
+            return ValidationResult(
+                result=False, message=f"Unknown MCP server '{input_data.server}'."
+            )
         resource = find_mcp_resource(runtime.servers, input_data.server, input_data.uri)
         if not resource:
-            return ValidationResult(result=False, message=f"Resource '{input_data.uri}' not found on server '{input_data.server}'.")
+            return ValidationResult(
+                result=False,
+                message=f"Resource '{input_data.uri}' not found on server '{input_data.server}'.",
+            )
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: ReadMcpResourceOutput) -> str:
@@ -426,7 +449,9 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
             return f"MCP resource {output.uri} on {output.server} has no content."
         return output.content
 
-    def render_tool_use_message(self, input_data: ReadMcpResourceInput, verbose: bool = False) -> str:
+    def render_tool_use_message(
+        self, input_data: ReadMcpResourceInput, verbose: bool = False
+    ) -> str:
         return f"Read MCP resource {input_data.uri} from {input_data.server}"
 
     async def call(
@@ -493,7 +518,9 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
                 text_parts = [p.text for p in parts if p.text]
                 content_text = "\n".join([p for p in text_parts if p]) or None
             except Exception as exc:  # pragma: no cover - runtime errors
-                logger.error(f"Error reading MCP resource {input_data.uri} from {input_data.server}: {exc}")
+                logger.error(
+                    f"Error reading MCP resource {input_data.uri} from {input_data.server}: {exc}"
+                )
                 content_text = f"Error reading MCP resource: {exc}"
         else:
             resource = find_mcp_resource(runtime.servers, input_data.server, input_data.uri)
@@ -509,12 +536,13 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
                     )
                 )
 
-        result = ReadMcpResourceOutput(server=input_data.server, uri=input_data.uri, content=content_text, contents=parts)
+        result = ReadMcpResourceOutput(
+            server=input_data.server, uri=input_data.uri, content=content_text, contents=parts
+        )
         yield ToolResult(
             data=result,
             result_for_assistant=self.render_result_for_assistant(result),
         )
-
 
 
 def _sanitize_name(name: str) -> str:
@@ -532,7 +560,9 @@ def _create_dynamic_input_model(schema: Optional[Dict[str, Any]]) -> type[BaseMo
         def model_json_schema(cls, *args: Any, **kwargs: Any) -> Dict[str, Any]:
             return raw_schema
 
-    DynamicMcpInput.__name__ = f"McpInput_{abs(hash(json.dumps(raw_schema, sort_keys=True, default=str))) % 10_000_000}"
+    DynamicMcpInput.__name__ = (
+        f"McpInput_{abs(hash(json.dumps(raw_schema, sort_keys=True, default=str))) % 10_000_000}"
+    )
     return DynamicMcpInput
 
 
@@ -565,7 +595,9 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
         self.project_path = project_path
         self._input_model = _create_dynamic_input_model(getattr(tool_info, "input_schema", None))
         self._name = f"mcp__{_sanitize_name(server_name)}__{_sanitize_name(tool_info.name)}"
-        self._user_facing = f"{server_name} - {getattr(tool_info, 'description', '') or tool_info.name} (MCP)"
+        self._user_facing = (
+            f"{server_name} - {getattr(tool_info, 'description', '') or tool_info.name} (MCP)"
+        )
 
     @property
     def name(self) -> str:
@@ -576,7 +608,9 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
         schema = getattr(self.tool_info, "input_schema", None)
         schema_snippet = json.dumps(schema, indent=2) if schema else ""
         if schema_snippet:
-            schema_snippet = schema_snippet if len(schema_snippet) < 800 else schema_snippet[:800] + "..."
+            schema_snippet = (
+                schema_snippet if len(schema_snippet) < 800 else schema_snippet[:800] + "..."
+            )
             return f"{desc}\n\n[MCP tool]\nServer: {self.server_name}\nTool: {self.tool_info.name}\nInput schema:\n{schema_snippet}"
         return f"{desc}\n\n[MCP tool]\nServer: {self.server_name}\nTool: {self.tool_info.name}"
 
@@ -649,7 +683,9 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
             structured = result.structuredContent if hasattr(result, "structuredContent") else None
             assistant_text = content_text
             if structured:
-                assistant_text = (assistant_text + "\n" if assistant_text else "") + json.dumps(structured, indent=2)
+                assistant_text = (assistant_text + "\n" if assistant_text else "") + json.dumps(
+                    structured, indent=2
+                )
             output = McpToolCallOutput(
                 server=self.server_name,
                 tool=self.tool_info.name,
@@ -673,7 +709,9 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                 structured_content=None,
                 is_error=True,
             )
-            logger.error(f"Error calling MCP tool {self.tool_info.name} on {self.server_name}: {exc}")
+            logger.error(
+                f"Error calling MCP tool {self.tool_info.name} on {self.server_name}: {exc}"
+            )
             yield ToolResult(
                 data=output,
                 result_for_assistant=f"Error calling MCP tool '{self.tool_info.name}' on '{self.server_name}': {exc}",
@@ -690,7 +728,9 @@ def _build_dynamic_mcp_tools(runtime: Optional[Any]) -> List[DynamicMcpTool]:
         if not getattr(server, "tools", None):
             continue
         for tool in server.tools:
-            tools.append(DynamicMcpTool(server.name, tool, getattr(runtime, "project_path", Path.cwd())))
+            tools.append(
+                DynamicMcpTool(server.name, tool, getattr(runtime, "project_path", Path.cwd()))
+            )
     return tools
 
 

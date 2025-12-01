@@ -14,10 +14,18 @@ from openai import AsyncOpenAI
 from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
-    Message, MessageContent, UserMessage, AssistantMessage, ProgressMessage,
-    create_user_message, create_assistant_message, create_progress_message,
-    normalize_messages_for_api, INTERRUPT_MESSAGE, INTERRUPT_MESSAGE_FOR_TOOL_USE,
-    create_tool_result_stop_message
+    Message,
+    MessageContent,
+    UserMessage,
+    AssistantMessage,
+    ProgressMessage,
+    create_user_message,
+    create_assistant_message,
+    create_progress_message,
+    normalize_messages_for_api,
+    INTERRUPT_MESSAGE,
+    INTERRUPT_MESSAGE_FOR_TOOL_USE,
+    create_tool_result_stop_message,
 )
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.config import get_global_config, ModelProfile, ProviderType
@@ -85,7 +93,7 @@ class QueryContext:
         max_thinking_tokens: int = 0,
         safe_mode: bool = False,
         model: str = "main",
-        verbose: bool = False
+        verbose: bool = False,
     ) -> None:
         self.tools = tools
         self.max_thinking_tokens = max_thinking_tokens
@@ -101,7 +109,7 @@ async def query_llm(
     tools: List[Tool[Any, Any]],
     max_thinking_tokens: int = 0,
     model: str = "main",
-    abort_signal: Optional[asyncio.Event] = None
+    abort_signal: Optional[asyncio.Event] = None,
 ) -> AssistantMessage:
     """Query the AI model and return the response.
 
@@ -170,11 +178,13 @@ async def query_llm(
                 # Build tool schemas
                 tool_schemas = []
                 for tool in tools:
-                    tool_schemas.append({
-                        "name": tool.name,
-                        "description": await tool.description(),
-                        "input_schema": tool.input_schema.model_json_schema()
-                    })
+                    tool_schemas.append(
+                        {
+                            "name": tool.name,
+                            "description": await tool.description(),
+                            "input_schema": tool.input_schema.model_json_schema(),
+                        }
+                    )
 
                 # Make the API call
                 response = await client.messages.create(
@@ -183,17 +193,13 @@ async def query_llm(
                     system=system_prompt,
                     messages=normalized_messages,
                     tools=tool_schemas if tool_schemas else None,  # type: ignore
-                    temperature=model_profile.temperature
+                    temperature=model_profile.temperature,
                 )
 
                 duration_ms = (time.time() - start_time) * 1000
 
                 usage_tokens = _anthropic_usage_tokens(getattr(response, "usage", None))
-                record_usage(
-                    model_profile.model,
-                    duration_ms=duration_ms,
-                    **usage_tokens
-                )
+                record_usage(model_profile.model, duration_ms=duration_ms, **usage_tokens)
 
                 # Calculate cost (simplified, should use actual pricing)
                 cost_usd = 0.0  # TODO: Implement cost calculation
@@ -202,44 +208,44 @@ async def query_llm(
                 content_blocks = []
                 for block in response.content:
                     if block.type == "text":
-                        content_blocks.append({
-                            "type": "text",
-                            "text": block.text
-                        })
+                        content_blocks.append({"type": "text", "text": block.text})
                     elif block.type == "tool_use":
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "tool_use_id": block.id,
-                            "name": block.name,
-                            "input": block.input
-                        })
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "tool_use_id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            }
+                        )
 
                 return create_assistant_message(
-                    content=content_blocks,
-                    cost_usd=cost_usd,
-                    duration_ms=duration_ms
+                    content=content_blocks, cost_usd=cost_usd, duration_ms=duration_ms
                 )
 
         elif model_profile.provider == ProviderType.OPENAI:
             # OpenAI (including DeepSeek and other compatible APIs)
             async with AsyncOpenAI(
-                api_key=model_profile.api_key,
-                base_url=model_profile.api_base
+                api_key=model_profile.api_key, base_url=model_profile.api_base
             ) as client:
                 # Build tool schemas for OpenAI format
                 openai_tools = []
                 for tool in tools:
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": tool.name,
-                            "description": await tool.description(),
-                            "parameters": tool.input_schema.model_json_schema()
+                    openai_tools.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool.name,
+                                "description": await tool.description(),
+                                "parameters": tool.input_schema.model_json_schema(),
+                            },
                         }
-                    })
+                    )
 
                 # Prepare messages for OpenAI format
-                openai_messages = [{"role": "system", "content": system_prompt}] + normalized_messages
+                openai_messages = [
+                    {"role": "system", "content": system_prompt}
+                ] + normalized_messages
 
                 # Make the API call
                 response = await client.chat.completions.create(
@@ -247,16 +253,12 @@ async def query_llm(
                     messages=openai_messages,
                     tools=openai_tools if openai_tools else None,
                     temperature=model_profile.temperature,
-                    max_tokens=model_profile.max_tokens
+                    max_tokens=model_profile.max_tokens,
                 )
 
                 duration_ms = (time.time() - start_time) * 1000
                 usage_tokens = _openai_usage_tokens(getattr(response, "usage", None))
-                record_usage(
-                    model_profile.model,
-                    duration_ms=duration_ms,
-                    **usage_tokens
-                )
+                record_usage(model_profile.model, duration_ms=duration_ms, **usage_tokens)
                 cost_usd = 0.0  # TODO: Implement cost calculation
 
                 # Convert OpenAI response to our format
@@ -264,25 +266,23 @@ async def query_llm(
                 choice = response.choices[0]
 
                 if choice.message.content:
-                    content_blocks.append({
-                        "type": "text",
-                        "text": choice.message.content
-                    })
+                    content_blocks.append({"type": "text", "text": choice.message.content})
 
                 if choice.message.tool_calls:
                     for tool_call in choice.message.tool_calls:
                         import json
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "tool_use_id": tool_call.id,
-                            "name": tool_call.function.name,
-                            "input": json.loads(tool_call.function.arguments)
-                        })
+
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "tool_use_id": tool_call.id,
+                                "name": tool_call.function.name,
+                                "input": json.loads(tool_call.function.arguments),
+                            }
+                        )
 
                 return create_assistant_message(
-                    content=content_blocks,
-                    cost_usd=cost_usd,
-                    duration_ms=duration_ms
+                    content=content_blocks, cost_usd=cost_usd, duration_ms=duration_ms
                 )
 
         else:
@@ -293,8 +293,7 @@ async def query_llm(
         logger.error(f"Error querying AI model: {e}")
         duration_ms = (time.time() - start_time) * 1000
         error_msg = create_assistant_message(
-            content=f"Error querying AI model: {str(e)}",
-            duration_ms=duration_ms
+            content=f"Error querying AI model: {str(e)}", duration_ms=duration_ms
         )
         error_msg.is_api_error_message = True
         return error_msg
@@ -305,7 +304,7 @@ async def query(
     system_prompt: str,
     context: Dict[str, str],
     query_context: QueryContext,
-    can_use_tool_fn: Optional[Any] = None
+    can_use_tool_fn: Optional[Any] = None,
 ) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
     """Execute a query with tool support.
 
@@ -328,9 +327,9 @@ async def query(
     # Work on a copy so external mutations (e.g., UI appending messages while consuming)
     # do not interfere with recursion or normalization.
     messages = list(messages)
+
     async def _check_permissions(
-        tool: Tool[Any, Any],
-        parsed_input: Any
+        tool: Tool[Any, Any], parsed_input: Any
     ) -> tuple[bool, Optional[str]]:
         """Check permissions for tool execution."""
         try:
@@ -375,7 +374,7 @@ async def query(
         query_context.tools,
         query_context.max_thinking_tokens,
         query_context.model,
-        query_context.abort_controller
+        query_context.abort_controller,
     )
 
     # Check for abort
@@ -388,8 +387,9 @@ async def query(
     tool_block_count = 0
     if isinstance(assistant_message.message.content, list):
         tool_block_count = sum(
-            1 for block in assistant_message.message.content
-            if hasattr(block, 'type') and block.type == "tool_use"
+            1
+            for block in assistant_message.message.content
+            if hasattr(block, "type") and block.type == "tool_use"
         )
     logger.debug(
         f"[query] Assistant message received: "
@@ -401,10 +401,8 @@ async def query(
     tool_use_blocks = []
     if isinstance(assistant_message.message.content, list):
         for block in assistant_message.message.content:
-            normalized_block = (
-                MessageContent(**block) if isinstance(block, dict) else block
-            )
-            if hasattr(normalized_block, 'type') and normalized_block.type == "tool_use":
+            normalized_block = MessageContent(**block) if isinstance(block, dict) else block
+            if hasattr(normalized_block, "type") and normalized_block.type == "tool_use":
                 tool_use_blocks.append(normalized_block)
 
     # If no tool use, we're done
@@ -428,12 +426,16 @@ async def query(
         if not tool:
             # Tool not found
             logger.warning(f"[query] Tool '{tool_name}' not found for tool_use_id={tool_id}")
-            result_msg = create_user_message([{
-                "type": "tool_result",
-                "tool_use_id": tool_id,
-                "text": f"Error: Tool '{tool_name}' not found",
-                "is_error": True
-            }])
+            result_msg = create_user_message(
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "text": f"Error: Tool '{tool_name}' not found",
+                        "is_error": True,
+                    }
+                ]
+            )
             tool_results.append(result_msg)
             yield result_msg
             continue
@@ -459,12 +461,16 @@ async def query(
                 logger.debug(
                     f"[query] Validation failed for tool_use_id={tool_id}: {validation.message}"
                 )
-                result_msg = create_user_message([{
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "text": validation.message or "Tool input validation failed.",
-                    "is_error": True
-                }])
+                result_msg = create_user_message(
+                    [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "text": validation.message or "Tool input validation failed.",
+                            "is_error": True,
+                        }
+                    ]
+                )
                 tool_results.append(result_msg)
                 yield result_msg
                 continue
@@ -477,12 +483,16 @@ async def query(
                         f"[query] Permission denied for tool_use_id={tool_id}: {denial_message}"
                     )
                     denial_text = denial_message or f"Permission denied for tool '{tool_name}'."
-                    result_msg = create_user_message([{
-                        "type": "tool_result",
-                        "tool_use_id": tool_id,
-                        "text": denial_text,
-                        "is_error": True
-                    }])
+                    result_msg = create_user_message(
+                        [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tool_id,
+                                "text": denial_text,
+                                "is_error": True,
+                            }
+                        ]
+                    )
                     tool_results.append(result_msg)
                     yield result_msg
                     continue
@@ -497,20 +507,17 @@ async def query(
                             getattr(t, "tool_use_id", None) or getattr(t, "id", None) or ""
                             for t in tool_use_blocks
                         ),
-                        content=output.content
+                        content=output.content,
                     )
                     yield progress
-                    logger.debug(
-                        f"[query] Progress from tool_use_id={tool_id}: {output.content}"
-                    )
+                    logger.debug(f"[query] Progress from tool_use_id={tool_id}: {output.content}")
                 elif isinstance(output, ToolResult):
                     # Tool completed
                     result_content = output.result_for_assistant or str(output.data)
-                    result_msg = create_user_message([{
-                        "type": "tool_result",
-                        "tool_use_id": tool_id,
-                        "text": result_content
-                    }], tool_use_result=output.data)
+                    result_msg = create_user_message(
+                        [{"type": "tool_result", "tool_use_id": tool_id, "text": result_content}],
+                        tool_use_result=output.data,
+                    )
                     tool_results.append(result_msg)
                     yield result_msg
                     logger.debug(
@@ -521,12 +528,16 @@ async def query(
         except Exception as e:
             # Tool execution failed
             logger.error(f"Error executing tool '{tool_name}': {e}")
-            error_msg = create_user_message([{
-                "type": "tool_result",
-                "tool_use_id": tool_id,
-                "text": f"Error executing tool: {str(e)}",
-                "is_error": True
-            }])
+            error_msg = create_user_message(
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "text": f"Error executing tool: {str(e)}",
+                        "is_error": True,
+                    }
+                ]
+            )
             tool_results.append(error_msg)
             yield error_msg
 
@@ -542,11 +553,5 @@ async def query(
         f"tool_results_count={len(tool_results)}"
     )
 
-    async for msg in query(
-        new_messages,
-        system_prompt,
-        context,
-        query_context,
-        can_use_tool_fn
-    ):
+    async for msg in query(new_messages, system_prompt, context, query_context, can_use_tool_fn):
         yield msg

@@ -23,8 +23,8 @@ SHELL_OPERATORS_WITH_REDIRECTION: set[str] = {
 }
 
 _REDIRECTION_PATTERNS = (
-    re.compile(r"^\d?>?&\d+$"),       # 2>&1, >&2, etc.
-    re.compile(r"^\d?>/dev/null$"),   # 2>/dev/null, >/dev/null
+    re.compile(r"^\d?>?&\d+$"),  # 2>&1, >&2, etc.
+    re.compile(r"^\d?>/dev/null$"),  # 2>/dev/null, >/dev/null
     re.compile(r"^/dev/null$"),
 )
 

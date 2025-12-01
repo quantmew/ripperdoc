@@ -75,7 +75,7 @@ You can read files, edit code, run commands, and help with various programming t
         title=f"Ripperdoc v{__version__}",
         border_style="cyan",
         box=box.ROUNDED,
-        padding=(1, 2)
+        padding=(1, 2),
     )
 
 
@@ -113,13 +113,12 @@ class RichUI:
         # Track a stable session identifier for the current UI run.
         self.session_id = str(uuid.uuid4())
         self._session_history = SessionHistory(self.project_path, self.session_id)
-        self._permission_checker = make_permission_checker(self.project_path, safe_mode) if safe_mode else None
+        self._permission_checker = (
+            make_permission_checker(self.project_path, safe_mode) if safe_mode else None
+        )
 
     def _context_usage_lines(
-        self,
-        breakdown,
-        model_label: str,
-        auto_compact_enabled: bool
+        self, breakdown, model_label: str, auto_compact_enabled: bool
     ) -> List[str]:
         return context_usage_lines(breakdown, model_label, auto_compact_enabled)
 
@@ -158,7 +157,9 @@ class RichUI:
             has_tool_result = False
             if isinstance(content, list):
                 for block in content:
-                    block_type = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
+                    block_type = getattr(block, "type", None) or (
+                        block.get("type") if isinstance(block, dict) else None
+                    )
                     if block_type == "tool_result":
                         has_tool_result = True
                         break
@@ -178,7 +179,15 @@ class RichUI:
         """Get the default set of tools."""
         return get_default_tools()
 
-    def display_message(self, sender: str, content: str, is_tool: bool = False, tool_type: str = None, tool_args: dict = None, tool_data: Any = None):
+    def display_message(
+        self,
+        sender: str,
+        content: str,
+        is_tool: bool = False,
+        tool_type: str = None,
+        tool_args: dict = None,
+        tool_data: Any = None,
+    ):
         """Display a message in the conversation."""
         if not is_tool:
             self._print_human_or_assistant(sender, content)
@@ -307,7 +316,9 @@ class RichUI:
                 file_path = self._get_tool_field(tool_data, "file_path")
                 additions = self._get_tool_field(tool_data, "additions", 0)
                 deletions = self._get_tool_field(tool_data, "deletions", 0)
-                diff_with_line_numbers = self._get_tool_field(tool_data, "diff_with_line_numbers", [])
+                diff_with_line_numbers = self._get_tool_field(
+                    tool_data, "diff_with_line_numbers", []
+                )
 
                 if not file_path:
                     self.console.print(f"  ⎿  [dim]File updated successfully[/]")
@@ -384,10 +395,7 @@ class RichUI:
                 stderr_lines = fallback_stderr
 
             show_inline_stdout = (
-                stdout_lines
-                and not stderr_lines
-                and exit_code == 0
-                and not self.verbose
+                stdout_lines and not stderr_lines and exit_code == 0 and not self.verbose
             )
 
             if show_inline_stdout:
@@ -396,7 +404,9 @@ class RichUI:
                 for line in preview[1:]:
                     self.console.print(f"      {line}", markup=False)
                 if not self.verbose and len(stdout_lines) > len(preview):
-                    self.console.print(f"[dim]... ({len(stdout_lines) - len(preview)} more lines)[/]")
+                    self.console.print(
+                        f"[dim]... ({len(stdout_lines) - len(preview)} more lines)[/]"
+                    )
             else:
                 if tool_data:
                     timing = ""
@@ -417,14 +427,18 @@ class RichUI:
                     for line in preview:
                         self.console.print(f"      {line}", markup=False)
                     if not self.verbose and len(stdout_lines) > len(preview):
-                        self.console.print(f"[dim]... ({len(stdout_lines) - len(preview)} more stdout lines)[/]")
+                        self.console.print(
+                            f"[dim]... ({len(stdout_lines) - len(preview)} more stdout lines)[/]"
+                        )
                 if stderr_lines:
                     preview = stderr_lines if self.verbose else stderr_lines[:5]
                     self.console.print("[dim]stderr:[/]")
                     for line in preview:
                         self.console.print(f"      {line}", markup=False)
                     if not self.verbose and len(stderr_lines) > len(preview):
-                        self.console.print(f"[dim]... ({len(stderr_lines) - len(preview)} more stderr lines)[/]")
+                        self.console.print(
+                            f"[dim]... ({len(stderr_lines) - len(preview)} more stderr lines)[/]"
+                        )
                 if not stdout_lines and not stderr_lines:
                     self.console.print("      [dim](no output)[/]")
             return
@@ -532,9 +546,7 @@ class RichUI:
         """Process a user query and display the response."""
         if not self.query_context:
             self.query_context = QueryContext(
-                tools=self.get_default_tools(),
-                safe_mode=self.safe_mode,
-                verbose=self.verbose
+                tools=self.get_default_tools(), safe_mode=self.safe_mode, verbose=self.verbose
             )
 
         try:
@@ -542,7 +554,9 @@ class RichUI:
             servers = await load_mcp_servers_async(self.project_path)
             dynamic_tools = await load_dynamic_mcp_tools_async(self.project_path)
             if dynamic_tools:
-                self.query_context.tools = merge_tools_with_dynamic(self.query_context.tools, dynamic_tools)
+                self.query_context.tools = merge_tools_with_dynamic(
+                    self.query_context.tools, dynamic_tools
+                )
             mcp_instructions = format_mcp_instructions(servers)
             base_system_prompt = build_system_prompt(
                 self.query_context.tools,
@@ -569,9 +583,7 @@ class RichUI:
             auto_compact_enabled = resolve_auto_compact_enabled(config)
 
             usage_status = get_context_usage_status(
-                messages,
-                max_context_tokens,
-                auto_compact_enabled
+                messages, max_context_tokens, auto_compact_enabled
             )
 
             if usage_status.is_above_warning:
@@ -619,11 +631,7 @@ class RichUI:
             try:
                 spinner.start()
                 async for message in query(
-                    messages,
-                    system_prompt,
-                    context,
-                    self.query_context,
-                    permission_checker
+                    messages, system_prompt, context, self.query_context, permission_checker
                 ):
                     if message.type == "assistant":
                         # Extract text content from assistant message
@@ -631,14 +639,16 @@ class RichUI:
                             self.display_message("Ripperdoc", message.message.content)
                         elif isinstance(message.message.content, list):
                             for block in message.message.content:
-                                if hasattr(block, 'type') and block.type == "text" and block.text:
+                                if hasattr(block, "type") and block.type == "text" and block.text:
                                     self.display_message("Ripperdoc", block.text)
-                                elif hasattr(block, 'type') and block.type == "tool_use":
+                                elif hasattr(block, "type") and block.type == "tool_use":
                                     # Show tool usage in the new format
-                                    tool_name = getattr(block, 'name', 'unknown tool')
-                                    tool_args = getattr(block, 'input', {})
+                                    tool_name = getattr(block, "name", "unknown tool")
+                                    tool_args = getattr(block, "input", {})
 
-                                    tool_use_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
+                                    tool_use_id = getattr(block, "tool_use_id", None) or getattr(
+                                        block, "id", None
+                                    )
                                     if tool_use_id:
                                         tool_registry[tool_use_id] = {
                                             "name": tool_name,
@@ -661,9 +671,13 @@ class RichUI:
                         # Handle tool results - show summary instead of full content
                         if isinstance(message.message.content, list):
                             for block in message.message.content:
-                                if hasattr(block, 'type') and block.type == "tool_result" and block.text:
+                                if (
+                                    hasattr(block, "type")
+                                    and block.type == "tool_result"
+                                    and block.text
+                                ):
                                     tool_name = "Tool"
-                                    tool_data = getattr(message, 'tool_use_result', None)
+                                    tool_data = getattr(message, "tool_use_result", None)
 
                                     tool_use_id = getattr(block, "tool_use_id", None)
                                     entry = tool_registry.get(tool_use_id) if tool_use_id else None
@@ -686,29 +700,21 @@ class RichUI:
                                         block.text,
                                         is_tool=True,
                                         tool_type="result",
-                                        tool_data=tool_data
+                                        tool_data=tool_data,
                                     )
 
                     elif message.type == "progress":
                         if self.verbose:
                             self.display_message(
-                                "System",
-                                f"Progress: {message.content}",
-                                is_tool=True
+                                "System", f"Progress: {message.content}", is_tool=True
                             )
                         elif message.content and isinstance(message.content, str):
                             if message.content.startswith("Subagent: "):
                                 self.display_message(
-                                    "Subagent",
-                                    message.content[len("Subagent: "):],
-                                    is_tool=True
+                                    "Subagent", message.content[len("Subagent: ") :], is_tool=True
                                 )
                             elif message.content.startswith("Subagent"):
-                                self.display_message(
-                                    "Subagent",
-                                    message.content,
-                                    is_tool=True
-                                )
+                                self.display_message("Subagent", message.content, is_tool=True)
                         spinner.update(f"Working... {message.content}")
 
                     # Add message to history
@@ -833,6 +839,7 @@ class RichUI:
                 console.print(f"[red]Error: {escape(str(e))}[/]")
                 if self.verbose:
                     import traceback
+
                     console.print(traceback.format_exc())
 
     async def _run_manual_compact(self, custom_instructions: str) -> None:
@@ -848,18 +855,16 @@ class RichUI:
         original_messages = list(self.conversation_messages)
         tokens_before = estimate_conversation_tokens(original_messages)
 
-        compaction = compact_messages(
-            original_messages,
-            max_context_tokens,
-            force=False
-        )
+        compaction = compact_messages(original_messages, max_context_tokens, force=False)
         messages_for_summary = compaction.messages
 
         spinner = Spinner(console, "Summarizing conversation...", spinner="dots")
         summary_text = ""
         try:
             spinner.start()
-            summary_text = await self._summarize_conversation(messages_for_summary, custom_instructions)
+            summary_text = await self._summarize_conversation(
+                messages_for_summary, custom_instructions
+            )
         except Exception as e:
             console.print(f"[red]Error during compaction: {escape(str(e))}[/red]")
             return
@@ -952,6 +957,7 @@ def check_onboarding_rich() -> bool:
 
     # Use simple console onboarding
     from ripperdoc.cli.cli import check_onboarding
+
     return check_onboarding()
 
 
@@ -967,5 +973,5 @@ def main_rich(safe_mode: bool = False, verbose: bool = False) -> None:
     ui.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main_rich()

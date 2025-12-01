@@ -15,6 +15,7 @@ logger = get_logger()
 
 class MessageRole(str, Enum):
     """Message roles in a conversation."""
+
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
@@ -22,6 +23,7 @@ class MessageRole(str, Enum):
 
 class MessageContent(BaseModel):
     """Content of a message."""
+
     type: str
     text: Optional[str] = None
     # Some providers return tool_use IDs as "id", others as "tool_use_id"
@@ -49,7 +51,7 @@ def _content_block_to_api(block: MessageContent) -> Dict[str, Any]:
             "content": [
                 {
                     "type": "text",
-                    "text": getattr(block, "text", None) or getattr(block, "content", None) or ""
+                    "text": getattr(block, "text", None) or getattr(block, "content", None) or "",
                 }
             ],
         }
@@ -59,7 +61,7 @@ def _content_block_to_api(block: MessageContent) -> Dict[str, Any]:
     # Default to text block
     return {
         "type": "text",
-        "text": getattr(block, "text", None) or getattr(block, "content", None) or str(block)
+        "text": getattr(block, "text", None) or getattr(block, "content", None) or str(block),
     }
 
 
@@ -68,12 +70,15 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
     block_type = getattr(block, "type", None)
     if block_type == "tool_use":
         import json
+
         args = getattr(block, "input", None) or {}
         try:
             args_str = json.dumps(args)
         except Exception:
             args_str = "{}"
-        tool_call_id = getattr(block, "id", None) or getattr(block, "tool_use_id", "") or str(uuid4())
+        tool_call_id = (
+            getattr(block, "id", None) or getattr(block, "tool_use_id", "") or str(uuid4())
+        )
         return {
             "role": "assistant",
             "content": None,
@@ -102,12 +107,13 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
     # Fallback text message
     return {
         "role": "assistant",
-        "content": getattr(block, "text", None) or getattr(block, "content", None) or str(block)
+        "content": getattr(block, "text", None) or getattr(block, "content", None) or str(block),
     }
 
 
 class Message(BaseModel):
     """A message in a conversation."""
+
     role: MessageRole
     content: Union[str, List[MessageContent]]
     uuid: str = ""
@@ -120,6 +126,7 @@ class Message(BaseModel):
 
 class UserMessage(BaseModel):
     """User message with tool results."""
+
     type: str = "user"
     message: Message
     uuid: str = ""
@@ -133,6 +140,7 @@ class UserMessage(BaseModel):
 
 class AssistantMessage(BaseModel):
     """Assistant message with metadata."""
+
     type: str = "assistant"
     message: Message
     uuid: str = ""
@@ -148,6 +156,7 @@ class AssistantMessage(BaseModel):
 
 class ProgressMessage(BaseModel):
     """Progress message during tool execution."""
+
     type: str = "progress"
     uuid: str = ""
     tool_use_id: str
@@ -163,8 +172,7 @@ class ProgressMessage(BaseModel):
 
 
 def create_user_message(
-    content: Union[str, List[Dict[str, Any]]],
-    tool_use_result: Optional[Any] = None
+    content: Union[str, List[Dict[str, Any]]], tool_use_result: Optional[Any] = None
 ) -> UserMessage:
     """Create a user message."""
     if isinstance(content, str):
@@ -181,10 +189,7 @@ def create_user_message(
             # Fallback: keep as-is if conversion fails
             pass
 
-    message = Message(
-        role=MessageRole.USER,
-        content=message_content
-    )
+    message = Message(role=MessageRole.USER, content=message_content)
 
     # Debug: record tool_result shaping
     if isinstance(message_content, list):
@@ -197,16 +202,11 @@ def create_user_message(
                 f"ids={[getattr(b, 'tool_use_id', None) for b in tool_result_blocks]}"
             )
 
-    return UserMessage(
-        message=message,
-        tool_use_result=tool_use_result
-    )
+    return UserMessage(message=message, tool_use_result=tool_use_result)
 
 
 def create_assistant_message(
-    content: Union[str, List[Dict[str, Any]]],
-    cost_usd: float = 0.0,
-    duration_ms: float = 0.0
+    content: Union[str, List[Dict[str, Any]]], cost_usd: float = 0.0, duration_ms: float = 0.0
 ) -> AssistantMessage:
     """Create an assistant message."""
     if isinstance(content, str):
@@ -214,16 +214,9 @@ def create_assistant_message(
     else:
         message_content = [MessageContent(**item) for item in content]
 
-    message = Message(
-        role=MessageRole.ASSISTANT,
-        content=message_content
-    )
+    message = Message(role=MessageRole.ASSISTANT, content=message_content)
 
-    return AssistantMessage(
-        message=message,
-        cost_usd=cost_usd,
-        duration_ms=duration_ms
-    )
+    return AssistantMessage(message=message, cost_usd=cost_usd, duration_ms=duration_ms)
 
 
 def create_progress_message(
@@ -237,13 +230,13 @@ def create_progress_message(
         tool_use_id=tool_use_id,
         sibling_tool_use_ids=sibling_tool_use_ids,
         content=content,
-        normalized_messages=normalized_messages or []
+        normalized_messages=normalized_messages or [],
     )
 
 
 def normalize_messages_for_api(
     messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
-    protocol: str = "anthropic"
+    protocol: str = "anthropic",
 ) -> List[Dict[str, Any]]:
     """Normalize messages for API submission.
 
@@ -278,6 +271,9 @@ def normalize_messages_for_api(
 
         if msg.type == "user":
             user_msg = msg
+            # ProgressMessage doesn't have .message attribute
+            if not hasattr(user_msg, "message"):
+                continue
             if isinstance(user_msg.message.content, list):
                 if protocol == "openai":
                     # Map each block to an OpenAI-style message
@@ -295,17 +291,16 @@ def normalize_messages_for_api(
                     if getattr(block, "type", None) == "tool_result":
                         tool_results_seen += 1
                     api_blocks.append(_content_block_to_api(block))
-                normalized.append({
-                    "role": "user",
-                    "content": api_blocks
-                })
+                normalized.append({"role": "user", "content": api_blocks})
             else:
-                normalized.append({
-                    "role": "user",
-                    "content": user_msg.message.content  # type: ignore
-                })
+                normalized.append(
+                    {"role": "user", "content": user_msg.message.content}  # type: ignore
+                )
         elif msg.type == "assistant":
             asst_msg = msg
+            # ProgressMessage doesn't have .message attribute
+            if not hasattr(asst_msg, "message"):
+                continue
             if isinstance(asst_msg.message.content, list):
                 if protocol == "openai":
                     openai_msgs: List[Dict[str, Any]] = []
@@ -314,7 +309,9 @@ def normalize_messages_for_api(
                     for block in asst_msg.message.content:
                         if getattr(block, "type", None) == "tool_use":
                             tool_uses_seen += 1
-                            tool_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
+                            tool_id = getattr(block, "tool_use_id", None) or getattr(
+                                block, "id", None
+                            )
                             if not tool_id:
                                 skipped_tool_uses_no_id += 1
                                 continue
@@ -336,16 +333,15 @@ def normalize_messages_for_api(
                             if mapped:
                                 openai_msgs.append(mapped)
                     if text_parts:
-                        openai_msgs.append({
-                            "role": "assistant",
-                            "content": "\n".join(text_parts)
-                        })
+                        openai_msgs.append({"role": "assistant", "content": "\n".join(text_parts)})
                     if tool_calls:
-                        openai_msgs.append({
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": tool_calls,
-                        })
+                        openai_msgs.append(
+                            {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": tool_calls,
+                            }
+                        )
                     normalized.extend(openai_msgs)
                     continue
                 api_blocks = []
@@ -353,15 +349,11 @@ def normalize_messages_for_api(
                     if getattr(block, "type", None) == "tool_use":
                         tool_uses_seen += 1
                     api_blocks.append(_content_block_to_api(block))
-                normalized.append({
-                    "role": "assistant",
-                    "content": api_blocks
-                })
+                normalized.append({"role": "assistant", "content": api_blocks})
             else:
-                normalized.append({
-                    "role": "assistant",
-                    "content": asst_msg.message.content  # type: ignore
-                })
+                normalized.append(
+                    {"role": "assistant", "content": asst_msg.message.content}  # type: ignore
+                )
 
     logger.debug(
         f"[normalize_messages_for_api] protocol={protocol} input_msgs={len(messages)} "
@@ -385,5 +377,5 @@ def create_tool_result_stop_message(tool_use_id: str) -> Dict[str, Any]:
         "type": "tool_result",
         "tool_use_id": tool_use_id,
         "text": INTERRUPT_MESSAGE_FOR_TOOL_USE,
-        "is_error": True
+        "is_error": True,
     }

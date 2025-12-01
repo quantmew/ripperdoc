@@ -3,12 +3,20 @@
 Allows the AI to search for patterns in files.
 """
 
+import asyncio
 import subprocess
 from pathlib import Path
 from typing import AsyncGenerator, Optional, List
 from pydantic import BaseModel, Field
 
-from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress, ToolOutput, ValidationResult
+from ripperdoc.core.tool import (
+    Tool,
+    ToolUseContext,
+    ToolResult,
+    ToolProgress,
+    ToolOutput,
+    ValidationResult,
+)
 
 
 GREP_USAGE = (
@@ -25,27 +33,22 @@ GREP_USAGE = (
 
 class GrepToolInput(BaseModel):
     """Input schema for GrepTool."""
+
     pattern: str = Field(description="Regular expression pattern to search for")
     path: Optional[str] = Field(
-        default=None,
-        description="Directory or file to search in (default: current directory)"
+        default=None, description="Directory or file to search in (default: current directory)"
     )
-    glob: Optional[str] = Field(
-        default=None,
-        description="File pattern to filter (e.g., '*.py')"
-    )
-    case_insensitive: bool = Field(
-        default=False,
-        description="Case insensitive search"
-    )
+    glob: Optional[str] = Field(default=None, description="File pattern to filter (e.g., '*.py')")
+    case_insensitive: bool = Field(default=False, description="Case insensitive search")
     output_mode: str = Field(
         default="files_with_matches",
-        description="Output mode: 'files_with_matches', 'content', or 'count'"
+        description="Output mode: 'files_with_matches', 'content', or 'count'",
     )
 
 
 class GrepMatch(BaseModel):
     """A single grep match."""
+
     file: str
     line_number: Optional[int] = None
     content: Optional[str] = None
@@ -54,6 +57,7 @@ class GrepMatch(BaseModel):
 
 class GrepToolOutput(BaseModel):
     """Output from grep search."""
+
     matches: List[GrepMatch]
     pattern: str
     total_files: int
@@ -87,15 +91,12 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         return False
 
     async def validate_input(
-        self,
-        input_data: GrepToolInput,
-        context: Optional[ToolUseContext] = None
+        self, input_data: GrepToolInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         valid_modes = ["files_with_matches", "content", "count"]
         if input_data.output_mode not in valid_modes:
             return ValidationResult(
-                result=False,
-                message=f"Invalid output_mode. Must be one of: {valid_modes}"
+                result=False, message=f"Invalid output_mode. Must be one of: {valid_modes}"
             )
         return ValidationResult(result=True)
 
@@ -119,11 +120,7 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
 
         return result
 
-    def render_tool_use_message(
-        self,
-        input_data: GrepToolInput,
-        verbose: bool = False
-    ) -> str:
+    def render_tool_use_message(self, input_data: GrepToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
         msg = f"Grep: {input_data.pattern}"
         if input_data.glob:
@@ -131,9 +128,7 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         return msg
 
     async def call(
-        self,
-        input_data: GrepToolInput,
-        context: ToolUseContext
+        self, input_data: GrepToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Search for the pattern."""
 
@@ -159,18 +154,19 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             if input_data.glob:
                 cmd.extend(["--include", input_data.glob])
 
-            # Run grep
-            process = await subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True
+            # Run grep asynchronously
+            process = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
+
+            stdout, stderr = await process.communicate()
+            returncode = process.returncode
 
             # Parse output
             matches: List[GrepMatch] = []
 
-            if process.returncode == 0:
-                lines = process.stdout.strip().split('\n')
+            if returncode == 0:
+                lines = stdout.decode("utf-8").strip().split("\n")
 
                 for line in lines:
                     if not line:
@@ -181,44 +177,42 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
 
                     elif input_data.output_mode == "count":
                         # Format: file:count
-                        parts = line.rsplit(':', 1)
+                        parts = line.rsplit(":", 1)
                         if len(parts) == 2:
-                            matches.append(GrepMatch(
-                                file=parts[0],
-                                count=int(parts[1]) if parts[1].isdigit() else 0
-                            ))
+                            matches.append(
+                                GrepMatch(
+                                    file=parts[0], count=int(parts[1]) if parts[1].isdigit() else 0
+                                )
+                            )
 
                     else:  # content mode
                         # Format: file:line:content
-                        parts = line.split(':', 2)
+                        parts = line.split(":", 2)
                         if len(parts) >= 3:
-                            matches.append(GrepMatch(
-                                file=parts[0],
-                                line_number=int(parts[1]) if parts[1].isdigit() else None,
-                                content=parts[2] if len(parts) > 2 else ""
-                            ))
+                            matches.append(
+                                GrepMatch(
+                                    file=parts[0],
+                                    line_number=int(parts[1]) if parts[1].isdigit() else None,
+                                    content=parts[2] if len(parts) > 2 else "",
+                                )
+                            )
 
             output = GrepToolOutput(
                 matches=matches,
                 pattern=input_data.pattern,
                 total_files=len(set(m.file for m in matches)),
-                total_matches=len(matches)
+                total_matches=len(matches),
             )
 
             yield ToolResult(
-                data=output,
-                result_for_assistant=self.render_result_for_assistant(output)
+                data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
         except Exception as e:
             error_output = GrepToolOutput(
-                matches=[],
-                pattern=input_data.pattern,
-                total_files=0,
-                total_matches=0
+                matches=[], pattern=input_data.pattern, total_files=0, total_matches=0
             )
 
             yield ToolResult(
-                data=error_output,
-                result_for_assistant=f"Error executing grep: {str(e)}"
+                data=error_output, result_for_assistant=f"Error executing grep: {str(e)}"
             )

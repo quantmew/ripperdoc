@@ -9,15 +9,18 @@ from ripperdoc.tools.background_shell import get_background_status
 
 class BashOutputInput(BaseModel):
     """Input schema for BashOutput."""
-    task_id: str = Field(description="Background task id returned by BashTool when run_in_background is true")
+
+    task_id: str = Field(
+        description="Background task id returned by BashTool when run_in_background is true"
+    )
     consume: bool = Field(
-        default=True,
-        description="Whether to clear buffered output after reading (default: True)"
+        default=True, description="Whether to clear buffered output after reading (default: True)"
     )
 
 
 class BashOutputData(BaseModel):
     """Snapshot of a background task."""
+
     task_id: str
     command: str
     status: str
@@ -53,11 +56,15 @@ class BashOutputTool(Tool[BashOutputInput, BashOutputData]):
     def needs_permissions(self, input_data=None) -> bool:
         return False
 
-    async def validate_input(self, input_data: BashOutputInput, context: ToolUseContext) -> ValidationResult:
+    async def validate_input(
+        self, input_data: BashOutputInput, context: ToolUseContext
+    ) -> ValidationResult:
         try:
             get_background_status(input_data.task_id, consume=False)
         except KeyError:
-            return ValidationResult(result=False, message=f"No background task found with id '{input_data.task_id}'")
+            return ValidationResult(
+                result=False, message=f"No background task found with id '{input_data.task_id}'"
+            )
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: BashOutputData) -> str:
@@ -76,9 +83,7 @@ class BashOutputTool(Tool[BashOutputInput, BashOutputData]):
         return f"$ bash-output {input_data.task_id}{suffix}"
 
     async def call(
-        self,
-        input_data: BashOutputInput,
-        context: ToolUseContext
+        self, input_data: BashOutputInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolResult, None]:
         status = get_background_status(input_data.task_id, consume=input_data.consume)
         output = BashOutputData(
@@ -90,7 +95,4 @@ class BashOutputTool(Tool[BashOutputInput, BashOutputData]):
             exit_code=status["exit_code"],
             duration_ms=status["duration_ms"],
         )
-        yield ToolResult(
-            data=output,
-            result_for_assistant=self.render_result_for_assistant(output)
-        )
+        yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))

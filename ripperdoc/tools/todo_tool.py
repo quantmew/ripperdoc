@@ -240,7 +240,11 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
         if input_data.limit < 0:
             return ValidationResult(result=False, message="limit cannot be negative")
         if input_data.status:
-            invalid = [status for status in input_data.status if status not in ("pending", "in_progress", "completed")]
+            invalid = [
+                status
+                for status in input_data.status
+                if status not in ("pending", "in_progress", "completed")
+            ]
             if invalid:
                 return ValidationResult(
                     result=False,
