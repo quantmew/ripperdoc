@@ -15,7 +15,6 @@ from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.message_compaction import estimate_tokens_from_text
 
 try:
-    import mcp
     import mcp.types as mcp_types
     from mcp.client.session import ClientSession
     from mcp.client.sse import sse_client

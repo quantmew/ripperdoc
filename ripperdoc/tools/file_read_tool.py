@@ -4,7 +4,6 @@ Allows the AI to read file contents.
 """
 
 import os
-from pathlib import Path
 from typing import AsyncGenerator, Optional
 from pydantic import BaseModel, Field
 
@@ -12,7 +11,6 @@ from ripperdoc.core.tool import (
     Tool,
     ToolUseContext,
     ToolResult,
-    ToolProgress,
     ToolOutput,
     ValidationResult,
 )
@@ -118,7 +116,6 @@ and limit to read only a portion of the file."""
             with open(input_data.file_path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
-            total_lines = len(lines)
             offset = input_data.offset or 0
             limit = input_data.limit
 

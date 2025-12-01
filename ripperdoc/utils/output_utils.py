@@ -1,7 +1,7 @@
 """Utilities for processing and truncating command output."""
 
 import re
-from typing import Optional, Any
+from typing import Any
 
 
 # Maximum output length to prevent token overflow

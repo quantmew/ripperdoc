@@ -303,7 +303,7 @@ def normalize_messages_for_api(
                 continue
             if isinstance(asst_msg.message.content, list):
                 if protocol == "openai":
-                    openai_msgs: List[Dict[str, Any]] = []
+                    assistant_openai_msgs: List[Dict[str, Any]] = []
                     tool_calls: List[Dict[str, Any]] = []
                     text_parts: List[str] = []
                     for block in asst_msg.message.content:
@@ -331,18 +331,20 @@ def normalize_messages_for_api(
                         else:
                             mapped = _content_block_to_openai(block)
                             if mapped:
-                                openai_msgs.append(mapped)
+                                assistant_openai_msgs.append(mapped)
                     if text_parts:
-                        openai_msgs.append({"role": "assistant", "content": "\n".join(text_parts)})
+                        assistant_openai_msgs.append(
+                            {"role": "assistant", "content": "\n".join(text_parts)}
+                        )
                     if tool_calls:
-                        openai_msgs.append(
+                        assistant_openai_msgs.append(
                             {
                                 "role": "assistant",
                                 "content": None,
                                 "tool_calls": tool_calls,
                             }
                         )
-                    normalized.extend(openai_msgs)
+                    normalized.extend(assistant_openai_msgs)
                     continue
                 api_blocks = []
                 for block in asst_msg.message.content:

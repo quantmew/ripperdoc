@@ -6,6 +6,7 @@ via the KillBash tool.
 """
 
 import asyncio
+import concurrent.futures
 import contextlib
 import threading
 import time
@@ -76,7 +77,7 @@ def _ensure_background_loop() -> asyncio.AbstractEventLoop:
         return loop
 
 
-def _submit_to_background_loop(coro) -> asyncio.Future:
+def _submit_to_background_loop(coro) -> concurrent.futures.Future:
     """Run a coroutine on the background loop and return a thread-safe future."""
     loop = _ensure_background_loop()
     return asyncio.run_coroutine_threadsafe(coro, loop)

@@ -6,7 +6,7 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional, Set
+from typing import Any, Awaitable, Callable, Optional, Set
 
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.tool import Tool

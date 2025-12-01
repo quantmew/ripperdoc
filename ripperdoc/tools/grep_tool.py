@@ -4,8 +4,6 @@ Allows the AI to search for patterns in files.
 """
 
 import asyncio
-import subprocess
-from pathlib import Path
 from typing import AsyncGenerator, Optional, List
 from pydantic import BaseModel, Field
 
@@ -13,7 +11,6 @@ from ripperdoc.core.tool import (
     Tool,
     ToolUseContext,
     ToolResult,
-    ToolProgress,
     ToolOutput,
     ValidationResult,
 )

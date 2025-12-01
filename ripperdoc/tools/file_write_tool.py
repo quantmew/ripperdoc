@@ -12,7 +12,6 @@ from ripperdoc.core.tool import (
     Tool,
     ToolUseContext,
     ToolResult,
-    ToolProgress,
     ToolOutput,
     ValidationResult,
 )

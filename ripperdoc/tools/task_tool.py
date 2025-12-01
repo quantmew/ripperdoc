@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ from ripperdoc.core.agents import (
     summarize_agent,
 )
 from ripperdoc.core.query import QueryContext, query
-from ripperdoc.core.system_prompt import build_environment_prompt, build_system_prompt
+from ripperdoc.core.system_prompt import build_environment_prompt
 from ripperdoc.core.tool import Tool, ToolOutput, ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.utils.messages import AssistantMessage, create_user_message
 

@@ -8,7 +8,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -460,7 +460,6 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
         context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
         runtime = await ensure_mcp_runtime()
-        server = next((s for s in runtime.servers if s.name == input_data.server), None)
         session = runtime.sessions.get(input_data.server) if runtime else None
 
         content_text = None

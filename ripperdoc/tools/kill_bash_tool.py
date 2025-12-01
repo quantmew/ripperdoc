@@ -71,12 +71,12 @@ class KillBashTool(Tool[KillBashInput, KillBashOutput]):
 
     async def check_permissions(
         self, input_data: KillBashInput, permission_context: object
-    ) -> dict:
+    ) -> PermissionDecision:
         # Killing is destructive; require explicit confirmation upstream.
         return PermissionDecision(behavior="allow", updated_input=input_data)
 
     async def validate_input(
-        self, input_data: KillBashInput, context: ToolUseContext
+        self, input_data: KillBashInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         try:
             get_background_status(input_data.task_id, consume=False)

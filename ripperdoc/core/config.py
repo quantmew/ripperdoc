@@ -7,7 +7,7 @@ including API keys, model settings, and user preferences.
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 

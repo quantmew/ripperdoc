@@ -7,14 +7,12 @@ the query-response loop including tool execution.
 import asyncio
 import inspect
 from typing import AsyncGenerator, List, Optional, Dict, Any, Union
-from anthropic import Anthropic, AsyncAnthropic
-from anthropic.types import Message as APIMessage, ToolUseBlock
+from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
-    Message,
     MessageContent,
     UserMessage,
     AssistantMessage,
@@ -25,10 +23,9 @@ from ripperdoc.utils.messages import (
     normalize_messages_for_api,
     INTERRUPT_MESSAGE,
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
-    create_tool_result_stop_message,
 )
 from ripperdoc.core.permissions import PermissionResult
-from ripperdoc.core.config import get_global_config, ModelProfile, ProviderType
+from ripperdoc.core.config import get_global_config, ProviderType
 from ripperdoc.utils.session_usage import record_usage
 
 import time

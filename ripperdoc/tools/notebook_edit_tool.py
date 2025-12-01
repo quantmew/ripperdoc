@@ -222,7 +222,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
                         "id": new_id,
                         "source": new_source,
                         "metadata": {},
-                        "execution_count": None,
+                        "execution_count": 0,
                         "outputs": [],
                     }
                 )

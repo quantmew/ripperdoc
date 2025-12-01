@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ripperdoc.utils.message_compaction import ContextBreakdown
 
@@ -92,7 +92,7 @@ def make_segment_grid(
     """Build a 10x10 proportional grid (left→right for main sections, reserved pinned to bottom-right)."""
     total_slots = max(1, per_row * per_row)  # default 100 slots
 
-    categories = [
+    categories: List[Dict[str, Any]] = [
         {
             "label": "System prompt",
             "glyph": "⛁",
@@ -144,7 +144,8 @@ def make_segment_grid(
     remainders: List[tuple[float, int]] = []
     allocated = 0
     for idx, category in enumerate(categories):
-        token_value = max(0, category["tokens"])
+        token_value_int = int(category["tokens"])
+        token_value = max(0, token_value_int)
         raw_slots = (token_value / max_tokens) * total_slots
         base = int(raw_slots)
         if token_value > 0 and base == 0:
@@ -153,7 +154,7 @@ def make_segment_grid(
         allocated += base
         remainders.append((raw_slots - base, idx))
 
-    min_allowed = [1 if cat["tokens"] > 0 else 0 for cat in categories]
+    min_allowed = [1 if int(cat["tokens"]) > 0 else 0 for cat in categories]
 
     while allocated > total_slots:
         for _, idx in sorted(remainders, key=lambda x: x[0]):
@@ -185,11 +186,11 @@ def make_segment_grid(
         for _ in range(count):
             if cursor >= total_slots:
                 break
-            icons[cursor] = styled_symbol(category["glyph"], category["color"])
+            icons[cursor] = styled_symbol(str(category["glyph"]), str(category["color"]))
             cursor += 1
 
     end_cursor = total_slots - 1
-    reserved_symbol = styled_symbol(categories[-1]["glyph"], categories[-1]["color"])
+    reserved_symbol = styled_symbol(str(categories[-1]["glyph"]), str(categories[-1]["color"]))
     for _ in range(reserved_count):
         if end_cursor < 0:
             break
@@ -284,7 +285,6 @@ def context_usage_lines(
     padded_grid = [""] * (total_rows - len(grid_lines)) + grid_lines
     padded_stats = [""] * (total_rows - len(stats_lines)) + stats_lines
 
-    grid_width = max((visible_length(line) for line in padded_grid), default=0)
     combined: List[str] = []
     for left, right in zip(padded_grid, padded_stats):
         # left_pad = " " * max(0, grid_width - visible_length(left))

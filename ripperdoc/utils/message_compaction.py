@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 import math
 import os
-from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from ripperdoc.core.config import GlobalConfig, ModelProfile
 from ripperdoc.utils.log import get_logger
@@ -323,10 +322,19 @@ def compact_messages(
                 },
             )
             try:
-                entry["tokens"] = int(entry["tokens"]) + estimate_tokens_from_text(text)
+                token_val = entry["tokens"]
+                if token_val is None:
+                    current_tokens = 0
+                else:
+                    current_tokens = int(token_val)
+                entry["tokens"] = current_tokens + estimate_tokens_from_text(text)
             except (TypeError, ValueError):
                 entry["tokens"] = estimate_tokens_from_text(text)
-            entry["occurrences"].append((message_index, content_index))
+            occurrences_list = entry["occurrences"]
+            if isinstance(occurrences_list, list):
+                occurrences_list.append((message_index, content_index))
+            else:
+                entry["occurrences"] = [(message_index, content_index)]
 
     if not results_by_tool_id:
         return CompactionResult(
@@ -373,7 +381,9 @@ def compact_messages(
     for tool_use_id, meta in sorted_results:
         ids_to_clear.add(tool_use_id)
         try:
-            reclaimed += int(meta["tokens"])
+            token_value = meta["tokens"]
+            if token_value is not None:
+                reclaimed += int(token_value)
         except (TypeError, ValueError):
             # If tokens is not convertible to int, skip it
             pass

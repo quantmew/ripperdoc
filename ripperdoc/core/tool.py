@@ -7,7 +7,6 @@ Tools are the primary way that the AI agent interacts with the environment.
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, Optional, TypeVar, Generic, Union
 from pydantic import BaseModel, ConfigDict
-from enum import Enum
 
 
 class ToolResult(BaseModel):

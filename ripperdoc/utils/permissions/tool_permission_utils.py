@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Set
 
 from ripperdoc.utils.permissions.path_validation_utils import validate_shell_command_paths

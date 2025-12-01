@@ -57,7 +57,7 @@ class BashOutputTool(Tool[BashOutputInput, BashOutputData]):
         return False
 
     async def validate_input(
-        self, input_data: BashOutputInput, context: ToolUseContext
+        self, input_data: BashOutputInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         try:
             get_background_status(input_data.task_id, consume=False)

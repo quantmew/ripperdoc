@@ -41,7 +41,6 @@ from ripperdoc.utils.message_compaction import (
     estimate_conversation_tokens,
     get_context_usage_status,
     get_model_context_limit,
-    summarize_context_usage,
     resolve_auto_compact_enabled,
 )
 from ripperdoc.utils.mcp import (
@@ -286,7 +285,7 @@ class RichUI:
     def _print_tool_result(self, sender: str, content: str, tool_data: Any) -> None:
         """Render a tool result summary."""
         if not content:
-            self.console.print(f"  ⎿  [dim]Tool completed[/]")
+            self.console.print("  ⎿  [dim]Tool completed[/]")
             return
 
         if "Todo" in sender:
@@ -296,7 +295,7 @@ class RichUI:
                 for line in lines[1:]:
                     self.console.print(f"      {line}", markup=False)
             else:
-                self.console.print(f"  ⎿  [dim]Todo update[/]")
+                self.console.print("  ⎿  [dim]Todo update[/]")
             return
 
         if "Read" in sender or "View" in sender:
@@ -321,7 +320,7 @@ class RichUI:
                 )
 
                 if not file_path:
-                    self.console.print(f"  ⎿  [dim]File updated successfully[/]")
+                    self.console.print("  ⎿  [dim]File updated successfully[/]")
                     return
 
                 self.console.print(
@@ -332,7 +331,7 @@ class RichUI:
                     for line in diff_with_line_numbers:
                         self.console.print(line, markup=False)
             else:
-                self.console.print(f"  ⎿  [dim]File updated successfully[/]")
+                self.console.print("  ⎿  [dim]File updated successfully[/]")
             return
 
         if "Glob" in sender:
@@ -419,7 +418,7 @@ class RichUI:
                         timing = f" (timeout {timeout_ms/1000:.0f}s)"
                     self.console.print(f"  ⎿  [dim]Exit code {exit_code}{timing}[/]")
                 else:
-                    self.console.print(f"  ⎿  [dim]Command executed[/]")
+                    self.console.print("  ⎿  [dim]Command executed[/]")
 
                 if stdout_lines:
                     preview = stdout_lines if self.verbose else stdout_lines[:5]
@@ -430,6 +429,9 @@ class RichUI:
                         self.console.print(
                             f"[dim]... ({len(stdout_lines) - len(preview)} more stdout lines)[/]"
                         )
+                else:
+                    self.console.print("[dim]stdout:[/]")
+                    self.console.print("      [dim](no stdout)[/]")
                 if stderr_lines:
                     preview = stderr_lines if self.verbose else stderr_lines[:5]
                     self.console.print("[dim]stderr:[/]")
@@ -439,11 +441,12 @@ class RichUI:
                         self.console.print(
                             f"[dim]... ({len(stderr_lines) - len(preview)} more stderr lines)[/]"
                         )
-                if not stdout_lines and not stderr_lines:
-                    self.console.print("      [dim](no output)[/]")
+                else:
+                    self.console.print("[dim]stderr:[/]")
+                    self.console.print("      [dim](no stderr)[/]")
             return
 
-        self.console.print(f"  ⎿  [dim]Tool completed[/]")
+        self.console.print("  ⎿  [dim]Tool completed[/]")
 
     def _print_generic_tool(self, sender: str, content: str) -> None:
         """Fallback rendering for miscellaneous tool messages."""
