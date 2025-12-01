@@ -1,5 +1,6 @@
-"""Slash command to show background bash tasks."""
+"""Slash command to inspect and manage background bash tasks."""
 
+import asyncio
 import textwrap
 
 from rich import box
@@ -8,6 +9,7 @@ from rich.table import Table
 
 from ripperdoc.tools.background_shell import (
     get_background_status,
+    kill_background_task,
     list_background_tasks,
 )
 
@@ -56,7 +58,29 @@ def _format_status(status: dict) -> str:
     return f"[{color}]{label}[/{color}]" if color else label
 
 
-def _handle(ui, _: str) -> bool:
+def _tail_lines(text: str, max_lines: int = 20, max_chars: int = 4000) -> str:
+    """Return a shortened view of output for display."""
+    if not text:
+        return ""
+
+    lines = text.splitlines()
+    prefixes = []
+
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+        prefixes.append(f"[dim]... showing last {max_lines} lines[/dim]")
+
+    content = "\n".join(lines)
+    if len(content) > max_chars:
+        content = content[-max_chars:]
+        prefixes.insert(0, f"[dim]... output truncated to last {max_chars} chars[/dim]")
+
+    if prefixes:
+        return "\n".join(prefixes + [content])
+    return content
+
+
+def _list_tasks(ui) -> bool:
     console = ui.console
     task_ids = list_background_tasks()
 
@@ -94,13 +118,108 @@ def _handle(ui, _: str) -> bool:
             padding=(1, 2),
         )
     )
-    console.print("[dim]Use BashOutput <id> to read output or KillBash to stop a running task.[/dim]")
+    console.print(
+        "[dim]Use /tasks show <id> to view details/output, /tasks kill <id> to stop a task, or BashOutput/KillBash tools directly.[/dim]"
+    )
+    return True
+
+
+def _kill_task(ui, task_id: str) -> bool:
+    console = ui.console
+    try:
+        status = get_background_status(task_id, consume=False)
+    except KeyError:
+        console.print(f"[red]No task found with id '{task_id}'.[/red]")
+        return True
+    except Exception as exc:
+        console.print(f"[red]Failed to read task '{task_id}': {exc}[/red]")
+        return True
+
+    if status.get("status") != "running":
+        console.print(f"[yellow]Task {task_id} is not running (status: {status.get('status')}).[/yellow]")
+        return True
+
+    try:
+        killed = asyncio.run(kill_background_task(task_id))
+    except Exception as exc:
+        console.print(f"[red]Error stopping task {task_id}: {exc}[/red]")
+        return True
+
+    if killed:
+        console.print(f"[green]Killed task {task_id}[/green] — {status.get('command')}")
+    else:
+        console.print(f"[red]Failed to kill task {task_id}[/red]")
+    return True
+
+
+def _show_task(ui, task_id: str) -> bool:
+    console = ui.console
+    try:
+        status = get_background_status(task_id, consume=False)
+    except KeyError:
+        console.print(f"[red]No task found with id '{task_id}'.[/red]")
+        return True
+    except Exception as exc:
+        console.print(f"[red]Failed to read task '{task_id}': {exc}[/red]")
+        return True
+
+    details = Table(box=box.SIMPLE_HEAVY, show_header=False)
+    details.add_row("ID", task_id)
+    details.add_row("Status", _format_status(status))
+    details.add_row("Command", status.get("command") or "")
+    details.add_row("Duration", _format_duration(status.get("duration_ms")))
+    exit_code = status.get("exit_code")
+    details.add_row("Exit code", str(exit_code) if exit_code is not None else "running")
+
+    console.print(Panel(details, title=f"Task {task_id}", box=box.ROUNDED, padding=(1, 2)))
+
+    stdout_block = _tail_lines(status.get("stdout") or "")
+    stderr_block = _tail_lines(status.get("stderr") or "")
+
+    console.print(
+        Panel(
+            stdout_block or "[dim]No stdout yet[/dim]",
+            title="stdout (latest)",
+            box=box.SIMPLE,
+            padding=(1, 2),
+        )
+    )
+    console.print(
+        Panel(
+            stderr_block or "[dim]No stderr yet[/dim]",
+            title="stderr (latest)",
+            box=box.SIMPLE,
+            padding=(1, 2),
+        )
+    )
+    return True
+
+
+def _handle(ui, args: str) -> bool:
+    parts = args.split()
+    if not parts:
+        return _list_tasks(ui)
+
+    command = parts[0].lower()
+    if command in {"kill", "stop"}:
+        if len(parts) < 2:
+            ui.console.print("[red]Usage: /tasks kill <task_id>[/red]")
+            return True
+        return _kill_task(ui, parts[1])
+
+    if command in {"show", "info", "view"}:
+        if len(parts) < 2:
+            ui.console.print("[red]Usage: /tasks show <task_id>[/red]")
+            return True
+        return _show_task(ui, parts[1])
+
+    ui.console.print("[red]Unknown subcommand. Use /tasks, /tasks show <id>, or /tasks kill <id>.[/red]")
     return True
 
 
 command = SlashCommand(
     name="tasks",
-    description="Show background tasks started with run_in_background",
+    description="List, inspect, and manage background tasks started with run_in_background",
     handler=_handle,
 )
 
