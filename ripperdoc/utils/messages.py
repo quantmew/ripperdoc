@@ -73,12 +73,13 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
             args_str = json.dumps(args)
         except Exception:
             args_str = "{}"
+        tool_call_id = getattr(block, "id", None) or getattr(block, "tool_use_id", "") or str(uuid4())
         return {
             "role": "assistant",
             "content": None,
             "tool_calls": [
                 {
-                    "id": getattr(block, "id", None) or getattr(block, "tool_use_id", "") or "",
+                    "id": tool_call_id,
                     "type": "function",
                     "function": {
                         "name": getattr(block, "name", None) or "",
@@ -89,9 +90,13 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
         }
     if block_type == "tool_result":
         # OpenAI expects role=tool messages after a tool call
+        tool_call_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None) or ""
+        if not tool_call_id:
+            logger.debug("[_content_block_to_openai] Skipping tool_result without tool_call_id")
+            return {}
         return {
             "role": "tool",
-            "tool_call_id": getattr(block, "tool_use_id", None) or getattr(block, "id", None) or "",
+            "tool_call_id": tool_call_id,
             "content": getattr(block, "text", None) or getattr(block, "content", None) or "",
         }
     # Fallback text message
@@ -248,7 +253,25 @@ def normalize_messages_for_api(
     tool_results_seen = 0
     tool_uses_seen = 0
 
-    for msg in messages:
+    # Precompute tool_result positions so we can drop dangling tool_calls that
+    # lack a following tool response (which OpenAI rejects).
+    tool_result_positions: Dict[str, int] = {}
+    skipped_tool_uses_no_result = 0
+    skipped_tool_uses_no_id = 0
+    if protocol == "openai":
+        for idx, msg in enumerate(messages):
+            if getattr(msg, "type", "") != "user":
+                continue
+            content = getattr(getattr(msg, "message", None), "content", None)
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if getattr(block, "type", None) == "tool_result":
+                    tool_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
+                    if tool_id and tool_id not in tool_result_positions:
+                        tool_result_positions[tool_id] = idx
+
+    for msg_index, msg in enumerate(messages):
         if msg.type == "progress":
             # Skip progress messages
             continue
@@ -286,12 +309,43 @@ def normalize_messages_for_api(
             if isinstance(asst_msg.message.content, list):
                 if protocol == "openai":
                     openai_msgs: List[Dict[str, Any]] = []
+                    tool_calls: List[Dict[str, Any]] = []
+                    text_parts: List[str] = []
                     for block in asst_msg.message.content:
                         if getattr(block, "type", None) == "tool_use":
                             tool_uses_seen += 1
-                        mapped = _content_block_to_openai(block)
-                        if mapped:
-                            openai_msgs.append(mapped)
+                            tool_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
+                            if not tool_id:
+                                skipped_tool_uses_no_id += 1
+                                continue
+                            # Skip tool_use blocks that are not followed by a tool_result
+                            result_pos = tool_result_positions.get(tool_id)
+                            if result_pos is None:
+                                skipped_tool_uses_no_result += 1
+                                continue
+                            if result_pos <= msg_index:
+                                skipped_tool_uses_no_result += 1
+                                continue
+                            mapped = _content_block_to_openai(block)
+                            if mapped.get("tool_calls"):
+                                tool_calls.extend(mapped["tool_calls"])
+                        elif getattr(block, "type", None) == "text":
+                            text_parts.append(getattr(block, "text", "") or "")
+                        else:
+                            mapped = _content_block_to_openai(block)
+                            if mapped:
+                                openai_msgs.append(mapped)
+                    if text_parts:
+                        openai_msgs.append({
+                            "role": "assistant",
+                            "content": "\n".join(text_parts)
+                        })
+                    if tool_calls:
+                        openai_msgs.append({
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": tool_calls,
+                        })
                     normalized.extend(openai_msgs)
                     continue
                 api_blocks = []
@@ -312,7 +366,10 @@ def normalize_messages_for_api(
     logger.debug(
         f"[normalize_messages_for_api] protocol={protocol} input_msgs={len(messages)} "
         f"normalized={len(normalized)} tool_results_seen={tool_results_seen} "
-        f"tool_uses_seen={tool_uses_seen}"
+        f"tool_uses_seen={tool_uses_seen} "
+        f"tool_result_positions={len(tool_result_positions)} "
+        f"skipped_tool_uses_no_result={skipped_tool_uses_no_result} "
+        f"skipped_tool_uses_no_id={skipped_tool_uses_no_id}"
     )
     return normalized
 

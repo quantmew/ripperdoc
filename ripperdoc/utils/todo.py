@@ -192,7 +192,4 @@ def format_todo_lines(todos: Sequence[TodoItem]) -> List[str]:
         "in_progress": "◐",
         "pending": "○",
     }
-    return [
-        f"{status_marker.get(todo.status, '○')} [{todo.status}|{todo.priority}] {todo.content} (id: {todo.id})"
-        for todo in todos
-    ]
+    return [f"{status_marker.get(todo.status, '○')} {todo.content}" for todo in todos]

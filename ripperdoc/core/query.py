@@ -138,6 +138,22 @@ async def query_llm(
         protocol=protocol,
     )
 
+    if protocol == "openai":
+        summary_parts = []
+        for idx, m in enumerate(normalized_messages):
+            role = m.get("role")
+            tool_calls = m.get("tool_calls")
+            tc_ids = []
+            if tool_calls:
+                tc_ids = [tc.get("id") for tc in tool_calls]
+            tool_call_id = m.get("tool_call_id")
+            summary_parts.append(
+                f"{idx}:{role}"
+                + (f" tool_calls={tc_ids}" if tc_ids else "")
+                + (f" tool_call_id={tool_call_id}" if tool_call_id else "")
+            )
+        logger.debug(f"[query_llm] OpenAI normalized messages: {' | '.join(summary_parts)}")
+
     logger.debug(
         f"[query_llm] Sending {len(normalized_messages)} messages to model pointer "
         f"'{model}' with {len(tools)} tool schemas; "
