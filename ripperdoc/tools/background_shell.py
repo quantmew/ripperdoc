@@ -6,6 +6,7 @@ via the KillBash tool.
 """
 
 import asyncio
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -36,6 +37,48 @@ class BackgroundTask:
 
 
 _tasks: Dict[str, BackgroundTask] = {}
+_tasks_lock = threading.Lock()
+_background_loop: Optional[asyncio.AbstractEventLoop] = None
+_background_thread: Optional[threading.Thread] = None
+_loop_lock = threading.Lock()
+
+
+def _ensure_background_loop() -> asyncio.AbstractEventLoop:
+    """Create (or return) a dedicated loop for background processes."""
+    global _background_loop, _background_thread
+
+    if _background_loop and _background_loop.is_running():
+        return _background_loop
+
+    with _loop_lock:
+        if _background_loop and _background_loop.is_running():
+            return _background_loop
+
+        loop = asyncio.new_event_loop()
+        ready = threading.Event()
+
+        def _run_loop() -> None:
+            asyncio.set_event_loop(loop)
+            ready.set()
+            loop.run_forever()
+
+        thread = threading.Thread(
+            target=_run_loop,
+            name="ripperdoc-bg-loop",
+            daemon=True,
+        )
+        thread.start()
+        ready.wait()
+
+        _background_loop = loop
+        _background_thread = thread
+        return loop
+
+
+def _submit_to_background_loop(coro) -> asyncio.Future:
+    """Run a coroutine on the background loop and return a thread-safe future."""
+    loop = _ensure_background_loop()
+    return asyncio.run_coroutine_threadsafe(coro, loop)
 
 
 async def _pump_stream(stream: asyncio.StreamReader, sink: List[str]) -> None:
@@ -45,10 +88,12 @@ async def _pump_stream(stream: asyncio.StreamReader, sink: List[str]) -> None:
             chunk = await stream.read(4096)
             if not chunk:
                 break
-            sink.append(chunk.decode("utf-8", errors="replace"))
-    except Exception:
+            text = chunk.decode("utf-8", errors="replace")
+            with _tasks_lock:
+                sink.append(text)
+    except Exception as exc:
         # Best effort; ignore stream read errors to avoid leaking tasks.
-        pass
+        logger.debug(f"Stream pump error for background task: {exc}")
 
 
 async def _monitor_task(task: BackgroundTask) -> None:
@@ -58,16 +103,22 @@ async def _monitor_task(task: BackgroundTask) -> None:
             await asyncio.wait_for(task.process.wait(), timeout=task.timeout)
         else:
             await task.process.wait()
-        task.exit_code = task.process.returncode
+        with _tasks_lock:
+            task.exit_code = task.process.returncode
     except asyncio.TimeoutError:
         logger.warning(f"Background task {task.id} timed out after {task.timeout}s: {task.command}")
-        task.timed_out = True
+        with _tasks_lock:
+            task.timed_out = True
         task.process.kill()
         await task.process.wait()
-        task.exit_code = -1
+        with _tasks_lock:
+            task.exit_code = -1
+    except asyncio.CancelledError:
+        return
     except Exception as exc:
         logger.error(f"Error monitoring background task {task.id}: {exc}")
-        task.exit_code = -1
+        with _tasks_lock:
+            task.exit_code = -1
     finally:
         # Ensure readers are finished before marking done.
         for reader in task.reader_tasks:
@@ -76,8 +127,8 @@ async def _monitor_task(task: BackgroundTask) -> None:
         task.done_event.set()
 
 
-async def start_background_command(command: str, timeout: Optional[float] = None) -> str:
-    """Launch a background shell command and return its task id."""
+async def _start_background_command(command: str, timeout: Optional[float] = None) -> str:
+    """Launch a background shell command on the dedicated loop."""
     process = await asyncio.create_subprocess_shell(
         command,
         stdout=asyncio.subprocess.PIPE,
@@ -90,10 +141,11 @@ async def start_background_command(command: str, timeout: Optional[float] = None
         id=task_id,
         command=command,
         process=process,
-        start_time=asyncio.get_running_loop().time(),
+        start_time=_loop_time(),
         timeout=timeout,
     )
-    _tasks[task_id] = record
+    with _tasks_lock:
+        _tasks[task_id] = record
 
     # Start stream pumps and monitor task.
     if process.stdout:
@@ -103,6 +155,12 @@ async def start_background_command(command: str, timeout: Optional[float] = None
     asyncio.create_task(_monitor_task(record))
 
     return task_id
+
+
+async def start_background_command(command: str, timeout: Optional[float] = None) -> str:
+    """Launch a background shell command and return its task id."""
+    future = _submit_to_background_loop(_start_background_command(command, timeout))
+    return await asyncio.wrap_future(future)
 
 
 def _compute_status(task: BackgroundTask) -> str:
@@ -121,10 +179,7 @@ def _loop_time() -> float:
     try:
         return asyncio.get_running_loop().time()
     except RuntimeError:
-        try:
-            return asyncio.get_event_loop().time()
-        except Exception:
-            return time.monotonic()
+        return time.monotonic()
 
 
 def get_background_status(task_id: str, consume: bool = True) -> dict:
@@ -132,49 +187,57 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
 
     If consume is True, buffered stdout/stderr are cleared after reading.
     """
-    if task_id not in _tasks:
-        raise KeyError(f"No background task found with id '{task_id}'")
+    with _tasks_lock:
+        if task_id not in _tasks:
+            raise KeyError(f"No background task found with id '{task_id}'")
 
-    task = _tasks[task_id]
-    stdout = "".join(task.stdout_chunks)
-    stderr = "".join(task.stderr_chunks)
+        task = _tasks[task_id]
+        stdout = "".join(task.stdout_chunks)
+        stderr = "".join(task.stderr_chunks)
 
-    if consume:
-        task.stdout_chunks.clear()
-        task.stderr_chunks.clear()
+        if consume:
+            task.stdout_chunks.clear()
+            task.stderr_chunks.clear()
 
-    return {
-        "id": task.id,
-        "command": task.command,
-        "status": _compute_status(task),
-        "stdout": stdout,
-        "stderr": stderr,
-        "exit_code": task.exit_code,
-        "timed_out": task.timed_out,
-        "killed": task.killed,
-        "duration_ms": (_loop_time() - task.start_time) * 1000.0,
-    }
+        return {
+            "id": task.id,
+            "command": task.command,
+            "status": _compute_status(task),
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": task.exit_code,
+            "timed_out": task.timed_out,
+            "killed": task.killed,
+            "duration_ms": (_loop_time() - task.start_time) * 1000.0,
+        }
 
 
 async def kill_background_task(task_id: str) -> bool:
     """Attempt to kill a running background task."""
-    task = _tasks.get(task_id)
-    if not task:
-        return False
+    async def _kill(task_id: str) -> bool:
+        with _tasks_lock:
+            task = _tasks.get(task_id)
+            if not task:
+                return False
 
-    if task.exit_code is not None:
-        return False
+            if task.exit_code is not None:
+                return False
 
-    try:
-        task.killed = True
-        task.process.kill()
-        await task.process.wait()
-        task.exit_code = task.process.returncode or -1
-        return True
-    finally:
-        task.done_event.set()
+        try:
+            task.killed = True
+            task.process.kill()
+            await task.process.wait()
+            with _tasks_lock:
+                task.exit_code = task.process.returncode or -1
+            return True
+        finally:
+            task.done_event.set()
+
+    future = _submit_to_background_loop(_kill(task_id))
+    return await asyncio.wrap_future(future)
 
 
 def list_background_tasks() -> List[str]:
     """Return known background task ids."""
-    return list(_tasks.keys())
+    with _tasks_lock:
+        return list(_tasks.keys())

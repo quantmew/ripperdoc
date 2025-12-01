@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.path_utils import project_storage_dir
+
+
+logger = get_logger()
 
 TodoStatus = Literal["pending", "in_progress", "completed"]
 TodoPriority = Literal["high", "medium", "low"]
@@ -77,14 +81,16 @@ def load_todos(project_root: Optional[Path] = None) -> List[TodoItem]:
 
     try:
         raw = json.loads(path.read_text())
-    except Exception:
+    except Exception as exc:
+        logger.error(f"Failed to load todos from {path}: {exc}")
         return []
 
     todos: List[TodoItem] = []
     for item in raw:
         try:
             todos.append(TodoItem(**item))
-        except ValidationError:
+        except ValidationError as exc:
+            logger.error(f"Failed to parse todo item: {exc}")
             continue
 
     # Preserve stored order; do not reorder based on status/priority.

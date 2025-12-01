@@ -12,6 +12,7 @@ from anthropic.types import Message as APIMessage, ToolUseBlock
 from openai import AsyncOpenAI
 
 from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     Message, MessageContent, UserMessage, AssistantMessage, ProgressMessage,
     create_user_message, create_assistant_message, create_progress_message,
@@ -23,6 +24,9 @@ from ripperdoc.core.config import get_global_config, ModelProfile, ProviderType
 from ripperdoc.utils.session_usage import record_usage
 
 import time
+
+
+logger = get_logger()
 
 
 def _safe_int(value: Any) -> int:
@@ -257,6 +261,7 @@ async def query_llm(
 
     except Exception as e:
         # Return error message
+        logger.error(f"Error querying AI model: {e}")
         duration_ms = (time.time() - start_time) * 1000
         error_msg = create_assistant_message(
             content=f"Error querying AI model: {str(e)}",
@@ -324,8 +329,9 @@ async def query(
                 return response.strip().lower() in ("y", "yes"), None
 
             return True, None
-        except Exception:
+        except Exception as exc:
             # Fail closed on any errors
+            logger.error(f"Error checking permissions for tool '{tool.name}': {exc}")
             return False, None
 
     # Build full system prompt with context
@@ -455,6 +461,7 @@ async def query(
 
         except Exception as e:
             # Tool execution failed
+            logger.error(f"Error executing tool '{tool_name}': {e}")
             error_msg = create_user_message([{
                 "type": "tool_result",
                 "tool_use_id": tool_id,

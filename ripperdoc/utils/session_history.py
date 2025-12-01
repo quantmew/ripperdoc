@@ -8,12 +8,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
     ProgressMessage,
     UserMessage,
 )
 from ripperdoc.utils.path_utils import project_storage_dir
+
+
+logger = get_logger()
 
 ConversationMessage = UserMessage | AssistantMessage | ProgressMessage
 
@@ -97,9 +101,11 @@ class SessionHistory:
                         msg_uuid = payload.get("uuid")
                         if isinstance(msg_uuid, str):
                             self._seen_ids.add(msg_uuid)
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug(f"Failed to parse session history line: {exc}")
                         continue
-        except Exception:
+        except Exception as exc:
+            logger.error(f"Failed to load seen IDs from session {self.session_id}: {exc}")
             return
 
     def append(self, message: ConversationMessage) -> None:
@@ -122,8 +128,9 @@ class SessionHistory:
                 fh.write("\n")
             if isinstance(msg_uuid, str):
                 self._seen_ids.add(msg_uuid)
-        except Exception:
+        except Exception as exc:
             # Avoid crashing the UI if logging fails
+            logger.error(f"Failed to append message to session {self.session_id}: {exc}")
             return
 
 
@@ -138,7 +145,8 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
         try:
             with jsonl_path.open("r", encoding="utf-8") as fh:
                 messages = [json.loads(line) for line in fh if line.strip()]
-        except Exception:
+        except Exception as exc:
+            logger.error(f"Failed to load session summary from {jsonl_path}: {exc}")
             continue
 
         payloads = [entry.get("payload") or {} for entry in messages]
@@ -188,9 +196,11 @@ def load_session_messages(project_path: Path, session_id: str) -> List[Conversat
                     msg = _deserialize_message(payload)
                     if msg is not None and getattr(msg, "type", None) != "progress":
                         messages.append(msg)
-                except Exception:
+                except Exception as exc:
+                    logger.debug(f"Failed to deserialize message in session {session_id}: {exc}")
                     continue
-    except Exception:
+    except Exception as exc:
+        logger.error(f"Failed to load session messages for {session_id}: {exc}")
         return []
 
     return messages

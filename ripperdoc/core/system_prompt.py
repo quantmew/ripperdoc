@@ -9,6 +9,10 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from ripperdoc.core.agents import clear_agent_cache, load_agent_definitions, summarize_agent
 from ripperdoc.core.tool import Tool
+from ripperdoc.utils.log import get_logger
+
+
+logger = get_logger()
 
 APP_NAME = "Ripperdoc"
 DEFENSIVE_SECURITY_GUIDELINE = (
@@ -262,7 +266,8 @@ def build_system_prompt(
 
                     Provide detailed prompts so the agent can work autonomously and return a concise report."""
                 ).strip()
-        except Exception:
+        except Exception as exc:
+            logger.error(f"Failed to load agent definitions: {exc}")
             agent_section = "# Subagents\nTask tool available, but agent definitions could not be loaded."
 
     code_references = dedent(

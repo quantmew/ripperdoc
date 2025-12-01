@@ -10,6 +10,11 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
+from ripperdoc.utils.log import get_logger
+
+
+logger = get_logger()
+
 
 AGENT_DIR_NAME = "agents"
 
@@ -104,6 +109,7 @@ def _split_frontmatter(raw_text: str) -> Tuple[Dict[str, object], str]:
                 try:
                     frontmatter = yaml.safe_load(frontmatter_text) or {}
                 except Exception as exc:  # pragma: no cover - defensive
+                    logger.error(f"Invalid frontmatter in agent file: {exc}")
                     return {"__error__": f"Invalid frontmatter: {exc}"}, body
                 return frontmatter, body
     return {}, raw_text
@@ -128,6 +134,7 @@ def _parse_agent_file(path: Path, location: AgentLocation) -> Tuple[Optional[Age
     try:
         text = path.read_text(encoding="utf-8")
     except Exception as exc:
+        logger.error(f"Failed to read agent file {path}: {exc}")
         return None, f"Failed to read agent file {path}: {exc}"
 
     frontmatter, body = _split_frontmatter(text)
