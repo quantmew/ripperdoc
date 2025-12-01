@@ -2,6 +2,7 @@
 
 import logging
 import sys
+import os
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -12,11 +13,13 @@ class RipperdocLogger:
 
     def __init__(self, name: str = "ripperdoc", log_dir: Optional[Path] = None):
         self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.INFO)
+        level_name = os.getenv("RIPPERDOC_LOG_LEVEL", "WARNING").upper()
+        level = getattr(logging, level_name, logging.WARNING)
+        self.logger.setLevel(level)
 
         # Console handler
         console_handler = logging.StreamHandler(sys.stderr)
-        console_handler.setLevel(logging.WARNING)
+        console_handler.setLevel(level)
         console_formatter = logging.Formatter(
             '%(levelname)s: %(message)s'
         )

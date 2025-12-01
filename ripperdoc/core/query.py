@@ -96,7 +96,7 @@ class QueryContext:
 
 
 async def query_llm(
-    messages: List[Dict[str, Any]],
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
     system_prompt: str,
     tools: List[Tool[Any, Any]],
     max_thinking_tokens: int = 0,
@@ -131,6 +131,19 @@ async def query_llm(
     if not model_profile:
         raise ValueError(f"No model profile found for pointer: {model}")
 
+    # Normalize messages based on provider (Anthropic allows tool blocks; others prefer text-only)
+    protocol = "anthropic" if model_profile.provider == ProviderType.ANTHROPIC else "openai"
+    normalized_messages = normalize_messages_for_api(
+        messages,
+        protocol=protocol,
+    )
+
+    logger.debug(
+        f"[query_llm] Sending {len(normalized_messages)} messages to model pointer "
+        f"'{model}' with {len(tools)} tool schemas; "
+        f"max_thinking_tokens={max_thinking_tokens} protocol={protocol}"
+    )
+
     # Make the API call
     start_time = time.time()
 
@@ -152,7 +165,7 @@ async def query_llm(
                     model=model_profile.model,
                     max_tokens=model_profile.max_tokens,
                     system=system_prompt,
-                    messages=messages,
+                    messages=normalized_messages,
                     tools=tool_schemas if tool_schemas else None,  # type: ignore
                     temperature=model_profile.temperature
                 )
@@ -210,7 +223,7 @@ async def query_llm(
                     })
 
                 # Prepare messages for OpenAI format
-                openai_messages = [{"role": "system", "content": system_prompt}] + messages
+                openai_messages = [{"role": "system", "content": system_prompt}] + normalized_messages
 
                 # Make the API call
                 response = await client.chat.completions.create(
@@ -340,11 +353,8 @@ async def query(
         context_str = "\n".join(f"{k}: {v}" for k, v in context.items())
         full_system_prompt = f"{system_prompt}\n\nContext:\n{context_str}"
 
-    # Get assistant response
-    normalized_messages = normalize_messages_for_api(messages)
-
     assistant_message = await query_llm(
-        normalized_messages,
+        messages,
         full_system_prompt,
         query_context.tools,
         query_context.max_thinking_tokens,
@@ -359,6 +369,18 @@ async def query(
 
     yield assistant_message
 
+    tool_block_count = 0
+    if isinstance(assistant_message.message.content, list):
+        tool_block_count = sum(
+            1 for block in assistant_message.message.content
+            if hasattr(block, 'type') and block.type == "tool_use"
+        )
+    logger.debug(
+        f"[query] Assistant message received: "
+        f"text_blocks={len(assistant_message.message.content) if isinstance(assistant_message.message.content, list) else 1}, "
+        f"tool_use_blocks={tool_block_count}"
+    )
+
     # Check for tool use
     tool_use_blocks = []
     if isinstance(assistant_message.message.content, list):
@@ -371,10 +393,13 @@ async def query(
 
     # If no tool use, we're done
     if not tool_use_blocks:
+        logger.debug("[query] No tool_use blocks; returning response to user.")
         return
 
     # Execute tools
     tool_results: List[UserMessage] = []
+
+    logger.debug(f"[query] Executing {len(tool_use_blocks)} tool_use block(s).")
 
     for tool_use in tool_use_blocks:
         tool_name = tool_use.name
@@ -386,6 +411,7 @@ async def query(
 
         if not tool:
             # Tool not found
+            logger.warning(f"[query] Tool '{tool_name}' not found for tool_use_id={tool_id}")
             result_msg = create_user_message([{
                 "type": "tool_result",
                 "tool_use_id": tool_id,
@@ -406,10 +432,17 @@ async def query(
         try:
             # Parse input using tool's schema
             parsed_input = tool.input_schema(**tool_input)
+            logger.debug(
+                f"[query] tool_use_id={tool_id} name={tool_name} parsed_input="
+                f"{str(parsed_input)[:500]}"
+            )
 
             # Validate input before execution
             validation = await tool.validate_input(parsed_input, tool_context)
             if not validation.result:
+                logger.debug(
+                    f"[query] Validation failed for tool_use_id={tool_id}: {validation.message}"
+                )
                 result_msg = create_user_message([{
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -424,6 +457,9 @@ async def query(
             if query_context.safe_mode or can_use_tool_fn is not None:
                 allowed, denial_message = await _check_permissions(tool, parsed_input)
                 if not allowed:
+                    logger.debug(
+                        f"[query] Permission denied for tool_use_id={tool_id}: {denial_message}"
+                    )
                     denial_text = denial_message or f"Permission denied for tool '{tool_name}'."
                     result_msg = create_user_message([{
                         "type": "tool_result",
@@ -448,6 +484,9 @@ async def query(
                         content=output.content
                     )
                     yield progress
+                    logger.debug(
+                        f"[query] Progress from tool_use_id={tool_id}: {output.content}"
+                    )
                 elif isinstance(output, ToolResult):
                     # Tool completed
                     result_content = output.result_for_assistant or str(output.data)
@@ -458,6 +497,10 @@ async def query(
                     }], tool_use_result=output.data)
                     tool_results.append(result_msg)
                     yield result_msg
+                    logger.debug(
+                        f"[query] Tool completed tool_use_id={tool_id} name={tool_name} "
+                        f"result_len={len(result_content)}"
+                    )
 
         except Exception as e:
             # Tool execution failed
@@ -478,6 +521,10 @@ async def query(
 
     # Continue conversation with tool results
     new_messages = messages + [assistant_message] + tool_results
+    logger.debug(
+        f"[query] Recursing with {len(new_messages)} messages after tools; "
+        f"tool_results_count={len(tool_results)}"
+    )
 
     async for msg in query(
         new_messages,
