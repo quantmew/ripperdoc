@@ -1,5 +1,7 @@
 import asyncio
 
+from rich.markup import escape
+
 from ripperdoc.utils.mcp import load_mcp_servers_async, shutdown_mcp_runtime
 
 from .base import SlashCommand
@@ -21,28 +23,28 @@ def _handle(ui, _: str) -> bool:
     for server in servers:
         status = server.status or "unknown"
         url_part = f" ({server.url})" if server.url else ""
-        ui.console.print(f"- {server.name}{url_part} — {status}")
+        ui.console.print(f"- {server.name}{url_part} — {status}", markup=False)
         if server.command:
             cmd_line = " ".join([server.command, *server.args]) if server.args else server.command
-            ui.console.print(f"    Command: {cmd_line}")
+            ui.console.print(f"    Command: {cmd_line}", markup=False)
         if server.description:
-            ui.console.print(f"    {server.description}")
+            ui.console.print(f"    {server.description}", markup=False)
         if server.error:
-            ui.console.print(f"    [red]Error:[/red] {server.error}")
+            ui.console.print(f"    [red]Error:[/red] {escape(str(server.error))}")
         if server.instructions:
             snippet = server.instructions.strip()
             if len(snippet) > 160:
                 snippet = snippet[:157] + "..."
-            ui.console.print(f"    Instructions: {snippet}")
+            ui.console.print(f"    Instructions: {snippet}", markup=False)
         if server.tools:
             ui.console.print("    Tools:")
             for tool in server.tools:
                 desc = f" — {tool.description}" if tool.description else ""
-                ui.console.print(f"      • {tool.name}{desc}")
+                ui.console.print(f"      • {tool.name}{desc}", markup=False)
         else:
             ui.console.print("    Tools: none discovered")
         if server.resources:
-            ui.console.print("    Resources: " + ", ".join(res.uri for res in server.resources))
+            ui.console.print("    Resources: " + ", ".join(res.uri for res in server.resources), markup=False)
         elif not server.tools:
             ui.console.print("    Resources: none")
     return True

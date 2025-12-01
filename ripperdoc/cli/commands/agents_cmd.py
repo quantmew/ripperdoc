@@ -1,3 +1,5 @@
+from rich.markup import escape
+
 from ripperdoc.core.agents import (
     AGENT_DIR_NAME,
     AgentLocation,
@@ -82,9 +84,11 @@ def _handle(ui, trimmed_arg: str) -> bool:
                 location=location,
                 model=model_input,
             )
-            console.print(f"[green]✓ Agent '{agent_name}' created at {path}[/green]")
+            console.print(
+                f"[green]✓ Agent '{escape(agent_name)}' created at {escape(str(path))}[/green]"
+            )
         except Exception as exc:
-            console.print(f"[red]Failed to create agent: {exc}[/red]")
+            console.print(f"[red]Failed to create agent: {escape(str(exc))}[/red]")
             print_agents_usage()
         return True
 
@@ -101,11 +105,13 @@ def _handle(ui, trimmed_arg: str) -> bool:
         location = AgentLocation.PROJECT if location_raw == "project" else AgentLocation.USER
         try:
             path = delete_agent_definition(agent_name, location)
-            console.print(f"[green]✓ Deleted agent '{agent_name}' at {path}[/green]")
+            console.print(
+                f"[green]✓ Deleted agent '{escape(agent_name)}' at {escape(str(path))}[/green]"
+            )
         except FileNotFoundError as exc:
-            console.print(f"[yellow]{exc}[/yellow]")
+            console.print(f"[yellow]{escape(str(exc))}[/yellow]")
         except Exception as exc:
-            console.print(f"[red]Failed to delete agent: {exc}[/red]")
+            console.print(f"[red]Failed to delete agent: {escape(str(exc))}[/red]")
             print_agents_usage()
         return True
 
@@ -119,7 +125,7 @@ def _handle(ui, trimmed_arg: str) -> bool:
         agents = load_agent_definitions()
         target_agent = next((a for a in agents.active_agents if a.agent_type == agent_name), None)
         if not target_agent:
-            console.print(f"[red]Agent '{agent_name}' not found.[/red]")
+            console.print(f"[red]Agent '{escape(agent_name)}' not found.[/red]")
             print_agents_usage()
             return True
         if target_agent.location == AgentLocation.BUILT_IN:
@@ -143,7 +149,7 @@ def _handle(ui, trimmed_arg: str) -> bool:
         tools = [t.strip() for t in tools_input.split(",") if t.strip()] or ["*"]
 
         console.print("[dim]Current system prompt:[/dim]")
-        console.print(target_agent.system_prompt or "(empty)")
+        console.print(escape(target_agent.system_prompt or "(empty)"), markup=False)
         system_prompt = console.input(
             "System prompt (single line, use \\n for newlines) "
             "[Enter to keep current]: "
@@ -166,9 +172,11 @@ def _handle(ui, trimmed_arg: str) -> bool:
                 model=model_input,
                 overwrite=True,
             )
-            console.print(f"[green]✓ Agent '{agent_name}' updated at {path}[/green]")
+            console.print(
+                f"[green]✓ Agent '{escape(agent_name)}' updated at {escape(str(path))}[/green]"
+            )
         except Exception as exc:
-            console.print(f"[red]Failed to update agent: {exc}[/red]")
+            console.print(f"[red]Failed to update agent: {escape(str(exc))}[/red]")
             print_agents_usage()
         return True
 
@@ -180,14 +188,14 @@ def _handle(ui, trimmed_arg: str) -> bool:
     for agent in agents.active_agents:
         location = getattr(agent.location, "value", agent.location)
         tools = "all tools" if "*" in agent.tools else ", ".join(agent.tools)
-        console.print(f"  • {agent.agent_type} ({location})")
-        console.print(f"      {agent.when_to_use}")
-        console.print(f"      tools: {tools}")
-        console.print(f"      model: {agent.model or 'task (default)'}")
+        console.print(f"  • {escape(agent.agent_type)} ({escape(str(location))})", markup=False)
+        console.print(f"      {escape(agent.when_to_use)}", markup=False)
+        console.print(f"      tools: {escape(tools)}", markup=False)
+        console.print(f"      model: {escape(agent.model or 'task (default)')}", markup=False)
     if agents.failed_files:
         console.print("[yellow]Some agent files could not be loaded:[/yellow]")
         for path, error in agents.failed_files:
-            console.print(f"  - {path}: {error}")
+            console.print(f"  - {escape(str(path))}: {escape(str(error))}", markup=False)
     console.print(
         f"[dim]Add agents in ~/.ripperdoc/{AGENT_DIR_NAME} or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
     )

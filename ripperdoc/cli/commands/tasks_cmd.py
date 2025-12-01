@@ -6,6 +6,7 @@ import textwrap
 from rich import box
 from rich.panel import Panel
 from rich.table import Table
+from rich.markup import escape
 
 from ripperdoc.tools.background_shell import (
     get_background_status,
@@ -98,15 +99,15 @@ def _list_tasks(ui) -> bool:
         try:
             status = get_background_status(task_id, consume=False)
         except Exception as exc:
-            table.add_row(task_id, "[red]error[/]", str(exc), "-")
+            table.add_row(escape(task_id), "[red]error[/]", escape(str(exc)), "-")
             continue
 
         command = status.get("command") or ""
         command_display = textwrap.shorten(command, width=80, placeholder="...")
         table.add_row(
-            task_id,
+            escape(task_id),
             _format_status(status),
-            command_display,
+            escape(command_display),
             _format_duration(status.get("duration_ms")),
         )
 
@@ -129,26 +130,30 @@ def _kill_task(ui, task_id: str) -> bool:
     try:
         status = get_background_status(task_id, consume=False)
     except KeyError:
-        console.print(f"[red]No task found with id '{task_id}'.[/red]")
+        console.print(f"[red]No task found with id '{escape(task_id)}'.[/red]")
         return True
     except Exception as exc:
-        console.print(f"[red]Failed to read task '{task_id}': {exc}[/red]")
+        console.print(f"[red]Failed to read task '{escape(task_id)}': {escape(str(exc))}[/red]")
         return True
 
     if status.get("status") != "running":
-        console.print(f"[yellow]Task {task_id} is not running (status: {status.get('status')}).[/yellow]")
+        console.print(
+            f"[yellow]Task {escape(task_id)} is not running (status: {escape(str(status.get('status')))}).[/yellow]"
+        )
         return True
 
     try:
         killed = asyncio.run(kill_background_task(task_id))
     except Exception as exc:
-        console.print(f"[red]Error stopping task {task_id}: {exc}[/red]")
+        console.print(f"[red]Error stopping task {escape(task_id)}: {escape(str(exc))}[/red]")
         return True
 
     if killed:
-        console.print(f"[green]Killed task {task_id}[/green] — {status.get('command')}")
+        console.print(
+            f"[green]Killed task {escape(task_id)}[/green] — {escape(status.get('command') or '')}",
+        )
     else:
-        console.print(f"[red]Failed to kill task {task_id}[/red]")
+        console.print(f"[red]Failed to kill task {escape(task_id)}[/red]")
     return True
 
 
@@ -157,28 +162,31 @@ def _show_task(ui, task_id: str) -> bool:
     try:
         status = get_background_status(task_id, consume=False)
     except KeyError:
-        console.print(f"[red]No task found with id '{task_id}'.[/red]")
+        console.print(f"[red]No task found with id '{escape(task_id)}'.[/red]")
         return True
     except Exception as exc:
-        console.print(f"[red]Failed to read task '{task_id}': {exc}[/red]")
+        console.print(f"[red]Failed to read task '{escape(task_id)}': {escape(str(exc))}[/red]")
         return True
 
     details = Table(box=box.SIMPLE_HEAVY, show_header=False)
-    details.add_row("ID", task_id)
+    details.add_row("ID", escape(task_id))
     details.add_row("Status", _format_status(status))
-    details.add_row("Command", status.get("command") or "")
+    details.add_row("Command", escape(status.get("command") or ""))
     details.add_row("Duration", _format_duration(status.get("duration_ms")))
     exit_code = status.get("exit_code")
     details.add_row("Exit code", str(exit_code) if exit_code is not None else "running")
 
-    console.print(Panel(details, title=f"Task {task_id}", box=box.ROUNDED, padding=(1, 2)))
+    console.print(
+        Panel(details, title=f"Task {escape(task_id)}", box=box.ROUNDED, padding=(1, 2)),
+        markup=False,
+    )
 
     stdout_block = _tail_lines(status.get("stdout") or "")
     stderr_block = _tail_lines(status.get("stderr") or "")
 
     console.print(
         Panel(
-            stdout_block or "[dim]No stdout yet[/dim]",
+            escape(stdout_block) if stdout_block else "[dim]No stdout yet[/dim]",
             title="stdout (latest)",
             box=box.SIMPLE,
             padding=(1, 2),
@@ -186,7 +194,7 @@ def _show_task(ui, task_id: str) -> bool:
     )
     console.print(
         Panel(
-            stderr_block or "[dim]No stderr yet[/dim]",
+            escape(stderr_block) if stderr_block else "[dim]No stderr yet[/dim]",
             title="stderr (latest)",
             box=box.SIMPLE,
             padding=(1, 2),

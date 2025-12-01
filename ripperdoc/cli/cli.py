@@ -33,6 +33,7 @@ from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.markup import escape
 
 console = Console()
 
@@ -118,7 +119,7 @@ async def run_query(
                 elif message.type == "progress":
                     # Print progress
                     if verbose:
-                        console.print(f"[dim]Progress: {message.content}[/dim]")
+                        console.print(f"[dim]Progress: {escape(str(message.content))}[/dim]")
 
                 # Add message to history
                 messages.append(message)
@@ -126,10 +127,10 @@ async def run_query(
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted by user[/yellow]")
         except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+            console.print(f"[red]Error: {escape(str(e))}[/red]")
             if verbose:
                 import traceback
-                console.print(traceback.format_exc())
+                console.print(traceback.format_exc(), markup=False)
     finally:
         await shutdown_mcp_runtime()
 
@@ -295,7 +296,7 @@ def main() -> None:
         console.print("\n[yellow]Interrupted[/yellow]")
         sys.exit(130)
     except Exception as e:
-        console.print(f"[red]Fatal error: {e}[/red]")
+        console.print(f"[red]Fatal error: {escape(str(e))}[/red]")
         sys.exit(1)
 
 

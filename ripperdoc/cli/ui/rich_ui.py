@@ -14,6 +14,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.text import Text
 from rich import box
+from rich.markup import escape
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -260,7 +261,7 @@ class RichUI:
             label = f"-> Launching subagent: {subagent or 'unknown'}"
             if desc:
                 label += f" — {desc}"
-            self.console.print(f"[cyan]{label}[/cyan]")
+            self.console.print(f"[cyan]{escape(label)}[/cyan]")
             return
 
         tool_name = sender if sender != "Ripperdoc" else content
@@ -271,7 +272,7 @@ class RichUI:
             tool_display += ", ".join(args_parts)
         tool_display += ")"
 
-        self.console.print(f"[dim cyan]{tool_display}[/]")
+        self.console.print(f"[dim cyan]{escape(tool_display)}[/]")
 
     def _print_tool_result(self, sender: str, content: str, tool_data: Any) -> None:
         """Render a tool result summary."""
@@ -282,9 +283,9 @@ class RichUI:
         if "Todo" in sender:
             lines = content.splitlines()
             if lines:
-                self.console.print(f"  ⎿  [dim]{lines[0]}[/]")
+                self.console.print(f"  ⎿  [dim]{escape(lines[0])}[/]")
                 for line in lines[1:]:
-                    self.console.print(f"      {line}")
+                    self.console.print(f"      {line}", markup=False)
             else:
                 self.console.print(f"  ⎿  [dim]Todo update[/]")
             return
@@ -296,7 +297,7 @@ class RichUI:
             if self.verbose:
                 preview = lines[:30]
                 for line in preview:
-                    self.console.print(line)
+                    self.console.print(line, markup=False)
                 if len(lines) > len(preview):
                     self.console.print(f"[dim]... ({len(lines) - len(preview)} more lines)[/]")
             return
@@ -312,11 +313,13 @@ class RichUI:
                     self.console.print(f"  ⎿  [dim]File updated successfully[/]")
                     return
 
-                self.console.print(f"  ⎿  [dim]Updated {file_path} with {additions} additions and {deletions} removals[/]")
+                self.console.print(
+                    f"  ⎿  [dim]Updated {escape(str(file_path))} with {additions} additions and {deletions} removals[/]"
+                )
 
                 if self.verbose:
                     for line in diff_with_line_numbers:
-                        self.console.print(line)
+                        self.console.print(line, markup=False)
             else:
                 self.console.print(f"  ⎿  [dim]File updated successfully[/]")
             return
@@ -328,7 +331,7 @@ class RichUI:
             if self.verbose:
                 for line in files[:30]:
                     if line.strip():
-                        self.console.print(f"      {line}")
+                        self.console.print(f"      {line}", markup=False)
                 if file_count > 30:
                     self.console.print(f"[dim]... ({file_count - 30} more)[/]")
             return
@@ -340,7 +343,7 @@ class RichUI:
             if self.verbose:
                 for line in matches[:30]:
                     if line.strip():
-                        self.console.print(f"      {line}")
+                        self.console.print(f"      {line}", markup=False)
                 if match_count > 30:
                     self.console.print(f"[dim]... ({match_count - 30} more)[/]")
             return
@@ -351,7 +354,7 @@ class RichUI:
             if self.verbose:
                 preview = tree_lines[:40]
                 for line in preview:
-                    self.console.print(f"      {line}")
+                    self.console.print(f"      {line}", markup=False)
                 if len(tree_lines) > len(preview):
                     self.console.print(f"[dim]... ({len(tree_lines) - len(preview)} more)[/]")
             return
@@ -389,9 +392,9 @@ class RichUI:
 
             if show_inline_stdout:
                 preview = stdout_lines if self.verbose else stdout_lines[:5]
-                self.console.print(f"  ⎿  {preview[0]}")
+                self.console.print(f"  ⎿  {preview[0]}", markup=False)
                 for line in preview[1:]:
-                    self.console.print(f"      {line}")
+                    self.console.print(f"      {line}", markup=False)
                 if not self.verbose and len(stdout_lines) > len(preview):
                     self.console.print(f"[dim]... ({len(stdout_lines) - len(preview)} more lines)[/]")
             else:
@@ -412,14 +415,14 @@ class RichUI:
                     preview = stdout_lines if self.verbose else stdout_lines[:5]
                     self.console.print("[dim]stdout:[/]")
                     for line in preview:
-                        self.console.print(f"      {line}")
+                        self.console.print(f"      {line}", markup=False)
                     if not self.verbose and len(stdout_lines) > len(preview):
                         self.console.print(f"[dim]... ({len(stdout_lines) - len(preview)} more stdout lines)[/]")
                 if stderr_lines:
                     preview = stderr_lines if self.verbose else stderr_lines[:5]
                     self.console.print("[dim]stderr:[/]")
                     for line in preview:
-                        self.console.print(f"      {line}")
+                        self.console.print(f"      {line}", markup=False)
                     if not self.verbose and len(stderr_lines) > len(preview):
                         self.console.print(f"[dim]... ({len(stderr_lines) - len(preview)} more stderr lines)[/]")
                 if not stdout_lines and not stderr_lines:
@@ -433,16 +436,16 @@ class RichUI:
         if sender == "Task" and isinstance(content, str) and content.startswith("[subagent:"):
             agent_label = content.split("]", 1)[0].replace("[subagent:", "").strip()
             summary = content.split("]", 1)[1].strip() if "]" in content else ""
-            self.console.print(f"[green]↳ Subagent {agent_label} finished[/green]")
+            self.console.print(f"[green]↳ Subagent {escape(agent_label)} finished[/green]")
             if summary:
-                self.console.print(f"    {summary}")
+                self.console.print(f"    {summary}", markup=False)
             return
-        self.console.print(f"[dim cyan][Tool] {sender}: {content}[/]")
+        self.console.print(f"[dim cyan][Tool] {escape(sender)}: {escape(content)}[/]")
 
     def _print_human_or_assistant(self, sender: str, content: str) -> None:
         """Render messages from the user or assistant."""
         if sender.lower() == "you":
-            self.console.print(f"[bold green]{sender}:[/] {content}")
+            self.console.print(f"[bold green]{escape(sender)}:[/] {escape(content)}")
             return
         self.console.print(Markdown(content))
 
@@ -741,7 +744,7 @@ class RichUI:
         trimmed_arg = " ".join(parts[1:]).strip()
         command = get_slash_command(command_name)
         if command is None:
-            self.console.print(f"[red]Unknown command: {command_name}[/red]")
+            self.console.print(f"[red]Unknown command: {escape(command_name)}[/red]")
             return True
 
         return command.handler(self, trimmed_arg)
@@ -827,7 +830,7 @@ class RichUI:
                 console.print("\n[yellow]Goodbye![/yellow]")
                 break
             except Exception as e:
-                console.print(f"[red]Error: {e}[/]")
+                console.print(f"[red]Error: {escape(str(e))}[/]")
                 if self.verbose:
                     import traceback
                     console.print(traceback.format_exc())
@@ -858,7 +861,7 @@ class RichUI:
             spinner.start()
             summary_text = await self._summarize_conversation(messages_for_summary, custom_instructions)
         except Exception as e:
-            console.print(f"[red]Error during compaction: {e}[/red]")
+            console.print(f"[red]Error during compaction: {escape(str(e))}[/red]")
             return
         finally:
             spinner.stop()

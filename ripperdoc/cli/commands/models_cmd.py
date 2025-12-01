@@ -1,6 +1,8 @@
 from getpass import getpass
 from typing import Optional
 
+from rich.markup import escape
+
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.config import (
     ModelProfile,
@@ -78,7 +80,7 @@ def _handle(ui, trimmed_arg: str) -> bool:
         try:
             provider = ProviderType(provider_input)
         except ValueError:
-            console.print(f"[red]Invalid provider: {provider_input}[/red]")
+            console.print(f"[red]Invalid provider: {escape(provider_input)}[/red]")
             print_models_usage()
             return True
 
@@ -147,11 +149,11 @@ def _handle(ui, trimmed_arg: str) -> bool:
                 set_as_main=set_as_main,
             )
         except Exception as exc:
-            console.print(f"[red]Failed to save model: {exc}[/red]")
+            console.print(f"[red]Failed to save model: {escape(str(exc))}[/red]")
             return True
 
         marker = " (main)" if set_as_main else ""
-        console.print(f"[green]✓ Model '{profile_name}' saved{marker}[/green]")
+        console.print(f"[green]✓ Model '{escape(profile_name)}' saved{marker}[/green]")
         return True
 
     if subcmd in ("edit", "update"):
@@ -169,7 +171,7 @@ def _handle(ui, trimmed_arg: str) -> bool:
         try:
             provider = ProviderType(provider_input)
         except ValueError:
-            console.print(f"[red]Invalid provider: {provider_input}[/red]")
+            console.print(f"[red]Invalid provider: {escape(provider_input)}[/red]")
             return True
 
         model_name = console.input(
@@ -225,10 +227,10 @@ def _handle(ui, trimmed_arg: str) -> bool:
                 set_as_main=False,
             )
         except Exception as exc:
-            console.print(f"[red]Failed to update model: {exc}[/red]")
+            console.print(f"[red]Failed to update model: {escape(str(exc))}[/red]")
             return True
 
-        console.print(f"[green]✓ Model '{profile_name}' updated[/green]")
+        console.print(f"[green]✓ Model '{escape(profile_name)}' updated[/green]")
         return True
 
     if subcmd in ("delete", "del", "remove"):
@@ -239,11 +241,11 @@ def _handle(ui, trimmed_arg: str) -> bool:
             return True
         try:
             delete_model_profile(target)
-            console.print(f"[green]✓ Deleted model '{target}'[/green]")
+            console.print(f"[green]✓ Deleted model '{escape(target)}'[/green]")
         except KeyError as exc:
-            console.print(f"[yellow]{exc}[/yellow]")
+            console.print(f"[yellow]{escape(str(exc))}[/yellow]")
         except Exception as exc:
-            console.print(f"[red]Failed to delete model: {exc}[/red]")
+            console.print(f"[red]Failed to delete model: {escape(str(exc))}[/red]")
             print_models_usage()
         return True
 
@@ -255,9 +257,9 @@ def _handle(ui, trimmed_arg: str) -> bool:
             return True
         try:
             set_model_pointer("main", target)
-            console.print(f"[green]✓ Main model set to '{target}'[/green]")
+            console.print(f"[green]✓ Main model set to '{escape(target)}'[/green]")
         except Exception as exc:
-            console.print(f"[red]{exc}[/red]")
+            console.print(f"[red]{escape(str(exc))}[/red]")
             print_models_usage()
         return True
 
@@ -271,19 +273,20 @@ def _handle(ui, trimmed_arg: str) -> bool:
     for name, profile in config.model_profiles.items():
         markers = [ptr for ptr, value in pointer_map.items() if value == name]
         marker_text = f" ({', '.join(markers)})" if markers else ""
-        console.print(f"  • {name}{marker_text}")
-        console.print(f"      provider: {profile.provider.value}")
-        console.print(f"      model: {profile.model}")
+        console.print(f"  • {escape(name)}{marker_text}", markup=False)
+        console.print(f"      provider: {profile.provider.value}", markup=False)
+        console.print(f"      model: {profile.model}", markup=False)
         if profile.api_base:
-            console.print(f"      api_base: {profile.api_base}")
+            console.print(f"      api_base: {profile.api_base}", markup=False)
         if profile.context_window:
-            console.print(f"      context: {profile.context_window} tokens")
+            console.print(f"      context: {profile.context_window} tokens", markup=False)
         console.print(
-            f"      max_tokens: {profile.max_tokens}, temperature: {profile.temperature}"
+            f"      max_tokens: {profile.max_tokens}, temperature: {profile.temperature}",
+            markup=False,
         )
-        console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}")
+        console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}", markup=False)
     pointer_labels = ", ".join(f"{p}->{v or '-'}" for p, v in pointer_map.items())
-    console.print(f"[dim]Pointers: {pointer_labels}[/dim]")
+    console.print(f"[dim]Pointers: {escape(pointer_labels)}[/dim]")
     return True
 
 

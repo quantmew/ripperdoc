@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Optional
 
+from rich.markup import escape
+
 from ripperdoc.utils.session_history import (
     SessionSummary,
     list_session_summaries,
@@ -26,13 +28,15 @@ def _choose_session(ui, arg: str) -> Optional[SessionSummary]:
             idx = int(arg)
             if 0 <= idx < len(sessions):
                 return sessions[idx]
-            ui.console.print(f"[red]Invalid session index {idx}. Choose 0-{len(sessions)-1}.[/red]")
+            ui.console.print(
+                f"[red]Invalid session index {escape(str(idx))}. Choose 0-{len(sessions)-1}.[/red]"
+            )
         else:
             # Treat arg as session id if it matches.
             match = next((s for s in sessions if s.session_id.startswith(arg.strip())), None)
             if match:
                 return match
-            ui.console.print(f"[red]No session found matching '{arg}'.[/red]")
+            ui.console.print(f"[red]No session found matching '{escape(arg)}'.[/red]")
             return None
 
     ui.console.print("\n[bold]Saved sessions:[/bold]")
@@ -41,7 +45,8 @@ def _choose_session(ui, arg: str) -> Optional[SessionSummary]:
             f"  [{idx}] {summary.session_id} "
             f"({summary.message_count} messages, "
             f"{_format_time(summary.created_at)} → {_format_time(summary.updated_at)}) "
-            f"{summary.first_prompt}"
+            f"{escape(summary.first_prompt)}",
+            markup=False,
         )
 
     choice_text = ui.console.input("\nSelect a session index (Enter to cancel): ").strip()
@@ -53,7 +58,9 @@ def _choose_session(ui, arg: str) -> Optional[SessionSummary]:
 
     idx = int(choice_text)
     if idx < 0 or idx >= len(sessions):
-        ui.console.print(f"[red]Invalid session index {idx}. Choose 0-{len(sessions)-1}.[/red]")
+        ui.console.print(
+            f"[red]Invalid session index {escape(str(idx))}. Choose 0-{len(sessions)-1}.[/red]"
+        )
         return None
     return sessions[idx]
 
@@ -73,7 +80,7 @@ def _handle(ui, arg: str) -> bool:
     ui._set_session(summary.session_id)
     ui.replay_conversation(messages)
     ui.console.print(
-        f"[green]✓ Resumed session {summary.session_id} "
+        f"[green]✓ Resumed session {escape(summary.session_id)} "
         f"with {len(messages)} messages.[/green]"
     )
     return True

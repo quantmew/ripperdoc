@@ -1,6 +1,7 @@
 from typing import Optional
 
 from rich.console import Console
+from rich.markup import escape
 
 
 class Spinner:
@@ -17,7 +18,7 @@ class Spinner:
 
         if self._status is not None:
             return
-        self._status = self.console.status(f"[cyan]{self.text}[/cyan]", spinner=self.spinner)
+        self._status = self.console.status(f"[cyan]{escape(self.text)}[/cyan]", spinner=self.spinner)
         self._status.__enter__()
 
     def update(self, text: Optional[str] = None) -> None:
@@ -26,7 +27,7 @@ class Spinner:
         if self._status is None:
             return
         new_text = text if text is not None else self.text
-        self._status.update(f"[cyan]{new_text}[/cyan]")
+        self._status.update(f"[cyan]{escape(new_text)}[/cyan]")
 
     def stop(self) -> None:
         """Stop the spinner if running."""

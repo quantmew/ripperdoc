@@ -2,6 +2,7 @@
 
 from rich import box
 from rich.panel import Panel
+from rich.markup import escape
 
 from ripperdoc.utils.todo import (
     format_todo_lines,
@@ -29,15 +30,15 @@ def _handle(ui, trimmed_arg: str) -> bool:
             return True
         console.print(
             Panel(
-                f"{next_todo.content}\n[id: {next_todo.id} | {next_todo.status} | {next_todo.priority}]",
+                f"{escape(next_todo.content)}\n[id: {escape(next_todo.id)} | {escape(next_todo.status)} | {escape(next_todo.priority)}]",
                 title="Next todo",
                 box=box.ROUNDED,
             )
         )
         return True
 
-    summary = format_todo_summary(todos)
-    lines = format_todo_lines(todos)
+    summary = escape(format_todo_summary(todos))
+    lines = [escape(line) for line in format_todo_lines(todos)]
     body = "\n".join(lines)
     panel = Panel(
         body or "No todos currently tracked",
@@ -51,7 +52,7 @@ def _handle(ui, trimmed_arg: str) -> bool:
     next_todo = get_next_actionable(todos)
     if next_todo:
         console.print(
-            f"[dim]Next: {next_todo.content} (id: {next_todo.id}, status: {next_todo.status})[/dim]"
+            f"[dim]Next: {escape(next_todo.content)} (id: {escape(next_todo.id)}, status: {escape(next_todo.status)})[/dim]"
         )
     return True
 

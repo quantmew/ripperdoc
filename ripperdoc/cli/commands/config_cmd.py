@@ -1,3 +1,5 @@
+from rich.markup import escape
+
 from ripperdoc.core.config import get_global_config
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 
@@ -10,9 +12,11 @@ def _handle(ui, _: str) -> bool:
     main_pointer = getattr(config.model_pointers, "main", "default")
     model_label = profile.model if profile else "Not configured"
 
-    ui.console.print(f"\n[bold]Model (main -> {main_pointer}):[/bold] {model_label}")
-    ui.console.print(f"[bold]Safe Mode:[/bold] {ui.safe_mode}")
-    ui.console.print(f"[bold]Verbose:[/bold] {ui.verbose}")
+    ui.console.print(
+        f"\n[bold]Model (main -> {escape(str(main_pointer))}):[/bold] {escape(str(model_label))}"
+    )
+    ui.console.print(f"[bold]Safe Mode:[/bold] {escape(str(ui.safe_mode))}")
+    ui.console.print(f"[bold]Verbose:[/bold] {escape(str(ui.verbose))}")
     return True
 
 
