@@ -17,7 +17,9 @@ from ripperdoc.tools.glob_tool import GlobTool, GlobToolInput
 from ripperdoc.tools.ls_tool import LSTool, LSToolInput
 from ripperdoc.tools.bash_tool import BashTool, BashToolInput
 from ripperdoc.tools.bash_output_tool import BashOutputTool, BashOutputInput
+from ripperdoc.tools.kill_bash_tool import KillBashTool, KillBashInput
 from ripperdoc.core.tool import ToolUseContext, ToolProgress
+from ripperdoc.tools.background_shell import get_background_status
 
 
 @pytest.mark.asyncio
@@ -354,6 +356,40 @@ async def test_bash_tool_background_and_output():
 
 
 @pytest.mark.asyncio
+async def test_bash_background_stdin_detached():
+    """Background commands should not hold the controlling TTY/stdin open."""
+    bash_tool = BashTool()
+    output_tool = BashOutputTool()
+    context = ToolUseContext()
+
+    start_input = BashToolInput(
+        command='python -c "import sys; data=sys.stdin.read(); print(f\\\"len={len(data)}\\\")"',
+        run_in_background=True,
+        timeout=2000,
+    )
+
+    start_result = None
+    async for output in bash_tool.call(start_input, context):
+        start_result = output
+
+    assert start_result is not None
+    task_id = start_result.data.background_task_id
+    assert task_id
+
+    # Allow brief time for the process to exit (should not wait on stdin).
+    await asyncio.sleep(0.2)
+
+    poll_input = BashOutputInput(task_id=task_id, consume=True)
+    poll_result = None
+    async for output in output_tool.call(poll_input, context):
+        poll_result = output
+
+    assert poll_result is not None
+    assert poll_result.data.status in ("completed", "failed")
+    assert "len=0" in poll_result.data.stdout
+
+
+@pytest.mark.asyncio
 async def test_bash_tool_streaming_output():
     """BashTool should emit progress when stream_output is enabled."""
     bash_tool = BashTool()
@@ -379,3 +415,84 @@ async def test_bash_tool_streaming_output():
     assert "hi" in result.data.stdout
     assert "bye" in result.data.stdout
     assert result.data.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_kill_bash_running_task():
+    """KillBash should terminate a running background command."""
+    bash_tool = BashTool()
+    kill_tool = KillBashTool()
+    context = ToolUseContext()
+
+    start_input = BashToolInput(
+        command="python -c \"import time; time.sleep(2)\"",
+        run_in_background=True,
+        timeout=3000,
+    )
+
+    start_result = None
+    async for output in bash_tool.call(start_input, context):
+        start_result = output
+
+    assert start_result is not None
+    task_id = start_result.data.background_task_id
+    assert task_id
+
+    kill_input = KillBashInput(task_id=task_id)
+    validation = await kill_tool.validate_input(kill_input, context)
+    assert validation.result is True
+
+    kill_result = None
+    async for output in kill_tool.call(kill_input, context):
+        kill_result = output
+
+    assert kill_result is not None
+    assert kill_result.data.success is True
+    status = get_background_status(task_id, consume=False)
+    assert status["status"] == "killed"
+
+
+@pytest.mark.asyncio
+async def test_kill_bash_completed_task():
+    """Killing a completed task should report not running."""
+    bash_tool = BashTool()
+    kill_tool = KillBashTool()
+    context = ToolUseContext()
+
+    start_input = BashToolInput(
+        command="echo done",
+        run_in_background=True,
+        timeout=1000,
+    )
+
+    start_result = None
+    async for output in bash_tool.call(start_input, context):
+        start_result = output
+
+    assert start_result is not None
+    task_id = start_result.data.background_task_id
+    assert task_id
+
+    # allow completion
+    await asyncio.sleep(0.2)
+
+    kill_input = KillBashInput(task_id=task_id)
+    validation = await kill_tool.validate_input(kill_input, context)
+    assert validation.result is True
+
+    kill_result = None
+    async for output in kill_tool.call(kill_input, context):
+        kill_result = output
+
+    assert kill_result is not None
+    assert kill_result.data.success is False
+    assert "not running" in kill_result.data.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_kill_bash_validation_missing():
+    """Validation should fail for unknown task ids."""
+    kill_tool = KillBashTool()
+    context = ToolUseContext()
+    validation = await kill_tool.validate_input(KillBashInput(task_id="missing"), context)
+    assert validation.result is False

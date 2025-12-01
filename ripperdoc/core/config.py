@@ -78,6 +78,9 @@ class ProjectConfig(BaseModel):
 
     # Tool permissions
     allowed_tools: list[str] = Field(default_factory=list)
+    bash_allow_rules: list[str] = Field(default_factory=list)
+    bash_deny_rules: list[str] = Field(default_factory=list)
+    working_directories: list[str] = Field(default_factory=list)
 
     # Context
     context: Dict[str, str] = Field(default_factory=dict)

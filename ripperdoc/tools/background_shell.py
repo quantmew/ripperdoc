@@ -6,6 +6,7 @@ via the KillBash tool.
 """
 
 import asyncio
+import contextlib
 import threading
 import time
 import uuid
@@ -96,6 +97,20 @@ async def _pump_stream(stream: asyncio.StreamReader, sink: List[str]) -> None:
         logger.debug(f"Stream pump error for background task: {exc}")
 
 
+async def _finalize_reader_tasks(reader_tasks: List[asyncio.Task], timeout: float = 1.0) -> None:
+    """Wait for stream reader tasks to finish, cancelling if they hang."""
+    if not reader_tasks:
+        return
+
+    try:
+        await asyncio.wait_for(asyncio.gather(*reader_tasks, return_exceptions=True), timeout=timeout)
+    except asyncio.TimeoutError:
+        for task in reader_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*reader_tasks, return_exceptions=True)
+
+
 async def _monitor_task(task: BackgroundTask) -> None:
     """Wait for a background process to finish or timeout, then mark status."""
     try:
@@ -121,20 +136,34 @@ async def _monitor_task(task: BackgroundTask) -> None:
             task.exit_code = -1
     finally:
         # Ensure readers are finished before marking done.
-        for reader in task.reader_tasks:
-            reader.cancel()
-        await asyncio.gather(*task.reader_tasks, return_exceptions=True)
+        await _finalize_reader_tasks(task.reader_tasks)
         task.done_event.set()
 
 
-async def _start_background_command(command: str, timeout: Optional[float] = None) -> str:
+async def _start_background_command(
+    command: str,
+    timeout: Optional[float] = None,
+    shell_executable: Optional[str] = None
+) -> str:
     """Launch a background shell command on the dedicated loop."""
-    process = await asyncio.create_subprocess_shell(
-        command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        shell=True,
-    )
+    if shell_executable:
+        process = await asyncio.create_subprocess_exec(
+            shell_executable,
+            "-c",
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+            start_new_session=False,
+        )
+    else:
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+            start_new_session=False,
+        )
 
     task_id = f"bash_{uuid.uuid4().hex[:8]}"
     record = BackgroundTask(
@@ -157,9 +186,15 @@ async def _start_background_command(command: str, timeout: Optional[float] = Non
     return task_id
 
 
-async def start_background_command(command: str, timeout: Optional[float] = None) -> str:
+async def start_background_command(
+    command: str,
+    timeout: Optional[float] = None,
+    shell_executable: Optional[str] = None
+) -> str:
     """Launch a background shell command and return its task id."""
-    future = _submit_to_background_loop(_start_background_command(command, timeout))
+    future = _submit_to_background_loop(
+        _start_background_command(command, timeout, shell_executable)
+    )
     return await asyncio.wrap_future(future)
 
 
@@ -214,6 +249,8 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
 
 async def kill_background_task(task_id: str) -> bool:
     """Attempt to kill a running background task."""
+    KILL_WAIT_SECONDS = 2.0
+
     async def _kill(task_id: str) -> bool:
         with _tasks_lock:
             task = _tasks.get(task_id)
@@ -226,11 +263,19 @@ async def kill_background_task(task_id: str) -> bool:
         try:
             task.killed = True
             task.process.kill()
-            await task.process.wait()
+            try:
+                await asyncio.wait_for(task.process.wait(), timeout=KILL_WAIT_SECONDS)
+            except asyncio.TimeoutError:
+                # Best effort: force kill and don't block.
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    task.process.kill()
+                await asyncio.wait_for(task.process.wait(), timeout=1.0)
+
             with _tasks_lock:
                 task.exit_code = task.process.returncode or -1
             return True
         finally:
+            await _finalize_reader_tasks(task.reader_tasks)
             task.done_event.set()
 
     future = _submit_to_background_loop(_kill(task_id))

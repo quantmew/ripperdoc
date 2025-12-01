@@ -3,6 +3,7 @@
 import asyncio
 from pathlib import Path
 import tempfile
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -42,6 +43,13 @@ class DummyTool(Tool[DummyInput, None]):
 
     async def call(self, input_data: DummyInput, context: ToolUseContext):
         yield ToolResult(data=None)
+
+
+class DictPermissionTool(DummyTool):
+    """Dummy tool whose check_permissions returns a dict (legacy behavior)."""
+
+    async def check_permissions(self, input_data: DummyInput, permission_context: Any):
+        return {"behavior": "allow", "updated_input": input_data}
 
 
 def test_safe_mode_does_not_persist_permissions(tmp_path: Path):
@@ -125,5 +133,15 @@ def test_non_safe_mode_allows_without_prompt(tmp_path: Path):
     parsed_input = DummyInput(command="rm -rf /tmp/test")
 
     checker = make_permission_checker(tmp_path, safe_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly"))
+    result = asyncio.run(checker(tool, parsed_input))
+    assert result.result is True
+
+
+def test_dict_permission_result_is_handled(tmp_path: Path):
+    """Tools returning dict-based permission decisions should still be accepted."""
+    tool = DictPermissionTool()
+    parsed_input = DummyInput(command="echo ok")
+
+    checker = make_permission_checker(tmp_path, safe_mode=True, prompt_fn=lambda _: "y")
     result = asyncio.run(checker(tool, parsed_input))
     assert result.result is True

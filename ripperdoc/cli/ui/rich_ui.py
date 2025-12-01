@@ -179,168 +179,309 @@ class RichUI:
 
     def display_message(self, sender: str, content: str, is_tool: bool = False, tool_type: str = None, tool_args: dict = None, tool_data: Any = None):
         """Display a message in the conversation."""
-        if is_tool:
-            if tool_type == "call":
-                if sender == "Task":
-                    subagent = ""
-                    if isinstance(tool_args, dict):
-                        subagent = tool_args.get("subagent_type") or tool_args.get("subagent") or ""
-                    desc = ""
-                    if isinstance(tool_args, dict):
-                        raw_desc = tool_args.get("description") or tool_args.get("prompt") or ""
-                        desc = raw_desc if len(str(raw_desc)) <= 120 else str(raw_desc)[:117] + "..."
-                    label = f"-> Launching subagent: {subagent or 'unknown'}"
-                    if desc:
-                        label += f" — {desc}"
-                    console.print(f"[cyan]{label}[/cyan]")
+        if not is_tool:
+            self._print_human_or_assistant(sender, content)
+            return
+
+        if tool_type == "call":
+            self._print_tool_call(sender, content, tool_args)
+            return
+
+        if tool_type == "result":
+            self._print_tool_result(sender, content, tool_data)
+            return
+
+        self._print_generic_tool(sender, content)
+
+    def _format_tool_args(self, tool_name: str, tool_args: Optional[dict]) -> list[str]:
+        """Render tool arguments into concise display-friendly parts."""
+        if not tool_args:
+            return []
+
+        args_parts: list[str] = []
+
+        def _format_arg(arg_key: str, arg_value: Any) -> str:
+            if arg_key == "todos" and isinstance(arg_value, list):
+                counts = {"pending": 0, "in_progress": 0, "completed": 0}
+                for item in arg_value:
+                    status = ""
+                    if isinstance(item, dict):
+                        status = item.get("status", "")
+                    elif hasattr(item, "get"):
+                        status = item.get("status", "")
+                    elif hasattr(item, "status"):
+                        status = getattr(item, "status")
+                    if status in counts:
+                        counts[status] += 1
+                total = len(arg_value)
+                return (
+                    f"{arg_key}: {total} items "
+                    f"(pending {counts['pending']}, in_progress {counts['in_progress']}, completed {counts['completed']})"
+                )
+            if isinstance(arg_value, (list, dict)):
+                return f"{arg_key}: {len(arg_value)} items"
+            if isinstance(arg_value, str) and len(arg_value) > 50:
+                return f'{arg_key}: "{arg_value[:50]}..."'
+            return f"{arg_key}: {arg_value}"
+
+        if tool_name == "Bash":
+            command_value = tool_args.get("command")
+            if command_value is not None:
+                args_parts.append(_format_arg("command", command_value))
+
+            background_value = tool_args.get("run_in_background", tool_args.get("runInBackground"))
+            background_value = bool(background_value) if background_value is not None else False
+            args_parts.append(f"background: {background_value}")
+
+            sandbox_value = tool_args.get("sandbox")
+            sandbox_value = bool(sandbox_value) if sandbox_value is not None else False
+            args_parts.append(f"sandbox: {sandbox_value}")
+
+            for key, value in tool_args.items():
+                if key in {"command", "run_in_background", "runInBackground", "sandbox"}:
+                    continue
+                args_parts.append(_format_arg(key, value))
+            return args_parts
+
+        for key, value in tool_args.items():
+            args_parts.append(_format_arg(key, value))
+        return args_parts
+
+    def _print_tool_call(self, sender: str, content: str, tool_args: Optional[dict]) -> None:
+        """Render a tool invocation line."""
+        if sender == "Task":
+            subagent = ""
+            if isinstance(tool_args, dict):
+                subagent = tool_args.get("subagent_type") or tool_args.get("subagent") or ""
+            desc = ""
+            if isinstance(tool_args, dict):
+                raw_desc = tool_args.get("description") or tool_args.get("prompt") or ""
+                desc = raw_desc if len(str(raw_desc)) <= 120 else str(raw_desc)[:117] + "..."
+            label = f"-> Launching subagent: {subagent or 'unknown'}"
+            if desc:
+                label += f" — {desc}"
+            self.console.print(f"[cyan]{label}[/cyan]")
+            return
+
+        tool_name = sender if sender != "Ripperdoc" else content
+        tool_display = f"● {tool_name}("
+
+        args_parts = self._format_tool_args(tool_name, tool_args)
+        if args_parts:
+            tool_display += ", ".join(args_parts)
+        tool_display += ")"
+
+        self.console.print(f"[dim cyan]{tool_display}[/]")
+
+    def _print_tool_result(self, sender: str, content: str, tool_data: Any) -> None:
+        """Render a tool result summary."""
+        if not content:
+            self.console.print(f"  ⎿  [dim]Tool completed[/]")
+            return
+
+        if "Todo" in sender:
+            lines = content.splitlines()
+            if lines:
+                self.console.print(f"  ⎿  [dim]{lines[0]}[/]")
+                for line in lines[1:]:
+                    self.console.print(f"      {line}")
+            else:
+                self.console.print(f"  ⎿  [dim]Todo update[/]")
+            return
+
+        if "Read" in sender or "View" in sender:
+            lines = content.split("\n")
+            line_count = len(lines)
+            self.console.print(f"  ⎿  [dim]Read {line_count} lines[/]")
+            if self.verbose:
+                preview = lines[:30]
+                for line in preview:
+                    self.console.print(line)
+                if len(lines) > len(preview):
+                    self.console.print(f"[dim]... ({len(lines) - len(preview)} more lines)[/]")
+            return
+
+        if "Write" in sender or "Edit" in sender or "MultiEdit" in sender:
+            if tool_data and (hasattr(tool_data, "file_path") or isinstance(tool_data, dict)):
+                file_path = self._get_tool_field(tool_data, "file_path")
+                additions = self._get_tool_field(tool_data, "additions", 0)
+                deletions = self._get_tool_field(tool_data, "deletions", 0)
+                diff_with_line_numbers = self._get_tool_field(tool_data, "diff_with_line_numbers", [])
+
+                if not file_path:
+                    self.console.print(f"  ⎿  [dim]File updated successfully[/]")
                     return
-                tool_name = sender if sender != "Ripperdoc" else content
-                tool_display = f"● {tool_name}("
 
-                if tool_args:
-                    args_parts = []
-                    for key, value in tool_args.items():
-                        if key == "todos" and isinstance(value, list):
-                            counts = {"pending": 0, "in_progress": 0, "completed": 0}
-                            for item in value:
-                                status = ""
-                                if isinstance(item, dict):
-                                    status = item.get("status", "")
-                                elif hasattr(item, "get"):
-                                    status = item.get("status", "")
-                                elif hasattr(item, "status"):
-                                    status = getattr(item, "status")
-                                if status in counts:
-                                    counts[status] += 1
-                            total = len(value)
-                            args_parts.append(
-                                f"{key}: {total} items (pending {counts['pending']}, in_progress {counts['in_progress']}, completed {counts['completed']})"
-                            )
-                        elif isinstance(value, (list, dict)):
-                            args_parts.append(f"{key}: {len(value)} items")
-                        elif isinstance(value, str) and len(value) > 50:
-                            args_parts.append(f'{key}: "{value[:50]}..."')
-                        else:
-                            args_parts.append(f'{key}: {value}')
-                    tool_display += ", ".join(args_parts)
+                self.console.print(f"  ⎿  [dim]Updated {file_path} with {additions} additions and {deletions} removals[/]")
 
-                tool_display += ")"
-                console.print(f"[dim cyan]{tool_display}[/]")
-            elif tool_type == "result":
-                if content:
-                    if "Todo" in sender:
-                        lines = content.splitlines()
-                        if lines:
-                            console.print(f"  ⎿  [dim]{lines[0]}[/]")
-                            for line in lines[1:]:
-                                console.print(f"      {line}")
-                        else:
-                            console.print(f"  ⎿  [dim]Todo update[/]")
-                    elif "Read" in sender or "View" in sender:
-                        lines = content.split("\n")
-                        line_count = len(lines)
-                        console.print(f"  ⎿  [dim]Read {line_count} lines[/]")
-                        if self.verbose:
-                            preview = lines[:30]
-                            for line in preview:
-                                console.print(line)
-                            if len(lines) > len(preview):
-                                console.print(f"[dim]... ({len(lines) - len(preview)} more lines)[/]")
-                    elif "Write" in sender or "Edit" in sender or "MultiEdit" in sender:
-                        if tool_data and hasattr(tool_data, "file_path"):
-                            file_path = tool_data.file_path
-                            additions = getattr(tool_data, "additions", 0)
-                            deletions = getattr(tool_data, "deletions", 0)
-                            diff_with_line_numbers = getattr(tool_data, "diff_with_line_numbers", [])
-
-                            console.print(f"  ⎿  [dim]Updated {file_path} with {additions} additions and {deletions} removals[/]")
-
-                            if self.verbose:
-                                for line in diff_with_line_numbers:
-                                    console.print(line)
-                        else:
-                            console.print(f"  ⎿  [dim]File updated successfully[/]")
-                    elif "Glob" in sender:
-                        files = content.split("\n")
-                        file_count = len([f for f in files if f.strip()])
-                        console.print(f"  ⎿  [dim]Found {file_count} files[/]")
-                        if self.verbose:
-                            for line in files[:30]:
-                                if line.strip():
-                                    console.print(f"      {line}")
-                            if file_count > 30:
-                                console.print(f"[dim]... ({file_count - 30} more)[/]")
-                    elif "Grep" in sender:
-                        matches = content.split("\n")
-                        match_count = len([m for m in matches if m.strip()])
-                        console.print(f"  ⎿  [dim]Found {match_count} matches[/]")
-                        if self.verbose:
-                            for line in matches[:30]:
-                                if line.strip():
-                                    console.print(f"      {line}")
-                            if match_count > 30:
-                                console.print(f"[dim]... ({match_count - 30} more)[/]")
-                    elif "LS" in sender:
-                        tree_lines = content.splitlines()
-                        console.print(f"  ⎿  [dim]Directory tree ({len(tree_lines)} lines)[/]")
-                        if self.verbose:
-                            preview = tree_lines[:40]
-                            for line in preview:
-                                console.print(f"      {line}")
-                            if len(tree_lines) > len(preview):
-                                console.print(f"[dim]... ({len(tree_lines) - len(preview)} more)[/]")
-                    elif "Bash" in sender:
-                        if tool_data:
-                            exit_code = getattr(tool_data, "exit_code", 0)
-                            stdout = getattr(tool_data, "stdout", "") or ""
-                            stderr = getattr(tool_data, "stderr", "") or ""
-                            duration_ms = getattr(tool_data, "duration_ms", 0) or 0
-                            timeout_ms = getattr(tool_data, "timeout_ms", 0) or 0
-                            timing = ""
-                            if duration_ms:
-                                timing = f" ({duration_ms/1000:.2f}s"
-                                if timeout_ms:
-                                    timing += f" / timeout {timeout_ms/1000:.0f}s"
-                                timing += ")"
-                            elif timeout_ms:
-                                timing = f" (timeout {timeout_ms/1000:.0f}s)"
-                            console.print(f"  ⎿  [dim]Exit code {exit_code}{timing}[/]")
-                            stdout_lines = stdout.splitlines()
-                            stderr_lines = stderr.splitlines()
-                            if stdout_lines:
-                                preview = stdout_lines if self.verbose else stdout_lines[:5]
-                                console.print("[dim]stdout:[/]")
-                                for line in preview:
-                                    console.print(f"      {line}")
-                                if not self.verbose and len(stdout_lines) > len(preview):
-                                    console.print(f"[dim]... ({len(stdout_lines) - len(preview)} more stdout lines)[/]")
-                            if stderr_lines:
-                                preview = stderr_lines if self.verbose else stderr_lines[:5]
-                                console.print("[dim]stderr:[/]")
-                                for line in preview:
-                                    console.print(f"      {line}")
-                                if not self.verbose and len(stderr_lines) > len(preview):
-                                    console.print(f"[dim]... ({len(stderr_lines) - len(preview)} more stderr lines)[/]")
-                            if not stdout_lines and not stderr_lines:
-                                console.print("      [dim](no output)[/]")
-                        else:
-                            console.print(f"  ⎿  [dim]Command executed[/]")
-                    else:
-                        console.print(f"  ⎿  [dim]Tool completed[/]")
+                if self.verbose:
+                    for line in diff_with_line_numbers:
+                        self.console.print(line)
             else:
-                if sender == "Task" and isinstance(content, str) and content.startswith("[subagent:"):
-                    agent_label = content.split("]", 1)[0].replace("[subagent:", "").strip()
-                    summary = content.split("]", 1)[1].strip() if "]" in content else ""
-                    console.print(f"[green]↳ Subagent {agent_label} finished[/green]")
-                    if summary:
-                        console.print(f"    {summary}")
+                self.console.print(f"  ⎿  [dim]File updated successfully[/]")
+            return
+
+        if "Glob" in sender:
+            files = content.split("\n")
+            file_count = len([f for f in files if f.strip()])
+            self.console.print(f"  ⎿  [dim]Found {file_count} files[/]")
+            if self.verbose:
+                for line in files[:30]:
+                    if line.strip():
+                        self.console.print(f"      {line}")
+                if file_count > 30:
+                    self.console.print(f"[dim]... ({file_count - 30} more)[/]")
+            return
+
+        if "Grep" in sender:
+            matches = content.split("\n")
+            match_count = len([m for m in matches if m.strip()])
+            self.console.print(f"  ⎿  [dim]Found {match_count} matches[/]")
+            if self.verbose:
+                for line in matches[:30]:
+                    if line.strip():
+                        self.console.print(f"      {line}")
+                if match_count > 30:
+                    self.console.print(f"[dim]... ({match_count - 30} more)[/]")
+            return
+
+        if "LS" in sender:
+            tree_lines = content.splitlines()
+            self.console.print(f"  ⎿  [dim]Directory tree ({len(tree_lines)} lines)[/]")
+            if self.verbose:
+                preview = tree_lines[:40]
+                for line in preview:
+                    self.console.print(f"      {line}")
+                if len(tree_lines) > len(preview):
+                    self.console.print(f"[dim]... ({len(tree_lines) - len(preview)} more)[/]")
+            return
+
+        if "Bash" in sender:
+            stdout = ""
+            stderr = ""
+            stdout_lines: List[str] = []
+            stderr_lines: List[str] = []
+
+            exit_code = 0
+            duration_ms = 0
+            timeout_ms = 0
+
+            if tool_data:
+                exit_code = self._get_tool_field(tool_data, "exit_code", 0)
+                stdout = self._get_tool_field(tool_data, "stdout", "") or ""
+                stderr = self._get_tool_field(tool_data, "stderr", "") or ""
+                duration_ms = self._get_tool_field(tool_data, "duration_ms", 0) or 0
+                timeout_ms = self._get_tool_field(tool_data, "timeout_ms", 0) or 0
+                stdout_lines = stdout.splitlines() if stdout else []
+                stderr_lines = stderr.splitlines() if stderr else []
+
+            if not stdout_lines and not stderr_lines and content:
+                fallback_stdout, fallback_stderr = self._parse_bash_output_sections(content)
+                stdout_lines = fallback_stdout
+                stderr_lines = fallback_stderr
+
+            show_inline_stdout = (
+                stdout_lines
+                and not stderr_lines
+                and exit_code == 0
+                and not self.verbose
+            )
+
+            if show_inline_stdout:
+                preview = stdout_lines if self.verbose else stdout_lines[:5]
+                self.console.print(f"  ⎿  {preview[0]}")
+                for line in preview[1:]:
+                    self.console.print(f"      {line}")
+                if not self.verbose and len(stdout_lines) > len(preview):
+                    self.console.print(f"[dim]... ({len(stdout_lines) - len(preview)} more lines)[/]")
+            else:
+                if tool_data:
+                    timing = ""
+                    if duration_ms:
+                        timing = f" ({duration_ms/1000:.2f}s"
+                        if timeout_ms:
+                            timing += f" / timeout {timeout_ms/1000:.0f}s"
+                        timing += ")"
+                    elif timeout_ms:
+                        timing = f" (timeout {timeout_ms/1000:.0f}s)"
+                    self.console.print(f"  ⎿  [dim]Exit code {exit_code}{timing}[/]")
                 else:
-                    console.print(f"[dim cyan][Tool] {sender}: {content}[/]")
-        else:
-            if sender.lower() == "you":
-                console.print(f"[bold green]{sender}:[/] {content}")
-            else:
-                console.print(Markdown(content))
+                    self.console.print(f"  ⎿  [dim]Command executed[/]")
+
+                if stdout_lines:
+                    preview = stdout_lines if self.verbose else stdout_lines[:5]
+                    self.console.print("[dim]stdout:[/]")
+                    for line in preview:
+                        self.console.print(f"      {line}")
+                    if not self.verbose and len(stdout_lines) > len(preview):
+                        self.console.print(f"[dim]... ({len(stdout_lines) - len(preview)} more stdout lines)[/]")
+                if stderr_lines:
+                    preview = stderr_lines if self.verbose else stderr_lines[:5]
+                    self.console.print("[dim]stderr:[/]")
+                    for line in preview:
+                        self.console.print(f"      {line}")
+                    if not self.verbose and len(stderr_lines) > len(preview):
+                        self.console.print(f"[dim]... ({len(stderr_lines) - len(preview)} more stderr lines)[/]")
+                if not stdout_lines and not stderr_lines:
+                    self.console.print("      [dim](no output)[/]")
+            return
+
+        self.console.print(f"  ⎿  [dim]Tool completed[/]")
+
+    def _print_generic_tool(self, sender: str, content: str) -> None:
+        """Fallback rendering for miscellaneous tool messages."""
+        if sender == "Task" and isinstance(content, str) and content.startswith("[subagent:"):
+            agent_label = content.split("]", 1)[0].replace("[subagent:", "").strip()
+            summary = content.split("]", 1)[1].strip() if "]" in content else ""
+            self.console.print(f"[green]↳ Subagent {agent_label} finished[/green]")
+            if summary:
+                self.console.print(f"    {summary}")
+            return
+        self.console.print(f"[dim cyan][Tool] {sender}: {content}[/]")
+
+    def _print_human_or_assistant(self, sender: str, content: str) -> None:
+        """Render messages from the user or assistant."""
+        if sender.lower() == "you":
+            self.console.print(f"[bold green]{sender}:[/] {content}")
+            return
+        self.console.print(Markdown(content))
+
+    def _get_tool_field(self, data: Any, key: str, default: Any = None) -> Any:
+        """Safely fetch a field from either an object or a dict."""
+        if isinstance(data, dict):
+            return data.get(key, default)
+        return getattr(data, key, default)
+
+    def _parse_bash_output_sections(self, content: str) -> tuple[List[str], List[str]]:
+        """Fallback parser to pull stdout/stderr sections from a text block."""
+        stdout_lines: List[str] = []
+        stderr_lines: List[str] = []
+        if not content:
+            return stdout_lines, stderr_lines
+
+        current: Optional[str] = None
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("stdout:"):
+                current = "stdout"
+                remainder = line.split("stdout:", 1)[1].strip()
+                if remainder:
+                    stdout_lines.append(remainder)
+                continue
+            if stripped.startswith("stderr:"):
+                current = "stderr"
+                remainder = line.split("stderr:", 1)[1].strip()
+                if remainder:
+                    stderr_lines.append(remainder)
+                continue
+            if stripped.startswith("exit code:"):
+                break
+            if current == "stdout":
+                stdout_lines.append(line)
+            elif current == "stderr":
+                stderr_lines.append(line)
+
+        return stdout_lines, stderr_lines
 
     def _stringify_message_content(self, content: Any) -> str:
         """Extract readable text from a message content payload."""

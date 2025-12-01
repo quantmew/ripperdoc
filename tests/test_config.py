@@ -65,3 +65,6 @@ def test_project_config():
     assert config.dont_crawl_directory == False
     assert config.enable_architect_tool == False
     assert isinstance(config.allowed_tools, list)
+    assert isinstance(config.bash_allow_rules, list)
+    assert isinstance(config.bash_deny_rules, list)
+    assert isinstance(config.working_directories, list)
