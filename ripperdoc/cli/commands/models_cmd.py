@@ -79,7 +79,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         )
         provider_input = (
             console.input(
-                f"Provider ({', '.join(p.value for p in ProviderType)}) [{default_provider}]: "
+                f"Protocol ({', '.join(p.value for p in ProviderType)}) [{default_provider}]: "
             )
             .strip()
             .lower()
@@ -184,7 +184,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         provider_default = existing_profile.provider.value
         provider_input = (
             console.input(
-                f"Provider ({', '.join(p.value for p in ProviderType)}) [{provider_default}]: "
+                f"Protocol ({', '.join(p.value for p in ProviderType)}) [{provider_default}]: "
             )
             .strip()
             .lower()
@@ -301,7 +301,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         markers = [ptr for ptr, value in pointer_map.items() if value == name]
         marker_text = f" ({', '.join(markers)})" if markers else ""
         console.print(f"  • {escape(name)}{marker_text}", markup=False)
-        console.print(f"      provider: {profile.provider.value}", markup=False)
+        console.print(f"      protocol: {profile.provider.value}", markup=False)
         console.print(f"      model: {profile.model}", markup=False)
         if profile.api_base:
             console.print(f"      api_base: {profile.api_base}", markup=False)

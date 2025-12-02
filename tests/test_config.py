@@ -34,6 +34,19 @@ def test_model_profile_creation():
     assert profile.api_key == "test_key"
 
 
+def test_provider_type_normalizes_aliases():
+    """ProviderType should treat legacy provider names as protocol families."""
+    assert ProviderType("openai-compatible") == ProviderType.OPENAI_COMPATIBLE
+    assert ProviderType("deepseek") == ProviderType.OPENAI_COMPATIBLE
+    assert ProviderType("google") == ProviderType.GEMINI
+
+
+def test_model_profile_accepts_legacy_provider_label():
+    """ModelProfile should coerce legacy provider labels to the right protocol."""
+    profile = ModelProfile(provider="deepseek", model="deepseek-chat")
+    assert profile.provider == ProviderType.OPENAI_COMPATIBLE
+
+
 def test_config_manager():
     """Test config manager."""
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -3,7 +3,7 @@ import json
 
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.cli.ui.context_display import format_tokens
-from ripperdoc.core.config import ProviderType, get_global_config
+from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.query import QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.utils.memory import build_memory_instructions
@@ -29,11 +29,7 @@ def _handle(ui: Any, _: str) -> bool:
     model_profile = get_profile_for_pointer("main")
     max_context_tokens = get_remaining_context_tokens(model_profile, config.context_token_limit)
     auto_compact_enabled = resolve_auto_compact_enabled(config)
-    protocol = (
-        "anthropic"
-        if model_profile and model_profile.provider == ProviderType.ANTHROPIC
-        else "openai"
-    )
+    protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 
     if not ui.query_context:
         ui.query_context = QueryContext(

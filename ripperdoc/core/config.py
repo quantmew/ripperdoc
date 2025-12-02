@@ -18,15 +18,80 @@ logger = get_logger()
 
 
 class ProviderType(str, Enum):
-    """Supported AI providers."""
+    """Supported model protocols (not individual model vendors)."""
 
     ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    MISTRAL = "mistral"
-    DEEPSEEK = "deepseek"
-    KIMI = "kimi"
-    QWEN = "qwen"
-    GLM = "glm"
+    OPENAI_COMPATIBLE = "openai_compatible"
+    GEMINI = "gemini"
+
+    @classmethod
+    def _legacy_aliases(cls) -> Dict[str, "ProviderType"]:
+        """Map legacy provider labels to protocol families."""
+        return {
+            "openai": cls.OPENAI_COMPATIBLE,
+            "openai-compatible": cls.OPENAI_COMPATIBLE,
+            "openai compatible": cls.OPENAI_COMPATIBLE,
+            "mistral": cls.OPENAI_COMPATIBLE,
+            "deepseek": cls.OPENAI_COMPATIBLE,
+            "kimi": cls.OPENAI_COMPATIBLE,
+            "qwen": cls.OPENAI_COMPATIBLE,
+            "glm": cls.OPENAI_COMPATIBLE,
+            "google": cls.GEMINI,
+        }
+
+    @classmethod
+    def _missing_(cls, value: object) -> Optional["ProviderType"]:
+        """Support legacy provider strings by mapping to their protocol."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            mapped = cls._legacy_aliases().get(normalized)
+            if mapped:
+                return mapped
+        return None
+
+
+def provider_protocol(provider: ProviderType) -> str:
+    """Return the message formatting protocol for a provider."""
+    if provider == ProviderType.ANTHROPIC:
+        return "anthropic"
+    if provider == ProviderType.OPENAI_COMPATIBLE:
+        return "openai"
+    if provider == ProviderType.GEMINI:
+        # Gemini support is planned; default to OpenAI-style formatting for now.
+        return "openai"
+    return "openai"
+
+
+def api_key_env_candidates(provider: ProviderType) -> list[str]:
+    """Environment variables to check for an API key based on protocol."""
+    if provider == ProviderType.ANTHROPIC:
+        return ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+    if provider == ProviderType.GEMINI:
+        return ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+    return [
+        "OPENAI_COMPATIBLE_API_KEY",
+        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "MISTRAL_API_KEY",
+        "KIMI_API_KEY",
+        "QWEN_API_KEY",
+        "GLM_API_KEY",
+    ]
+
+
+def api_base_env_candidates(provider: ProviderType) -> list[str]:
+    """Environment variables to check for API base overrides."""
+    if provider == ProviderType.ANTHROPIC:
+        return ["ANTHROPIC_API_URL", "ANTHROPIC_BASE_URL"]
+    if provider == ProviderType.GEMINI:
+        return ["GEMINI_API_BASE", "GEMINI_BASE_URL", "GOOGLE_API_BASE_URL"]
+    return [
+        "OPENAI_COMPATIBLE_API_BASE",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "DEEPSEEK_API_BASE",
+        "DEEPSEEK_BASE_URL",
+    ]
 
 
 class ModelProfile(BaseModel):
@@ -178,9 +243,13 @@ class ConfigManager:
     def get_api_key(self, provider: ProviderType) -> Optional[str]:
         """Get API key for a provider."""
         # First check environment variables
-        env_var = f"{provider.value.upper()}_API_KEY"
-        if env_var in os.environ:
-            return os.environ[env_var]
+        env_candidates = api_key_env_candidates(provider)
+        provider_env = f"{provider.value.upper()}_API_KEY"
+        if provider_env not in env_candidates:
+            env_candidates.insert(0, provider_env)
+        for env_var in env_candidates:
+            if env_var in os.environ:
+                return os.environ[env_var]
 
         # Then check global config
         global_config = self.get_global_config()

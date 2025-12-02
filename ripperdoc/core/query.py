@@ -32,7 +32,7 @@ from ripperdoc.utils.messages import (
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
 )
 from ripperdoc.core.permissions import PermissionResult
-from ripperdoc.core.config import get_global_config, ProviderType
+from ripperdoc.core.config import get_global_config, ProviderType, provider_protocol
 from ripperdoc.utils.session_usage import record_usage
 
 import time
@@ -249,8 +249,8 @@ async def query_llm(
     if not model_profile:
         raise ValueError(f"No model profile found for pointer: {model}")
 
-    # Normalize messages based on provider (Anthropic allows tool blocks; others prefer text-only)
-    protocol = "anthropic" if model_profile.provider == ProviderType.ANTHROPIC else "openai"
+    # Normalize messages based on protocol family (Anthropic allows tool blocks; OpenAI-style prefers text-only)
+    protocol = provider_protocol(model_profile.provider)
     normalized_messages = normalize_messages_for_api(
         messages,
         protocol=protocol,
@@ -339,8 +339,8 @@ async def query_llm(
                     content=content_blocks, cost_usd=cost_usd, duration_ms=duration_ms
                 )
 
-        elif model_profile.provider == ProviderType.OPENAI:
-            # OpenAI (including DeepSeek and other compatible APIs)
+        elif model_profile.provider == ProviderType.OPENAI_COMPATIBLE:
+            # OpenAI-compatible APIs (OpenAI, DeepSeek, Mistral, etc.)
             async with AsyncOpenAI(
                 api_key=model_profile.api_key, base_url=model_profile.api_base
             ) as client:
@@ -404,6 +404,8 @@ async def query_llm(
                     content=content_blocks, cost_usd=cost_usd, duration_ms=duration_ms
                 )
 
+        elif model_profile.provider == ProviderType.GEMINI:
+            raise NotImplementedError("Gemini protocol is not yet supported.")
         else:
             raise NotImplementedError(f"Provider {model_profile.provider} not yet implemented")
 

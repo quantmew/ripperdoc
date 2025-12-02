@@ -142,33 +142,60 @@ def check_onboarding() -> bool:
     console.print("Let's set up your AI model configuration.\n")
 
     # Simple onboarding
-    provider = click.prompt(
-        "Choose your AI provider",
-        type=click.Choice(["anthropic", "openai", "deepseek", "custom"]),
-        default="anthropic",
+    provider_choices = [
+        *[p.value for p in ProviderType],
+        "openai",
+        "deepseek",
+        "mistral",
+        "kimi",
+        "qwen",
+        "glm",
+        "custom",
+    ]
+    provider_choice = click.prompt(
+        "Choose your model protocol",
+        type=click.Choice(provider_choices),
+        default=ProviderType.ANTHROPIC.value,
     )
+
+    api_base = None
+    if provider_choice == "custom":
+        provider_choice = click.prompt(
+            "Protocol family (for API compatibility)",
+            type=click.Choice([p.value for p in ProviderType]),
+            default=ProviderType.OPENAI_COMPATIBLE.value,
+        )
+        api_base = click.prompt("API Base URL")
 
     api_key = click.prompt("Enter your API key", hide_input=True)
 
+    provider = ProviderType(provider_choice)
+
     # Get model name
-    if provider == "anthropic":
+    if provider == ProviderType.ANTHROPIC:
         model = click.prompt("Model name", default="claude-3-5-sonnet-20241022")
-        api_base = None
-    elif provider == "openai":
-        model = click.prompt("Model name", default="gpt-4")
-        api_base = None
-    elif provider == "deepseek":
-        model = click.prompt("Model name", default="deepseek-chat")
-        api_base = click.prompt("API Base URL", default="https://api.deepseek.com")
-        provider = "openai"  # DeepSeek uses OpenAI-compatible API
-    else:  # custom
-        model = click.prompt("Model name")
-        api_base = click.prompt("API Base URL")
-        provider = click.prompt(
-            "Provider type (for API compatibility)",
-            type=click.Choice(["anthropic", "openai"]),
-            default="openai",
+    elif provider == ProviderType.OPENAI_COMPATIBLE:
+        default_model = "gpt-4o-mini"
+        if provider_choice == "deepseek":
+            default_model = "deepseek-chat"
+            api_base = api_base or "https://api.deepseek.com"
+        model = click.prompt("Model name", default=default_model)
+        if api_base is None:
+            api_base = (
+                click.prompt("API base URL (optional)", default="", show_default=False) or None
+            )
+    elif provider == ProviderType.GEMINI:
+        console.print(
+            "[yellow]Gemini protocol support is not yet available; configuration is saved for "
+            "future support.[/yellow]"
         )
+        model = click.prompt("Model name", default="gemini-1.5-pro")
+        if api_base is None:
+            api_base = (
+                click.prompt("API base URL (optional)", default="", show_default=False) or None
+            )
+    else:
+        model = click.prompt("Model name")
 
     context_window_input = click.prompt(
         "Context window in tokens (optional, press Enter to skip)", default="", show_default=False
@@ -182,7 +209,7 @@ def check_onboarding() -> bool:
 
     # Create model profile
     config.model_profiles["default"] = ModelProfile(
-        provider=ProviderType(provider),
+        provider=provider,
         model=model,
         api_key=api_key,
         api_base=api_base,

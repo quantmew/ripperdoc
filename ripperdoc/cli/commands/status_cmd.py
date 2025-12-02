@@ -5,7 +5,13 @@ from typing import List, Optional, Tuple
 
 from ripperdoc import __version__
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
-from ripperdoc.core.config import ModelProfile, ProviderType, get_global_config
+from ripperdoc.core.config import (
+    ModelProfile,
+    ProviderType,
+    api_base_env_candidates,
+    api_key_env_candidates,
+    get_global_config,
+)
 from ripperdoc.utils.memory import MAX_CONTENT_LENGTH, MemoryFile, collect_all_memory_files
 
 from .base import SlashCommand
@@ -16,18 +22,14 @@ def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[
     if not profile:
         return ("Not configured", None)
 
-    provider_value = (
-        profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
+    provider_value = profile.provider.value if hasattr(profile.provider, "value") else str(
+        profile.provider
     )
-    provider_lower = provider_value.lower()
 
-    env_candidates: list[str] = []
-    if provider_lower == ProviderType.ANTHROPIC.value:
-        env_candidates = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
-    elif provider_lower == ProviderType.OPENAI.value:
-        env_candidates = ["OPENAI_API_KEY"]
-    else:
-        env_candidates = [f"{provider_value.upper()}_API_KEY"] if provider_value else []
+    env_candidates = api_key_env_candidates(profile.provider)
+    provider_env = f"{provider_value.upper()}_API_KEY" if provider_value else None
+    if provider_env and provider_env not in env_candidates:
+        env_candidates = [provider_env, *env_candidates]
 
     env_var = next((name for name in env_candidates if os.environ.get(name)), None)
     if env_var:
@@ -42,21 +44,20 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
     if not profile:
         return "API base URL: Not configured"
 
-    label = "API base URL"
-    provider_value = (
-        profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
+    label_map = {
+        ProviderType.ANTHROPIC: "Anthropic base URL",
+        ProviderType.OPENAI_COMPATIBLE: "OpenAI-compatible base URL",
+        ProviderType.GEMINI: "Gemini base URL",
+    }
+    label = label_map.get(profile.provider, "API base URL")
+    provider_value = profile.provider.value if hasattr(profile.provider, "value") else str(
+        profile.provider
     )
-    provider_lower = provider_value.lower()
-    env_candidates: list[str] = []
-    if provider_lower == ProviderType.ANTHROPIC.value:
-        label = "Anthropic base URL"
-        env_candidates = ["ANTHROPIC_API_URL", "ANTHROPIC_BASE_URL"]
-    elif provider_lower == ProviderType.OPENAI.value:
-        label = "OpenAI base URL"
-        env_candidates = ["OPENAI_BASE_URL", "OPENAI_API_BASE"]
-    else:
-        label = f"{provider_value.title()} base URL" if provider_value else "API base URL"
-        env_candidates = [f"{provider_value.upper()}_BASE_URL"] if provider_value else []
+
+    env_candidates = api_base_env_candidates(profile.provider)
+    provider_env = f"{provider_value.upper()}_BASE_URL" if provider_value else None
+    if provider_env and provider_env not in env_candidates:
+        env_candidates = [provider_env, *env_candidates]
 
     base_url = profile.api_base
     if not base_url:

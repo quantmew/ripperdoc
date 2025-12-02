@@ -22,7 +22,7 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.history import InMemoryHistory
 
 from ripperdoc import __version__
-from ripperdoc.core.config import ProviderType, get_global_config
+from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
@@ -600,11 +600,7 @@ class RichUI:
             model_profile = get_profile_for_pointer("main")
             max_context_tokens = get_remaining_context_tokens(model_profile, config.context_token_limit)
             auto_compact_enabled = resolve_auto_compact_enabled(config)
-            protocol = (
-                "anthropic"
-                if model_profile and model_profile.provider == ProviderType.ANTHROPIC
-                else "openai"
-            )
+            protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 
             used_tokens = estimate_used_tokens(messages, protocol=protocol)
             usage_status = get_context_usage_status(
@@ -875,11 +871,7 @@ class RichUI:
 
         config = get_global_config()
         model_profile = get_profile_for_pointer("main")
-        protocol = (
-            "anthropic"
-            if model_profile and model_profile.provider == ProviderType.ANTHROPIC
-            else "openai"
-        )
+        protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 
         original_messages = list(self.conversation_messages)
         tokens_before = estimate_conversation_tokens(original_messages, protocol=protocol)
