@@ -22,8 +22,8 @@ def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[
     if not profile:
         return ("Not configured", None)
 
-    provider_value = profile.provider.value if hasattr(profile.provider, "value") else str(
-        profile.provider
+    provider_value = (
+        profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
     )
 
     env_candidates = api_key_env_candidates(profile.provider)
@@ -50,8 +50,8 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
         ProviderType.GEMINI: "Gemini base URL",
     }
     label = label_map.get(profile.provider, "API base URL")
-    provider_value = profile.provider.value if hasattr(profile.provider, "value") else str(
-        profile.provider
+    provider_value = (
+        profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
     )
 
     env_candidates = api_base_env_candidates(profile.provider)

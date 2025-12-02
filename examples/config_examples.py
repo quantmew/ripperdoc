@@ -19,11 +19,11 @@ BASIC_ANTHROPIC = {
         "main": "default",
         "task": "default",
         "reasoning": "default",
-        "quick": "default"
+        "quick": "default",
     },
     "theme": "dark",
     "verbose": False,
-    "safe_mode": False
+    "safe_mode": False,
 }
 
 # Example 2: Multi-Model Configuration
@@ -52,39 +52,29 @@ MULTI_MODEL = {
             "max_tokens": 4096,
             "temperature": 0.7,
             "context_window": 128000,
-        }
+        },
     },
     "model_pointers": {
-        "main": "sonnet",      # Use Sonnet for main tasks
-        "task": "haiku",       # Use Haiku for sub-tasks
-        "reasoning": "sonnet", # Use Sonnet for reasoning
-        "quick": "haiku"       # Use Haiku for quick tasks
+        "main": "sonnet",  # Use Sonnet for main tasks
+        "task": "haiku",  # Use Haiku for sub-tasks
+        "reasoning": "sonnet",  # Use Sonnet for reasoning
+        "quick": "haiku",  # Use Haiku for quick tasks
     },
     "theme": "dark",
-    "verbose": True
+    "verbose": True,
 }
 
 # Example 3: Project-Specific Configuration
 PROJECT_CONFIG = {
-    "allowed_tools": [
-        "Bash",
-        "View",
-        "Edit",
-        "Glob",
-        "Grep"
-    ],
+    "allowed_tools": ["Bash", "View", "Edit", "Glob", "Grep"],
     "context": {
         "project_type": "Python Web Application",
         "framework": "FastAPI",
-        "database": "PostgreSQL"
+        "database": "PostgreSQL",
     },
-    "context_files": [
-        "README.md",
-        "requirements.txt",
-        "src/main.py"
-    ],
+    "context_files": ["README.md", "requirements.txt", "src/main.py"],
     "dont_crawl_directory": False,
-    "enable_architect_tool": False
+    "enable_architect_tool": False,
 }
 
 # Example 4: Safe Mode Configuration
@@ -93,11 +83,11 @@ SAFE_MODE = {
         "default": {
             "provider": "anthropic",
             "model": "claude-3-5-sonnet-20241022",
-            "api_key": "your_api_key"
+            "api_key": "your_api_key",
         }
     },
     "safe_mode": True,  # Always ask for permission
-    "verbose": True     # Show all operations
+    "verbose": True,  # Show all operations
 }
 
 

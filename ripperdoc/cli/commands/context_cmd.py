@@ -21,7 +21,6 @@ from ripperdoc.utils.mcp import (
     shutdown_mcp_runtime,
 )
 
-from typing import Any
 from .base import SlashCommand
 
 

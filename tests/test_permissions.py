@@ -118,7 +118,9 @@ def test_safe_mode_respects_read_only_tools(tmp_path: Path):
     temp_file = tmp_path / "file.txt"
     temp_file.write_text("hello")
 
-    checker = make_permission_checker(tmp_path, safe_mode=True, prompt_fn=lambda _: pytest.fail("prompted unexpectedly"))
+    checker = make_permission_checker(
+        tmp_path, safe_mode=True, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
     tool = FileReadTool()
     parsed_input = FileReadToolInput(file_path=str(temp_file))
 
@@ -131,7 +133,9 @@ def test_non_safe_mode_allows_without_prompt(tmp_path: Path):
     tool = DummyTool()
     parsed_input = DummyInput(command="rm -rf /tmp/test")
 
-    checker = make_permission_checker(tmp_path, safe_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly"))
+    checker = make_permission_checker(
+        tmp_path, safe_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
     result = asyncio.run(checker(tool, parsed_input))
     assert result.result is True
 

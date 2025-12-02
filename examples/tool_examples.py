@@ -18,10 +18,7 @@ async def example_bash_tool():
     tool = BashTool()
     context = ToolUseContext()
 
-    input_data = BashToolInput(
-        command="echo 'Hello from Ripperdoc!'",
-        timeout=10000
-    )
+    input_data = BashToolInput(command="echo 'Hello from Ripperdoc!'", timeout=10000)
 
     async for result in tool.call(input_data, context):
         print(f"Command: {result.data.command}")
@@ -39,7 +36,7 @@ async def example_file_read_tool():
     # Read this example file
     input_data = FileReadToolInput(
         file_path=__file__,
-        limit=10  # Only read first 10 lines
+        limit=10,  # Only read first 10 lines
     )
 
     async for result in tool.call(input_data, context):
@@ -56,10 +53,7 @@ async def example_glob_tool():
     tool = GlobTool()
     context = ToolUseContext()
 
-    input_data = GlobToolInput(
-        pattern="**/*.py",
-        path="."
-    )
+    input_data = GlobToolInput(pattern="**/*.py", path=".")
 
     async for result in tool.call(input_data, context):
         print(f"Pattern: {result.data.pattern}")
@@ -80,7 +74,7 @@ async def example_file_edit_tool():
     input_data = FileEditToolInput(
         file_path="/path/to/file.py",
         old_string="def old_function():",
-        new_string="def new_function():"
+        new_string="def new_function():",
     )
     print(f"  File: {input_data.file_path}")
     print(f"  Replace: '{input_data.old_string}'")

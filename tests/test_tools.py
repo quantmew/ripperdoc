@@ -31,7 +31,7 @@ async def test_file_read_tool():
     tool = FileReadTool()
 
     # Create a test file
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
         f.write("Line 1\nLine 2\nLine 3\n")
         temp_path = f.name
 
@@ -58,10 +58,7 @@ async def test_file_write_tool():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         file_path = str(Path(tmpdir) / "test.txt")
-        input_data = FileWriteToolInput(
-            file_path=file_path,
-            content="Test content\n"
-        )
+        input_data = FileWriteToolInput(file_path=file_path, content="Test content\n")
         context = ToolUseContext()
 
         result = None
@@ -81,16 +78,12 @@ async def test_file_edit_tool():
     """Test editing a file."""
     tool = FileEditTool()
 
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
         f.write("Hello World\n")
         temp_path = f.name
 
     try:
-        input_data = FileEditToolInput(
-            file_path=temp_path,
-            old_string="World",
-            new_string="Python"
-        )
+        input_data = FileEditToolInput(file_path=temp_path, old_string="World", new_string="Python")
         context = ToolUseContext()
 
         result = None
@@ -113,7 +106,7 @@ async def test_multi_edit_tool():
     """Test applying multiple edits sequentially."""
     tool = MultiEditTool()
 
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
         f.write("hello world\nhello again\n")
         temp_path = f.name
 
@@ -169,7 +162,7 @@ async def test_multi_edit_tool_failure_no_match():
     """Multi edit should not write when a string is missing."""
     tool = MultiEditTool()
 
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
         f.write("content\n")
         temp_path = f.name
 
@@ -202,10 +195,7 @@ async def test_glob_tool():
         (Path(tmpdir) / "test2.py").touch()
         (Path(tmpdir) / "test.txt").touch()
 
-        input_data = GlobToolInput(
-            pattern="*.py",
-            path=tmpdir
-        )
+        input_data = GlobToolInput(pattern="*.py", path=tmpdir)
         context = ToolUseContext()
 
         result = None
@@ -332,9 +322,7 @@ async def test_bash_tool_background_and_output():
 
     # Start a short-lived command in the background.
     start_input = BashToolInput(
-        command="sleep 0.1 && echo hi",
-        run_in_background=True,
-        timeout=2000
+        command="sleep 0.1 && echo hi", run_in_background=True, timeout=2000
     )
 
     start_result = None
@@ -366,7 +354,7 @@ async def test_bash_background_stdin_detached():
     context = ToolUseContext()
 
     start_input = BashToolInput(
-        command='python -c "import sys; data=sys.stdin.read(); print(f\\\"len={len(data)}\\\")"',
+        command='python -c "import sys; data=sys.stdin.read(); print(f\\"len={len(data)}\\")"',
         run_in_background=True,
         timeout=2000,
     )
@@ -399,7 +387,7 @@ async def test_bash_tool_streaming_output():
     context = ToolUseContext()
 
     input_data = BashToolInput(
-        command='python -c "import sys, time; print(\'hi\'); sys.stdout.flush(); time.sleep(0.1); print(\'bye\'); sys.stdout.flush()"',
+        command="python -c \"import sys, time; print('hi'); sys.stdout.flush(); time.sleep(0.1); print('bye'); sys.stdout.flush()\"",
         timeout=2000,
     )
 
@@ -428,7 +416,7 @@ async def test_kill_bash_running_task():
     context = ToolUseContext()
 
     start_input = BashToolInput(
-        command="python -c \"import time; time.sleep(2)\"",
+        command='python -c "import time; time.sleep(2)"',
         run_in_background=True,
         timeout=3000,
     )
@@ -539,7 +527,9 @@ class DummyTool(Tool[DummyInput, str]):
         return self._name
 
     async def call(
-        self, input_data: DummyInput, context: ToolUseContext  # noqa: ARG002
+        self,
+        input_data: DummyInput,
+        context: ToolUseContext,  # noqa: ARG002
     ):  # type: ignore[override]
         yield ToolResult(data="ok", result_for_assistant="ok")
 

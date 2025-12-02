@@ -395,10 +395,10 @@ build projects, run tests, and interact with the file system."""
         if output.duration_ms:
             timing = f" ({format_duration(output.duration_ms)}"
             if output.timeout_ms:
-                timing += f" / timeout {output.timeout_ms/1000:.0f}s"
+                timing += f" / timeout {output.timeout_ms / 1000:.0f}s"
             timing += ")"
         elif output.timeout_ms:
-            timing = f" (timeout {output.timeout_ms/1000:.0f}s)"
+            timing = f" (timeout {output.timeout_ms / 1000:.0f}s)"
 
         result_parts.append(f"{exit_code_text}{timing}")
 

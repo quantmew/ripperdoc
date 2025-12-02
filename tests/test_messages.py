@@ -5,7 +5,7 @@ from ripperdoc.utils.messages import (
     create_user_message,
     create_assistant_message,
     create_progress_message,
-    normalize_messages_for_api
+    normalize_messages_for_api,
 )
 
 
@@ -33,9 +33,7 @@ def test_create_assistant_message():
 def test_create_progress_message():
     """Test creating a progress message."""
     msg = create_progress_message(
-        tool_use_id="test_id",
-        sibling_tool_use_ids={"id1", "id2"},
-        content="Working..."
+        tool_use_id="test_id", sibling_tool_use_ids={"id1", "id2"}, content="Working..."
     )
 
     assert msg.type == "progress"
@@ -49,7 +47,7 @@ def test_normalize_messages_for_api():
         create_user_message("Hello"),
         create_assistant_message("Hi there"),
         create_progress_message("test_id", set(), "Progress"),
-        create_user_message("How are you?")
+        create_user_message("How are you?"),
     ]
 
     normalized = normalize_messages_for_api(messages)
@@ -63,11 +61,7 @@ def test_normalize_messages_for_api():
 
 def test_message_with_tool_result():
     """Test creating a message with tool result."""
-    tool_result = {
-        "type": "tool_result",
-        "tool_use_id": "test_id",
-        "content": "Result content"
-    }
+    tool_result = {"type": "tool_result", "tool_use_id": "test_id", "content": "Result content"}
 
     msg = create_user_message([tool_result])
 

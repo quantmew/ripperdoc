@@ -119,7 +119,9 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
         return False
 
     async def validate_input(
-        self, input_data: ToolSearchInput, context: Optional[ToolUseContext] = None  # noqa: ARG002
+        self,
+        input_data: ToolSearchInput,
+        context: Optional[ToolUseContext] = None,  # noqa: ARG002
     ) -> ValidationResult:
         if not (input_data.query or input_data.names):
             return ValidationResult(

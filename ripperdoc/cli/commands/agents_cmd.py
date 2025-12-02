@@ -172,7 +172,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         console.print(escape(target_agent.system_prompt or "(empty)"), markup=False)
         system_prompt = (
             console.input(
-                "System prompt (single line, use \\n for newlines) " "[Enter to keep current]: "
+                "System prompt (single line, use \\n for newlines) [Enter to keep current]: "
             ).strip()
             or target_agent.system_prompt
         )

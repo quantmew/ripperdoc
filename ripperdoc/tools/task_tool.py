@@ -85,7 +85,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         details: List[str] = []
         if output.tool_use_count:
             details.append(f"{output.tool_use_count} tool uses")
-        details.append(f"{output.duration_ms/1000:.1f}s")
+        details.append(f"{output.duration_ms / 1000:.1f}s")
         if output.missing_tools:
             details.append(f"missing tools: {', '.join(output.missing_tools)}")
 
@@ -127,7 +127,10 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
         # Type conversion: List[object] -> List[Tool[Any, Any]]
         from ripperdoc.core.tool import Tool
-        typed_agent_tools: List[Tool[Any, Any]] = [tool for tool in agent_tools if isinstance(tool, Tool)]
+
+        typed_agent_tools: List[Tool[Any, Any]] = [
+            tool for tool in agent_tools if isinstance(tool, Tool)
+        ]
 
         agent_system_prompt = self._build_agent_prompt(target_agent, typed_agent_tools)
         subagent_messages = [create_user_message(input_data.prompt)]

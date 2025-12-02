@@ -233,7 +233,7 @@ class McpRuntime:
 
             if read_stream is None or write_stream is None:
                 raise ValueError("Failed to create read/write streams for MCP server")
-            
+
             session = await self._exit_stack.enter_async_context(
                 ClientSession(
                     read_stream,

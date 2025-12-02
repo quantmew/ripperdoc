@@ -8,7 +8,7 @@ from ripperdoc.core.config import (
     ProjectConfig,
     ModelProfile,
     ProviderType,
-    ConfigManager
+    ConfigManager,
 )
 
 
@@ -23,9 +23,7 @@ def test_global_config_creation():
 def test_model_profile_creation():
     """Test creating a model profile."""
     profile = ModelProfile(
-        provider=ProviderType.ANTHROPIC,
-        model="claude-3-5-sonnet-20241022",
-        api_key="test_key"
+        provider=ProviderType.ANTHROPIC, model="claude-3-5-sonnet-20241022", api_key="test_key"
     )
     assert profile.provider == ProviderType.ANTHROPIC
     assert profile.model == "claude-3-5-sonnet-20241022"
@@ -58,8 +56,7 @@ def test_config_manager():
         # Modify and save
         config.has_completed_onboarding = True
         config.model_profiles["test"] = ModelProfile(
-            provider=ProviderType.ANTHROPIC,
-            model="test-model"
+            provider=ProviderType.ANTHROPIC, model="test-model"
         )
         manager.save_global_config(config)
 

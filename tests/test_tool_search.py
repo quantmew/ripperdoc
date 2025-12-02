@@ -47,7 +47,9 @@ class DummyTool(Tool[DummyInput, str]):
         return self._name
 
     async def call(  # type: ignore[override]
-        self, input_data: DummyInput, context: ToolUseContext  # noqa: ARG002
+        self,
+        input_data: DummyInput,
+        context: ToolUseContext,  # noqa: ARG002
     ):
         yield ToolResult(data="ok", result_for_assistant="ok")
 

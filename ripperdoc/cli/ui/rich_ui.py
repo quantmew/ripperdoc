@@ -32,19 +32,9 @@ from ripperdoc.cli.commands import (
     slash_command_completions,
 )
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
-from ripperdoc.core.permissions import make_permission_checker, PermissionResult
+from ripperdoc.core.permissions import make_permission_checker
 from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
-from ripperdoc.utils.messages import (
-    UserMessage,
-    AssistantMessage,
-    ProgressMessage,
-    create_user_message,
-    create_assistant_message,
-)
-
-# Type alias for conversation messages
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 from ripperdoc.utils.message_compaction import (
     compact_messages,
     estimate_conversation_tokens,
@@ -62,6 +52,16 @@ from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_
 from ripperdoc.utils.session_history import SessionHistory
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.core.query import query_llm
+from ripperdoc.utils.messages import (
+    UserMessage,
+    AssistantMessage,
+    ProgressMessage,
+    create_user_message,
+    create_assistant_message,
+)
+
+# Type alias for conversation messages
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
 
 console = Console()
@@ -435,12 +435,12 @@ class RichUI:
                 if tool_data:
                     timing = ""
                     if duration_ms:
-                        timing = f" ({duration_ms/1000:.2f}s"
+                        timing = f" ({duration_ms / 1000:.2f}s"
                         if timeout_ms:
-                            timing += f" / timeout {timeout_ms/1000:.0f}s"
+                            timing += f" / timeout {timeout_ms / 1000:.0f}s"
                         timing += ")"
                     elif timeout_ms:
-                        timing = f" (timeout {timeout_ms/1000:.0f}s)"
+                        timing = f" (timeout {timeout_ms / 1000:.0f}s)"
                     self.console.print(f"  ⎿  [dim]Exit code {exit_code}{timing}[/]")
                 else:
                     self.console.print("  ⎿  [dim]Command executed[/]")
@@ -607,7 +607,9 @@ class RichUI:
 
             config = get_global_config()
             model_profile = get_profile_for_pointer("main")
-            max_context_tokens = get_remaining_context_tokens(model_profile, config.context_token_limit)
+            max_context_tokens = get_remaining_context_tokens(
+                model_profile, config.context_token_limit
+            )
             auto_compact_enabled = resolve_auto_compact_enabled(config)
             protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 
@@ -648,7 +650,7 @@ class RichUI:
                 try:
                     if base_permission_checker is not None:
                         result = await base_permission_checker(tool, parsed_input)
-                        return result.result if hasattr(result, 'result') else True
+                        return result.result if hasattr(result, "result") else True
                     return True
                 finally:
                     if spinner:
@@ -662,7 +664,11 @@ class RichUI:
             try:
                 spinner.start()
                 async for message in query(
-                    messages, system_prompt, context, self.query_context, permission_checker  # type: ignore[arg-type]
+                    messages,
+                    system_prompt,
+                    context,
+                    self.query_context,
+                    permission_checker,  # type: ignore[arg-type]
                 ):
                     if message.type == "assistant" and isinstance(message, AssistantMessage):
                         # Extract text content from assistant message
@@ -959,8 +965,7 @@ class RichUI:
             instructions += f"\nCustom instructions: {custom_instructions.strip()}"
 
         user_content = (
-            "Summarize the following conversation between a user and an assistant:\n\n"
-            f"{transcript}"
+            f"Summarize the following conversation between a user and an assistant:\n\n{transcript}"
         )
 
         assistant_response = await query_llm(

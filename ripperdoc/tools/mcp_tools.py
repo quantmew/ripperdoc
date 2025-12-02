@@ -469,6 +469,7 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
             try:
                 # Convert string to AnyUrl
                 from mcp.types import AnyUrl
+
                 uri = AnyUrl(input_data.uri)
                 result = await session.read_resource(uri)
                 for item in result.contents:
@@ -686,7 +687,9 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
             raw_blocks = getattr(call_result, "content", None)
             content_blocks = _normalize_content_blocks(raw_blocks)
             content_text = _render_content_blocks(content_blocks) if content_blocks else None
-            structured = call_result.structuredContent if hasattr(call_result, "structuredContent") else None
+            structured = (
+                call_result.structuredContent if hasattr(call_result, "structuredContent") else None
+            )
             assistant_text = content_text
             if structured:
                 assistant_text = (assistant_text + "\n" if assistant_text else "") + json.dumps(

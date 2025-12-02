@@ -48,6 +48,7 @@ async def run_query(
 
     # Create initial user message
     from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMessage
+
     messages: List[UserMessage | AssistantMessage | ProgressMessage] = [create_user_message(prompt)]
 
     # Create query context
@@ -80,7 +81,7 @@ async def run_query(
             async for message in query(
                 messages, system_prompt, context, query_context, can_use_tool
             ):
-                if message.type == "assistant" and hasattr(message, 'message'):
+                if message.type == "assistant" and hasattr(message, "message"):
                     # Print assistant message
                     if isinstance(message.message.content, str):
                         console.print(
@@ -112,7 +113,7 @@ async def run_query(
                                         )
                                     )
 
-                elif message.type == "progress" and hasattr(message, 'content'):
+                elif message.type == "progress" and hasattr(message, "content"):
                     # Print progress
                     if verbose:
                         console.print(f"[dim]Progress: {escape(str(message.content))}[/dim]")

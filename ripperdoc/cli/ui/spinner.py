@@ -1,5 +1,3 @@
-from typing import Optional
-
 from typing import Any, Literal, Optional
 from rich.console import Console
 from rich.markup import escape

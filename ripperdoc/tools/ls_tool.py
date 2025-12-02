@@ -270,7 +270,7 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
     def render_tool_use_message(self, input_data: LSToolInput, verbose: bool = False) -> str:
         ignore_display = ""
         if input_data.ignore:
-            ignore_display = f", ignore: \"{', '.join(input_data.ignore)}\""
+            ignore_display = f', ignore: "{", ".join(input_data.ignore)}"'
         return f'path: "{input_data.path}"{ignore_display}'
 
     async def call(

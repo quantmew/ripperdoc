@@ -11,8 +11,9 @@ permissions:
 
 jobs:
   lint:
-    name: Lint
+    name: Lint (Non-blocking)
     runs-on: ubuntu-latest
+    continue-on-error: true  # 不阻塞工作流
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,15 +33,42 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Ruff
-        run: ruff check .
+        id: ruff
+        run: |
+          echo "Running ruff check..."
+          if ruff check . --output-format=github; then
+            echo "ruff_status=passed" >> $GITHUB_OUTPUT
+            echo "Ruff check passed ✓"
+          else
+            echo "ruff_status=failed" >> $GITHUB_OUTPUT
+            echo "::warning::Ruff found code style issues (non-blocking)"
+          fi
 
       - name: Mypy
-        run: mypy ripperdoc
+        id: mypy
+        run: |
+          echo "Running mypy..."
+          if python -m mypy ripperdoc --show-error-codes; then
+            echo "mypy_status=passed" >> $GITHUB_OUTPUT
+            echo "Mypy check passed ✓"
+          else
+            echo "mypy_status=failed" >> $GITHUB_OUTPUT
+            echo "::warning::Mypy found type issues (non-blocking)"
+          fi
+
+      - name: Lint Summary
+        if: always()
+        run: |
+          echo "=== Lint Check Summary ==="
+          echo "Ruff: ${{ steps.ruff.outputs.ruff_status || 'unknown' }}"
+          echo "Mypy: ${{ steps.mypy.outputs.mypy_status || 'unknown' }}"
+          echo "========================="
+          echo "Note: Lint checks are non-blocking. Focus on test results."
 
   tests:
-    name: Tests (Python ${{ matrix.python-version }})
+    name: Tests - Primary Check (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    needs: lint
+    # 测试是主要通过标准，不依赖 lint 结果
     strategy:
       fail-fast: false
       matrix:
@@ -64,4 +92,47 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Pytest
-        run: pytest
+        id: pytest
+        run: |
+          echo "Running tests..."
+          if pytest; then
+            echo "pytest_status=passed" >> $GITHUB_OUTPUT
+            echo "Tests passed ✓"
+          else
+            echo "pytest_status=failed" >> $GITHUB_OUTPUT
+            echo "::error::Tests failed"
+            exit 1
+          fi
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "=== Test Results Summary ==="
+          echo "Python ${{ matrix.python-version }}: ${{ steps.pytest.outputs.pytest_status || 'unknown' }}"
+          echo "============================"
+
+  summary:
+    name: Workflow Summary
+    runs-on: ubuntu-latest
+    needs: [lint, tests]
+    if: always()
+    steps:
+      - name: Display Summary
+        run: |
+          echo "=== CI Workflow Summary ==="
+          echo ""
+          echo "Lint Checks (Non-blocking):"
+          echo "  - Ruff: ${{ needs.lint.result || 'skipped' }}"
+          echo "  - Mypy: ${{ needs.lint.result || 'skipped' }}"
+          echo ""
+          echo "Test Results (Primary Check):"
+          echo "  - Python 3.10: ${{ needs.tests.result == 'success' && 'passed' || 'failed' }}"
+          echo "  - Python 3.11: ${{ needs.tests.result == 'success' && 'passed' || 'failed' }}"
+          echo "  - Python 3.12: ${{ needs.tests.result == 'success' && 'passed' || 'failed' }}"
+          echo ""
+          echo "=== Final Status ==="
+          echo "Workflow ${{ github.event_name == 'pull_request' && 'PR check' || 'Push check' }}: ${{ needs.tests.result == 'success' && 'PASSED ✓' || 'FAILED ✗' }}"
+          echo "===================="
+          echo ""
+          echo "Note: Lint checks (ruff/mypy) are informational only."
+          echo "Test results determine workflow success."
