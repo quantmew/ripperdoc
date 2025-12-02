@@ -2,6 +2,7 @@
 
 Ripperdoc is an AI-powered terminal assistant for coding tasks, providing an interactive interface for AI-assisted development, file management, and command execution.
 
+[中文文档](README_CN.md) | [Contributing](CONTRIBUTING.md) | [Documentation](docs/)
 ## Features
 
 - **AI-Powered Assistance** - Uses AI models to understand and respond to coding requests
@@ -11,13 +12,11 @@ Ripperdoc is an AI-powered terminal assistant for coding tasks, providing an int
 - **Command Execution** - Run shell commands with real-time feedback
 - **Tool System** - Extensible architecture with specialized tools
 - **Subagents** - Delegate tasks to specialized agents with their own tool scopes
-- **Rich UI** - Beautiful terminal interface with syntax highlighting
 - **File Operations** - Read, write, edit, search, and manage files
 - **Todo Tracking** - Plan, read, and update persistent todo lists per project
 - **Background Commands** - Run commands in background and monitor output
 - **Permission System** - Safe mode with permission prompts for operations
 - **Multi-Edit Support** - Batch edit operations on files
-- **MCP Server Support** - Connect to Model Context Protocol servers for extended capabilities
 - **MCP Server Support** - Integration with Model Context Protocol servers
 - **Subagent System** - Delegate tasks to specialized agents
 - **Session Management** - Persistent session history and usage tracking

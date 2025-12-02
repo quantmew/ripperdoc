@@ -88,7 +88,7 @@ options = RipperdocOptions(permission_checker=allow_only_reads, safe_mode=True)
 ```
 
 ## 提示词与记忆
-- 不传 `system_prompt` 时，SDK 会调用 `build_system_prompt` 并自动注入 `RIPPERDOC.md`/`RIPPERDOC.local.md` 等记忆文件。
+- 不传 `system_prompt` 时，SDK 会调用 `build_system_prompt` 并自动注入 `AGENTS.md`/`AGENTS.local.md` 等记忆文件。
 - 追加指令：`additional_instructions="你是该仓库的守护者，回答请用要点。"`
 
 ## 返回的消息类型

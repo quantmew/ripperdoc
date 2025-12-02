@@ -1,4 +1,4 @@
-"""Helpers for loading RIPPERDOC.md memory files."""
+"""Helpers for loading AGENTS.md memory files."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Set
 
-MEMORY_FILE_NAME = "RIPPERDOC.md"
-LOCAL_MEMORY_FILE_NAME = "RIPPERDOC.local.md"
+MEMORY_FILE_NAME = "AGENTS.md"
+LOCAL_MEMORY_FILE_NAME = "AGENTS.local.md"
 
 MEMORY_INSTRUCTIONS = (
     "Codebase and user instructions are shown below. Be sure to adhere to these "
@@ -150,7 +150,7 @@ def _collect_files(
 
 
 def collect_all_memory_files(force_include_external: bool = False) -> List[MemoryFile]:
-    """Collect all RIPPERDOC memory files reachable from the working directory."""
+    """Collect all AGENTS memory files reachable from the working directory."""
     visited: Set[str] = set()
     files: List[MemoryFile] = []
 

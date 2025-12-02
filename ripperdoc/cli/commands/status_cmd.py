@@ -69,7 +69,7 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
 
 
 def _memory_status_lines(memory_files: List[MemoryFile]) -> List[str]:
-    """Summarize RIPPERDOC memory files and any issues."""
+    """Summarize AGENTS memory files and any issues."""
     if not memory_files:
         return ["None detected"]
 
