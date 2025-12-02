@@ -2,7 +2,6 @@
 
 import asyncio
 from pathlib import Path
-import tempfile
 from typing import Any
 
 import pytest

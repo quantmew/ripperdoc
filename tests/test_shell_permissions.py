@@ -1,6 +1,5 @@
 """Tests for the new bash permissions and validation utilities."""
 
-import asyncio
 from pathlib import Path
 
 import pytest

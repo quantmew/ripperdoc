@@ -1,7 +1,6 @@
 """Tests for the ToolSearch tool and deferred activation."""
 
 import asyncio
-import pytest
 from pydantic import BaseModel
 
 from ripperdoc.core.query import ToolRegistry

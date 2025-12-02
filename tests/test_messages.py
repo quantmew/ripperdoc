@@ -1,12 +1,7 @@
 """Test message utilities."""
 
-import pytest
 from ripperdoc.utils.messages import (
-    Message,
     MessageRole,
-    UserMessage,
-    AssistantMessage,
-    ProgressMessage,
     create_user_message,
     create_assistant_message,
     create_progress_message,

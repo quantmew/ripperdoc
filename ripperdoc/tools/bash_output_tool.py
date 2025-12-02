@@ -1,5 +1,3 @@
-from typing import Any
-
 """Tool to retrieve output from background bash tasks."""
 
 from typing import Any, AsyncGenerator, Optional

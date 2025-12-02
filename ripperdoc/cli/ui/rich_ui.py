@@ -869,7 +869,6 @@ class RichUI:
             console.print("[yellow]Not enough conversation history to compact.[/yellow]")
             return
 
-        config = get_global_config()
         model_profile = get_profile_for_pointer("main")
         protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 

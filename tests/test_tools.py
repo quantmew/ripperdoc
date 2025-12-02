@@ -69,7 +69,7 @@ async def test_file_write_tool():
             result = output
 
         assert result is not None
-        assert result.data.success == True
+        assert result.data.success
 
         # Verify file was created
         assert Path(file_path).exists()
@@ -98,7 +98,7 @@ async def test_file_edit_tool():
             result = output
 
         assert result is not None
-        assert result.data.success == True
+        assert result.data.success
         assert result.data.replacements_made == 1
 
         # Verify edit
@@ -227,7 +227,7 @@ async def test_tool_validation():
     context = ToolUseContext()
 
     validation = await tool.validate_input(input_data, context)
-    assert validation.result == False
+    assert not validation.result
     assert "not found" in validation.message.lower()
 
 

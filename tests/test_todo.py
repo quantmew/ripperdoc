@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 from ripperdoc.core.tool import ToolUseContext
 from ripperdoc.tools.todo_tool import (

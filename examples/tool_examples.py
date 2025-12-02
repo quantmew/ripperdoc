@@ -6,7 +6,7 @@ This file demonstrates how to use Ripperdoc programmatically.
 import asyncio
 from ripperdoc.tools.bash_tool import BashTool, BashToolInput
 from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
-from ripperdoc.tools.file_edit_tool import FileEditTool, FileEditToolInput
+from ripperdoc.tools.file_edit_tool import FileEditToolInput
 from ripperdoc.tools.glob_tool import GlobTool, GlobToolInput
 from ripperdoc.core.tool import ToolUseContext
 
@@ -74,8 +74,6 @@ async def example_file_edit_tool():
     """Example: Edit a file (demo only, doesn't actually edit)."""
     print("\n=== File Edit Tool Example ===")
     print("Note: This is a demonstration. To actually edit files, use a real file.")
-
-    tool = FileEditTool()
 
     # Show what input would look like
     print("\nExample input:")

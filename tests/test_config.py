@@ -1,8 +1,6 @@
 """Test configuration management."""
 
-import pytest
 from pathlib import Path
-import json
 import tempfile
 
 from ripperdoc.core.config import (
@@ -17,9 +15,9 @@ from ripperdoc.core.config import (
 def test_global_config_creation():
     """Test creating a global config."""
     config = GlobalConfig()
-    assert config.has_completed_onboarding == False
+    assert not config.has_completed_onboarding
     assert config.theme == "dark"
-    assert config.verbose == False
+    assert not config.verbose
 
 
 def test_model_profile_creation():
@@ -68,15 +66,15 @@ def test_config_manager():
         # Load again and verify
         manager._global_config = None
         loaded_config = manager.get_global_config()
-        assert loaded_config.has_completed_onboarding == True
+        assert loaded_config.has_completed_onboarding
         assert "test" in loaded_config.model_profiles
 
 
 def test_project_config():
     """Test project configuration."""
     config = ProjectConfig()
-    assert config.dont_crawl_directory == False
-    assert config.enable_architect_tool == False
+    assert not config.dont_crawl_directory
+    assert not config.enable_architect_tool
     assert isinstance(config.allowed_tools, list)
     assert isinstance(config.bash_allow_rules, list)
     assert isinstance(config.bash_deny_rules, list)
