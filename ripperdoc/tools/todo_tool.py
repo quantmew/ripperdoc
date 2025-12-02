@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 from textwrap import dedent
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ToolResult,
     ToolOutput,
+    ToolUseExample,
     ValidationResult,
 )
 from ripperdoc.utils.todo import (
@@ -135,6 +136,48 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
     def input_schema(self) -> type[TodoWriteToolInput]:
         return TodoWriteToolInput
 
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Seed a three-step plan",
+                input={
+                    "todos": [
+                        {
+                            "id": "plan",
+                            "content": "Review existing API docs",
+                            "status": "pending",
+                            "priority": "medium",
+                        },
+                        {
+                            "id": "impl",
+                            "content": "Implement new endpoint",
+                            "status": "pending",
+                            "priority": "high",
+                        },
+                        {
+                            "id": "tests",
+                            "content": "Add integration tests",
+                            "status": "pending",
+                            "priority": "high",
+                        },
+                    ]
+                },
+            ),
+            ToolUseExample(
+                description="Update a single task already in progress",
+                input={
+                    "todos": [
+                        {
+                            "id": "bugfix-123",
+                            "content": "Fix login redirect loop",
+                            "status": "in_progress",
+                            "priority": "high",
+                        }
+                    ]
+                },
+            ),
+        ]
+
     async def prompt(self, safe_mode: bool = False) -> str:
         return TODO_WRITE_PROMPT
 
@@ -215,6 +258,18 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
     @property
     def input_schema(self) -> type[TodoReadToolInput]:
         return TodoReadToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Get only the next actionable todo",
+                input={"next_only": True},
+            ),
+            ToolUseExample(
+                description="List recent completed tasks with a limit",
+                input={"status": ["completed"], "limit": 5},
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         return (

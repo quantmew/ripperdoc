@@ -257,6 +257,11 @@ def get_model_context_limit(
     if model_profile and model_profile.model:
         name = model_profile.model.lower()
         if "claude" in name:
+            # Claude 4.5 defaults and beta 1M thinking window.
+            if "4.5" in name or "sonnet" in name or "haiku" in name:
+                return 1_000_000 if "1m" in name or "beta" in name else 200_000
+            if "opus" in name or "4.1" in name:
+                return 200_000
             return 200_000
         if "gpt-4o" in name or "gpt-4.1" in name or "gpt-4-turbo" in name:
             return 128_000
@@ -265,7 +270,7 @@ def get_model_context_limit(
         if "gpt-3.5" in name:
             return 16_000
         if "deepseek" in name:
-            return 64_000
+            return 128_000
 
     return DEFAULT_CONTEXT_TOKENS
 

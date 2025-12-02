@@ -8,7 +8,7 @@ import random
 import string
 from pathlib import Path
 from textwrap import dedent
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
@@ -16,6 +16,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ToolResult,
     ToolOutput,
+    ToolUseExample,
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
@@ -95,6 +96,29 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
     @property
     def input_schema(self) -> type[NotebookEditInput]:
         return NotebookEditInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Replace a markdown cell by id",
+                input={
+                    "notebook_path": "/repo/notebooks/analysis.ipynb",
+                    "cell_id": "abc123",
+                    "new_source": "# Updated overview\\nThis notebook analyzes revenue.",
+                    "cell_type": "markdown",
+                    "edit_mode": "replace",
+                },
+            ),
+            ToolUseExample(
+                description="Insert a new code cell at the beginning",
+                input={
+                    "notebook_path": "/repo/notebooks/analysis.ipynb",
+                    "cell_type": "code",
+                    "edit_mode": "insert",
+                    "new_source": "import pandas as pd\\nimport numpy as np",
+                },
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         return NOTEBOOK_EDIT_DESCRIPTION

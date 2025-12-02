@@ -12,6 +12,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ToolResult,
     ToolOutput,
+    ToolUseExample,
     ValidationResult,
 )
 
@@ -74,6 +75,22 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
     @property
     def input_schema(self) -> type[GrepToolInput]:
         return GrepToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Find TODO comments in TypeScript files",
+                input={"pattern": "TODO", "glob": "**/*.ts", "output_mode": "content"},
+            ),
+            ToolUseExample(
+                description="List files referencing a function name",
+                input={
+                    "pattern": "fetchUserData",
+                    "output_mode": "files_with_matches",
+                    "path": "/repo/src",
+                },
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         return GREP_USAGE

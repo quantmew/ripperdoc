@@ -4,6 +4,7 @@ import asyncio
 import pytest
 import tempfile
 from pathlib import Path
+from pydantic import BaseModel
 
 from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
 from ripperdoc.tools.file_write_tool import FileWriteTool, FileWriteToolInput
@@ -18,7 +19,9 @@ from ripperdoc.tools.ls_tool import LSTool, LSToolInput
 from ripperdoc.tools.bash_tool import BashTool, BashToolInput
 from ripperdoc.tools.bash_output_tool import BashOutputTool, BashOutputInput
 from ripperdoc.tools.kill_bash_tool import KillBashTool, KillBashInput
-from ripperdoc.core.tool import ToolUseContext, ToolProgress
+from ripperdoc.core.tool import Tool, ToolUseContext, ToolProgress, ToolResult
+from ripperdoc.core.query import ToolRegistry
+from ripperdoc.tools.tool_search_tool import ToolSearchTool, ToolSearchInput
 from ripperdoc.tools.background_shell import get_background_status
 
 
@@ -496,3 +499,67 @@ async def test_kill_bash_validation_missing():
     context = ToolUseContext()
     validation = await kill_tool.validate_input(KillBashInput(task_id="missing"), context)
     assert validation.result is False
+
+
+class DummyInput(BaseModel):
+    """Input for dummy tools."""
+
+    pass
+
+
+class DummyTool(Tool[DummyInput, str]):
+    """Minimal tool used for tool search tests."""
+
+    def __init__(self, name: str, deferred: bool = False) -> None:
+        super().__init__()
+        self._name = name
+        self._deferred = deferred
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def description(self) -> str:
+        return f"{self._name} tool"
+
+    @property
+    def input_schema(self) -> type[DummyInput]:
+        return DummyInput
+
+    async def prompt(self, safe_mode: bool = False) -> str:  # noqa: ARG002
+        return ""
+
+    def defer_loading(self) -> bool:
+        return self._deferred
+
+    def render_result_for_assistant(self, output: str) -> str:
+        return output
+
+    def render_tool_use_message(self, input_data: DummyInput, verbose: bool = False) -> str:  # noqa: ARG002
+        return self._name
+
+    async def call(
+        self, input_data: DummyInput, context: ToolUseContext  # noqa: ARG002
+    ):  # type: ignore[override]
+        yield ToolResult(data="ok", result_for_assistant="ok")
+
+
+@pytest.mark.asyncio
+async def test_tool_search_activates_deferred_tools():
+    """ToolSearch should surface deferred tools and activate them."""
+    active = DummyTool("Active")
+    deferred = DummyTool("Deferred", deferred=True)
+    registry = ToolRegistry([active, deferred])
+
+    search_tool = ToolSearchTool()
+    context = ToolUseContext(tool_registry=registry)
+    input_data = ToolSearchInput(query="defer", max_results=3, include_active=True)
+
+    result = None
+    async for output in search_tool.call(input_data, context):
+        result = output
+
+    assert result is not None
+    assert "Deferred" in result.data.activated
+    assert registry.is_active("Deferred")
+    assert any(match.name == "Deferred" for match in result.data.matches)

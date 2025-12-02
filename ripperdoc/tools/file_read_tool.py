@@ -4,7 +4,7 @@ Allows the AI to read file contents.
 """
 
 import os
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
@@ -12,6 +12,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ToolResult,
     ToolOutput,
+    ToolUseExample,
     ValidationResult,
 )
 
@@ -50,6 +51,18 @@ and limit to read only a portion of the file."""
     @property
     def input_schema(self) -> type[FileReadToolInput]:
         return FileReadToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Read the top of a file to understand structure",
+                input={"file_path": "/repo/src/main.py", "limit": 50},
+            ),
+            ToolUseExample(
+                description="Inspect a slice of a large log without loading everything",
+                input={"file_path": "/repo/logs/server.log", "offset": 200, "limit": 40},
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         return (

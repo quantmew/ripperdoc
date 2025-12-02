@@ -9,7 +9,14 @@ from typing import AsyncGenerator, Optional, List
 from textwrap import dedent
 from pydantic import BaseModel, Field
 
-from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolOutput, ValidationResult
+from ripperdoc.core.tool import (
+    Tool,
+    ToolUseContext,
+    ToolResult,
+    ToolOutput,
+    ToolUseExample,
+    ValidationResult,
+)
 
 
 DEFAULT_ACTION = "Edit"
@@ -112,6 +119,30 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
     @property
     def input_schema(self) -> type[MultiEditToolInput]:
         return MultiEditToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Apply multiple replacements in one pass",
+                input={
+                    "file_path": "/repo/src/app.py",
+                    "edits": [
+                        {"old_string": "DEBUG = True", "new_string": "DEBUG = False"},
+                        {"old_string": "old_fn(", "new_string": "new_fn("},
+                    ],
+                },
+            ),
+            ToolUseExample(
+                description="Create a new file then adjust content",
+                input={
+                    "file_path": "/repo/docs/notes.txt",
+                    "edits": [
+                        {"old_string": "", "new_string": "Line one\nLine two\n"},
+                        {"old_string": "Line two", "new_string": "Second line"},
+                    ],
+                },
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         return MULTI_EDIT_DESCRIPTION

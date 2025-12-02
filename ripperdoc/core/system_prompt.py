@@ -352,6 +352,11 @@ def build_system_prompt(
             1,
             "- Use the Task tool with configured subagents when the task matches an agent's description. Always set subagent_type.",
         )
+    if "ToolSearch" in tool_names:
+        tool_usage_lines.insert(
+            1,
+            "- Use the ToolSearch tool to discover and activate deferred or MCP tools. Keep searches focused and load only 3-5 relevant tools.",
+        )
     tool_usage_section = "\n".join(tool_usage_lines)
 
     always_use_todo = ""

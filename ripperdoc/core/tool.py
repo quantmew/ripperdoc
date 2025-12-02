@@ -4,9 +4,10 @@ This module provides the abstract base class for all tools in the system.
 Tools are the primary way that the AI agent interacts with the environment.
 """
 
+import json
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator, Dict, Optional, TypeVar, Generic, Union
-from pydantic import BaseModel, ConfigDict
+from typing import Any, AsyncGenerator, Dict, List, Optional, TypeVar, Generic, Union
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToolResult(BaseModel):
@@ -35,6 +36,7 @@ class ToolUseContext(BaseModel):
     verbose: bool = False
     permission_checker: Optional[Any] = None
     read_file_timestamps: Dict[str, float] = {}
+    tool_registry: Optional[Any] = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
@@ -45,6 +47,18 @@ class ValidationResult(BaseModel):
     message: Optional[str] = None
     error_code: Optional[int] = None
     meta: Optional[Dict[str, Any]] = None
+
+
+class ToolUseExample(BaseModel):
+    """Example of how to call a tool to guide the model."""
+
+    example: Dict[str, Any] = Field(validation_alias="input")
+    description: Optional[str] = None
+    model_config = ConfigDict(
+        validate_by_alias=True,
+        validate_by_name=True,
+        serialization_aliases={"example": "input"},
+    )
 
 
 TInput = TypeVar("TInput", bound=BaseModel)
@@ -104,6 +118,18 @@ class Tool(ABC, Generic[TInput, TOutput]):
         """Check if this tool needs permission to execute."""
         return not self.is_read_only()
 
+    def defer_loading(self) -> bool:
+        """Whether this tool should be omitted from the initial tool list.
+
+        Deferred tools can be surfaced later via tool search to save tokens
+        when there are many available tools.
+        """
+        return False
+
+    def input_examples(self) -> List[ToolUseExample]:
+        """Optional examples that demonstrate correct tool usage."""
+        return []
+
     async def validate_input(
         self, input_data: TInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
@@ -140,3 +166,49 @@ def create_tool_schema(tool: Tool[Any, Any]) -> Dict[str, Any]:
         "description": "",  # Will be populated async
         "input_schema": tool.input_schema.model_json_schema(),
     }
+
+
+async def build_tool_description(
+    tool: Tool[Any, Any], *, include_examples: bool = False, max_examples: int = 3
+) -> str:
+    """Return the tool description with optional input examples appended."""
+
+    description_text = await tool.description()
+
+    if not include_examples:
+        return description_text
+
+    examples = tool.input_examples()
+    if not examples:
+        return description_text
+
+    try:
+        parts = []
+        for idx, example in enumerate(examples[:max_examples], start=1):
+            payload = json.dumps(example.example, ensure_ascii=False, indent=2)
+            prefix = f"{idx}."
+            if example.description:
+                parts.append(f"{prefix} {example.description}\n{payload}")
+            else:
+                parts.append(f"{prefix} {payload}")
+
+        if parts:
+            return f"{description_text}\n\nInput examples:\n" + "\n\n".join(parts)
+    except Exception:
+        return description_text
+
+    return description_text
+
+
+def tool_input_examples(tool: Tool[Any, Any], limit: int = 5) -> List[Dict[str, Any]]:
+    """Return raw input example objects formatted for the model."""
+    results: List[Dict[str, Any]] = []
+    examples = tool.input_examples()
+    if not examples:
+        return results
+    for example in examples[:limit]:
+        try:
+            results.append(example.example)
+        except Exception:
+            continue
+    return results

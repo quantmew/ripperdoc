@@ -12,6 +12,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ToolResult,
     ToolOutput,
+    ToolUseExample,
     ValidationResult,
 )
 
@@ -56,6 +57,18 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
     @property
     def input_schema(self) -> type[GlobToolInput]:
         return GlobToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Find Python sources inside src",
+                input={"pattern": "src/**/*.py"},
+            ),
+            ToolUseExample(
+                description="Locate snapshot files within tests",
+                input={"pattern": "tests/**/__snapshots__/*.snap", "path": "/repo"},
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         return GLOB_USAGE

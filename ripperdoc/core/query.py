@@ -6,11 +6,18 @@ the query-response loop including tool execution.
 
 import asyncio
 import inspect
-from typing import AsyncGenerator, List, Optional, Dict, Any, Union
+from typing import AsyncGenerator, List, Optional, Dict, Any, Union, Iterable, Tuple
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
-from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolProgress
+from ripperdoc.core.tool import (
+    Tool,
+    ToolUseContext,
+    ToolResult,
+    ToolProgress,
+    build_tool_description,
+    tool_input_examples,
+)
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     MessageContent,
@@ -81,6 +88,94 @@ def _openai_usage_tokens(usage: Any) -> Dict[str, int]:
     }
 
 
+class ToolRegistry:
+    """Track available tools, including deferred ones, and expose search/activation helpers."""
+
+    def __init__(self, tools: List[Tool[Any, Any]]) -> None:
+        self._tool_map: Dict[str, Tool[Any, Any]] = {}
+        self._order: List[str] = []
+        self._deferred: set[str] = set()
+        self._active: List[str] = []
+        self._active_set: set[str] = set()
+        self.replace_tools(tools)
+
+    def replace_tools(self, tools: List[Tool[Any, Any]]) -> None:
+        """Replace all known tools and rebuild active/deferred lists."""
+        seen = set()
+        self._tool_map.clear()
+        self._order.clear()
+        self._deferred.clear()
+        self._active.clear()
+        self._active_set.clear()
+
+        for tool in tools:
+            name = getattr(tool, "name", None)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            self._tool_map[name] = tool
+            self._order.append(name)
+            try:
+                deferred = tool.defer_loading()
+            except Exception:
+                deferred = False
+            if deferred:
+                self._deferred.add(name)
+            else:
+                self._active.append(name)
+                self._active_set.add(name)
+
+    @property
+    def active_tools(self) -> List[Tool[Any, Any]]:
+        """Return active (non-deferred) tools in original order."""
+        return [self._tool_map[name] for name in self._order if name in self._active_set]
+
+    @property
+    def all_tools(self) -> List[Tool[Any, Any]]:
+        """Return all known tools in registration order."""
+        return [self._tool_map[name] for name in self._order]
+
+    @property
+    def deferred_names(self) -> set[str]:
+        """Return the set of deferred tool names."""
+        return set(self._deferred)
+
+    def get(self, name: str) -> Optional[Tool[Any, Any]]:
+        """Lookup a tool by name."""
+        return self._tool_map.get(name)
+
+    def is_active(self, name: str) -> bool:
+        """Check if a tool is currently active."""
+        return name in self._active_set
+
+    def activate_tools(self, names: Iterable[str]) -> Tuple[List[str], List[str]]:
+        """Activate deferred tools by name."""
+        activated: List[str] = []
+        missing: List[str] = []
+        for raw_name in names:
+            name = (raw_name or "").strip()
+            if not name:
+                continue
+            if name in self._active_set:
+                continue
+            tool = self._tool_map.get(name)
+            if tool:
+                self._active.append(name)
+                self._active_set.add(name)
+                self._deferred.discard(name)
+                activated.append(name)
+            else:
+                missing.append(name)
+        return activated, missing
+
+    def iter_named_tools(self) -> Iterable[tuple[str, Tool[Any, Any]]]:
+        """Yield (name, tool) for all known tools in registration order."""
+        for name in self._order:
+            tool = self._tool_map.get(name)
+            if tool:
+                yield name, tool
+
+
 class QueryContext:
     """Context for a query session."""
 
@@ -92,12 +187,30 @@ class QueryContext:
         model: str = "main",
         verbose: bool = False,
     ) -> None:
-        self.tools = tools
+        self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
         self.safe_mode = safe_mode
         self.model = model
         self.verbose = verbose
         self.abort_controller = asyncio.Event()
+
+    @property
+    def tools(self) -> List[Tool[Any, Any]]:
+        """Active tools available for the current request."""
+        return self.tool_registry.active_tools
+
+    @tools.setter
+    def tools(self, tools: List[Tool[Any, Any]]) -> None:
+        """Replace tool inventory and recompute active/deferred sets."""
+        self.tool_registry.replace_tools(tools)
+
+    def activate_tools(self, names: Iterable[str]) -> Tuple[List[str], List[str]]:
+        """Activate deferred tools by name."""
+        return self.tool_registry.activate_tools(names)
+
+    def all_tools(self) -> List[Tool[Any, Any]]:
+        """Return all known tools (active + deferred)."""
+        return self.tool_registry.all_tools
 
 
 async def query_llm(
@@ -175,13 +288,19 @@ async def query_llm(
                 # Build tool schemas
                 tool_schemas = []
                 for tool in tools:
-                    tool_schemas.append(
-                        {
-                            "name": tool.name,
-                            "description": await tool.description(),
-                            "input_schema": tool.input_schema.model_json_schema(),
-                        }
+                    description = await build_tool_description(
+                        tool, include_examples=True, max_examples=2
                     )
+                    tool_schema = {
+                        "name": tool.name,
+                        "description": description,
+                        "input_schema": tool.input_schema.model_json_schema(),
+                        "defer_loading": bool(getattr(tool, "defer_loading", lambda: False)()),
+                    }
+                    examples = tool_input_examples(tool, limit=5)
+                    if examples:
+                        tool_schema["input_examples"] = examples
+                    tool_schemas.append(tool_schema)
 
                 # Make the API call
                 response = await client.messages.create(
@@ -228,12 +347,15 @@ async def query_llm(
                 # Build tool schemas for OpenAI format
                 openai_tools = []
                 for tool in tools:
+                    description = await build_tool_description(
+                        tool, include_examples=True, max_examples=2
+                    )
                     openai_tools.append(
                         {
                             "type": "function",
                             "function": {
                                 "name": tool.name,
-                                "description": await tool.description(),
+                                "description": description,
                                 "parameters": tool.input_schema.model_json_schema(),
                             },
                         }
@@ -368,7 +490,7 @@ async def query(
     assistant_message = await query_llm(
         messages,
         full_system_prompt,
-        query_context.tools,
+        query_context.all_tools(),
         query_context.max_thinking_tokens,
         query_context.model,
         query_context.abort_controller,
@@ -418,7 +540,10 @@ async def query(
         tool_input = getattr(tool_use, "input", {}) or {}
 
         # Find the tool
-        tool = next((t for t in query_context.tools if t.name == tool_name), None)
+        tool = query_context.tool_registry.get(tool_name)
+        # Auto-activate when used so subsequent rounds list it as active.
+        if tool:
+            query_context.activate_tools([tool_name])
 
         if not tool:
             # Tool not found
@@ -442,6 +567,7 @@ async def query(
             safe_mode=query_context.safe_mode,
             verbose=query_context.verbose,
             permission_checker=can_use_tool_fn,
+            tool_registry=query_context.tool_registry,
         )
 
         try:

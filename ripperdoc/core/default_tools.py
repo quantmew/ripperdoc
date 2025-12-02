@@ -17,6 +17,7 @@ from ripperdoc.tools.ls_tool import LSTool
 from ripperdoc.tools.grep_tool import GrepTool
 from ripperdoc.tools.todo_tool import TodoReadTool, TodoWriteTool
 from ripperdoc.tools.task_tool import TaskTool
+from ripperdoc.tools.tool_search_tool import ToolSearchTool
 from ripperdoc.tools.mcp_tools import (
     ListMcpResourcesTool,
     ListMcpServersTool,
@@ -41,6 +42,7 @@ def get_default_tools() -> List:
         GrepTool(),
         TodoReadTool(),
         TodoWriteTool(),
+        ToolSearchTool(),
         ListMcpServersTool(),
         ListMcpResourcesTool(),
         ReadMcpResourceTool(),

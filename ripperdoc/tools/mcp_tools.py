@@ -632,6 +632,10 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
     def is_open_world(self) -> bool:
         return _annotation_flag(self.tool_info, "openWorldHint")
 
+    def defer_loading(self) -> bool:
+        """Avoid loading all MCP tools into the initial context."""
+        return True
+
     def needs_permissions(self, input_data: Optional[BaseModel] = None) -> bool:
         return not self.is_read_only()
 

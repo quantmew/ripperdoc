@@ -31,7 +31,7 @@ class KillBashInput(BaseModel):
         validation_alias=AliasChoices("task_id", "shell_id"),
         serialization_alias="task_id",
     )
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    model_config = ConfigDict(validate_by_alias=True, validate_by_name=True, extra="ignore")
 
 
 class KillBashOutput(BaseModel):

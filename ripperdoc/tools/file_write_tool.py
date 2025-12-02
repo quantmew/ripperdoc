@@ -5,7 +5,7 @@ Allows the AI to create new files.
 
 import os
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
@@ -13,6 +13,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ToolResult,
     ToolOutput,
+    ToolUseExample,
     ValidationResult,
 )
 
@@ -47,6 +48,18 @@ the file if it already exists."""
     @property
     def input_schema(self) -> type[FileWriteToolInput]:
         return FileWriteToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Create a JSON fixture file",
+                input={"file_path": "/repo/tests/fixtures/sample.json", "content": '{\n  "items": []\n}\n'},
+            ),
+            ToolUseExample(
+                description="Write a short markdown note",
+                input={"file_path": "/repo/docs/USAGE.md", "content": "# Usage\n\nRun `make test`.\n"},
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         prompt = """Use the Write tool to create new files. """

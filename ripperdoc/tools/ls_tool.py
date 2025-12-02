@@ -6,10 +6,17 @@ Provides a safe way to inspect directory trees without executing shell commands.
 import fnmatch
 from collections import deque
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, Field
 
-from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ToolOutput, ValidationResult
+from ripperdoc.core.tool import (
+    Tool,
+    ToolUseContext,
+    ToolResult,
+    ToolOutput,
+    ToolUseExample,
+    ValidationResult,
+)
 
 
 IGNORED_DIRECTORIES = {
@@ -212,6 +219,18 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
     @property
     def input_schema(self) -> type[LSToolInput]:
         return LSToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="List the repository root with defaults",
+                input={"path": "/repo"},
+            ),
+            ToolUseExample(
+                description="Inspect a package while skipping build outputs",
+                input={"path": "/repo/packages/api", "ignore": ["dist/**", "node_modules/**"]},
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         return (

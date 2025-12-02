@@ -4,7 +4,7 @@ Allows the AI to edit files by replacing text.
 """
 
 import os
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
@@ -12,6 +12,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ToolResult,
     ToolOutput,
+    ToolUseExample,
     ValidationResult,
 )
 
@@ -54,6 +55,28 @@ match exactly (including whitespace and indentation)."""
     @property
     def input_schema(self) -> type[FileEditToolInput]:
         return FileEditToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Rename a function definition once",
+                input={
+                    "file_path": "/repo/src/app.py",
+                    "old_string": "def old_name(",
+                    "new_string": "def new_name(",
+                    "replace_all": False,
+                },
+            ),
+            ToolUseExample(
+                description="Replace every occurrence of a constant across a file",
+                input={
+                    "file_path": "/repo/src/config.ts",
+                    "old_string": 'API_BASE = "http://localhost"',
+                    "new_string": 'API_BASE = "https://api.example.com"',
+                    "replace_all": True,
+                },
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         return (

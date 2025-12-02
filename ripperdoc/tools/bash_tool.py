@@ -8,7 +8,7 @@ import os
 import signal
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, List, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -18,6 +18,7 @@ from ripperdoc.core.tool import (
     ToolProgress,
     ToolResult,
     ToolUseContext,
+    ToolUseExample,
     ValidationResult,
 )
 from ripperdoc.utils.bash_constants import (
@@ -85,7 +86,7 @@ class BashToolInput(BaseModel):
         default=None,
         description="If true, request sandboxed execution (read-only).",
     )
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    model_config = ConfigDict(validate_by_alias=True, validate_by_name=True, extra="ignore")
 
 
 class BashToolOutput(BaseModel):
@@ -128,6 +129,22 @@ build projects, run tests, and interact with the file system."""
     @property
     def input_schema(self) -> type[BashToolInput]:
         return BashToolInput
+
+    def input_examples(self) -> List[ToolUseExample]:
+        return [
+            ToolUseExample(
+                description="Run a read-only listing in sandboxed mode",
+                input={"command": "ls -la", "sandbox": True, "timeout": 10000},
+            ),
+            ToolUseExample(
+                description="Start a long task in the background with a timeout",
+                input={
+                    "command": "npm test",
+                    "run_in_background": True,
+                    "timeout": 600000,
+                },
+            ),
+        ]
 
     async def prompt(self, safe_mode: bool = False) -> str:
         sandbox_available = is_sandbox_available()
