@@ -7,7 +7,7 @@ from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.message_compaction import (
     estimate_tokens_from_text,
-    get_model_context_limit,
+    get_remaining_context_tokens,
     resolve_auto_compact_enabled,
     summarize_context_usage,
 )
@@ -25,7 +25,7 @@ from .base import SlashCommand
 def _handle(ui: Any, _: str) -> bool:
     config = get_global_config()
     model_profile = get_profile_for_pointer("main")
-    max_context_tokens = get_model_context_limit(model_profile, config.context_token_limit)
+    max_context_tokens = get_remaining_context_tokens(model_profile, config.context_token_limit)
     auto_compact_enabled = resolve_auto_compact_enabled(config)
     protocol = (
         "anthropic"
