@@ -72,7 +72,10 @@ def _load_json_file(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
+        if isinstance(data, dict):
+            return data
+        return {}
     except (OSError, json.JSONDecodeError) as exc:
         logger.error(f"Failed to load JSON from {path}: {exc}")
         return {}
@@ -181,11 +184,11 @@ class McpRuntime:
             self.servers.append(await self._connect_server(config))
         return self.servers
 
-    async def _list_roots_callback(self, *_: Any, **__: Any):
+    async def _list_roots_callback(self, *_: Any, **__: Any) -> Optional[Any]:
         if not mcp_types:
             return None
         return mcp_types.ListRootsResult(
-            roots=[mcp_types.Root(uri=Path(self.project_path).resolve().as_uri())]
+            roots=[mcp_types.Root(uri=Path(self.project_path).resolve().as_uri())]  # type: ignore[arg-type]
         )
 
     async def _connect_server(self, config: McpServerInfo) -> McpServerInfo:
@@ -228,17 +231,22 @@ class McpRuntime:
                     stdio_client(stdio_params)
                 )
 
+            if read_stream is None or write_stream is None:
+                raise ValueError("Failed to create read/write streams for MCP server")
+            
             session = await self._exit_stack.enter_async_context(
                 ClientSession(
                     read_stream,
                     write_stream,
-                    list_roots_callback=self._list_roots_callback,
+                    list_roots_callback=self._list_roots_callback,  # type: ignore[arg-type]
                     client_info=mcp_types.Implementation(name="ripperdoc", version=__version__),
                 )
             )
 
             init_result = await session.initialize()
             capabilities = session.get_server_capabilities()
+            if capabilities is None:
+                capabilities = mcp_types.ServerCapabilities()
 
             info.status = "connected"
             info.instructions = init_result.instructions or info.instructions

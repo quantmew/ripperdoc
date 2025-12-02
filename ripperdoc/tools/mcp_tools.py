@@ -34,7 +34,7 @@ from ripperdoc.utils.mcp import (
 try:
     import mcp.types as mcp_types  # type: ignore
 except Exception:  # pragma: no cover - SDK may be missing at runtime
-    mcp_types = None
+    mcp_types = None  # type: ignore[assignment]
 
 
 logger = get_logger()
@@ -467,7 +467,10 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
 
         if session and mcp_types:
             try:
-                result = await session.read_resource(input_data.uri)
+                # Convert string to AnyUrl
+                from mcp.types import AnyUrl
+                uri = AnyUrl(input_data.uri)
+                result = await session.read_resource(uri)
                 for item in result.contents:
                     if isinstance(item, mcp_types.TextResourceContents):
                         parts.append(
@@ -535,12 +538,12 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
                     )
                 )
 
-        result = ReadMcpResourceOutput(
+        read_result: Any = ReadMcpResourceOutput(
             server=input_data.server, uri=input_data.uri, content=content_text, contents=parts
         )
         yield ToolResult(
-            data=result,
-            result_for_assistant=self.render_result_for_assistant(result),
+            data=read_result,
+            result_for_assistant=self.render_result_for_assistant(read_result),  # type: ignore[arg-type]
         )
 
 
@@ -676,14 +679,14 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
 
         try:
             args = input_data.model_dump(exclude_none=True)
-            result = await session.call_tool(
+            call_result = await session.call_tool(
                 self.tool_info.name,
                 args or {},
             )
-            raw_blocks = getattr(result, "content", None)
+            raw_blocks = getattr(call_result, "content", None)
             content_blocks = _normalize_content_blocks(raw_blocks)
             content_text = _render_content_blocks(content_blocks) if content_blocks else None
-            structured = result.structuredContent if hasattr(result, "structuredContent") else None
+            structured = call_result.structuredContent if hasattr(call_result, "structuredContent") else None
             assistant_text = content_text
             if structured:
                 assistant_text = (assistant_text + "\n" if assistant_text else "") + json.dumps(
@@ -696,7 +699,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                 text=content_text,
                 content_blocks=content_blocks,
                 structured_content=structured,
-                is_error=getattr(result, "isError", False),
+                is_error=getattr(call_result, "isError", False),
             )
             yield ToolResult(
                 data=output,

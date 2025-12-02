@@ -157,7 +157,7 @@ class RipperdocClient:
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[override]
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:  # type: ignore[override]
         await self.disconnect()
 
     async def connect(self, prompt: Optional[str] = None) -> None:

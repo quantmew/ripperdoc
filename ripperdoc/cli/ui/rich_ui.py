@@ -6,7 +6,7 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 import asyncio
 import sys
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union, Iterable
 from pathlib import Path
 
 from rich.console import Console
@@ -35,7 +35,16 @@ from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permissions import make_permission_checker, PermissionResult
 from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
-from ripperdoc.utils.messages import create_user_message, create_assistant_message
+from ripperdoc.utils.messages import (
+    UserMessage,
+    AssistantMessage,
+    ProgressMessage,
+    create_user_message,
+    create_assistant_message,
+)
+
+# Type alias for conversation messages
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 from ripperdoc.utils.message_compaction import (
     compact_messages,
     estimate_conversation_tokens,
@@ -105,8 +114,8 @@ class RichUI:
         self.console = console
         self.safe_mode = safe_mode
         self.verbose = verbose
-        self.conversation_messages: List[Dict[str, Any]] = []
-        self._saved_conversation: Optional[List[Dict[str, Any]]] = None
+        self.conversation_messages: List[ConversationMessage] = []
+        self._saved_conversation: Optional[List[ConversationMessage]] = None
         self.query_context: Optional[QueryContext] = None
         self._current_tool: Optional[str] = None
         self._should_exit: bool = False
@@ -122,7 +131,7 @@ class RichUI:
         )
 
     def _context_usage_lines(
-        self, breakdown, model_label: str, auto_compact_enabled: bool
+        self, breakdown: Any, model_label: str, auto_compact_enabled: bool
     ) -> List[str]:
         return context_usage_lines(breakdown, model_label, auto_compact_enabled)
 
@@ -188,10 +197,10 @@ class RichUI:
         sender: str,
         content: str,
         is_tool: bool = False,
-        tool_type: str = None,
-        tool_args: dict = None,
+        tool_type: Optional[str] = None,
+        tool_args: Optional[dict] = None,
         tool_data: Any = None,
-    ):
+    ) -> None:
         """Display a message in the conversation."""
         if not is_tool:
             self._print_human_or_assistant(sender, content)
@@ -534,7 +543,7 @@ class RichUI:
             return "\n".join(parts)
         return ""
 
-    def _render_transcript(self, messages: List[Dict[str, Any]]) -> str:
+    def _render_transcript(self, messages: List[ConversationMessage]) -> str:
         """Render a simple transcript for summarization."""
         lines: List[str] = []
         for msg in messages:
@@ -549,7 +558,7 @@ class RichUI:
             lines.append(f"{label}: {text}")
         return "\n".join(lines)
 
-    def _extract_assistant_text(self, assistant_message) -> str:
+    def _extract_assistant_text(self, assistant_message: Any) -> str:
         """Extract plain text from an AssistantMessage."""
         if isinstance(assistant_message.message.content, str):
             return assistant_message.message.content
@@ -561,7 +570,7 @@ class RichUI:
             return "\n".join(parts)
         return ""
 
-    async def process_query(self, user_input: str):
+    async def process_query(self, user_input: str) -> None:
         """Process a user query and display the response."""
         if not self.query_context:
             self.query_context = QueryContext(
@@ -602,7 +611,7 @@ class RichUI:
             auto_compact_enabled = resolve_auto_compact_enabled(config)
             protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 
-            used_tokens = estimate_used_tokens(messages, protocol=protocol)
+            used_tokens = estimate_used_tokens(messages, protocol=protocol)  # type: ignore[arg-type]
             usage_status = get_context_usage_status(
                 used_tokens, max_context_tokens, auto_compact_enabled
             )
@@ -619,11 +628,11 @@ class RichUI:
 
             if usage_status.should_auto_compact:
                 original_messages = list(messages)
-                compaction = compact_messages(messages, protocol=protocol)
+                compaction = compact_messages(messages, protocol=protocol)  # type: ignore[arg-type]
                 if compaction.was_compacted:
                     if self._saved_conversation is None:
-                        self._saved_conversation = original_messages
-                    messages = compaction.messages
+                        self._saved_conversation = original_messages  # type: ignore[assignment]
+                    messages = compaction.messages  # type: ignore[assignment]
                     console.print(
                         f"[yellow]Auto-compacted conversation (saved ~{compaction.tokens_saved} tokens). "
                         f"Estimated usage: {compaction.tokens_after}/{max_context_tokens} tokens.[/yellow]"
@@ -633,13 +642,14 @@ class RichUI:
             # Wrap permission checker to pause the spinner while waiting for user input.
             base_permission_checker = self._permission_checker
 
-            async def permission_checker(tool, parsed_input):
+            async def permission_checker(tool: Any, parsed_input: Any) -> bool:
                 if spinner:
                     spinner.stop()
                 try:
                     if base_permission_checker is not None:
-                        return await base_permission_checker(tool, parsed_input)
-                    return PermissionResult(result=True)
+                        result = await base_permission_checker(tool, parsed_input)
+                        return result.result if hasattr(result, 'result') else True
+                    return True
                 finally:
                     if spinner:
                         spinner.start()
@@ -652,9 +662,9 @@ class RichUI:
             try:
                 spinner.start()
                 async for message in query(
-                    messages, system_prompt, context, self.query_context, permission_checker
+                    messages, system_prompt, context, self.query_context, permission_checker  # type: ignore[arg-type]
                 ):
-                    if message.type == "assistant":
+                    if message.type == "assistant" and isinstance(message, AssistantMessage):
                         # Extract text content from assistant message
                         if isinstance(message.message.content, str):
                             self.display_message("Ripperdoc", message.message.content)
@@ -688,7 +698,7 @@ class RichUI:
                                             tool_registry[tool_use_id]["printed"] = True
                                     last_tool_name = tool_name
 
-                    elif message.type == "user":
+                    elif message.type == "user" and isinstance(message, UserMessage):
                         # Handle tool results - show summary instead of full content
                         if isinstance(message.message.content, list):
                             for block in message.message.content:
@@ -724,7 +734,7 @@ class RichUI:
                                         tool_data=tool_data,
                                     )
 
-                    elif message.type == "progress":
+                    elif message.type == "progress" and isinstance(message, ProgressMessage):
                         if self.verbose:
                             self.display_message(
                                 "System", f"Progress: {message.content}", is_tool=True
@@ -740,7 +750,7 @@ class RichUI:
 
                     # Add message to history
                     self._log_message(message)
-                    messages.append(message)
+                    messages.append(message)  # type: ignore[arg-type]
             except Exception as e:
                 self.display_message("System", f"Error: {str(e)}", is_tool=True)
             finally:
@@ -787,7 +797,7 @@ class RichUI:
             def __init__(self, completions: List):
                 self.completions = completions
 
-            def get_completions(self, document, complete_event):
+            def get_completions(self, document: Any, complete_event: Any) -> Iterable[Completion]:
                 text = document.text_before_cursor
                 if not text.startswith("/"):
                     return
@@ -809,7 +819,7 @@ class RichUI:
         )
         return self._prompt_session
 
-    def run(self):
+    def run(self) -> None:
         """Run the Rich-based interface."""
         # Display welcome panel
         console.print()
@@ -929,7 +939,7 @@ class RichUI:
 
     async def _summarize_conversation(
         self,
-        messages: List[Dict[str, Any]],
+        messages: List[ConversationMessage],
         custom_instructions: str,
     ) -> str:
         """Summarize the given conversation using the configured model."""
@@ -954,7 +964,7 @@ class RichUI:
         )
 
         assistant_response = await query_llm(
-            messages=[{"role": "user", "content": user_content}],
+            messages=[{"role": "user", "content": user_content}],  # type: ignore[list-item]
             system_prompt=instructions,
             tools=[],
             max_thinking_tokens=0,

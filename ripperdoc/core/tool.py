@@ -57,7 +57,7 @@ class ToolUseExample(BaseModel):
     model_config = ConfigDict(
         validate_by_alias=True,
         validate_by_name=True,
-        serialization_aliases={"example": "input"},
+        serialization_aliases={"example": "input"},  # type: ignore[typeddict-item]
     )
 
 

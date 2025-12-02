@@ -571,7 +571,7 @@ def compact_messages(
             compacted_messages.append(message)
             continue
 
-        if msg_type == "assistant":
+        if msg_type == "assistant" and isinstance(message, AssistantMessage):
             # Copy content list to avoid mutating the original message.
             compacted_messages.append(
                 AssistantMessage(
@@ -610,7 +610,7 @@ def compact_messages(
                 else:
                     filtered_content.append(MessageContent(type=str(block_type or "text"), text=str(content_item)))
 
-        if modified:
+        if modified and isinstance(message, UserMessage):
             compacted_messages.append(
                 UserMessage(
                     message=message.message.model_copy(update={"content": filtered_content}),

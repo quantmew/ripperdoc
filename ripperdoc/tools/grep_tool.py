@@ -80,11 +80,11 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         return [
             ToolUseExample(
                 description="Find TODO comments in TypeScript files",
-                input={"pattern": "TODO", "glob": "**/*.ts", "output_mode": "content"},
+                example={"pattern": "TODO", "glob": "**/*.ts", "output_mode": "content"},
             ),
             ToolUseExample(
                 description="List files referencing a function name",
-                input={
+                example={
                     "pattern": "fetchUserData",
                     "output_mode": "files_with_matches",
                     "path": "/repo/src",

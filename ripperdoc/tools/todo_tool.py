@@ -140,7 +140,7 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
         return [
             ToolUseExample(
                 description="Seed a three-step plan",
-                input={
+                example={
                     "todos": [
                         {
                             "id": "plan",
@@ -165,7 +165,7 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
             ),
             ToolUseExample(
                 description="Update a single task already in progress",
-                input={
+                example={
                     "todos": [
                         {
                             "id": "bugfix-123",
@@ -263,11 +263,11 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
         return [
             ToolUseExample(
                 description="Get only the next actionable todo",
-                input={"next_only": True},
+                example={"next_only": True},
             ),
             ToolUseExample(
                 description="List recent completed tasks with a limit",
-                input={"status": ["completed"], "limit": 5},
+                example={"status": ["completed"], "limit": 5},
             ),
         ]
 

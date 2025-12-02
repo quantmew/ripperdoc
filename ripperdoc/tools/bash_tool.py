@@ -134,11 +134,11 @@ build projects, run tests, and interact with the file system."""
         return [
             ToolUseExample(
                 description="Run a read-only listing in sandboxed mode",
-                input={"command": "ls -la", "sandbox": True, "timeout": 10000},
+                example={"command": "ls -la", "sandbox": True, "timeout": 10000},
             ),
             ToolUseExample(
                 description="Start a long task in the background with a timeout",
-                input={
+                example={
                     "command": "npm test",
                     "run_in_background": True,
                     "timeout": 600000,

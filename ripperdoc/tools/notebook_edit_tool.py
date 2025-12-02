@@ -101,7 +101,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
         return [
             ToolUseExample(
                 description="Replace a markdown cell by id",
-                input={
+                example={
                     "notebook_path": "/repo/notebooks/analysis.ipynb",
                     "cell_id": "abc123",
                     "new_source": "# Updated overview\\nThis notebook analyzes revenue.",
@@ -111,7 +111,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             ),
             ToolUseExample(
                 description="Insert a new code cell at the beginning",
-                input={
+                example={
                     "notebook_path": "/repo/notebooks/analysis.ipynb",
                     "cell_type": "code",
                     "edit_mode": "insert",
@@ -246,7 +246,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
                         "id": new_id,
                         "source": new_source,
                         "metadata": {},
-                        "execution_count": 0,
+                        "execution_count": None,  # type: ignore[dict-item]
                         "outputs": [],
                     }
                 )

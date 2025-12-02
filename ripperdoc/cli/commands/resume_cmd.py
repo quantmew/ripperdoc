@@ -17,7 +17,7 @@ def _format_time(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
-def _choose_session(ui, arg: str) -> Optional[SessionSummary]:
+def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
     sessions = list_session_summaries(ui.project_path)
     if not sessions:
         ui.console.print("[yellow]No saved sessions found for this project.[/yellow]")

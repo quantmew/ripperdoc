@@ -1,8 +1,9 @@
 from typing import Optional
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from rich.console import Console
 from rich.markup import escape
+from rich.status import Status
 
 
 class Spinner:
@@ -12,7 +13,7 @@ class Spinner:
         self.console = console
         self.text = text
         self.spinner = spinner
-        self._status = None  # type: Optional[object]
+        self._status: Optional[Status] = None
 
     def start(self) -> None:
         """Start the spinner if not already running."""

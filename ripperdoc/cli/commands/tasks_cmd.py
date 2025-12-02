@@ -14,11 +14,11 @@ from ripperdoc.tools.background_shell import (
     list_background_tasks,
 )
 
-from typing import Any
+from typing import Any, Optional
 from .base import SlashCommand
 
 
-def _format_duration(duration_ms) -> str:
+def _format_duration(duration_ms: Optional[float]) -> str:
     """Render milliseconds into a short human-readable duration."""
     if duration_ms is None:
         return "-"
@@ -82,7 +82,7 @@ def _tail_lines(text: str, max_lines: int = 20, max_chars: int = 4000) -> str:
     return content
 
 
-def _list_tasks(ui) -> bool:
+def _list_tasks(ui: Any) -> bool:
     console = ui.console
     task_ids = list_background_tasks()
 
@@ -128,7 +128,7 @@ def _list_tasks(ui) -> bool:
     return True
 
 
-def _kill_task(ui, task_id: str) -> bool:
+def _kill_task(ui: Any, task_id: str) -> bool:
     console = ui.console
     try:
         status = get_background_status(task_id, consume=False)
@@ -160,7 +160,7 @@ def _kill_task(ui, task_id: str) -> bool:
     return True
 
 
-def _show_task(ui, task_id: str) -> bool:
+def _show_task(ui: Any, task_id: str) -> bool:
     console = ui.console
     try:
         status = get_background_status(task_id, consume=False)

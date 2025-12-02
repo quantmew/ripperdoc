@@ -53,11 +53,11 @@ the file if it already exists."""
         return [
             ToolUseExample(
                 description="Create a JSON fixture file",
-                input={"file_path": "/repo/tests/fixtures/sample.json", "content": '{\n  "items": []\n}\n'},
+                example={"file_path": "/repo/tests/fixtures/sample.json", "content": '{\n  "items": []\n}\n'},
             ),
             ToolUseExample(
                 description="Write a short markdown note",
-                input={"file_path": "/repo/docs/USAGE.md", "content": "# Usage\n\nRun `make test`.\n"},
+                example={"file_path": "/repo/docs/USAGE.md", "content": "# Usage\n\nRun `make test`.\n"},
             ),
         ]
 

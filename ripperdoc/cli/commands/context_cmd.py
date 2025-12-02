@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import List, Any
 
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.cli.ui.context_display import format_tokens
@@ -38,7 +39,7 @@ def _handle(ui: Any, _: str) -> bool:
             verbose=ui.verbose,
         )
 
-    async def _load_servers():
+    async def _load_servers() -> List[Any]:
         try:
             return await load_mcp_servers_async(ui.project_path)
         finally:

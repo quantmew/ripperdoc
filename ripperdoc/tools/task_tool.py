@@ -125,11 +125,15 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 f"Missing or unknown tools: {', '.join(missing_tools) if missing_tools else 'none'}"
             )
 
-        agent_system_prompt = self._build_agent_prompt(target_agent, agent_tools)
+        # Type conversion: List[object] -> List[Tool[Any, Any]]
+        from ripperdoc.core.tool import Tool
+        typed_agent_tools: List[Tool[Any, Any]] = [tool for tool in agent_tools if isinstance(tool, Tool)]
+
+        agent_system_prompt = self._build_agent_prompt(target_agent, typed_agent_tools)
         subagent_messages = [create_user_message(input_data.prompt)]
 
         subagent_context = QueryContext(
-            tools=agent_tools,
+            tools=typed_agent_tools,
             safe_mode=context.safe_mode,
             verbose=context.verbose,
             model=target_agent.model or "task",
@@ -142,7 +146,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         yield ToolProgress(content=f"Launching subagent '{target_agent.agent_type}'")
 
         async for message in query(
-            subagent_messages,
+            subagent_messages,  # type: ignore[arg-type]
             agent_system_prompt,
             {},
             subagent_context,
@@ -183,7 +187,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                                     )
                                     yield ToolProgress(content=f"Subagent: {short}")
                 assistant_messages.append(message)  # type: ignore[arg-type]
-                tool_use_count += self._count_tool_uses(message)
+                if isinstance(message, AssistantMessage):
+                    tool_use_count += self._count_tool_uses(message)
 
         duration_ms = (time.time() - start) * 1000
         result_text = (

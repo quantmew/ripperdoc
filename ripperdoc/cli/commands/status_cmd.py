@@ -81,7 +81,7 @@ def _memory_status_lines(memory_files: List[MemoryFile]) -> List[str]:
 
 
 def _setting_sources_summary(
-    config,
+    config: Any,
     profile: Optional[ModelProfile],
     memory_files: List[MemoryFile],
     auth_env_var: Optional[str],

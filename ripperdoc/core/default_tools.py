@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any, List
+
+from ripperdoc.core.tool import Tool
 
 from ripperdoc.tools.bash_tool import BashTool
 from ripperdoc.tools.bash_output_tool import BashOutputTool
@@ -26,9 +28,9 @@ from ripperdoc.tools.mcp_tools import (
 )
 
 
-def get_default_tools() -> List:
+def get_default_tools() -> List[Tool[Any, Any]]:
     """Construct the default tool set (base tools + Task subagent launcher)."""
-    base_tools = [
+    base_tools: List[Tool[Any, Any]] = [
         BashTool(),
         BashOutputTool(),
         KillBashTool(),
@@ -48,7 +50,11 @@ def get_default_tools() -> List:
         ReadMcpResourceTool(),
     ]
     try:
-        base_tools.extend(load_dynamic_mcp_tools_sync())
+        mcp_tools = load_dynamic_mcp_tools_sync()
+        # Filter to ensure only Tool instances are added
+        for tool in mcp_tools:
+            if isinstance(tool, Tool):
+                base_tools.append(tool)
     except Exception:
         # If MCP runtime is not available, continue with base tools only.
         pass

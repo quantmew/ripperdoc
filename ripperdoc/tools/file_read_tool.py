@@ -56,11 +56,11 @@ and limit to read only a portion of the file."""
         return [
             ToolUseExample(
                 description="Read the top of a file to understand structure",
-                input={"file_path": "/repo/src/main.py", "limit": 50},
+                example={"file_path": "/repo/src/main.py", "limit": 50},
             ),
             ToolUseExample(
                 description="Inspect a slice of a large log without loading everything",
-                input={"file_path": "/repo/logs/server.log", "offset": 200, "limit": 40},
+                example={"file_path": "/repo/logs/server.log", "offset": 200, "limit": 40},
             ),
         ]
 

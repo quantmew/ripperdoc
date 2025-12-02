@@ -124,7 +124,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         return [
             ToolUseExample(
                 description="Apply multiple replacements in one pass",
-                input={
+                example={
                     "file_path": "/repo/src/app.py",
                     "edits": [
                         {"old_string": "DEBUG = True", "new_string": "DEBUG = False"},
@@ -134,7 +134,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             ),
             ToolUseExample(
                 description="Create a new file then adjust content",
-                input={
+                example={
                     "file_path": "/repo/docs/notes.txt",
                     "edits": [
                         {"old_string": "", "new_string": "Line one\nLine two\n"},

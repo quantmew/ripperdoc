@@ -224,11 +224,11 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
         return [
             ToolUseExample(
                 description="List the repository root with defaults",
-                input={"path": "/repo"},
+                example={"path": "/repo"},
             ),
             ToolUseExample(
                 description="Inspect a package while skipping build outputs",
-                input={"path": "/repo/packages/api", "ignore": ["dist/**", "node_modules/**"]},
+                example={"path": "/repo/packages/api", "ignore": ["dist/**", "node_modules/**"]},
             ),
         ]
 

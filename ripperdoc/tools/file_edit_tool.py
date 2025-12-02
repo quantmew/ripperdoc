@@ -60,7 +60,7 @@ match exactly (including whitespace and indentation)."""
         return [
             ToolUseExample(
                 description="Rename a function definition once",
-                input={
+                example={
                     "file_path": "/repo/src/app.py",
                     "old_string": "def old_name(",
                     "new_string": "def new_name(",
@@ -69,7 +69,7 @@ match exactly (including whitespace and indentation)."""
             ),
             ToolUseExample(
                 description="Replace every occurrence of a constant across a file",
-                input={
+                example={
                     "file_path": "/repo/src/config.ts",
                     "old_string": 'API_BASE = "http://localhost"',
                     "new_string": 'API_BASE = "https://api.example.com"',

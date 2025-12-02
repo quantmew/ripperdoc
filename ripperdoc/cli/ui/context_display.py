@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ripperdoc.utils.message_compaction import ContextBreakdown
 
@@ -205,7 +205,8 @@ def make_segment_grid(
 
     rows: List[str] = []
     for start in range(0, total_slots, per_row):
-        rows.append(" ".join(icons[start : start + per_row]))
+        row_icons = [icon for icon in icons[start : start + per_row] if icon is not None]
+        rows.append(" ".join(row_icons))
     return rows
 
 
@@ -229,7 +230,7 @@ def context_usage_lines(
             grid_lines.append(f"     {row}")
 
     # Textual stats (without additional mini bars).
-    stats = [
+    stats: List[Tuple[str, Optional[int], Optional[float]]] = [
         (
             f"{styled_symbol('⛁', 'grey58')} System prompt",
             breakdown.system_prompt_tokens,

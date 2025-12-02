@@ -7,7 +7,7 @@ import asyncio
 import click
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from ripperdoc import __version__
 from ripperdoc.core.config import (
@@ -47,13 +47,14 @@ async def run_query(
     can_use_tool = make_permission_checker(project_path, safe_mode) if safe_mode else None
 
     # Create initial user message
-    messages = [create_user_message(prompt)]
+    from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMessage
+    messages: List[UserMessage | AssistantMessage | ProgressMessage] = [create_user_message(prompt)]
 
     # Create query context
     query_context = QueryContext(tools=tools, safe_mode=safe_mode, verbose=verbose)
 
     try:
-        context = {}
+        context: Dict[str, Any] = {}
         # System prompt
         servers = await load_mcp_servers_async(Path.cwd())
         dynamic_tools = await load_dynamic_mcp_tools_async(Path.cwd())
@@ -79,7 +80,7 @@ async def run_query(
             async for message in query(
                 messages, system_prompt, context, query_context, can_use_tool
             ):
-                if message.type == "assistant":
+                if message.type == "assistant" and hasattr(message, 'message'):
                     # Print assistant message
                     if isinstance(message.message.content, str):
                         console.print(
@@ -105,19 +106,19 @@ async def run_query(
                                 if hasattr(block, "type") and block.type == "text":
                                     console.print(
                                         Panel(
-                                            Markdown(block.text),
+                                            Markdown(block.text or ""),
                                             title="Ripperdoc",
                                             border_style="cyan",
                                         )
                                     )
 
-                elif message.type == "progress":
+                elif message.type == "progress" and hasattr(message, 'content'):
                     # Print progress
                     if verbose:
                         console.print(f"[dim]Progress: {escape(str(message.content))}[/dim]")
 
                 # Add message to history
-                messages.append(message)
+                messages.append(message)  # type: ignore[arg-type]
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted by user[/yellow]")

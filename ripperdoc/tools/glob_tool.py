@@ -62,11 +62,11 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
         return [
             ToolUseExample(
                 description="Find Python sources inside src",
-                input={"pattern": "src/**/*.py"},
+                example={"pattern": "src/**/*.py"},
             ),
             ToolUseExample(
                 description="Locate snapshot files within tests",
-                input={"pattern": "tests/**/__snapshots__/*.snap", "path": "/repo"},
+                example={"pattern": "tests/**/__snapshots__/*.snap", "path": "/repo"},
             ),
         ]
 

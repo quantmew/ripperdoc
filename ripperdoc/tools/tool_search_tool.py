@@ -94,11 +94,11 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
         return [
             ToolUseExample(
                 description="Search for notebook-related tools and activate top results",
-                input={"query": "notebook", "max_results": 3},
+                example={"query": "notebook", "max_results": 3},
             ),
             ToolUseExample(
                 description="Activate a known tool by name",
-                input={"names": ["mcp__search__query"], "auto_activate": True},
+                example={"names": ["mcp__search__query"], "auto_activate": True},
             ),
         ]
 
@@ -193,7 +193,7 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
 
         avg_len = sum(doc_len for _, _, _, doc_len, _ in corpus) / len(corpus)
         query_terms = _tokenize(normalized)
-        df = defaultdict(int)
+        df: Dict[str, int] = defaultdict(int)
         for _, _, tokens, _, _ in corpus:
             seen_terms = set(tokens)
             for term in query_terms:

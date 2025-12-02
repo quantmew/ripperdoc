@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
@@ -98,7 +98,7 @@ def _agent_dir_for_location(location: AgentLocation) -> Path:
     raise ValueError(f"Unsupported agent location: {location}")
 
 
-def _split_frontmatter(raw_text: str) -> Tuple[Dict[str, object], str]:
+def _split_frontmatter(raw_text: str) -> Tuple[Dict[str, Any], str]:
     """Extract YAML frontmatter and body content."""
     lines = raw_text.splitlines()
     if len(lines) >= 3 and lines[0].strip() == "---":
@@ -151,8 +151,10 @@ def _parse_agent_file(
         return None, 'Missing required "description" field in frontmatter'
 
     tools = _normalize_tools(frontmatter.get("tools"))
-    model = frontmatter.get("model") if isinstance(frontmatter.get("model"), str) else None
-    color = frontmatter.get("color") if isinstance(frontmatter.get("color"), str) else None
+    model_value = frontmatter.get("model")
+    color_value = frontmatter.get("color")
+    model = model_value if isinstance(model_value, str) else None
+    color = color_value if isinstance(color_value, str) else None
 
     agent = AgentDefinition(
         agent_type=agent_name.strip(),

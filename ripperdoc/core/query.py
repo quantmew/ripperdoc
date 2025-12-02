@@ -307,7 +307,7 @@ async def query_llm(
                     model=model_profile.model,
                     max_tokens=model_profile.max_tokens,
                     system=system_prompt,
-                    messages=normalized_messages,
+                    messages=normalized_messages,  # type: ignore[arg-type]
                     tools=tool_schemas if tool_schemas else None,  # type: ignore
                     temperature=model_profile.temperature,
                 )
@@ -331,7 +331,7 @@ async def query_llm(
                                 "type": "tool_use",
                                 "tool_use_id": block.id,
                                 "name": block.name,
-                                "input": block.input,
+                                "input": block.input,  # type: ignore[dict-item]
                             }
                         )
 
@@ -367,22 +367,22 @@ async def query_llm(
                 ] + normalized_messages
 
                 # Make the API call
-                response = await client.chat.completions.create(
+                openai_response: Any = await client.chat.completions.create(
                     model=model_profile.model,
                     messages=openai_messages,
-                    tools=openai_tools if openai_tools else None,
+                    tools=openai_tools if openai_tools else None,  # type: ignore[arg-type]
                     temperature=model_profile.temperature,
                     max_tokens=model_profile.max_tokens,
                 )
 
                 duration_ms = (time.time() - start_time) * 1000
-                usage_tokens = _openai_usage_tokens(getattr(response, "usage", None))
+                usage_tokens = _openai_usage_tokens(getattr(openai_response, "usage", None))
                 record_usage(model_profile.model, duration_ms=duration_ms, **usage_tokens)
                 cost_usd = 0.0  # TODO: Implement cost calculation
 
                 # Convert OpenAI response to our format
                 content_blocks = []
-                choice = response.choices[0]
+                choice = openai_response.choices[0]
 
                 if choice.message.content:
                     content_blocks.append({"type": "text", "text": choice.message.content})
@@ -538,6 +538,8 @@ async def query(
 
     for tool_use in tool_use_blocks:
         tool_name = tool_use.name
+        if not tool_name:
+            continue
         tool_id = getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
         tool_input = getattr(tool_use, "input", {}) or {}
 
@@ -545,7 +547,7 @@ async def query(
         tool = query_context.tool_registry.get(tool_name)
         # Auto-activate when used so subsequent rounds list it as active.
         if tool:
-            query_context.activate_tools([tool_name])
+            query_context.activate_tools([tool_name])  # type: ignore[list-item]
 
         if not tool:
             # Tool not found
