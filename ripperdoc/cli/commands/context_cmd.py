@@ -1,6 +1,8 @@
 import asyncio
+import json
 
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
+from ripperdoc.cli.ui.context_display import format_tokens
 from ripperdoc.core.config import ProviderType, get_global_config
 from ripperdoc.core.query import QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
@@ -71,6 +73,36 @@ def _handle(ui: Any, _: str) -> bool:
 
     model_label = model_profile.model if model_profile else "Unknown model"
     lines = ui._context_usage_lines(breakdown, model_label, auto_compact_enabled)
+
+    lines.append("")
+    # Append a brief tool listing so users can see which tools are currently loaded.
+    try:
+        # Detailed MCP tool listing with token estimates.
+        mcp_tools = [
+            tool
+            for tool in getattr(ui.query_context, "tool_registry", ui.query_context).all_tools
+            if getattr(tool, "is_mcp", False) or getattr(tool, "name", "").startswith("mcp__")
+        ]
+        if mcp_tools:
+            lines.append("   MCP tools · /mcp")
+            for tool in mcp_tools[:20]:
+                name = getattr(tool, "name", "unknown")
+                display = name
+                parts = name.split("__")
+                if len(parts) >= 3 and parts[0] == "mcp":
+                    server = parts[1]
+                    display = "__".join(parts[2:])
+                    display = f"{display} ({server})"
+                try:
+                    schema = tool.input_schema.model_json_schema()
+                    token_est = estimate_tokens_from_text(json.dumps(schema, sort_keys=True))
+                except Exception:
+                    token_est = 0
+                lines.append(f"     └ {display}: {format_tokens(token_est)} tokens")
+            if len(mcp_tools) > 20:
+                lines.append(f"     └ ... (+{len(mcp_tools) - 20} more)")
+    except Exception:
+        pass
     for line in lines:
         ui.console.print(line)
     return True
