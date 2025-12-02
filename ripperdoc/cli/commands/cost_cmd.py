@@ -1,5 +1,6 @@
 from ripperdoc.utils.session_usage import get_session_usage
 
+from typing import Any
 from .base import SlashCommand
 
 
@@ -20,7 +21,7 @@ def _format_duration(duration_ms: float) -> str:
     return f"{hours}h {mins}m {secs}s"
 
 
-def _handle(ui, _: str) -> bool:
+def _handle(ui: Any, _: str) -> bool:
     usage = get_session_usage()
     if not usage.models:
         ui.console.print("[yellow]No model usage recorded yet.[/yellow]")

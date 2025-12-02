@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ripperdoc.utils.log import get_logger
 
@@ -77,7 +77,7 @@ def _ensure_background_loop() -> asyncio.AbstractEventLoop:
         return loop
 
 
-def _submit_to_background_loop(coro) -> concurrent.futures.Future:
+def _submit_to_background_loop(coro: Any) -> concurrent.futures.Future:
     """Run a coroutine on the background loop and return a thread-safe future."""
     loop = _ensure_background_loop()
     return asyncio.run_coroutine_threadsafe(coro, loop)

@@ -120,20 +120,64 @@ def _stringify_content(content: Union[str, List[MessageContent], None]) -> str:
     parts: List[str] = []
     for part in content:
         if isinstance(part, dict):
-            parts.append(str(part.get("text", "")))
+            block_type = part.get("type")
+            text_val = part.get("text")
+            if text_val:
+                parts.append(str(text_val))
+
+            # Capture nested text for tool_result content blocks
+            nested_content = part.get("content")
+            if isinstance(nested_content, list):
+                nested_text = _stringify_content(nested_content)
+                if nested_text:
+                    parts.append(nested_text)
+
+            # Include tool payloads that otherwise don't have "text"
+            if block_type == "tool_use" and part.get("input") is not None:
+                try:
+                    parts.append(json.dumps(part.get("input"), ensure_ascii=False))
+                except Exception:
+                    parts.append(str(part.get("input")))
+
+            # OpenAI-style arguments blocks
+            if part.get("arguments"):
+                parts.append(str(part.get("arguments")))
         elif hasattr(part, "text"):
-            parts.append(str(getattr(part, "text", "")))
+            text_val = getattr(part, "text", "")
+            if text_val:
+                parts.append(str(text_val))
         else:
             parts.append(str(part))
-    return "\n".join(parts)
+    # Filter out empty strings to avoid over-counting separators
+    return "\n".join([p for p in parts if p])
 
 
-def estimate_conversation_tokens(messages: Sequence[ConversationMessage]) -> int:
+def estimate_conversation_tokens(
+    messages: Sequence[ConversationMessage], *, protocol: str = "anthropic"
+) -> int:
     """Estimate tokens for a conversation after normalization."""
-    normalized = normalize_messages_for_api(list(messages))
+    normalized = normalize_messages_for_api(list(messages), protocol=protocol)
     total = 0
     for message in normalized:
         total += estimate_tokens_from_text(_stringify_content(message.get("content")))
+
+        # Account for OpenAI-style tool_calls payloads (arguments + name)
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for call in tool_calls:
+                if not isinstance(call, dict):
+                    total += estimate_tokens_from_text(str(call))
+                    continue
+                func = call.get("function")
+                if isinstance(func, dict):
+                    arguments = func.get("arguments")
+                    if arguments:
+                        total += estimate_tokens_from_text(str(arguments))
+                    name = func.get("name")
+                    if name:
+                        total += estimate_tokens_from_text(str(name))
+                else:
+                    total += estimate_tokens_from_text(str(func))
     return total
 
 
@@ -201,11 +245,15 @@ def resolve_auto_compact_enabled(config: GlobalConfig) -> bool:
 
 
 def get_context_usage_status(
-    messages: Sequence[ConversationMessage], max_context_tokens: int, auto_compact_enabled: bool
+    messages: Sequence[ConversationMessage],
+    max_context_tokens: int,
+    auto_compact_enabled: bool,
+    *,
+    protocol: str = "anthropic",
 ) -> ContextUsageStatus:
     """Compute context usage and thresholds."""
     max_context_tokens = max(max_context_tokens, MIN_CONTEXT_TOKENS)
-    total_tokens = estimate_conversation_tokens(messages)
+    total_tokens = estimate_conversation_tokens(messages, protocol=protocol)
     warning_tokens = int(max_context_tokens * WARNING_USAGE_RATIO)
     auto_compact_tokens = int(max_context_tokens * AUTO_COMPACT_RATIO)
     error_tokens = int(max_context_tokens * ERROR_USAGE_RATIO)
@@ -229,6 +277,8 @@ def summarize_context_usage(
     auto_compact_enabled: bool,
     memory_tokens: int = 0,
     mcp_tokens: int = 0,
+    *,
+    protocol: str = "anthropic",
 ) -> ContextBreakdown:
     """Return a detailed breakdown of context usage.
 
@@ -239,7 +289,7 @@ def summarize_context_usage(
     raw_system_tokens = estimate_tokens_from_text(system_prompt)
     base_prompt_tokens = max(0, raw_system_tokens - max(0, mcp_tokens))
     tool_schema_tokens = _estimate_tool_schema_tokens(tools)
-    message_tokens = estimate_conversation_tokens(messages)
+    message_tokens = estimate_conversation_tokens(messages, protocol=protocol)
     message_count = len([m for m in messages if getattr(m, "type", "") != "progress"])
     reserved_tokens = (
         max_context_tokens - int(max_context_tokens * AUTO_COMPACT_RATIO)
@@ -286,9 +336,10 @@ def compact_messages(
     *,
     preserve_tool_uses: int = MAX_TOOL_USES_TO_PRESERVE,
     force: bool = False,
+    protocol: str = "anthropic",
 ) -> CompactionResult:
     """Compact old tool results to save context tokens."""
-    tokens_before = estimate_conversation_tokens(messages)
+    tokens_before = estimate_conversation_tokens(messages, protocol=protocol)
     tool_use_order, tool_names = _collect_tool_metadata(messages)
     order_lookup = {tool_id: idx for idx, tool_id in enumerate(tool_use_order)}
     preserved_ids = set(tool_use_order[-preserve_tool_uses:]) if preserve_tool_uses > 0 else set()
@@ -432,7 +483,7 @@ def compact_messages(
         else:
             compacted_messages.append(message)
 
-    tokens_after = estimate_conversation_tokens(compacted_messages)
+    tokens_after = estimate_conversation_tokens(compacted_messages, protocol=protocol)
     return CompactionResult(
         messages=compacted_messages,
         tokens_before=tokens_before,

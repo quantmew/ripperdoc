@@ -1,3 +1,4 @@
+from typing import Any
 from datetime import datetime
 from typing import Optional
 
@@ -65,7 +66,7 @@ def _choose_session(ui, arg: str) -> Optional[SessionSummary]:
     return sessions[idx]
 
 
-def _handle(ui, arg: str) -> bool:
+def _handle(ui: Any, arg: str) -> bool:
     summary = _choose_session(ui, arg)
     if not summary:
         return True

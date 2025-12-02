@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Any, Dict
 
 
 @dataclass
@@ -53,7 +53,7 @@ class SessionUsage:
 _SESSION_USAGE = SessionUsage()
 
 
-def _as_int(value) -> int:
+def _as_int(value: Any) -> int:
     """Best-effort integer conversion."""
     try:
         if value is None:

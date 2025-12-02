@@ -14,6 +14,7 @@ from ripperdoc.tools.background_shell import (
     list_background_tasks,
 )
 
+from typing import Any
 from .base import SlashCommand
 
 
@@ -205,7 +206,7 @@ def _show_task(ui, task_id: str) -> bool:
     return True
 
 
-def _handle(ui, args: str) -> bool:
+def _handle(ui: Any, args: str) -> bool:
     parts = args.split()
     if not parts:
         return _list_tasks(ui)

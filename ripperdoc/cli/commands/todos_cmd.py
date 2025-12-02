@@ -11,10 +11,11 @@ from ripperdoc.utils.todo import (
     load_todos,
 )
 
+from typing import Any
 from .base import SlashCommand
 
 
-def _handle(ui, trimmed_arg: str) -> bool:
+def _handle(ui: Any, trimmed_arg: str) -> bool:
     console = ui.console
     todos = load_todos(ui.project_path)
     next_only = trimmed_arg.strip().lower() in ("next", "-n", "--next")

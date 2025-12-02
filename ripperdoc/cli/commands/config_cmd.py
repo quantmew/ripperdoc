@@ -3,10 +3,11 @@ from rich.markup import escape
 from ripperdoc.core.config import get_global_config
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 
+from typing import Any
 from .base import SlashCommand
 
 
-def _handle(ui, _: str) -> bool:
+def _handle(ui: Any, _: str) -> bool:
     config = get_global_config()
     profile = get_profile_for_pointer("main")
     main_pointer = getattr(config.model_pointers, "main", "default")

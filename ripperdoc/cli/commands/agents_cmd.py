@@ -9,15 +9,16 @@ from ripperdoc.core.agents import (
 )
 from ripperdoc.core.config import get_global_config
 
+from typing import Any
 from .base import SlashCommand
 
 
-def _handle(ui, trimmed_arg: str) -> bool:
+def _handle(ui: Any, trimmed_arg: str) -> bool:
     console = ui.console
     tokens = trimmed_arg.split()
     subcmd = tokens[0].lower() if tokens else ""
 
-    def print_agents_usage():
+    def print_agents_usage() -> None:
         console.print("[bold]/agents[/bold] — list configured agents")
         console.print(
             "[bold]/agents create <name> [location] [model][/bold] — create agent (location: user|project, default user)"
@@ -208,10 +209,10 @@ def _handle(ui, trimmed_arg: str) -> bool:
         console.print("  • None configured")
     for agent in agents.active_agents:
         location = getattr(agent.location, "value", agent.location)
-        tools = "all tools" if "*" in agent.tools else ", ".join(agent.tools)
+        tools_str = "all tools" if "*" in agent.tools else ", ".join(agent.tools)
         console.print(f"  • {escape(agent.agent_type)} ({escape(str(location))})", markup=False)
         console.print(f"      {escape(agent.when_to_use)}", markup=False)
-        console.print(f"      tools: {escape(tools)}", markup=False)
+        console.print(f"      tools: {escape(tools_str)}", markup=False)
         console.print(f"      model: {escape(agent.model or 'task (default)')}", markup=False)
     if agents.failed_files:
         console.print("[yellow]Some agent files could not be loaded:[/yellow]")

@@ -1,6 +1,8 @@
+from typing import Any
+
 """Tool to retrieve output from background bash tasks."""
 
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import Tool, ToolUseContext, ToolResult, ValidationResult
@@ -53,7 +55,7 @@ class BashOutputTool(Tool[BashOutputInput, BashOutputData]):
     def is_concurrency_safe(self) -> bool:
         return True
 
-    def needs_permissions(self, input_data=None) -> bool:
+    def needs_permissions(self, input_data: Any = None) -> bool:
         return False
 
     async def validate_input(

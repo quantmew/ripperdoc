@@ -1,3 +1,4 @@
+from typing import Any
 import os
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -118,7 +119,7 @@ def _setting_sources_summary(
     return ", ".join(unique_sources)
 
 
-def _handle(ui, _: str) -> bool:
+def _handle(ui: Any, _: str) -> bool:
     config = get_global_config()
     profile = get_profile_for_pointer("main")
     memory_files = collect_all_memory_files()

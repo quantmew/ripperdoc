@@ -4,10 +4,11 @@ from rich.markup import escape
 
 from ripperdoc.utils.mcp import load_mcp_servers_async, shutdown_mcp_runtime
 
+from typing import Any
 from .base import SlashCommand
 
 
-def _handle(ui, _: str) -> bool:
+def _handle(ui: Any, _: str) -> bool:
     async def _load() -> list:
         try:
             return await load_mcp_servers_async(ui.project_path)

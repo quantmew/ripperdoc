@@ -1,5 +1,6 @@
 from typing import Optional
 
+from typing import Any, Literal
 from rich.console import Console
 from rich.markup import escape
 
@@ -39,11 +40,11 @@ class Spinner:
         self._status.__exit__(None, None, None)
         self._status = None
 
-    def __enter__(self):
+    def __enter__(self) -> "Spinner":
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Literal[False]:
         self.stop()
         # Do not suppress exceptions
         return False

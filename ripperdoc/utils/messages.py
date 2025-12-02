@@ -242,6 +242,25 @@ def normalize_messages_for_api(
 
     Progress messages are filtered out as they are not sent to the API.
     """
+
+    def _msg_type(msg: Any) -> Optional[str]:
+        if hasattr(msg, "type"):
+            return getattr(msg, "type", None)
+        if isinstance(msg, dict):
+            return msg.get("type")
+        return None
+
+    def _msg_content(msg: Any) -> Any:
+        if hasattr(msg, "message"):
+            return getattr(getattr(msg, "message", None), "content", None)
+        if isinstance(msg, dict):
+            message_payload = msg.get("message")
+            if isinstance(message_payload, dict):
+                return message_payload.get("content")
+            if "content" in msg:
+                return msg.get("content")
+        return None
+
     normalized: List[Dict[str, Any]] = []
     tool_results_seen = 0
     tool_uses_seen = 0
@@ -253,9 +272,9 @@ def normalize_messages_for_api(
     skipped_tool_uses_no_id = 0
     if protocol == "openai":
         for idx, msg in enumerate(messages):
-            if getattr(msg, "type", "") != "user":
+            if _msg_type(msg) != "user":
                 continue
-            content = getattr(getattr(msg, "message", None), "content", None)
+            content = _msg_content(msg)
             if not isinstance(content, list):
                 continue
             for block in content:
@@ -265,20 +284,20 @@ def normalize_messages_for_api(
                         tool_result_positions[tool_id] = idx
 
     for msg_index, msg in enumerate(messages):
-        if msg.type == "progress":
+        msg_type = _msg_type(msg)
+        if msg_type == "progress":
             # Skip progress messages
             continue
+        if msg_type is None:
+            continue
 
-        if msg.type == "user":
-            user_msg = msg
-            # ProgressMessage doesn't have .message attribute
-            if not hasattr(user_msg, "message"):
-                continue
-            if isinstance(user_msg.message.content, list):
+        if msg_type == "user":
+            user_content = _msg_content(msg)
+            if isinstance(user_content, list):
                 if protocol == "openai":
                     # Map each block to an OpenAI-style message
                     openai_msgs: List[Dict[str, Any]] = []
-                    for block in user_msg.message.content:
+                    for block in user_content:
                         if getattr(block, "type", None) == "tool_result":
                             tool_results_seen += 1
                         mapped = _content_block_to_openai(block)
@@ -287,26 +306,23 @@ def normalize_messages_for_api(
                     normalized.extend(openai_msgs)
                     continue
                 api_blocks = []
-                for block in user_msg.message.content:
+                for block in user_content:
                     if getattr(block, "type", None) == "tool_result":
                         tool_results_seen += 1
                     api_blocks.append(_content_block_to_api(block))
                 normalized.append({"role": "user", "content": api_blocks})
             else:
                 normalized.append(
-                    {"role": "user", "content": user_msg.message.content}  # type: ignore
+                    {"role": "user", "content": user_content}  # type: ignore
                 )
-        elif msg.type == "assistant":
-            asst_msg = msg
-            # ProgressMessage doesn't have .message attribute
-            if not hasattr(asst_msg, "message"):
-                continue
-            if isinstance(asst_msg.message.content, list):
+        elif msg_type == "assistant":
+            asst_content = _msg_content(msg)
+            if isinstance(asst_content, list):
                 if protocol == "openai":
                     assistant_openai_msgs: List[Dict[str, Any]] = []
                     tool_calls: List[Dict[str, Any]] = []
                     text_parts: List[str] = []
-                    for block in asst_msg.message.content:
+                    for block in asst_content:
                         if getattr(block, "type", None) == "tool_use":
                             tool_uses_seen += 1
                             tool_id = getattr(block, "tool_use_id", None) or getattr(
@@ -347,14 +363,14 @@ def normalize_messages_for_api(
                     normalized.extend(assistant_openai_msgs)
                     continue
                 api_blocks = []
-                for block in asst_msg.message.content:
+                for block in asst_content:
                     if getattr(block, "type", None) == "tool_use":
                         tool_uses_seen += 1
                     api_blocks.append(_content_block_to_api(block))
                 normalized.append({"role": "assistant", "content": api_blocks})
             else:
                 normalized.append(
-                    {"role": "assistant", "content": asst_msg.message.content}  # type: ignore
+                    {"role": "assistant", "content": asst_content}  # type: ignore
                 )
 
     logger.debug(

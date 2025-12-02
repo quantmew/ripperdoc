@@ -22,7 +22,7 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.history import InMemoryHistory
 
 from ripperdoc import __version__
-from ripperdoc.core.config import get_global_config
+from ripperdoc.core.config import ProviderType, get_global_config
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
@@ -223,10 +223,7 @@ class RichUI:
                     if status in counts:
                         counts[status] += 1
                 total = len(arg_value)
-                return (
-                    f"{arg_key}: {total} items "
-                    f"(pending {counts['pending']}, in_progress {counts['in_progress']}, completed {counts['completed']})"
-                )
+                return f"{arg_key}: {total} items"
             if isinstance(arg_value, (list, dict)):
                 return f"{arg_key}: {len(arg_value)} items"
             if isinstance(arg_value, str) and len(arg_value) > 50:
@@ -248,6 +245,20 @@ class RichUI:
 
             for key, value in tool_args.items():
                 if key in {"command", "run_in_background", "runInBackground", "sandbox"}:
+                    continue
+                args_parts.append(_format_arg(key, value))
+            return args_parts
+
+        # Special handling for Edit and MultiEdit tools - don't show old_string
+        if tool_name in ["Edit", "MultiEdit"]:
+            for key, value in tool_args.items():
+                if key == "new_string":
+                    continue  # Skip new_string for Edit/MultiEdit tools
+                if key == "old_string":
+                    continue  # Skip old_string for Edit/MultiEdit tools
+                # For MultiEdit, also handle edits array
+                if key == "edits" and isinstance(value, list):
+                    args_parts.append(f"edits: {len(value)} operations")
                     continue
                 args_parts.append(_format_arg(key, value))
             return args_parts
@@ -584,9 +595,14 @@ class RichUI:
             model_profile = get_profile_for_pointer("main")
             max_context_tokens = get_model_context_limit(model_profile, config.context_token_limit)
             auto_compact_enabled = resolve_auto_compact_enabled(config)
+            protocol = (
+                "anthropic"
+                if model_profile and model_profile.provider == ProviderType.ANTHROPIC
+                else "openai"
+            )
 
             usage_status = get_context_usage_status(
-                messages, max_context_tokens, auto_compact_enabled
+                messages, max_context_tokens, auto_compact_enabled, protocol=protocol
             )
 
             if usage_status.is_above_warning:
@@ -601,7 +617,7 @@ class RichUI:
 
             if usage_status.should_auto_compact:
                 original_messages = list(messages)
-                compaction = compact_messages(messages, max_context_tokens)
+                compaction = compact_messages(messages, max_context_tokens, protocol=protocol)
                 if compaction.was_compacted:
                     if self._saved_conversation is None:
                         self._saved_conversation = original_messages
@@ -854,11 +870,16 @@ class RichUI:
         config = get_global_config()
         model_profile = get_profile_for_pointer("main")
         max_context_tokens = get_model_context_limit(model_profile, config.context_token_limit)
+        protocol = (
+            "anthropic"
+            if model_profile and model_profile.provider == ProviderType.ANTHROPIC
+            else "openai"
+        )
 
         original_messages = list(self.conversation_messages)
-        tokens_before = estimate_conversation_tokens(original_messages)
+        tokens_before = estimate_conversation_tokens(original_messages, protocol=protocol)
 
-        compaction = compact_messages(original_messages, max_context_tokens, force=False)
+        compaction = compact_messages(original_messages, max_context_tokens, force=False, protocol=protocol)
         messages_for_summary = compaction.messages
 
         spinner = Spinner(console, "Summarizing conversation...", spinner="dots")
@@ -890,7 +911,7 @@ class RichUI:
             create_user_message("Conversation compacted. Previous history replaced by summary."),
             summary_message,
         ]
-        tokens_after = estimate_conversation_tokens(self.conversation_messages)
+        tokens_after = estimate_conversation_tokens(self.conversation_messages, protocol=protocol)
         tokens_saved = max(0, tokens_before - tokens_after)
         console.print(
             f"[green]✓ Conversation compacted[/green] "

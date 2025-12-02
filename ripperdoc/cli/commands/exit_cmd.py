@@ -1,7 +1,8 @@
+from typing import Any
 from .base import SlashCommand
 
 
-def _handle(ui, _: str) -> bool:
+def _handle(ui: Any, _: str) -> bool:
     ui.console.print("[yellow]Goodbye![/yellow]")
     ui._should_exit = True
     return True

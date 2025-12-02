@@ -1,3 +1,4 @@
+from typing import Any
 from getpass import getpass
 from typing import Optional
 
@@ -16,7 +17,7 @@ from ripperdoc.core.config import (
 from .base import SlashCommand
 
 
-def _handle(ui, trimmed_arg: str) -> bool:
+def _handle(ui: Any, trimmed_arg: str) -> bool:
     console = ui.console
     tokens = trimmed_arg.split()
     subcmd = tokens[0].lower() if tokens else ""
