@@ -689,7 +689,10 @@ async def query(
                     logger.debug(
                         f"[query] Permission denied for tool_use_id={tool_id}: {denial_message}"
                     )
-                    denial_text = denial_message or f"Permission denied for tool '{tool_name}'."
+                    denial_text = (
+                        denial_message
+                        or f"User aborted the tool invocation: {tool_name}"
+                    )
                     result_msg = create_user_message(
                         [
                             {
@@ -703,7 +706,6 @@ async def query(
                     tool_results.append(result_msg)
                     yield result_msg
                     permission_denied = True
-                    query_context.abort_controller.set()
                     break
 
             # Execute tool
@@ -759,6 +761,10 @@ async def query(
     # Check for abort after tools
     if query_context.abort_controller.is_set():
         yield create_assistant_message(INTERRUPT_MESSAGE_FOR_TOOL_USE)
+        return
+
+    if permission_denied:
+        # Permission was explicitly denied; return after surfacing the denial result.
         return
 
     # Continue conversation with tool results

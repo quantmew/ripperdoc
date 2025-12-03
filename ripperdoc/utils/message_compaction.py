@@ -22,7 +22,7 @@ logger = get_logger()
 
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
-# Compaction thresholds mirror the claude-code compact implementation.
+# Compaction thresholds.
 MAX_TOKENS_SOFT = 20_000
 MAX_TOKENS_HARD = 40_000
 MAX_TOOL_USES_TO_PRESERVE = 3
@@ -309,7 +309,7 @@ def get_context_usage_status(
     max_context_tokens: Optional[int],
     auto_compact_enabled: bool,
 ) -> ContextUsageStatus:
-    """Compute context usage thresholds following claude-code semantics."""
+    """Compute context usage thresholds using the compaction heuristics."""
     context_limit = max(max_context_tokens or DEFAULT_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS)
     effective_limit = (
         max(MIN_CONTEXT_TOKENS, context_limit - AUTO_COMPACT_BUFFER)

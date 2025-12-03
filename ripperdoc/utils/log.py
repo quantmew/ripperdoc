@@ -39,7 +39,7 @@ _LOG_RECORD_FIELDS = {
 
 
 class StructuredFormatter(logging.Formatter):
-    """Formatter that mirrors Claude-style debug logs with ISO timestamps and context."""
+    """Formatter with ISO timestamps and context."""
 
     def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
         timestamp = datetime.utcfromtimestamp(record.created)

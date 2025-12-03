@@ -238,6 +238,7 @@ class RichUI:
         tool_type: Optional[str] = None,
         tool_args: Optional[dict] = None,
         tool_data: Any = None,
+        tool_error: bool = False,
     ) -> None:
         """Display a message in the conversation."""
         if not is_tool:
@@ -249,7 +250,7 @@ class RichUI:
             return
 
         if tool_type == "result":
-            self._print_tool_result(sender, content, tool_data)
+            self._print_tool_result(sender, content, tool_data, tool_error)
             return
 
         self._print_generic_tool(sender, content)
@@ -345,8 +346,25 @@ class RichUI:
 
         self.console.print(f"[dim cyan]{escape(tool_display)}[/]")
 
-    def _print_tool_result(self, sender: str, content: str, tool_data: Any) -> None:
+    def _print_tool_result(
+        self, sender: str, content: str, tool_data: Any, tool_error: bool = False
+    ) -> None:
         """Render a tool result summary."""
+        failed = tool_error
+        if tool_data is not None:
+            if isinstance(tool_data, dict):
+                failed = failed or (tool_data.get("success") is False)
+            else:
+                success = getattr(tool_data, "success", None)
+                failed = failed or (success is False)
+
+        if failed:
+            if content:
+                self.console.print(f"  ⎿  [red]{escape(content)}[/red]")
+            else:
+                self.console.print(f"  ⎿  [red]{escape(sender)} failed[/red]")
+            return
+
         if not content:
             self.console.print("  ⎿  [dim]Tool completed[/]")
             return
@@ -614,6 +632,11 @@ class RichUI:
             self.query_context = QueryContext(
                 tools=self.get_default_tools(), safe_mode=self.safe_mode, verbose=self.verbose
             )
+        else:
+            # Clear any prior abort so new queries aren't immediately interrupted.
+            abort_controller = getattr(self.query_context, "abort_controller", None)
+            if abort_controller is not None:
+                abort_controller.clear()
 
         logger.info(
             "[ui] Starting query processing",
@@ -791,6 +814,7 @@ class RichUI:
                                 ):
                                     tool_name = "Tool"
                                     tool_data = getattr(message, "tool_use_result", None)
+                                    is_error = bool(getattr(block, "is_error", False))
 
                                     tool_use_id = getattr(block, "tool_use_id", None)
                                     entry = tool_registry.get(tool_use_id) if tool_use_id else None
@@ -814,6 +838,7 @@ class RichUI:
                                         is_tool=True,
                                         tool_type="result",
                                         tool_data=tool_data,
+                                        tool_error=is_error,
                                     )
 
                     elif message.type == "progress" and isinstance(message, ProgressMessage):

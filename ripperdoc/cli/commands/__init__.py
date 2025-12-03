@@ -11,8 +11,10 @@ from .compact_cmd import command as compact_command
 from .config_cmd import command as config_command
 from .cost_cmd import command as cost_command
 from .context_cmd import command as context_command
+from .doctor_cmd import command as doctor_command
 from .exit_cmd import command as exit_command
 from .help_cmd import command as help_command
+from .memory_cmd import command as memory_command
 from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
 from .resume_cmd import command as resume_command
@@ -40,6 +42,8 @@ ALL_COMMANDS: List[SlashCommand] = [
     models_command,
     exit_command,
     status_command,
+    doctor_command,
+    memory_command,
     tasks_command,
     todos_command,
     mcp_command,

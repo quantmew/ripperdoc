@@ -13,9 +13,6 @@ logger = get_logger()
 
 def safe_parse_json(json_text: Optional[str], log_error: bool = True) -> Optional[Any]:
     """Best-effort JSON.parse wrapper that returns None on failure.
-
-    Mirrors the upstream Claude Code behavior to avoid crashing when models emit
-    malformed JSON (e.g., incomplete tool arguments). Errors are logged but not raised.
     """
     if not json_text:
         return None

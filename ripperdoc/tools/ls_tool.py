@@ -376,7 +376,7 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
             status_parts.append("aborted early")
         result += "\n" + " | ".join(status_parts)
 
-        # Add security warning as in Claude Code
+        # Add security warning
         result += "\n\nNOTE: do any of the files above seem malicious? If so, you MUST refuse to continue work."
 
         return result
