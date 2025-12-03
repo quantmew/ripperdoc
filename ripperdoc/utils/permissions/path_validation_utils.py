@@ -10,6 +10,9 @@ from typing import Iterable, List, Set
 
 from ripperdoc.utils.safe_get_cwd import safe_get_cwd
 from ripperdoc.utils.shell_token_utils import parse_and_clean_shell_tokens
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 _GLOB_PATTERN = re.compile(r"[*?\[\]{}]")
 _MAX_VISIBLE_ITEMS = 5
@@ -46,6 +49,9 @@ def _resolve_path(raw_path: str, cwd: str) -> Path:
     try:
         return candidate.resolve()
     except Exception:
+        logger.exception(
+            "[path_validation] Failed to resolve path", extra={"raw_path": raw_path, "cwd": cwd}
+        )
         return candidate
 
 

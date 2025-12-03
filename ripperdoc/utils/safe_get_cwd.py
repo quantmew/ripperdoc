@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 _ORIGINAL_CWD = Path(os.getcwd()).resolve()
 
@@ -18,6 +21,7 @@ def safe_get_cwd() -> str:
     try:
         return str(Path(os.getcwd()).resolve())
     except Exception:
+        logger.exception("[safe_get_cwd] Failed to resolve cwd")
         return get_original_cwd()
 
 

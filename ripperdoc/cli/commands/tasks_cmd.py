@@ -13,9 +13,13 @@ from ripperdoc.tools.background_shell import (
     kill_background_task,
     list_background_tasks,
 )
+from ripperdoc.utils.log import get_logger
 
 from typing import Any, Optional
 from .base import SlashCommand
+
+
+logger = get_logger()
 
 
 def _format_duration(duration_ms: Optional[float]) -> str:
@@ -103,6 +107,10 @@ def _list_tasks(ui: Any) -> bool:
             status = get_background_status(task_id, consume=False)
         except Exception as exc:
             table.add_row(escape(task_id), "[red]error[/]", escape(str(exc)), "-")
+            logger.exception(
+                "[tasks_cmd] Failed to read background task status",
+                extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
+            )
             continue
 
         command = status.get("command") or ""
@@ -137,6 +145,10 @@ def _kill_task(ui: Any, task_id: str) -> bool:
         return True
     except Exception as exc:
         console.print(f"[red]Failed to read task '{escape(task_id)}': {escape(str(exc))}[/red]")
+        logger.exception(
+            "[tasks_cmd] Failed to read task before kill",
+            extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
+        )
         return True
 
     if status.get("status") != "running":
@@ -149,6 +161,10 @@ def _kill_task(ui: Any, task_id: str) -> bool:
         killed = asyncio.run(kill_background_task(task_id))
     except Exception as exc:
         console.print(f"[red]Error stopping task {escape(task_id)}: {escape(str(exc))}[/red]")
+        logger.exception(
+            "[tasks_cmd] Error stopping background task",
+            extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
+        )
         return True
 
     if killed:
@@ -169,6 +185,10 @@ def _show_task(ui: Any, task_id: str) -> bool:
         return True
     except Exception as exc:
         console.print(f"[red]Failed to read task '{escape(task_id)}': {escape(str(exc))}[/red]")
+        logger.exception(
+            "[tasks_cmd] Failed to read task for detail view",
+            extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
+        )
         return True
 
     details = Table(box=box.SIMPLE_HEAVY, show_header=False)
@@ -208,6 +228,13 @@ def _show_task(ui: Any, task_id: str) -> bool:
 
 def _handle(ui: Any, args: str) -> bool:
     parts = args.split()
+    logger.info(
+        "[tasks_cmd] Handling /tasks command",
+        extra={
+            "session_id": getattr(ui, "session_id", None),
+            "args": args,
+        },
+    )
     if not parts:
         return _list_tasks(ui)
 

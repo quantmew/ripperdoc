@@ -166,7 +166,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             raw = path.read_text(encoding="utf-8")
             nb_json = json.loads(raw)
         except Exception as exc:
-            logger.error(f"Failed to parse notebook {path}: {exc}")
+            logger.exception("Failed to parse notebook", extra={"path": str(path)})
             return ValidationResult(
                 result=False, message="Notebook is not valid JSON.", error_code=6
             )
@@ -285,7 +285,10 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
         except Exception as exc:  # pragma: no cover - error path
-            logger.error(f"Error editing notebook {input_data.notebook_path}: {exc}")
+            logger.exception(
+                "Error editing notebook",
+                extra={"path": input_data.notebook_path, "error": str(exc)},
+            )
             output = NotebookEditOutput(
                 new_source=new_source,
                 cell_type=cell_type or "code",

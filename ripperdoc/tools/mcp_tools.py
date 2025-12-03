@@ -35,6 +35,7 @@ try:
     import mcp.types as mcp_types  # type: ignore
 except Exception:  # pragma: no cover - SDK may be missing at runtime
     mcp_types = None  # type: ignore[assignment]
+    logger.exception("[mcp_tools] MCP SDK unavailable during import")
 
 
 logger = get_logger()
@@ -272,6 +273,7 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
         try:
             return json.dumps(output.resources, indent=2, ensure_ascii=False)
         except Exception:
+            logger.exception("[mcp_tools] Failed to serialize MCP resources for assistant output")
             return str(output.resources)
 
     def render_tool_use_message(
@@ -313,7 +315,10 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
                         for res in response.resources
                     ]
                 except Exception as exc:  # pragma: no cover - runtime errors
-                    logger.error(f"Failed to fetch resources from {server.name}: {exc}")
+                    logger.exception(
+                        "Failed to fetch resources from MCP server",
+                        extra={"server": server.name, "error": str(exc)},
+                    )
                     fetched = []
 
             candidate_resources = fetched if fetched else server.resources
@@ -494,6 +499,10 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
                             try:
                                 raw_bytes = base64.b64decode(blob_data)
                             except Exception:
+                                logger.exception(
+                                    "[mcp_tools] Failed to decode base64 blob content",
+                                    extra={"server": input_data.server, "uri": input_data.uri},
+                                )
                                 raw_bytes = None
                         else:
                             raw_bytes = None
@@ -521,8 +530,9 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
                 text_parts = [p.text for p in parts if p.text]
                 content_text = "\n".join([p for p in text_parts if p]) or None
             except Exception as exc:  # pragma: no cover - runtime errors
-                logger.error(
-                    f"Error reading MCP resource {input_data.uri} from {input_data.server}: {exc}"
+                logger.exception(
+                    "Error reading MCP resource",
+                    extra={"server": input_data.server, "uri": input_data.uri, "error": str(exc)},
                 )
                 content_text = f"Error reading MCP resource: {exc}"
         else:
@@ -575,6 +585,7 @@ def _annotation_flag(tool_info: Any, key: str) -> bool:
         try:
             return bool(annotations.get(key, False))
         except Exception:
+            logger.debug("[mcp_tools] Failed to read annotation flag", exc_info=True)
             return False
     return False
 
@@ -718,8 +729,13 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                 structured_content=None,
                 is_error=True,
             )
-            logger.error(
-                f"Error calling MCP tool {self.tool_info.name} on {self.server_name}: {exc}"
+            logger.exception(
+                "Error calling MCP tool",
+                extra={
+                    "server": self.server_name,
+                    "tool": self.tool_info.name,
+                    "error": str(exc),
+                },
             )
             yield ToolResult(
                 data=output,
@@ -768,7 +784,10 @@ def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[Dyn
     try:
         return asyncio.run(_load_and_cleanup())
     except Exception as exc:  # pragma: no cover - SDK/runtime failures
-        logger.error(f"Failed to initialize MCP runtime for dynamic tools: {exc}")
+        logger.exception(
+            "Failed to initialize MCP runtime for dynamic tools (sync)",
+            extra={"error": str(exc)},
+        )
         return []
 
 
@@ -777,7 +796,10 @@ async def load_dynamic_mcp_tools_async(project_path: Optional[Path] = None) -> L
     try:
         runtime = await ensure_mcp_runtime(project_path)
     except Exception as exc:  # pragma: no cover - SDK/runtime failures
-        logger.error(f"Failed to initialize MCP runtime for dynamic tools: {exc}")
+        logger.exception(
+            "Failed to initialize MCP runtime for dynamic tools (async)",
+            extra={"error": str(exc)},
+        )
         return []
     return _build_dynamic_mcp_tools(runtime)
 

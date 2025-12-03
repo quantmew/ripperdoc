@@ -26,6 +26,9 @@ from ripperdoc.tools.mcp_tools import (
     ReadMcpResourceTool,
     load_dynamic_mcp_tools_sync,
 )
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 def get_default_tools() -> List[Tool[Any, Any]]:
@@ -49,15 +52,26 @@ def get_default_tools() -> List[Tool[Any, Any]]:
         ListMcpResourcesTool(),
         ReadMcpResourceTool(),
     ]
+    dynamic_tools: List[Tool[Any, Any]] = []
     try:
         mcp_tools = load_dynamic_mcp_tools_sync()
         # Filter to ensure only Tool instances are added
         for tool in mcp_tools:
             if isinstance(tool, Tool):
                 base_tools.append(tool)
+                dynamic_tools.append(tool)
     except Exception:
         # If MCP runtime is not available, continue with base tools only.
-        pass
+        logger.exception("[default_tools] Failed to load dynamic MCP tools")
 
     task_tool = TaskTool(lambda: base_tools)
-    return base_tools + [task_tool]
+    all_tools = base_tools + [task_tool]
+    logger.debug(
+        "[default_tools] Built tool inventory",
+        extra={
+            "base_tools": len(base_tools),
+            "dynamic_mcp_tools": len(dynamic_tools),
+            "total_tools": len(all_tools),
+        },
+    )
+    return all_tools

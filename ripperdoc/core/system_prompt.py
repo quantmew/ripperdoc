@@ -35,6 +35,7 @@ def _detect_git_repo(cwd: Path) -> bool:
         )
         return result.returncode == 0 and result.stdout.strip().lower() == "true"
     except Exception:
+        logger.exception("[system_prompt] Failed to detect git repository", extra={"cwd": str(cwd)})
         return False
 
 
@@ -381,7 +382,7 @@ def build_system_prompt(
                     Provide detailed prompts so the agent can work autonomously and return a concise report."""
                 ).strip()
         except Exception as exc:
-            logger.error(f"Failed to load agent definitions: {exc}")
+            logger.exception("Failed to load agent definitions", extra={"error": str(exc)})
             agent_section = (
                 "# Subagents\nTask tool available, but agent definitions could not be loaded."
             )

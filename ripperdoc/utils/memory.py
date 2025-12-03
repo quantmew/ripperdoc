@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Set
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 MEMORY_FILE_NAME = "AGENTS.md"
 LOCAL_MEMORY_FILE_NAME = "AGENTS.local.md"
@@ -43,6 +46,10 @@ def _is_path_under_directory(path: Path, directory: Path) -> bool:
         path.resolve().relative_to(directory.resolve())
         return True
     except Exception:
+        logger.exception(
+            "[memory] Failed to compare path containment",
+            extra={"path": str(path), "directory": str(directory)},
+        )
         return False
 
 
@@ -65,8 +72,12 @@ def _read_file_with_type(file_path: Path, file_type: str) -> Optional[MemoryFile
         content = file_path.read_text(encoding="utf-8", errors="ignore")
         return MemoryFile(path=str(file_path), type=file_type, content=content)
     except PermissionError:
+        logger.exception(
+            "[memory] Permission error reading file", extra={"path": str(file_path)}
+        )
         return None
     except OSError:
+        logger.exception("[memory] OS error reading file", extra={"path": str(file_path)})
         return None
 
 
@@ -114,7 +125,9 @@ def _collect_files(
     try:
         resolved_path = resolved_path.resolve()
     except Exception:
-        pass
+        logger.exception(
+            "[memory] Failed to resolve memory file path", extra={"path": str(resolved_path)}
+        )
 
     resolved_key = str(resolved_path)
     if resolved_key in visited:

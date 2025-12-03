@@ -11,6 +11,9 @@ from typing import Any, Awaitable, Callable, Optional, Set
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.permissions import PermissionDecision, ToolRule
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 @dataclass
@@ -46,11 +49,19 @@ def permission_key(tool: Tool[Any, Any], parsed_input: Any) -> str:
         try:
             return f"{tool.name}::path::{Path(getattr(parsed_input, 'file_path')).resolve()}"
         except Exception:
+            logger.exception(
+                "[permissions] Failed to resolve file_path for permission key",
+                extra={"tool": getattr(tool, "name", None)},
+            )
             return f"{tool.name}::path::{getattr(parsed_input, 'file_path')}"
     if hasattr(parsed_input, "path"):
         try:
             return f"{tool.name}::path::{Path(getattr(parsed_input, 'path')).resolve()}"
         except Exception:
+            logger.exception(
+                "[permissions] Failed to resolve path for permission key",
+                extra={"tool": getattr(tool, "name", None)},
+            )
             return f"{tool.name}::path::{getattr(parsed_input, 'path')}"
     return tool.name
 
@@ -116,6 +127,10 @@ def make_permission_checker(
             if hasattr(tool, "needs_permissions") and not tool.needs_permissions(parsed_input):
                 return PermissionResult(result=True)
         except Exception:
+            logger.exception(
+                "[permissions] Tool needs_permissions check failed",
+                extra={"tool": getattr(tool, "name", None)},
+            )
             return PermissionResult(
                 result=False,
                 message="Permission check failed for this tool invocation.",
@@ -153,6 +168,10 @@ def make_permission_checker(
                 if isinstance(decision, dict) and "behavior" in decision:
                     decision = PermissionDecision(**decision)
             except Exception:
+                logger.exception(
+                    "[permissions] Tool check_permissions failed",
+                    extra={"tool": getattr(tool, "name", None)},
+                )
                 decision = PermissionDecision(
                     behavior="ask",
                     message="Error checking permissions for this tool.",

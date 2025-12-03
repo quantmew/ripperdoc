@@ -172,6 +172,9 @@ def _stringify_content(content: Union[str, List[MessageContent], None]) -> str:
                 try:
                     parts.append(json.dumps(part.get("input"), ensure_ascii=False))
                 except Exception:
+                    logger.exception(
+                        "[message_compaction] Failed to serialize tool_use input for token estimate"
+                    )
                     parts.append(str(part.get("input")))
 
             # OpenAI-style arguments blocks
@@ -225,7 +228,10 @@ def _estimate_tool_schema_tokens(tools: Sequence[Any]) -> int:
             schema_text = json.dumps(schema, sort_keys=True)
             total += estimate_tokens_from_text(schema_text)
         except Exception as exc:
-            logger.error(f"Failed to estimate tokens for tool schema: {exc}")
+            logger.exception(
+                "Failed to estimate tokens for tool schema",
+                extra={"tool": getattr(tool, "name", None), "error": str(exc)},
+            )
             continue
     return total
 
@@ -396,6 +402,9 @@ def find_latest_assistant_usage_tokens(
             if tokens > 0:
                 return tokens
         except Exception:
+            logger.debug(
+                "[message_compaction] Failed to parse usage tokens", exc_info=True
+            )
             continue
     return 0
 
@@ -432,7 +441,9 @@ def _run_cleanup_callbacks() -> None:
         try:
             callback()
         except Exception as exc:
-            logger.debug(f"[message_compaction] Cleanup callback failed: {exc}")
+            logger.debug(
+                f"[message_compaction] Cleanup callback failed: {exc}", exc_info=True
+            )
 
 
 def _normalize_tool_use_id(block: Any) -> str:
@@ -641,16 +652,26 @@ def compact_messages(
         _processed_tool_use_ids.add(id_to_remove)
 
     tokens_after = estimate_conversation_tokens(compacted_messages, protocol=protocol)
+    tokens_saved = max(0, tokens_before - tokens_after)
 
     if ids_to_remove:
         _is_compacting = True
         _run_cleanup_callbacks()
+        logger.debug(
+            "[message_compaction] Compacted conversation",
+            extra={
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+                "tokens_saved": tokens_saved,
+                "cleared_tool_ids": list(ids_to_remove),
+            },
+        )
 
     return CompactionResult(
         messages=compacted_messages,
         tokens_before=tokens_before,
         tokens_after=tokens_after,
-        tokens_saved=max(0, tokens_before - tokens_after),
+        tokens_saved=tokens_saved,
         cleared_tool_ids=ids_to_remove,
         was_compacted=bool(ids_to_remove),
     )

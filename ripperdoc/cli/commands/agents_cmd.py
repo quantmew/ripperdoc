@@ -8,15 +8,25 @@ from ripperdoc.core.agents import (
     save_agent_definition,
 )
 from ripperdoc.core.config import get_global_config
+from ripperdoc.utils.log import get_logger
 
 from typing import Any
 from .base import SlashCommand
+
+logger = get_logger()
 
 
 def _handle(ui: Any, trimmed_arg: str) -> bool:
     console = ui.console
     tokens = trimmed_arg.split()
     subcmd = tokens[0].lower() if tokens else ""
+    logger.info(
+        "[agents_cmd] Handling /agents command",
+        extra={
+            "subcommand": subcmd or "list",
+            "session_id": getattr(ui, "session_id", None),
+        },
+    )
 
     def print_agents_usage() -> None:
         console.print("[bold]/agents[/bold] — list configured agents")
@@ -100,6 +110,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         except Exception as exc:
             console.print(f"[red]Failed to create agent: {escape(str(exc))}[/red]")
             print_agents_usage()
+            logger.exception(
+                "[agents_cmd] Failed to create agent",
+                extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
+            )
         return True
 
     if subcmd in ("delete", "del", "remove"):
@@ -127,6 +141,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         except Exception as exc:
             console.print(f"[red]Failed to delete agent: {escape(str(exc))}[/red]")
             print_agents_usage()
+            logger.exception(
+                "[agents_cmd] Failed to delete agent",
+                extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
+            )
         return True
 
     if subcmd in ("edit", "update"):
@@ -200,6 +218,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         except Exception as exc:
             console.print(f"[red]Failed to update agent: {escape(str(exc))}[/red]")
             print_agents_usage()
+            logger.exception(
+                "[agents_cmd] Failed to update agent",
+                extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
+            )
         return True
 
     agents = load_agent_definitions()

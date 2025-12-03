@@ -59,12 +59,14 @@ from ripperdoc.utils.messages import (
     create_user_message,
     create_assistant_message,
 )
+from ripperdoc.utils.log import enable_session_file_logging, get_logger
 
 # Type alias for conversation messages
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
 
 console = Console()
+logger = get_logger()
 
 # Keep a small window of recent messages alongside the summary after /compact so
 # the model retains immediate context.
@@ -110,7 +112,13 @@ def create_status_bar() -> Text:
 class RichUI:
     """Rich-based UI for Ripperdoc."""
 
-    def __init__(self, safe_mode: bool = False, verbose: bool = False):
+    def __init__(
+        self,
+        safe_mode: bool = False,
+        verbose: bool = False,
+        session_id: Optional[str] = None,
+        log_file_path: Optional[Path] = None,
+    ):
         self.console = console
         self.safe_mode = safe_mode
         self.verbose = verbose
@@ -124,7 +132,22 @@ class RichUI:
         self._prompt_session: Optional[PromptSession] = None
         self.project_path = Path.cwd()
         # Track a stable session identifier for the current UI run.
-        self.session_id = str(uuid.uuid4())
+        self.session_id = session_id or str(uuid.uuid4())
+        if log_file_path:
+            self.log_file_path = log_file_path
+            logger.attach_file_handler(self.log_file_path)
+        else:
+            self.log_file_path = enable_session_file_logging(self.project_path, self.session_id)
+        logger.info(
+            "[ui] Initialized Rich UI session",
+            extra={
+                "session_id": self.session_id,
+                "project_path": str(self.project_path),
+                "log_file": str(self.log_file_path),
+                "safe_mode": self.safe_mode,
+                "verbose": self.verbose,
+            },
+        )
         self._session_history = SessionHistory(self.project_path, self.session_id)
         self._permission_checker = (
             make_permission_checker(self.project_path, safe_mode) if safe_mode else None
@@ -138,6 +161,15 @@ class RichUI:
     def _set_session(self, session_id: str) -> None:
         """Switch to a different session id and reset logging."""
         self.session_id = session_id
+        self.log_file_path = enable_session_file_logging(self.project_path, self.session_id)
+        logger.info(
+            "[ui] Switched session",
+            extra={
+                "session_id": self.session_id,
+                "project_path": str(self.project_path),
+                "log_file": str(self.log_file_path),
+            },
+        )
         self._session_history = SessionHistory(self.project_path, session_id)
 
     def _log_message(self, message: Any) -> None:
@@ -146,7 +178,10 @@ class RichUI:
             self._session_history.append(message)
         except Exception:
             # Logging failures should never interrupt the UI flow
-            return
+            logger.exception(
+                "[ui] Failed to append message to session history",
+                extra={"session_id": self.session_id},
+            )
 
     def _append_prompt_history(self, text: str) -> None:
         """Append text to the interactive prompt history."""
@@ -156,7 +191,10 @@ class RichUI:
         try:
             session.history.append_string(text)
         except Exception:
-            return
+            logger.exception(
+                "[ui] Failed to append prompt history",
+                extra={"session_id": self.session_id},
+            )
 
     def replay_conversation(self, messages: List[Dict[str, Any]]) -> None:
         """Render a conversation history in the console and seed prompt history."""
@@ -577,6 +615,15 @@ class RichUI:
                 tools=self.get_default_tools(), safe_mode=self.safe_mode, verbose=self.verbose
             )
 
+        logger.info(
+            "[ui] Starting query processing",
+            extra={
+                "session_id": self.session_id,
+                "prompt_length": len(user_input),
+                "prompt_preview": user_input[:200],
+            },
+        )
+
         try:
             context: Dict[str, str] = {}
             servers = await load_mcp_servers_async(self.project_path)
@@ -585,6 +632,15 @@ class RichUI:
                 self.query_context.tools = merge_tools_with_dynamic(
                     self.query_context.tools, dynamic_tools
                 )
+            logger.debug(
+                "[ui] Prepared tools and MCP servers",
+                extra={
+                    "session_id": self.session_id,
+                    "tool_count": len(self.query_context.tools),
+                    "mcp_servers": len(servers),
+                    "dynamic_tools": len(dynamic_tools),
+                },
+            )
             mcp_instructions = format_mcp_instructions(servers)
             base_system_prompt = build_system_prompt(
                 self.query_context.tools,
@@ -617,6 +673,16 @@ class RichUI:
             usage_status = get_context_usage_status(
                 used_tokens, max_context_tokens, auto_compact_enabled
             )
+            logger.debug(
+                "[ui] Context usage snapshot",
+                extra={
+                    "session_id": self.session_id,
+                    "used_tokens": used_tokens,
+                    "max_context_tokens": max_context_tokens,
+                    "percent_used": round(usage_status.percent_used, 2),
+                    "auto_compact_enabled": auto_compact_enabled,
+                },
+            )
 
             if usage_status.is_above_warning:
                 console.print(
@@ -638,6 +704,16 @@ class RichUI:
                     console.print(
                         f"[yellow]Auto-compacted conversation (saved ~{compaction.tokens_saved} tokens). "
                         f"Estimated usage: {compaction.tokens_after}/{max_context_tokens} tokens.[/yellow]"
+                    )
+                    logger.info(
+                        "[ui] Auto-compacted conversation",
+                        extra={
+                            "session_id": self.session_id,
+                            "tokens_before": compaction.tokens_before,
+                            "tokens_after": compaction.tokens_after,
+                            "tokens_saved": compaction.tokens_saved,
+                            "cleared_tool_ids": list(compaction.cleared_tool_ids),
+                        },
                     )
 
             spinner = Spinner(console, "Thinking...", spinner="dots")
@@ -758,16 +834,30 @@ class RichUI:
                     self._log_message(message)
                     messages.append(message)  # type: ignore[arg-type]
             except Exception as e:
+                logger.exception(
+                    "[ui] Unhandled error while processing streamed query response",
+                    extra={"session_id": self.session_id},
+                )
                 self.display_message("System", f"Error: {str(e)}", is_tool=True)
             finally:
                 # Ensure spinner stops even on exceptions
                 try:
                     spinner.stop()
                 except Exception:
-                    pass
+                    logger.exception(
+                        "[ui] Failed to stop spinner", extra={"session_id": self.session_id}
+                    )
 
                 # Update conversation history
                 self.conversation_messages = messages
+                logger.info(
+                    "[ui] Query processing completed",
+                    extra={
+                        "session_id": self.session_id,
+                        "conversation_messages": len(self.conversation_messages),
+                        "project_path": str(self.project_path),
+                    },
+                )
         finally:
             await shutdown_mcp_runtime()
             await shutdown_mcp_runtime()
@@ -838,6 +928,10 @@ class RichUI:
         console.print("[dim]Tip: type '/' then press Tab to see available commands.[/dim]\n")
 
         session = self.get_prompt_session()
+        logger.info(
+            "[ui] Starting interactive loop",
+            extra={"session_id": self.session_id, "log_file": str(self.log_file_path)},
+        )
 
         while not self._should_exit:
             try:
@@ -854,6 +948,10 @@ class RichUI:
 
                 # Handle slash commands locally
                 if user_input.startswith("/"):
+                    logger.debug(
+                        "[ui] Received slash command",
+                        extra={"session_id": self.session_id, "command": user_input},
+                    )
                     handled = self.handle_slash_command(user_input)
                     if self._should_exit:
                         break
@@ -862,6 +960,14 @@ class RichUI:
                         continue
 
                 # Process the query
+                logger.info(
+                    "[ui] Processing interactive prompt",
+                    extra={
+                        "session_id": self.session_id,
+                        "prompt_length": len(user_input),
+                        "prompt_preview": user_input[:200],
+                    },
+                )
                 asyncio.run(self.process_query(user_input))
 
                 console.print()  # Add spacing between interactions
@@ -874,6 +980,9 @@ class RichUI:
                 break
             except Exception as e:
                 console.print(f"[red]Error: {escape(str(e))}[/]")
+                logger.exception(
+                    "[ui] Error in interactive loop", extra={"session_id": self.session_id}
+                )
                 if self.verbose:
                     import traceback
 
@@ -903,6 +1012,9 @@ class RichUI:
             )
         except Exception as e:
             console.print(f"[red]Error during compaction: {escape(str(e))}[/red]")
+            logger.exception(
+                "[ui] Error during manual compaction", extra={"session_id": self.session_id}
+            )
             return
         finally:
             spinner.stop()
@@ -1009,7 +1121,12 @@ def check_onboarding_rich() -> bool:
     return check_onboarding()
 
 
-def main_rich(safe_mode: bool = False, verbose: bool = False) -> None:
+def main_rich(
+    safe_mode: bool = False,
+    verbose: bool = False,
+    session_id: Optional[str] = None,
+    log_file_path: Optional[Path] = None,
+) -> None:
     """Main entry point for Rich interface."""
 
     # Ensure onboarding is complete
@@ -1017,7 +1134,12 @@ def main_rich(safe_mode: bool = False, verbose: bool = False) -> None:
         sys.exit(1)
 
     # Run the Rich UI
-    ui = RichUI(safe_mode=safe_mode, verbose=verbose)
+    ui = RichUI(
+        safe_mode=safe_mode,
+        verbose=verbose,
+        session_id=session_id,
+        log_file_path=log_file_path,
+    )
     ui.run()
 
 

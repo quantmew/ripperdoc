@@ -16,6 +16,9 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 class FileWriteToolInput(BaseModel):
@@ -134,6 +137,10 @@ NEVER write new files unless explicitly required by the user."""
             )
 
         except Exception as e:
+            logger.exception(
+                "[file_write_tool] Error writing file",
+                extra={"file_path": input_data.file_path, "error": str(e)},
+            )
             error_output = FileWriteToolOutput(
                 file_path=input_data.file_path,
                 bytes_written=0,

@@ -15,6 +15,9 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 class FileEditToolInput(BaseModel):
@@ -268,6 +271,10 @@ match exactly (including whitespace and indentation)."""
             )
 
         except Exception as e:
+            logger.exception(
+                "[file_edit_tool] Error editing file",
+                extra={"file_path": input_data.file_path, "error": str(e)},
+            )
             error_output = FileEditToolOutput(
                 file_path=input_data.file_path,
                 replacements_made=0,

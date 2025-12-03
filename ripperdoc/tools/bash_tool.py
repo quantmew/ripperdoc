@@ -49,6 +49,9 @@ from ripperdoc.utils.permissions.tool_permission_utils import (
 from ripperdoc.utils.permissions import PermissionDecision
 from ripperdoc.utils.sandbox_utils import create_sandbox_wrapper, is_sandbox_available
 from ripperdoc.utils.safe_get_cwd import get_original_cwd, safe_get_cwd
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 DEFAULT_TIMEOUT_MS = get_bash_default_timeout_ms()
@@ -516,6 +519,10 @@ build projects, run tests, and interact with the file system."""
                 final_command = wrapper.final_command
                 sandbox_cleanup = wrapper.cleanup
             except Exception as exc:
+                logger.exception(
+                    "[bash_tool] Failed to enable sandbox",
+                    extra={"command": effective_command, "error": str(exc)},
+                )
                 error_output = BashToolOutput(
                     stdout="",
                     stderr=f"Failed to enable sandbox: {exc}",
@@ -561,6 +568,10 @@ build projects, run tests, and interact with the file system."""
                 try:
                     from ripperdoc.tools.background_shell import start_background_command
                 except Exception as e:  # pragma: no cover - defensive import
+                    logger.exception(
+                        "[bash_tool] Failed to import background shell runner",
+                        extra={"command": effective_command},
+                    )
                     error_output = BashToolOutput(
                         stdout="",
                         stderr=f"Failed to start background task: {str(e)}",
@@ -767,6 +778,10 @@ build projects, run tests, and interact with the file system."""
             )
 
         except Exception as e:
+            logger.exception(
+                "[bash_tool] Error executing command",
+                extra={"command": effective_command, "error": str(e)},
+            )
             error_output = BashToolOutput(
                 stdout="",
                 stderr=f"Error executing command: {str(e)}",

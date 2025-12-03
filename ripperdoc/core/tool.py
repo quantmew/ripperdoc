@@ -8,6 +8,10 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, List, Optional, TypeVar, Generic, Union
 from pydantic import BaseModel, ConfigDict, Field
+from ripperdoc.utils.log import get_logger
+
+
+logger = get_logger()
 
 
 class ToolResult(BaseModel):
@@ -195,6 +199,10 @@ async def build_tool_description(
         if parts:
             return f"{description_text}\n\nInput examples:\n" + "\n\n".join(parts)
     except Exception:
+        logger.exception(
+            "[tool] Failed to build input example section",
+            extra={"tool": getattr(tool, 'name', None)},
+        )
         return description_text
 
     return description_text
@@ -210,5 +218,9 @@ def tool_input_examples(tool: Tool[Any, Any], limit: int = 5) -> List[Dict[str, 
         try:
             results.append(example.example)
         except Exception:
+            logger.exception(
+                "[tool] Failed to format tool input example",
+                extra={"tool": getattr(tool, 'name', None)},
+            )
             continue
     return results

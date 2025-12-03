@@ -109,7 +109,7 @@ def _split_frontmatter(raw_text: str) -> Tuple[Dict[str, Any], str]:
                 try:
                     frontmatter = yaml.safe_load(frontmatter_text) or {}
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.error(f"Invalid frontmatter in agent file: {exc}")
+                    logger.exception("Invalid frontmatter in agent file", extra={"error": str(exc)})
                     return {"__error__": f"Invalid frontmatter: {exc}"}, body
                 return frontmatter, body
     return {}, raw_text
@@ -136,7 +136,9 @@ def _parse_agent_file(
     try:
         text = path.read_text(encoding="utf-8")
     except Exception as exc:
-        logger.error(f"Failed to read agent file {path}: {exc}")
+        logger.exception(
+            "Failed to read agent file", extra={"error": str(exc), "path": str(path)}
+        )
         return None, f"Failed to read agent file {path}: {exc}"
 
     frontmatter, body = _split_frontmatter(text)

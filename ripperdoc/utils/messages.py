@@ -75,6 +75,7 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
         try:
             args_str = json.dumps(args)
         except Exception:
+            logger.exception("[_content_block_to_openai] Failed to serialize tool arguments")
             args_str = "{}"
         tool_call_id = (
             getattr(block, "id", None) or getattr(block, "tool_use_id", "") or str(uuid4())
@@ -187,7 +188,7 @@ def create_user_message(
                 tool_use_result = tool_use_result.model_dump()
         except Exception:
             # Fallback: keep as-is if conversion fails
-            pass
+            logger.exception("[create_user_message] Failed to normalize tool_use_result")
 
     message = Message(role=MessageRole.USER, content=message_content)
 

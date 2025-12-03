@@ -20,11 +20,18 @@ from ripperdoc.utils.mcp import (
     load_mcp_servers_async,
     shutdown_mcp_runtime,
 )
+from ripperdoc.utils.log import get_logger
 
 from .base import SlashCommand
 
+logger = get_logger()
+
 
 def _handle(ui: Any, _: str) -> bool:
+    logger.info(
+        "[context_cmd] Rendering context summary",
+        extra={"session_id": getattr(ui, "session_id", None)},
+    )
     config = get_global_config()
     model_profile = get_profile_for_pointer("main")
     max_context_tokens = get_remaining_context_tokens(model_profile, config.context_token_limit)
@@ -98,7 +105,10 @@ def _handle(ui: Any, _: str) -> bool:
             if len(mcp_tools) > 20:
                 lines.append(f"     └ ... (+{len(mcp_tools) - 20} more)")
     except Exception:
-        pass
+        logger.exception(
+            "[context_cmd] Failed to summarize MCP tools",
+            extra={"session_id": getattr(ui, "session_id", None)},
+        )
     for line in lines:
         ui.console.print(line)
     return True

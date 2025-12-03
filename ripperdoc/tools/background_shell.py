@@ -95,7 +95,10 @@ async def _pump_stream(stream: asyncio.StreamReader, sink: List[str]) -> None:
                 sink.append(text)
     except Exception as exc:
         # Best effort; ignore stream read errors to avoid leaking tasks.
-        logger.debug(f"Stream pump error for background task: {exc}")
+        logger.debug(
+            f"Stream pump error for background task: {exc}",
+            exc_info=True,
+        )
 
 
 async def _finalize_reader_tasks(reader_tasks: List[asyncio.Task], timeout: float = 1.0) -> None:
@@ -134,7 +137,10 @@ async def _monitor_task(task: BackgroundTask) -> None:
     except asyncio.CancelledError:
         return
     except Exception as exc:
-        logger.error(f"Error monitoring background task {task.id}: {exc}")
+        logger.exception(
+            "Error monitoring background task",
+            extra={"task_id": task.id, "command": task.command},
+        )
         with _tasks_lock:
             task.exit_code = -1
     finally:

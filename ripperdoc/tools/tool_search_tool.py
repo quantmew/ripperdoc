@@ -19,6 +19,10 @@ from ripperdoc.core.tool import (
     ValidationResult,
     build_tool_description,
 )
+from ripperdoc.utils.log import get_logger
+
+
+logger = get_logger()
 
 
 class ToolSearchInput(BaseModel):
@@ -174,6 +178,7 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
                 regex = re.compile(normalized[1:-1], re.IGNORECASE)
             except re.error:
                 regex = None
+                logger.exception("[tool_search] Invalid regex search query", extra={"query": query})
 
         def _tokenize(text: str) -> List[str]:
             return re.findall(r"[a-z0-9]+", text.lower())
@@ -186,6 +191,10 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
                 )
             except Exception:
                 description = ""
+                logger.exception(
+                    "[tool_search] Failed to build tool description",
+                    extra={"tool_name": getattr(tool, "name", None)},
+                )
             doc_text = " ".join([name, tool.user_facing_name(), description])
             tokens = _tokenize(doc_text)
             corpus.append((name, tool, tokens, len(tokens), description))

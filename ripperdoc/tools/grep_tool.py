@@ -15,6 +15,9 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 GREP_USAGE = (
@@ -223,6 +226,10 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             )
 
         except Exception as e:
+            logger.exception(
+                "[grep_tool] Error executing grep",
+                extra={"pattern": input_data.pattern, "path": input_data.path},
+            )
             error_output = GrepToolOutput(
                 matches=[], pattern=input_data.pattern, total_files=0, total_matches=0
             )

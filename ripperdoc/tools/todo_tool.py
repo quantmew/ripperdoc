@@ -14,6 +14,7 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.todo import (
     TodoItem,
     TodoPriority,
@@ -26,6 +27,8 @@ from ripperdoc.utils.todo import (
     summarize_todos,
     validate_todos,
 )
+
+logger = get_logger()
 
 TODO_WRITE_PROMPT = dedent(
     """\
@@ -230,6 +233,9 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
             )
             yield ToolResult(data=output, result_for_assistant=result_text)
         except Exception as exc:
+            logger.exception(
+                "[todo_tool] Error updating todos", extra={"error": str(exc)}
+            )
             error = f"Error updating todos: {exc}"
             yield ToolResult(
                 data=TodoToolOutput(

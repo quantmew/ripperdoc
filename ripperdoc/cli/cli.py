@@ -6,6 +6,7 @@ This module provides the command-line interface for the Ripperdoc agent.
 import asyncio
 import click
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +30,7 @@ from ripperdoc.utils.mcp import (
     shutdown_mcp_runtime,
 )
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
+from ripperdoc.utils.log import enable_session_file_logging, get_logger
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -36,12 +38,32 @@ from rich.panel import Panel
 from rich.markup import escape
 
 console = Console()
+logger = get_logger()
 
 
 async def run_query(
-    prompt: str, tools: list, safe_mode: bool = False, verbose: bool = False
+    prompt: str,
+    tools: list,
+    safe_mode: bool = False,
+    verbose: bool = False,
+    session_id: Optional[str] = None,
 ) -> None:
     """Run a single query and print the response."""
+
+    logger.info(
+        "[cli] Running single prompt session",
+        extra={
+            "safe_mode": safe_mode,
+            "verbose": verbose,
+            "session_id": session_id,
+            "prompt_length": len(prompt),
+        },
+    )
+    if prompt:
+        logger.debug(
+            "[cli] Prompt preview",
+            extra={"session_id": session_id, "prompt_preview": prompt[:200]},
+        )
 
     project_path = Path.cwd()
     can_use_tool = make_permission_checker(project_path, safe_mode) if safe_mode else None
@@ -125,12 +147,18 @@ async def run_query(
             console.print("\n[yellow]Interrupted by user[/yellow]")
         except Exception as e:
             console.print(f"[red]Error: {escape(str(e))}[/red]")
+            logger.exception("[cli] Unhandled error while running prompt", extra={"session_id": session_id})
             if verbose:
                 import traceback
 
                 console.print(traceback.format_exc(), markup=False)
+        logger.info(
+            "[cli] Prompt session completed",
+            extra={"session_id": session_id, "message_count": len(messages)},
+        )
     finally:
         await shutdown_mcp_runtime()
+        logger.debug("[cli] Shutdown MCP runtime", extra={"session_id": session_id})
 
 
 def check_onboarding() -> bool:
@@ -243,27 +271,51 @@ def cli(
     ctx: click.Context, cwd: Optional[str], unsafe: bool, verbose: bool, prompt: Optional[str]
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
-
-    # Ensure onboarding is complete
-    if not check_onboarding():
-        sys.exit(1)
+    session_id = str(uuid.uuid4())
 
     # Set working directory
     if cwd:
         import os
 
         os.chdir(cwd)
+        logger.debug(
+            "[cli] Changed working directory via --cwd",
+            extra={"cwd": cwd, "session_id": session_id},
+        )
+
+    project_path = Path.cwd()
+    log_file = enable_session_file_logging(project_path, session_id)
+    logger.info(
+        "[cli] Starting CLI invocation",
+        extra={
+            "session_id": session_id,
+            "project_path": str(project_path),
+            "log_file": str(log_file),
+            "prompt_mode": bool(prompt),
+        },
+    )
+
+    # Ensure onboarding is complete
+    if not check_onboarding():
+        logger.info(
+            "[cli] Onboarding check failed or aborted; exiting.",
+            extra={"session_id": session_id},
+        )
+        sys.exit(1)
 
     # Initialize project configuration for the current working directory
-    project_path = Path.cwd()
     get_project_config(project_path)
 
     safe_mode = not unsafe
+    logger.debug(
+        "[cli] Configuration initialized",
+        extra={"session_id": session_id, "safe_mode": safe_mode, "verbose": verbose},
+    )
 
     # If prompt is provided, run directly
     if prompt:
         tools = get_default_tools()
-        asyncio.run(run_query(prompt, tools, safe_mode, verbose))
+        asyncio.run(run_query(prompt, tools, safe_mode, verbose, session_id=session_id))
         return
 
     # If no command specified, start interactive REPL with Rich interface
@@ -271,7 +323,12 @@ def cli(
         # Use Rich interface by default
         from ripperdoc.cli.ui.rich_ui import main_rich
 
-        main_rich(safe_mode=safe_mode, verbose=verbose)
+        main_rich(
+            safe_mode=safe_mode,
+            verbose=verbose,
+            session_id=session_id,
+            log_file_path=log_file,
+        )
         return
 
 
@@ -312,6 +369,7 @@ def main() -> None:
         sys.exit(130)
     except Exception as e:
         console.print(f"[red]Fatal error: {escape(str(e))}[/red]")
+        logger.exception("[cli] Fatal error in main CLI entrypoint")
         sys.exit(1)
 
 

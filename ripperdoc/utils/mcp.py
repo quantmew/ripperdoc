@@ -14,6 +14,8 @@ from ripperdoc import __version__
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.message_compaction import estimate_tokens_from_text
 
+logger = get_logger()
+
 try:
     import mcp.types as mcp_types
     from mcp.client.session import ClientSession
@@ -26,9 +28,7 @@ except Exception:  # pragma: no cover - handled gracefully at runtime
     MCP_AVAILABLE = False
     ClientSession = object  # type: ignore
     mcp_types = None  # type: ignore
-
-
-logger = get_logger()
+    logger.exception("[mcp] MCP SDK not available at import time")
 
 
 @dataclass
@@ -77,7 +77,7 @@ def _load_json_file(path: Path) -> Dict[str, Any]:
             return data
         return {}
     except (OSError, json.JSONDecodeError) as exc:
-        logger.error(f"Failed to load JSON from {path}: {exc}")
+        logger.exception("Failed to load JSON", extra={"path": str(path)})
         return {}
 
 
@@ -89,6 +89,10 @@ def _ensure_str_dict(raw: object) -> Dict[str, str]:
         try:
             result[str(key)] = str(value)
         except Exception:
+            logger.exception(
+                "[mcp] Failed to coerce env/header value to string",
+                extra={"key": key, "value": value},
+            )
             continue
     return result
 
@@ -154,6 +158,14 @@ def _load_server_configs(project_path: Optional[Path]) -> Dict[str, McpServerInf
     for path in candidates:
         data = _load_json_file(path)
         merged.update(_parse_servers(data))
+    logger.debug(
+        "[mcp] Loaded MCP server configs",
+        extra={
+            "project_path": str(project_path),
+            "server_count": len(merged),
+            "candidates": [str(path) for path in candidates],
+        },
+    )
     return merged
 
 
@@ -168,6 +180,14 @@ class McpRuntime:
         self._closed = False
 
     async def connect(self, configs: Dict[str, McpServerInfo]) -> List[McpServerInfo]:
+        logger.info(
+            "[mcp] Connecting to MCP servers",
+            extra={
+                "project_path": str(self.project_path),
+                "server_count": len(configs),
+                "servers": list(configs.keys()),
+            },
+        )
         await self._exit_stack.__aenter__()
         if not MCP_AVAILABLE:
             for config in configs.values():
@@ -182,6 +202,14 @@ class McpRuntime:
 
         for config in configs.values():
             self.servers.append(await self._connect_server(config))
+        logger.debug(
+            "[mcp] MCP connection summary",
+            extra={
+                "connected": [s.name for s in self.servers if s.status == "connected"],
+                "failed": [s.name for s in self.servers if s.status == "failed"],
+                "unavailable": [s.name for s in self.servers if s.status == "unavailable"],
+            },
+        )
         return self.servers
 
     async def _list_roots_callback(self, *_: Any, **__: Any) -> Optional[Any]:
@@ -201,6 +229,15 @@ class McpRuntime:
         try:
             read_stream = None
             write_stream = None
+            logger.debug(
+                "[mcp] Connecting server",
+                extra={
+                    "server": config.name,
+                    "type": config.type,
+                    "command": config.command,
+                    "url": config.url,
+                },
+            )
 
             if config.type in ("sse", "sse-ide"):
                 if not config.url:
@@ -280,8 +317,21 @@ class McpRuntime:
                     for resource in resources_result.resources
                 ]
 
+            logger.info(
+                "[mcp] Connected to MCP server",
+                extra={
+                    "server": config.name,
+                    "status": info.status,
+                    "tools": len(info.tools),
+                    "resources": len(info.resources),
+                    "capabilities": list(info.capabilities.keys()),
+                },
+            )
         except Exception as exc:  # pragma: no cover - network/process errors
-            logger.error(f"Failed to connect to MCP server '{config.name}': {exc}")
+            logger.exception(
+                "Failed to connect to MCP server",
+                extra={"server": config.name, "error": str(exc)},
+            )
             info.status = "failed"
             info.error = str(exc)
 
@@ -291,6 +341,10 @@ class McpRuntime:
         if self._closed:
             return
         self._closed = True
+        logger.debug(
+            "[mcp] Shutting down MCP runtime",
+            extra={"project_path": str(self.project_path), "session_count": len(self.sessions)},
+        )
         try:
             await self._exit_stack.aclose()
         finally:
@@ -316,12 +370,23 @@ async def ensure_mcp_runtime(project_path: Optional[Path] = None) -> McpRuntime:
     runtime = _get_runtime()
     project_path = project_path or Path.cwd()
     if runtime and not runtime._closed and runtime.project_path == project_path:
+        logger.debug(
+            "[mcp] Reusing existing MCP runtime",
+            extra={
+                "project_path": str(project_path),
+                "server_count": len(runtime.servers),
+            },
+        )
         return runtime
 
     if runtime:
         await runtime.aclose()
 
     runtime = McpRuntime(project_path)
+    logger.debug(
+        "[mcp] Creating MCP runtime",
+        extra={"project_path": str(project_path)},
+    )
     configs = _load_server_configs(project_path)
     await runtime.connect(configs)
     _runtime_var.set(runtime)

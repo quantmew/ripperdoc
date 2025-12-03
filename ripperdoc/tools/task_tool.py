@@ -19,6 +19,9 @@ from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.system_prompt import build_environment_prompt
 from ripperdoc.core.tool import Tool, ToolOutput, ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.utils.messages import AssistantMessage, create_user_message
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 class TaskToolInput(BaseModel):
@@ -284,6 +287,10 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             try:
                 serialized = json.dumps(inp, ensure_ascii=False)
             except Exception:
+                logger.exception(
+                    "[task_tool] Failed to serialize tool_use input",
+                    extra={"tool_use_input": str(inp)},
+                )
                 serialized = str(inp)
             return serialized if len(serialized) <= 120 else serialized[:117] + "..."
 

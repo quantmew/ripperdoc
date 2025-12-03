@@ -185,17 +185,36 @@ class ConfigManager:
                 try:
                     data = json.loads(self.global_config_path.read_text())
                     self._global_config = GlobalConfig(**data)
+                    logger.debug(
+                        "[config] Loaded global configuration",
+                        extra={
+                            "path": str(self.global_config_path),
+                            "profile_count": len(self._global_config.model_profiles),
+                        },
+                    )
                 except Exception as e:
-                    logger.error(f"Error loading global config: {e}")
+                    logger.exception("Error loading global config", extra={"error": str(e)})
                     self._global_config = GlobalConfig()
             else:
                 self._global_config = GlobalConfig()
+                logger.debug(
+                    "[config] Global config not found; using defaults",
+                    extra={"path": str(self.global_config_path)},
+                )
         return self._global_config
 
     def save_global_config(self, config: GlobalConfig) -> None:
         """Save global configuration."""
         self._global_config = config
         self.global_config_path.write_text(config.model_dump_json(indent=2))
+        logger.debug(
+            "[config] Saved global configuration",
+            extra={
+                "path": str(self.global_config_path),
+                "profile_count": len(config.model_profiles),
+                "pointers": config.model_pointers.model_dump(),
+            },
+        )
 
     def get_project_config(self, project_path: Optional[Path] = None) -> ProjectConfig:
         """Load and return project configuration."""
@@ -215,11 +234,26 @@ class ConfigManager:
                 try:
                     data = json.loads(config_path.read_text())
                     self._project_config = ProjectConfig(**data)
+                    logger.debug(
+                        "[config] Loaded project config",
+                        extra={
+                            "path": str(config_path),
+                            "project_path": str(self.current_project_path),
+                            "allowed_tools": len(self._project_config.allowed_tools),
+                        },
+                    )
                 except Exception as e:
-                    logger.error(f"Error loading project config: {e}")
+                    logger.exception(
+                        "Error loading project config",
+                        extra={"error": str(e), "path": str(config_path)},
+                    )
                     self._project_config = ProjectConfig()
             else:
                 self._project_config = ProjectConfig()
+                logger.debug(
+                    "[config] Project config not found; using defaults",
+                    extra={"path": str(config_path), "project_path": str(self.current_project_path)},
+                )
 
         return self._project_config
 
@@ -239,6 +273,14 @@ class ConfigManager:
         config_path = config_dir / "config.json"
         self._project_config = config
         config_path.write_text(config.model_dump_json(indent=2))
+        logger.debug(
+            "[config] Saved project config",
+            extra={
+                "path": str(config_path),
+                "project_path": str(self.current_project_path),
+                "allowed_tools": len(config.allowed_tools),
+            },
+        )
 
     def get_api_key(self, provider: ProviderType) -> Optional[str]:
         """Get API key for a provider."""

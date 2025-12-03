@@ -118,6 +118,10 @@ class ToolRegistry:
             try:
                 deferred = tool.defer_loading()
             except Exception:
+                logger.exception(
+                    "[tool_registry] Tool.defer_loading failed",
+                    extra={"tool": getattr(tool, "name", None)},
+                )
                 deferred = False
             if deferred:
                 self._deferred.add(name)
@@ -255,6 +259,17 @@ async def query_llm(
         messages,
         protocol=protocol,
     )
+    logger.info(
+        "[query_llm] Preparing model request",
+        extra={
+            "model_pointer": model,
+            "provider": getattr(model_profile.provider, "value", str(model_profile.provider)),
+            "model": model_profile.model,
+            "normalized_messages": len(normalized_messages),
+            "tool_count": len(tools),
+            "max_thinking_tokens": max_thinking_tokens,
+        },
+    )
 
     if protocol == "openai":
         summary_parts = []
@@ -320,6 +335,19 @@ async def query_llm(
                 # Calculate cost (simplified, should use actual pricing)
                 cost_usd = 0.0  # TODO: Implement cost calculation
 
+                tool_use_blocks = [
+                    block for block in response.content if getattr(block, "type", None) == "tool_use"
+                ]
+                logger.info(
+                    "[query_llm] Received response from Anthropic",
+                    extra={
+                        "model": model_profile.model,
+                        "duration_ms": round(duration_ms, 2),
+                        "usage_tokens": usage_tokens,
+                        "tool_use_blocks": len(tool_use_blocks),
+                    },
+                )
+
                 # Convert response to our format
                 content_blocks = []
                 for block in response.content:
@@ -384,6 +412,16 @@ async def query_llm(
                 content_blocks = []
                 choice = openai_response.choices[0]
 
+                logger.info(
+                    "[query_llm] Received response from OpenAI-compatible provider",
+                    extra={
+                        "model": model_profile.model,
+                        "duration_ms": round(duration_ms, 2),
+                        "usage_tokens": usage_tokens,
+                        "finish_reason": getattr(choice, "finish_reason", None),
+                    },
+                )
+
                 if choice.message.content:
                     content_blocks.append({"type": "text", "text": choice.message.content})
 
@@ -411,7 +449,16 @@ async def query_llm(
 
     except Exception as e:
         # Return error message
-        logger.error(f"Error querying AI model: {e}")
+        logger.exception(
+            "Error querying AI model",
+            extra={
+                "model": getattr(model_profile, "model", None),
+                "model_pointer": model,
+                "provider": getattr(model_profile.provider, "value", None)
+                if model_profile
+                else None,
+            },
+        )
         duration_ms = (time.time() - start_time) * 1000
         error_msg = create_assistant_message(
             content=f"Error querying AI model: {str(e)}", duration_ms=duration_ms
@@ -445,6 +492,15 @@ async def query(
     Yields:
         Messages (user, assistant, progress) as they are generated
     """
+    logger.info(
+        "[query] Starting query loop",
+        extra={
+            "message_count": len(messages),
+            "tool_count": len(query_context.tools),
+            "safe_mode": query_context.safe_mode,
+            "model_pointer": query_context.model,
+        },
+    )
     # Work on a copy so external mutations (e.g., UI appending messages while consuming)
     # do not interfere with recursion or normalization.
     messages = list(messages)
@@ -480,7 +536,10 @@ async def query(
             return True, None
         except Exception as exc:
             # Fail closed on any errors
-            logger.error(f"Error checking permissions for tool '{tool.name}': {exc}")
+            logger.exception(
+                f"Error checking permissions for tool '{tool.name}'",
+                extra={"tool": getattr(tool, "name", None)},
+            )
             return False, None
 
     # Build full system prompt with context
@@ -488,6 +547,14 @@ async def query(
     if context:
         context_str = "\n".join(f"{k}: {v}" for k, v in context.items())
         full_system_prompt = f"{system_prompt}\n\nContext:\n{context_str}"
+    logger.debug(
+        "[query] Built system prompt",
+        extra={
+            "prompt_chars": len(full_system_prompt),
+            "context_entries": len(context),
+            "tool_count": len(query_context.tools),
+        },
+    )
 
     assistant_message = await query_llm(
         messages,
@@ -654,7 +721,10 @@ async def query(
 
         except Exception as e:
             # Tool execution failed
-            logger.error(f"Error executing tool '{tool_name}': {e}")
+            logger.exception(
+                f"Error executing tool '{tool_name}'",
+                extra={"tool": tool_name, "tool_use_id": tool_id},
+            )
             error_msg = create_user_message(
                 [
                     {

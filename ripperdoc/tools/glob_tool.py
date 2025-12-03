@@ -15,6 +15,9 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 GLOB_USAGE = (
@@ -127,6 +130,10 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
             )
 
         except Exception as e:
+            logger.exception(
+                "[glob_tool] Error executing glob",
+                extra={"pattern": input_data.pattern, "path": input_data.path},
+            )
             error_output = GlobToolOutput(matches=[], pattern=input_data.pattern, count=0)
 
             yield ToolResult(

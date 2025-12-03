@@ -15,6 +15,9 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 class FileReadToolInput(BaseModel):
@@ -153,6 +156,10 @@ and limit to read only a portion of the file."""
             )
 
         except Exception as e:
+            logger.exception(
+                "[file_read_tool] Error reading file",
+                extra={"file_path": input_data.file_path, "error": str(e)},
+            )
             # Create an error output
             error_output = FileReadToolOutput(
                 content=f"Error reading file: {str(e)}",

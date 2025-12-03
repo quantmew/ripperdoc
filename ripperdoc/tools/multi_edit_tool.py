@@ -17,6 +17,9 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
 
 
 DEFAULT_ACTION = "Edit"
@@ -307,6 +310,10 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             if existing:
                 original_content = file_path.read_text(encoding="utf-8")
         except Exception as exc:  # pragma: no cover - unlikely permission issue
+            logger.exception(
+                "[multi_edit_tool] Error reading file before edits",
+                extra={"file_path": str(file_path)},
+            )
             output = MultiEditToolOutput(
                 file_path=str(file_path),
                 replacements_made=0,
@@ -354,6 +361,10 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         try:
             file_path.write_text(updated_content, encoding="utf-8")
         except Exception as exc:
+            logger.exception(
+                "[multi_edit_tool] Error writing edited file",
+                extra={"file_path": str(file_path)},
+            )
             output = MultiEditToolOutput(
                 file_path=str(file_path),
                 replacements_made=0,

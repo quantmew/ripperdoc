@@ -13,8 +13,11 @@ from ripperdoc.core.config import (
     get_global_config,
     set_model_pointer,
 )
+from ripperdoc.utils.log import get_logger
 
 from .base import SlashCommand
+
+logger = get_logger()
 
 
 def _handle(ui: Any, trimmed_arg: str) -> bool:
@@ -22,6 +25,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
     tokens = trimmed_arg.split()
     subcmd = tokens[0].lower() if tokens else ""
     config = get_global_config()
+    logger.info(
+        "[models_cmd] Handling /models command",
+        extra={"subcommand": subcmd or "list", "session_id": getattr(ui, "session_id", None)},
+    )
 
     def print_models_usage() -> None:
         console.print("[bold]/models[/bold] — list configured models")
@@ -167,6 +174,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             )
         except Exception as exc:
             console.print(f"[red]Failed to save model: {escape(str(exc))}[/red]")
+            logger.exception(
+                "[models_cmd] Failed to save model profile",
+                extra={"profile": profile_name, "session_id": getattr(ui, "session_id", None)},
+            )
             return True
 
         marker = " (main)" if set_as_main else ""
@@ -255,6 +266,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             )
         except Exception as exc:
             console.print(f"[red]Failed to update model: {escape(str(exc))}[/red]")
+            logger.exception(
+                "[models_cmd] Failed to update model profile",
+                extra={"profile": profile_name, "session_id": getattr(ui, "session_id", None)},
+            )
             return True
 
         console.print(f"[green]✓ Model '{escape(profile_name)}' updated[/green]")
@@ -274,6 +289,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         except Exception as exc:
             console.print(f"[red]Failed to delete model: {escape(str(exc))}[/red]")
             print_models_usage()
+            logger.exception(
+                "[models_cmd] Failed to delete model profile",
+                extra={"profile": target, "session_id": getattr(ui, "session_id", None)},
+            )
         return True
 
     if subcmd in ("use", "main", "set-main"):
@@ -288,6 +307,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         except Exception as exc:
             console.print(f"[red]{escape(str(exc))}[/red]")
             print_models_usage()
+            logger.exception(
+                "[models_cmd] Failed to set main model pointer",
+                extra={"profile": target, "session_id": getattr(ui, "session_id", None)},
+            )
         return True
 
     print_models_usage()
