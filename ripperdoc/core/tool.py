@@ -41,6 +41,7 @@ class ToolUseContext(BaseModel):
     permission_checker: Optional[Any] = None
     read_file_timestamps: Dict[str, float] = {}
     tool_registry: Optional[Any] = None
+    abort_signal: Optional[Any] = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 

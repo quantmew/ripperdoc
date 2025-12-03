@@ -34,6 +34,7 @@ from ripperdoc.utils.messages import (
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.config import get_global_config, ProviderType, provider_protocol
 from ripperdoc.utils.session_usage import record_usage
+from ripperdoc.utils.json_utils import safe_parse_json
 
 import time
 
@@ -427,14 +428,24 @@ async def query_llm(
 
                 if choice.message.tool_calls:
                     for tool_call in choice.message.tool_calls:
-                        import json
-
+                        parsed_args = safe_parse_json(getattr(tool_call.function, "arguments", None))
+                        if parsed_args is None:
+                            arg_preview = (getattr(tool_call.function, "arguments", "") or "")[:200]
+                            logger.debug(
+                                "[query_llm] Failed to parse tool arguments; falling back to empty dict",
+                                extra={
+                                    "tool_call_id": getattr(tool_call, "id", None),
+                                    "tool_name": getattr(tool_call.function, "name", None),
+                                    "arguments_preview": arg_preview,
+                                },
+                            )
+                            parsed_args = {}
                         content_blocks.append(
                             {
                                 "type": "tool_use",
                                 "tool_use_id": tool_call.id,
                                 "name": tool_call.function.name,
-                                "input": json.loads(tool_call.function.arguments),
+                                "input": parsed_args,
                             }
                         )
 
@@ -600,6 +611,7 @@ async def query(
 
     # Execute tools
     tool_results: List[UserMessage] = []
+    permission_denied = False
 
     logger.debug(f"[query] Executing {len(tool_use_blocks)} tool_use block(s).")
 
@@ -639,6 +651,7 @@ async def query(
             verbose=query_context.verbose,
             permission_checker=can_use_tool_fn,
             tool_registry=query_context.tool_registry,
+            abort_signal=query_context.abort_controller,
         )
 
         try:
@@ -689,7 +702,9 @@ async def query(
                     )
                     tool_results.append(result_msg)
                     yield result_msg
-                    continue
+                    permission_denied = True
+                    query_context.abort_controller.set()
+                    break
 
             # Execute tool
             async for output in tool.call(parsed_input, tool_context):
@@ -737,6 +752,9 @@ async def query(
             )
             tool_results.append(error_msg)
             yield error_msg
+
+        if permission_denied:
+            break
 
     # Check for abort after tools
     if query_context.abort_controller.is_set():

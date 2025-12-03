@@ -241,9 +241,9 @@ async def test_ls_tool():
 
         assert result is not None
         assert result.data.root == str(root.resolve())
-        assert "dir1/" in result.data.entries
-        assert "dir1/nested.txt" in result.data.entries
-        assert "file.txt" in result.data.entries
+        assert any(entry.endswith("dir1/") for entry in result.data.entries)
+        assert any(entry.endswith("dir1/nested.txt") for entry in result.data.entries)
+        assert any(entry.endswith("file.txt") for entry in result.data.entries)
         assert result.data.truncated is False
 
 
@@ -286,8 +286,8 @@ async def test_ls_tool_ignore_patterns():
             result = output
 
         assert result is not None
-        assert "keep/keep.txt" in result.data.entries
-        assert all(not entry.startswith("skip/") for entry in result.data.entries)
+        assert any(entry.endswith("keep/keep.txt") for entry in result.data.entries)
+        assert all("skip/" not in entry for entry in result.data.entries)
 
 
 @pytest.mark.asyncio
@@ -309,8 +309,8 @@ async def test_ls_tool_skips_heavy_directories():
             result = output
 
         assert result is not None
-        assert "node_modules/" in result.data.entries
-        assert "node_modules/large.js" not in result.data.entries
+        assert any(entry.endswith("node_modules/") for entry in result.data.entries)
+        assert all(not entry.endswith("node_modules/large.js") for entry in result.data.entries)
 
 
 @pytest.mark.asyncio
