@@ -335,6 +335,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             markup=False,
         )
         console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}", markup=False)
+        if profile.openai_tool_mode:
+            console.print(f"      openai_tool_mode: {profile.openai_tool_mode}", markup=False)
     pointer_labels = ", ".join(f"{p}->{v or '-'}" for p, v in pointer_map.items())
     console.print(f"[dim]Pointers: {escape(pointer_labels)}[/dim]")
     return True

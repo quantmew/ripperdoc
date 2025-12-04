@@ -4,6 +4,7 @@ This module provides utilities for creating and normalizing messages
 for communication with AI models.
 """
 
+import json
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict
 from uuid import uuid4
@@ -238,6 +239,7 @@ def create_progress_message(
 def normalize_messages_for_api(
     messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
     protocol: str = "anthropic",
+    tool_mode: str = "native",
 ) -> List[Dict[str, Any]]:
     """Normalize messages for API submission.
 
@@ -261,6 +263,62 @@ def normalize_messages_for_api(
             if "content" in msg:
                 return msg.get("content")
         return None
+
+    def _block_type(block: Any) -> Optional[str]:
+        if hasattr(block, "type"):
+            return getattr(block, "type", None)
+        if isinstance(block, dict):
+            return block.get("type")
+        return None
+
+    def _block_attr(block: Any, attr: str, default: Any = None) -> Any:
+        if hasattr(block, attr):
+            return getattr(block, attr, default)
+        if isinstance(block, dict):
+            return block.get(attr, default)
+        return default
+
+    def _flatten_blocks_to_text(blocks: List[Any]) -> str:
+        parts: List[str] = []
+        for blk in blocks:
+            btype = _block_type(blk)
+            if btype == "text":
+                text = _block_attr(blk, "text") or _block_attr(blk, "content") or ""
+                if text:
+                    parts.append(str(text))
+            elif btype == "tool_result":
+                text = _block_attr(blk, "text") or _block_attr(blk, "content") or ""
+                tool_id = _block_attr(blk, "tool_use_id") or _block_attr(blk, "id")
+                prefix = "Tool error" if _block_attr(blk, "is_error") else "Tool result"
+                label = f"{prefix}{f' ({tool_id})' if tool_id else ''}"
+                parts.append(f"{label}: {text}" if text else label)
+            elif btype == "tool_use":
+                name = _block_attr(blk, "name") or ""
+                input_data = _block_attr(blk, "input")
+                input_preview = ""
+                if input_data not in (None, {}):
+                    try:
+                        input_preview = json.dumps(input_data)
+                    except Exception:
+                        input_preview = str(input_data)
+                tool_id = _block_attr(blk, "tool_use_id") or _block_attr(blk, "id")
+                desc = "Tool call"
+                if name:
+                    desc += f" {name}"
+                if tool_id:
+                    desc += f" ({tool_id})"
+                if input_preview:
+                    desc += f": {input_preview}"
+                parts.append(desc)
+            else:
+                text = _block_attr(blk, "text") or _block_attr(blk, "content") or ""
+                if text:
+                    parts.append(str(text))
+        return "\n".join(p for p in parts if p)
+
+    effective_tool_mode = (tool_mode or "native").lower()
+    if effective_tool_mode not in {"native", "text"}:
+        effective_tool_mode = "native"
 
     normalized: List[Dict[str, Any]] = []
     tool_results_seen = 0
@@ -375,9 +433,9 @@ def normalize_messages_for_api(
                 )
 
     logger.debug(
-        f"[normalize_messages_for_api] protocol={protocol} input_msgs={len(messages)} "
-        f"normalized={len(normalized)} tool_results_seen={tool_results_seen} "
-        f"tool_uses_seen={tool_uses_seen} "
+        f"[normalize_messages_for_api] protocol={protocol} tool_mode={effective_tool_mode} "
+        f"input_msgs={len(messages)} normalized={len(normalized)} "
+        f"tool_results_seen={tool_results_seen} tool_uses_seen={tool_uses_seen} "
         f"tool_result_positions={len(tool_result_positions)} "
         f"skipped_tool_uses_no_result={skipped_tool_uses_no_result} "
         f"skipped_tool_uses_no_id={skipped_tool_uses_no_id}"

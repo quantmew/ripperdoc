@@ -21,13 +21,15 @@ logger = get_logger()
 
 
 GLOB_USAGE = (
-    "- Fast file pattern matching tool for any codebase size\n"
+    "- Fast file pattern matching tool that works with any codebase size\n"
     '- Supports glob patterns like "**/*.js" or "src/**/*.ts"\n'
-    "- Returns matching file paths sorted by modification time (newest first)\n"
-    "- Use this when you need to find files by name patterns\n"
-    "- For open-ended searches that need multiple rounds of globbing and grepping, run the searches iteratively with these tools\n"
-    "- You can call multiple tools in a single response; speculatively batch useful searches together"
+    "- Returns matching file paths sorted by modification time\n"
+    "- Use this tool when you need to find files by name patterns\n"
+    "- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead\n"
+    "- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.\n"
 )
+
+RESULT_LIMIT = 100
 
 
 class GlobToolInput(BaseModel):
@@ -45,6 +47,7 @@ class GlobToolOutput(BaseModel):
     matches: List[str]
     pattern: str
     count: int
+    truncated: bool = False
 
 
 class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
@@ -95,14 +98,34 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
         if not output.matches:
             return f"No files found matching pattern: {output.pattern}"
 
-        result = f"Found {output.count} file(s) matching '{output.pattern}':\n\n"
-        result += "\n".join(output.matches)
-
-        return result
+        lines = list(output.matches)
+        if output.truncated:
+            lines.append("(Results are truncated. Consider using a more specific path or pattern.)")
+        return "\n".join(lines)
 
     def render_tool_use_message(self, input_data: GlobToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
-        return f"Glob: {input_data.pattern}"
+        if not input_data.pattern:
+            return "Glob"
+
+        base_path = Path.cwd()
+        rendered_path = ""
+        if input_data.path:
+            candidate_path = Path(input_data.path)
+            absolute_path = candidate_path if candidate_path.is_absolute() else (base_path / candidate_path).resolve()
+
+            try:
+                relative_path = absolute_path.relative_to(base_path)
+            except ValueError:
+                relative_path = None
+
+            if verbose or not relative_path or str(relative_path) == ".":
+                rendered_path = str(absolute_path)
+            else:
+                rendered_path = str(relative_path)
+
+        path_fragment = f', path: "{rendered_path}"' if rendered_path else ""
+        return f'pattern: "{input_data.pattern}"{path_fragment}'
 
     async def call(
         self, input_data: GlobToolInput, context: ToolUseContext
@@ -111,9 +134,8 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
 
         try:
             search_path = Path(input_data.path) if input_data.path else Path.cwd()
-
-            # Use glob to find matches, sorted by modification time (newest first)
-            paths = list(search_path.glob(input_data.pattern))
+            if not search_path.is_absolute():
+                search_path = (Path.cwd() / search_path).resolve()
 
             def _mtime(path: Path) -> float:
                 try:
@@ -121,9 +143,20 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
                 except OSError:
                     return float("-inf")
 
-            matches = [str(p) for p in sorted(paths, key=_mtime, reverse=True)]
+            # Find matching files, sorted by modification time
+            paths = sorted(
+                (p for p in search_path.glob(input_data.pattern) if p.is_file()),
+                key=_mtime,
+            )
 
-            output = GlobToolOutput(matches=matches, pattern=input_data.pattern, count=len(matches))
+            truncated = len(paths) > RESULT_LIMIT
+            paths = paths[:RESULT_LIMIT]
+
+            matches = [str(p) for p in paths]
+
+            output = GlobToolOutput(
+                matches=matches, pattern=input_data.pattern, count=len(matches), truncated=truncated
+            )
 
             yield ToolResult(
                 data=output, result_for_assistant=self.render_result_for_assistant(output)

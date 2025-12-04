@@ -33,6 +33,7 @@ dependencies = [
     "prompt-toolkit>=3.0.0",
     "PyYAML>=6.0.0",
     "mcp[cli]>=1.22.0",
+    "json_repair>=0.54.2",
 ]
 
 [project.optional-dependencies]

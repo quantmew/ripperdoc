@@ -7,7 +7,7 @@ including API keys, model settings, and user preferences.
 import json
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -105,6 +105,9 @@ class ModelProfile(BaseModel):
     temperature: float = 0.7
     # Total context window in tokens (if known). Falls back to heuristics when unset.
     context_window: Optional[int] = None
+    # Tool handling for OpenAI-compatible providers. "native" uses tool_calls, "text" flattens tool
+    # interactions into plain text to support providers that reject tool roles.
+    openai_tool_mode: Literal["native", "text"] = "native"
 
 
 class ModelPointers(BaseModel):

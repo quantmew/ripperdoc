@@ -6,6 +6,10 @@ the query-response loop including tool execution.
 
 import asyncio
 import inspect
+import json
+import re
+from uuid import uuid4
+from json_repair import repair_json
 from typing import AsyncGenerator, List, Optional, Dict, Any, Union, Iterable, Tuple
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
@@ -32,7 +36,13 @@ from ripperdoc.utils.messages import (
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
 )
 from ripperdoc.core.permissions import PermissionResult
-from ripperdoc.core.config import get_global_config, ProviderType, provider_protocol
+from ripperdoc.core.config import (
+    get_global_config,
+    ProviderType,
+    provider_protocol,
+    ModelProfile,
+)
+from pydantic import ValidationError
 from ripperdoc.utils.session_usage import record_usage
 from ripperdoc.utils.json_utils import safe_parse_json
 
@@ -87,6 +97,307 @@ def _openai_usage_tokens(usage: Any) -> Dict[str, int]:
         "cache_read_input_tokens": cache_read_tokens,
         "cache_creation_input_tokens": 0,
     }
+
+
+def _resolve_model_profile(model: str) -> ModelProfile:
+    """Resolve a model pointer to a concrete profile or raise if missing."""
+    config = get_global_config()
+    profile_name = getattr(config.model_pointers, model, None) or model
+    model_profile = config.model_profiles.get(profile_name)
+    if model_profile is None:
+        fallback_profile = getattr(config.model_pointers, "main", "default")
+        model_profile = config.model_profiles.get(fallback_profile)
+    if not model_profile:
+        raise ValueError(f"No model profile found for pointer: {model}")
+    return model_profile
+
+
+def _determine_tool_mode(model_profile: ModelProfile) -> str:
+    """Return configured tool mode for provider."""
+    if model_profile.provider != ProviderType.OPENAI_COMPATIBLE:
+        return "native"
+    configured = getattr(model_profile, "openai_tool_mode", "native") or "native"
+    configured = configured.lower()
+    # Backward compatibility: fall back to global setting if provided
+    if configured not in {"native", "text"}:
+        configured = getattr(get_global_config(), "openai_tool_mode", "native") or "native"
+        configured = configured.lower()
+    return configured if configured in {"native", "text"} else "native"
+
+def _parse_text_mode_json_blocks(text: str) -> Optional[List[Dict[str, Any]]]:
+    """Parse a JSON code block or raw JSON string into content blocks for text mode."""
+    if not text or not isinstance(text, str):
+        return None
+
+    code_blocks = re.findall(
+        r"```(?:\s*json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE
+    )
+    candidates = [blk.strip() for blk in code_blocks if blk.strip()]
+
+    def _normalize_blocks(parsed: Any) -> Optional[List[Dict[str, Any]]]:
+        raw_blocks = parsed if isinstance(parsed, list) else [parsed]
+        normalized: List[Dict[str, Any]] = []
+        for raw in raw_blocks:
+            if not isinstance(raw, dict):
+                continue
+            block_type = raw.get("type")
+            if block_type == "text":
+                text_value = raw.get("text") or raw.get("content")
+                if isinstance(text_value, str) and text_value:
+                    normalized.append({"type": "text", "text": text_value})
+            elif block_type == "tool_use":
+                tool_name = raw.get("tool") or raw.get("name")
+                if not isinstance(tool_name, str) or not tool_name:
+                    continue
+                tool_use_id = raw.get("tool_use_id") or raw.get("id") or str(uuid4())
+                input_value = raw.get("input") or {}
+                if not isinstance(input_value, dict):
+                    input_value = _normalize_tool_args(input_value)
+                normalized.append(
+                    {
+                        "type": "tool_use",
+                        "tool_use_id": str(tool_use_id),
+                        "name": tool_name,
+                        "input": input_value,
+                    }
+                )
+        return normalized if normalized else None
+
+    last_error: Optional[str] = None
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+
+        parsed: Any = None
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = str(exc)
+            parsed = repair_json(candidate, return_objects=True, ensure_ascii=False)
+
+        if parsed is None or parsed == "":
+            continue
+
+        normalized = _normalize_blocks(parsed)
+        if normalized:
+            return normalized
+
+        last_error = "Parsed JSON did not contain valid content blocks."
+
+    if last_error:
+        error_text = (
+            f"JSON parsing failed: {last_error} "
+            "Please resend a valid JSON array of content blocks inside a ```json``` code block."
+        )
+        return [{"type": "text", "text": error_text}]
+
+    return None
+
+
+def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
+    """Build a system hint describing available tools and the expected JSON format."""
+    if not tools:
+        return ""
+
+    lines = [
+        "You are in text-only tool mode. Tools are not auto-invoked by the API.",
+        "Respond with one Markdown `json` code block containing a JSON array of content blocks.",
+        'Each block must include `type`; use {"type": "text", "text": "<message>"} for text and '
+        '{"type": "tool_use", "tool_use_id": "<tool_id>", "tool": "<tool_name>", "input": { ... required params ... }} '
+        "for tool calls. Add multiple `tool_use` blocks if you need multiple tools.",
+        "Include your natural language reply as a `text` block, followed by any `tool_use` blocks.",
+        "Only include the JSON array inside the code block - no extra prose.",
+        "Available tools:",
+    ]
+
+    for tool in tools:
+        required_fields: List[str] = []
+        try:
+            for fname, finfo in getattr(tool.input_schema, "model_fields", {}).items():
+                is_req = False
+                if hasattr(finfo, "is_required"):
+                    try:
+                        is_req = bool(finfo.is_required())
+                    except Exception:
+                        is_req = False
+                required_fields.append(f"{fname}{' (required)' if is_req else ''}")
+        except Exception:
+            required_fields = []
+
+        required_str = ", ".join(required_fields) if required_fields else "see input schema"
+        lines.append(f"- {tool.name}: fields {required_str}")
+
+        schema_json = ""
+        try:
+            schema_json = json.dumps(tool.input_schema.model_json_schema(), ensure_ascii=False, indent=2)
+        except (AttributeError, TypeError, ValueError) as exc:
+            logger.debug(
+                "[tool_prompt] Failed to render input_schema",
+                extra={"tool": getattr(tool, "name", None), "error": str(exc)},
+            )
+        if schema_json:
+            lines.append("  input schema (JSON):")
+            lines.append("  ```json")
+            lines.append(f"  {schema_json}")
+            lines.append("  ```")
+
+    # Example response format
+    example_blocks = [
+        {"type": "text", "text": "好的，我来帮你查看一下README.md文件"},
+        {"type": "tool_use", "tool_use_id": "tool_id_000001", "tool": "View", "input": {"file_path": "README.md"}},
+    ]
+    lines.append("Example:")
+    lines.append("```json")
+    lines.append(json.dumps(example_blocks, ensure_ascii=False, indent=2))
+    lines.append("```")
+
+    return "\n".join(lines)
+
+
+def _text_mode_history(messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]]) -> List[Union[UserMessage, AssistantMessage]]:
+    """Convert a message history into text-only form for text mode."""
+
+    def _normalize_block(block: Any) -> Optional[Dict[str, Any]]:
+        blk = MessageContent(**block) if isinstance(block, dict) else block
+        btype = getattr(blk, "type", None)
+        if btype == "text":
+            text_val = getattr(blk, "text", None) or getattr(blk, "content", None) or ""
+            return {"type": "text", "text": text_val}
+        if btype == "tool_use":
+            return {
+                "type": "tool_use",
+                "tool_use_id": getattr(blk, "tool_use_id", None) or getattr(blk, "id", None) or "",
+                "tool": getattr(blk, "name", None) or "",
+                "input": getattr(blk, "input", None) or {},
+            }
+        if btype == "tool_result":
+            result_block: Dict[str, Any] = {
+                "type": "tool_result",
+                "tool_use_id": getattr(blk, "tool_use_id", None) or getattr(blk, "id", None) or "",
+                "text": getattr(blk, "text", None) or getattr(blk, "content", None) or "",
+            }
+            is_error = getattr(blk, "is_error", None)
+            if is_error is not None:
+                result_block["is_error"] = is_error
+            return result_block
+        text_val = getattr(blk, "text", None) or getattr(blk, "content", None)
+        if text_val is not None:
+            return {"type": "text", "text": text_val}
+        return None
+
+    converted: List[Union[UserMessage, AssistantMessage]] = []
+    for msg in messages:
+        msg_type = getattr(msg, "type", None)
+        if msg_type == "progress" or msg_type is None:
+            continue
+        content = getattr(getattr(msg, "message", None), "content", None)
+        text_content: Optional[str] = None
+        if isinstance(content, list):
+            normalized_blocks = []
+            for block in content:
+                # If a text block contains nested JSON content, expand it inline
+                block_type = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
+                block_text = getattr(block, "text", None) if hasattr(block, "text") else (
+                    block.get("text") if isinstance(block, dict) else None
+                )
+                if block_type == "text" and isinstance(block_text, str):
+                    parsed_nested = _parse_text_mode_json_blocks(block_text)
+                    if parsed_nested:
+                        normalized_blocks.extend(parsed_nested)
+                        continue
+                norm = _normalize_block(block)
+                if norm:
+                    normalized_blocks.append(norm)
+            if normalized_blocks:
+                json_payload = json.dumps(normalized_blocks, ensure_ascii=False, indent=2)
+                text_content = f"```json\n{json_payload}\n```"
+        elif isinstance(content, str):
+            parsed_blocks = _parse_text_mode_json_blocks(content)
+            if parsed_blocks:
+                text_content = f"```json\n{json.dumps(parsed_blocks, ensure_ascii=False, indent=2)}\n```"
+            else:
+                text_content = content
+        else:
+            text_content = content if isinstance(content, str) else None
+        if not text_content:
+            continue
+        if msg_type == "user":
+            converted.append(create_user_message(text_content))
+        elif msg_type == "assistant":
+            converted.append(create_assistant_message(text_content))
+    return converted
+
+
+def _maybe_convert_json_block_to_tool_use(content_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert any text blocks containing JSON content to structured content blocks."""
+    if not content_blocks:
+        return content_blocks
+
+    new_blocks: List[Dict[str, Any]] = []
+    converted_count = 0
+
+    for block in content_blocks:
+        if block.get("type") != "text":
+            new_blocks.append(block)
+            continue
+
+        text = block.get("text")
+        if not isinstance(text, str):
+            new_blocks.append(block)
+            continue
+
+        parsed_blocks = _parse_text_mode_json_blocks(text)
+        if not parsed_blocks:
+            new_blocks.append(block)
+            continue
+
+        for parsed in parsed_blocks:
+            if parsed.get("type") == "tool_use":
+                new_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "tool_use_id": parsed.get("tool_use_id") or str(uuid4()),
+                        "name": parsed.get("name") or parsed.get("tool"),
+                        "input": parsed.get("input") or {},
+                    }
+                )
+            elif parsed.get("type") == "text":
+                new_blocks.append({"type": "text", "text": parsed.get("text") or ""})
+        converted_count += 1
+
+    if converted_count:
+        logger.debug(
+            "[query_llm] Converting JSON code block to structured content blocks",
+            extra={"block_count": len(new_blocks)},
+        )
+    return new_blocks
+
+
+def _normalize_tool_args(raw_args: Any) -> Dict[str, Any]:
+    """Ensure tool arguments are returned as a dict, handling double-encoded strings."""
+    candidate = raw_args
+
+    # If the provider returns a JSON string (or a JSON string wrapped in another string),
+    # try to parse up to two times before giving up.
+    for _ in range(2):
+        if isinstance(candidate, dict):
+            return candidate
+        if isinstance(candidate, str):
+            candidate = safe_parse_json(candidate, log_error=False)
+            continue
+        break
+
+    if isinstance(candidate, dict):
+        return candidate
+
+    preview = str(raw_args)
+    preview = preview[:200] if len(preview) > 200 else preview
+    logger.debug(
+        "[query_llm] Tool arguments not a dict; defaulting to empty object",
+        extra={"preview": preview},
+    )
+    return {}
 
 
 class ToolRegistry:
@@ -240,25 +551,19 @@ async def query_llm(
         AssistantMessage with the model's response
     """
     config = get_global_config()
-
-    # Get the model profile
-    profile_name = getattr(config.model_pointers, model, None)
-    if profile_name is None:
-        profile_name = model
-
-    model_profile = config.model_profiles.get(profile_name)
-    if model_profile is None:
-        fallback_profile = getattr(config.model_pointers, "main", "default")
-        model_profile = config.model_profiles.get(fallback_profile)
-
-    if not model_profile:
-        raise ValueError(f"No model profile found for pointer: {model}")
+    model_profile = _resolve_model_profile(model)
 
     # Normalize messages based on protocol family (Anthropic allows tool blocks; OpenAI-style prefers text-only)
     protocol = provider_protocol(model_profile.provider)
+    tool_mode = _determine_tool_mode(model_profile)
+    messages_for_model: List[Union[UserMessage, AssistantMessage, ProgressMessage]]
+    if tool_mode == "text":
+        messages_for_model = _text_mode_history(messages)
+    else:
+        messages_for_model = messages
+
     normalized_messages = normalize_messages_for_api(
-        messages,
-        protocol=protocol,
+        messages_for_model, protocol=protocol, tool_mode=tool_mode
     )
     logger.info(
         "[query_llm] Preparing model request",
@@ -269,6 +574,7 @@ async def query_llm(
             "normalized_messages": len(normalized_messages),
             "tool_count": len(tools),
             "max_thinking_tokens": max_thinking_tokens,
+            "tool_mode": tool_mode,
         },
     )
 
@@ -349,31 +655,14 @@ async def query_llm(
                     },
                 )
 
-                # Convert response to our format
-                content_blocks = []
-                for block in response.content:
-                    if block.type == "text":
-                        content_blocks.append({"type": "text", "text": block.text})
-                    elif block.type == "tool_use":
-                        content_blocks.append(
-                            {
-                                "type": "tool_use",
-                                "tool_use_id": block.id,
-                                "name": block.name,
-                                "input": block.input,  # type: ignore[dict-item]
-                            }
-                        )
-
                 return create_assistant_message(
                     content=content_blocks, cost_usd=cost_usd, duration_ms=duration_ms
                 )
 
         elif model_profile.provider == ProviderType.OPENAI_COMPATIBLE:
             # OpenAI-compatible APIs (OpenAI, DeepSeek, Mistral, etc.)
-            async with AsyncOpenAI(
-                api_key=model_profile.api_key, base_url=model_profile.api_base
-            ) as client:
-                # Build tool schemas for OpenAI format
+            async with AsyncOpenAI(api_key=model_profile.api_key, base_url=model_profile.api_base) as client:
+                # Build tool schemas for OpenAI format (unless disabled)
                 openai_tools = []
                 for tool in tools:
                     description = await build_tool_description(
@@ -428,9 +717,11 @@ async def query_llm(
 
                 if choice.message.tool_calls:
                     for tool_call in choice.message.tool_calls:
-                        parsed_args = safe_parse_json(getattr(tool_call.function, "arguments", None))
-                        if parsed_args is None:
-                            arg_preview = (getattr(tool_call.function, "arguments", "") or "")[:200]
+                        raw_args = getattr(tool_call.function, "arguments", None)
+                        parsed_args = safe_parse_json(raw_args)
+                        if parsed_args is None and raw_args:
+                            arg_preview = str(raw_args)
+                            arg_preview = arg_preview[:200] if len(arg_preview) > 200 else arg_preview
                             logger.debug(
                                 "[query_llm] Failed to parse tool arguments; falling back to empty dict",
                                 extra={
@@ -439,7 +730,7 @@ async def query_llm(
                                     "arguments_preview": arg_preview,
                                 },
                             )
-                            parsed_args = {}
+                        parsed_args = _normalize_tool_args(parsed_args if parsed_args is not None else raw_args)
                         content_blocks.append(
                             {
                                 "type": "tool_use",
@@ -448,6 +739,9 @@ async def query_llm(
                                 "input": parsed_args,
                             }
                         )
+                else:
+                    if tool_mode == "text":
+                        content_blocks = _maybe_convert_json_block_to_tool_use(content_blocks)
 
                 return create_assistant_message(
                     content=content_blocks, cost_usd=cost_usd, duration_ms=duration_ms
@@ -515,6 +809,12 @@ async def query(
     # Work on a copy so external mutations (e.g., UI appending messages while consuming)
     # do not interfere with recursion or normalization.
     messages = list(messages)
+    model_profile = _resolve_model_profile(query_context.model)
+    protocol = provider_protocol(model_profile.provider)
+    tool_mode = _determine_tool_mode(model_profile)
+    tools_for_model: List[Tool[Any, Any]] = []
+    if tool_mode != "text":
+        tools_for_model = query_context.all_tools()
 
     async def _check_permissions(
         tool: Tool[Any, Any], parsed_input: Any
@@ -558,19 +858,23 @@ async def query(
     if context:
         context_str = "\n".join(f"{k}: {v}" for k, v in context.items())
         full_system_prompt = f"{system_prompt}\n\nContext:\n{context_str}"
+    if tool_mode == "text":
+        tool_hint = _tool_prompt_for_text_mode(query_context.all_tools())
+        if tool_hint:
+            full_system_prompt = f"{full_system_prompt}\n\n{tool_hint}"
     logger.debug(
         "[query] Built system prompt",
         extra={
             "prompt_chars": len(full_system_prompt),
             "context_entries": len(context),
-            "tool_count": len(query_context.tools),
+            "tool_count": len(tools_for_model),
         },
     )
 
     assistant_message = await query_llm(
         messages,
         full_system_prompt,
-        query_context.all_tools(),
+        tools_for_model,
         query_context.max_thinking_tokens,
         query_context.model,
         query_context.abort_controller,
@@ -736,6 +1040,31 @@ async def query(
                         f"result_len={len(result_content)}"
                     )
 
+        except ValidationError as ve:
+            # Surface input errors back to the assistant so it can correct the call.
+            details = []
+            for err in ve.errors():
+                loc = err.get("loc") or []
+                loc_str = ".".join(str(part) for part in loc) if loc else ""
+                msg = err.get("msg") or ""
+                if loc_str and msg:
+                    details.append(f"{loc_str}: {msg}")
+                elif msg:
+                    details.append(msg)
+            detail_text = "; ".join(details) or str(ve)
+            error_msg = create_user_message(
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "text": f"Invalid input for tool '{tool_name}': {detail_text}",
+                        "is_error": True,
+                    }
+                ]
+            )
+            tool_results.append(error_msg)
+            yield error_msg
+            continue
         except Exception as e:
             # Tool execution failed
             logger.exception(
