@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ripperdoc"
-version = {attr = "ripperdoc.__version__"}
+dynamic = ["version"]
 description = "AI-powered terminal assistant for coding tasks"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,6 +48,9 @@ dev = [
 [project.scripts]
 ripperdoc = "ripperdoc.cli.cli:main"
 rd = "ripperdoc.cli.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "ripperdoc.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
