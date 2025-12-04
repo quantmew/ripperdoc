@@ -6,7 +6,7 @@ import sys
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from ripperdoc.utils.path_utils import sanitize_project_path
 
@@ -112,27 +112,27 @@ class RipperdocLogger:
         self._file_handler_path = log_file
         return log_file
 
-    def debug(self, message: str, *args, **kwargs) -> None:
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
         """Log debug message."""
         self.logger.debug(message, *args, **kwargs)
 
-    def info(self, message: str, *args, **kwargs) -> None:
+    def info(self, message: str, *args: Any, **kwargs: Any) -> None:
         """Log info message."""
         self.logger.info(message, *args, **kwargs)
 
-    def warning(self, message: str, *args, **kwargs) -> None:
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
         """Log warning message."""
         self.logger.warning(message, *args, **kwargs)
 
-    def error(self, message: str, *args, **kwargs) -> None:
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
         """Log error message."""
         self.logger.error(message, *args, **kwargs)
 
-    def critical(self, message: str, *args, **kwargs) -> None:
+    def critical(self, message: str, *args: Any, **kwargs: Any) -> None:
         """Log critical message."""
         self.logger.critical(message, *args, **kwargs)
 
-    def exception(self, message: str, *args, **kwargs) -> None:
+    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
         """Log an exception with traceback."""
         self.logger.exception(message, *args, **kwargs)
 

@@ -31,14 +31,14 @@ from ripperdoc.utils.mcp import (
     shutdown_mcp_runtime,
 )
 
+
+logger = get_logger()
+
 try:
     import mcp.types as mcp_types  # type: ignore
 except Exception:  # pragma: no cover - SDK may be missing at runtime
     mcp_types = None  # type: ignore[assignment]
     logger.exception("[mcp_tools] MCP SDK unavailable during import")
-
-
-logger = get_logger()
 
 
 def _content_block_to_text(block: Any) -> str:

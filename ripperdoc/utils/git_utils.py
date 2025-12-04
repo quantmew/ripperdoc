@@ -1,10 +1,8 @@
 """Git utilities for Ripperdoc."""
 
-import os
-import re
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Set
+from typing import Dict, List, Optional, Tuple
 import fnmatch
 
 

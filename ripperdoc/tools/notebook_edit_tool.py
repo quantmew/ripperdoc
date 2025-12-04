@@ -165,7 +165,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
         try:
             raw = path.read_text(encoding="utf-8")
             nb_json = json.loads(raw)
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to parse notebook", extra={"path": str(path)})
             return ValidationResult(
                 result=False, message="Notebook is not valid JSON.", error_code=6

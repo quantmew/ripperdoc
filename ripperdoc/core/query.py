@@ -7,7 +7,7 @@ the query-response loop including tool execution.
 import asyncio
 import inspect
 import time
-from typing import Any, AsyncGenerator, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Dict, Iterable, List, Optional, Tuple, Union, cast
 
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
@@ -16,20 +16,20 @@ from pydantic import ValidationError
 from ripperdoc.core.config import ProviderType, provider_protocol
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.query_utils import (
-    _anthropic_usage_tokens,
-    _build_anthropic_tool_schemas,
-    _build_full_system_prompt,
-    _build_openai_tool_schemas,
-    _content_blocks_from_anthropic_response,
-    _content_blocks_from_openai_choice,
-    _determine_tool_mode,
-    _extract_tool_use_blocks,
-    _format_pydantic_errors,
-    _log_openai_messages,
-    _openai_usage_tokens,
-    _resolve_model_profile,
-    _text_mode_history,
-    _tool_result_message,
+    anthropic_usage_tokens,
+    build_anthropic_tool_schemas,
+    build_full_system_prompt,
+    build_openai_tool_schemas,
+    content_blocks_from_anthropic_response,
+    content_blocks_from_openai_choice,
+    determine_tool_mode,
+    extract_tool_use_blocks,
+    format_pydantic_errors,
+    log_openai_messages,
+    openai_usage_tokens,
+    resolve_model_profile,
+    text_mode_history,
+    tool_result_message,
 )
 from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.utils.log import get_logger
@@ -39,7 +39,6 @@ from ripperdoc.utils.messages import (
     UserMessage,
     create_assistant_message,
     create_progress_message,
-    create_user_message,
     normalize_messages_for_api,
     INTERRUPT_MESSAGE,
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
@@ -58,7 +57,7 @@ def _resolve_tool(
     if tool:
         tool_registry.activate_tools([tool_name])
         return tool, None
-    return None, _tool_result_message(
+    return None, tool_result_message(
         tool_use_id, f"Error: Tool '{tool_name}' not found", is_error=True
     )
 
@@ -253,14 +252,17 @@ async def query_llm(
     Returns:
         AssistantMessage with the model's response
     """
-    model_profile = _resolve_model_profile(model)
+    model_profile = resolve_model_profile(model)
 
     # Normalize messages based on protocol family (Anthropic allows tool blocks; OpenAI-style prefers text-only)
     protocol = provider_protocol(model_profile.provider)
-    tool_mode = _determine_tool_mode(model_profile)
+    tool_mode = determine_tool_mode(model_profile)
     messages_for_model: List[Union[UserMessage, AssistantMessage, ProgressMessage]]
     if tool_mode == "text":
-        messages_for_model = _text_mode_history(messages)
+        messages_for_model = cast(
+            List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+            text_mode_history(messages),
+        )
     else:
         messages_for_model = messages
 
@@ -281,7 +283,7 @@ async def query_llm(
     )
 
     if protocol == "openai":
-        _log_openai_messages(normalized_messages)
+        log_openai_messages(normalized_messages)
 
     logger.debug(
         f"[query_llm] Sending {len(normalized_messages)} messages to model pointer "
@@ -296,7 +298,7 @@ async def query_llm(
         # Create the appropriate client based on provider
         if model_profile.provider == ProviderType.ANTHROPIC:
             async with AsyncAnthropic(api_key=model_profile.api_key) as client:
-                tool_schemas = await _build_anthropic_tool_schemas(tools)
+                tool_schemas = await build_anthropic_tool_schemas(tools)
                 response = await client.messages.create(
                     model=model_profile.model,
                     max_tokens=model_profile.max_tokens,
@@ -308,13 +310,13 @@ async def query_llm(
 
                 duration_ms = (time.time() - start_time) * 1000
 
-                usage_tokens = _anthropic_usage_tokens(getattr(response, "usage", None))
+                usage_tokens = anthropic_usage_tokens(getattr(response, "usage", None))
                 record_usage(model_profile.model, duration_ms=duration_ms, **usage_tokens)
 
                 # Calculate cost (simplified, should use actual pricing)
                 cost_usd = 0.0  # TODO: Implement cost calculation
 
-                content_blocks = _content_blocks_from_anthropic_response(response, tool_mode)
+                content_blocks = content_blocks_from_anthropic_response(response, tool_mode)
                 tool_use_blocks = [
                     block for block in response.content if getattr(block, "type", None) == "tool_use"
                 ]
@@ -337,7 +339,7 @@ async def query_llm(
         elif model_profile.provider == ProviderType.OPENAI_COMPATIBLE:
             # OpenAI-compatible APIs (OpenAI, DeepSeek, Mistral, etc.)
             async with AsyncOpenAI(api_key=model_profile.api_key, base_url=model_profile.api_base) as client:
-                openai_tools = await _build_openai_tool_schemas(tools)
+                openai_tools = await build_openai_tool_schemas(tools)
 
                 # Prepare messages for OpenAI format
                 openai_messages = [
@@ -354,7 +356,7 @@ async def query_llm(
                 )
 
                 duration_ms = (time.time() - start_time) * 1000
-                usage_tokens = _openai_usage_tokens(getattr(openai_response, "usage", None))
+                usage_tokens = openai_usage_tokens(getattr(openai_response, "usage", None))
                 record_usage(model_profile.model, duration_ms=duration_ms, **usage_tokens)
                 cost_usd = 0.0  # TODO: Implement cost calculation
 
@@ -372,7 +374,7 @@ async def query_llm(
                     },
                 )
 
-                content_blocks = _content_blocks_from_openai_choice(choice, tool_mode)
+                content_blocks = content_blocks_from_openai_choice(choice, tool_mode)
 
                 return create_assistant_message(
                     content=content_blocks, cost_usd=cost_usd, duration_ms=duration_ms
@@ -440,11 +442,11 @@ async def query(
     # Work on a copy so external mutations (e.g., UI appending messages while consuming)
     # do not interfere with recursion or normalization.
     messages = list(messages)
-    model_profile = _resolve_model_profile(query_context.model)
-    tool_mode = _determine_tool_mode(model_profile)
+    model_profile = resolve_model_profile(query_context.model)
+    tool_mode = determine_tool_mode(model_profile)
     tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else query_context.all_tools()
 
-    full_system_prompt = _build_full_system_prompt(
+    full_system_prompt = build_full_system_prompt(
         system_prompt, context, tool_mode, query_context.all_tools()
     )
     logger.debug(
@@ -472,7 +474,7 @@ async def query(
 
     yield assistant_message
 
-    tool_use_blocks = _extract_tool_use_blocks(assistant_message)
+    tool_use_blocks = extract_tool_use_blocks(assistant_message)
     text_blocks = (
         len(assistant_message.message.content)
         if isinstance(assistant_message.message.content, list)
@@ -507,6 +509,7 @@ async def query(
             tool_results.append(missing_msg)
             yield missing_msg
             continue
+        assert tool is not None
 
         tool_context = ToolUseContext(
             safe_mode=query_context.safe_mode,
@@ -528,7 +531,7 @@ async def query(
                 logger.debug(
                     f"[query] Validation failed for tool_use_id={tool_use_id}: {validation.message}"
                 )
-                result_msg = _tool_result_message(
+                result_msg = tool_result_message(
                     tool_use_id,
                     validation.message or "Tool input validation failed.",
                     is_error=True,
@@ -546,7 +549,7 @@ async def query(
                         f"[query] Permission denied for tool_use_id={tool_use_id}: {denial_message}"
                     )
                     denial_text = denial_message or f"User aborted the tool invocation: {tool_name}"
-                    denial_msg = _tool_result_message(tool_use_id, denial_text, is_error=True)
+                    denial_msg = tool_result_message(tool_use_id, denial_text, is_error=True)
                     tool_results.append(denial_msg)
                     yield denial_msg
                     permission_denied = True
@@ -563,7 +566,7 @@ async def query(
                     logger.debug(f"[query] Progress from tool_use_id={tool_use_id}: {output.content}")
                 elif isinstance(output, ToolResult):
                     result_content = output.result_for_assistant or str(output.data)
-                    result_msg = _tool_result_message(
+                    result_msg = tool_result_message(
                         tool_use_id, result_content, tool_use_result=output.data
                     )
                     tool_results.append(result_msg)
@@ -574,8 +577,8 @@ async def query(
                     )
 
         except ValidationError as ve:
-            detail_text = _format_pydantic_errors(ve)
-            error_msg = _tool_result_message(
+            detail_text = format_pydantic_errors(ve)
+            error_msg = tool_result_message(
                 tool_use_id,
                 f"Invalid input for tool '{tool_name}': {detail_text}",
                 is_error=True,
@@ -588,7 +591,7 @@ async def query(
                 f"Error executing tool '{tool_name}'",
                 extra={"tool": tool_name, "tool_use_id": tool_use_id},
             )
-            error_msg = _tool_result_message(
+            error_msg = tool_result_message(
                 tool_use_id, f"Error executing tool: {str(e)}", is_error=True
             )
             tool_results.append(error_msg)

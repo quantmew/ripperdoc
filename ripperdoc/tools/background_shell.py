@@ -136,7 +136,7 @@ async def _monitor_task(task: BackgroundTask) -> None:
             task.exit_code = -1
     except asyncio.CancelledError:
         return
-    except Exception as exc:
+    except Exception:
         logger.exception(
             "Error monitoring background task",
             extra={"task_id": task.id, "command": task.command},

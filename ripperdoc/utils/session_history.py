@@ -107,7 +107,7 @@ class SessionHistory:
                             exc_info=True,
                         )
                         continue
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "Failed to load seen IDs from session",
                 extra={"session_id": self.session_id, "path": str(self.path)},
@@ -134,7 +134,7 @@ class SessionHistory:
                 fh.write("\n")
             if isinstance(msg_uuid, str):
                 self._seen_ids.add(msg_uuid)
-        except Exception as exc:
+        except Exception:
             # Avoid crashing the UI if logging fails
             logger.exception(
                 "Failed to append message to session log",
@@ -223,7 +223,7 @@ def load_session_messages(project_path: Path, session_id: str) -> List[Conversat
                         exc_info=True,
                     )
                     continue
-    except Exception as exc:
+    except Exception:
         logger.exception(
             "Failed to load session messages",
             extra={"session_id": session_id, "path": str(path)},

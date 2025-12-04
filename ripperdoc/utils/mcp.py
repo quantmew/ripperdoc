@@ -76,7 +76,7 @@ def _load_json_file(path: Path) -> Dict[str, Any]:
         if isinstance(data, dict):
             return data
         return {}
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError):
         logger.exception("Failed to load JSON", extra={"path": str(path)})
         return {}
 

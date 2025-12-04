@@ -131,15 +131,42 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, A
             "is_image": False,
         }
 
-    # Truncate: keep start and end
-    start_chars = min(TRUNCATE_KEEP_START, max_chars // 2)
-    end_chars = min(TRUNCATE_KEEP_END, max_chars - start_chars - 100)
+    marker_template = "\n\n... [Output truncated: {omitted} characters omitted] ...\n\n"
+    short_marker = "... [truncated] ..."
 
-    truncated = (
-        text[:start_chars]
-        + f"\n\n... [Output truncated: {original_length - start_chars - end_chars} characters omitted] ...\n\n"
-        + text[-end_chars:]
-    )
+    def _choose_marker(omitted: int, budget: int) -> str:
+        """Pick the most informative marker that fits within the budget."""
+        full_marker = marker_template.format(omitted=omitted)
+        if len(full_marker) <= budget:
+            return full_marker
+        if len(short_marker) <= budget:
+            return short_marker
+        # Last resort: squeeze an ellipsis into the budget (may be empty for tiny budgets)
+        return "..."[: max(budget, 0)]
+
+    # Iteratively balance how much of the start/end to keep while ensuring we never exceed max_chars.
+    marker = _choose_marker(original_length - max_chars, max_chars)
+    keep_start = keep_end = 0
+    for _ in range(2):
+        available = max(0, max_chars - len(marker))
+        keep_start = min(TRUNCATE_KEEP_START, available // 2)
+        keep_end = min(TRUNCATE_KEEP_END, available - keep_start)
+        marker = _choose_marker(
+            max(0, original_length - (keep_start + keep_end)), max_chars
+        )
+
+    available = max(0, max_chars - len(marker))
+    # Ensure kept sections fit the final budget; trim end first, then start if needed.
+    if keep_start + keep_end > available:
+        overflow = keep_start + keep_end - available
+        trim_end = min(overflow, keep_end)
+        keep_end -= trim_end
+        overflow -= trim_end
+        keep_start = max(0, keep_start - overflow)
+
+    truncated = text[:keep_start] + marker + (text[-keep_end:] if keep_end else "")
+    if len(truncated) > max_chars:
+        truncated = truncated[:max_chars]
 
     return {
         "truncated_content": truncated,

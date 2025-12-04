@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from json_repair import repair_json
@@ -45,7 +45,7 @@ def _get_usage_field(usage: Any, field: str) -> int:
     return _safe_int(getattr(usage, field, 0))
 
 
-def _anthropic_usage_tokens(usage: Any) -> Dict[str, int]:
+def anthropic_usage_tokens(usage: Any) -> Dict[str, int]:
     """Extract token counts from an Anthropic response usage payload."""
     return {
         "input_tokens": _get_usage_field(usage, "input_tokens"),
@@ -55,7 +55,7 @@ def _anthropic_usage_tokens(usage: Any) -> Dict[str, int]:
     }
 
 
-def _openai_usage_tokens(usage: Any) -> Dict[str, int]:
+def openai_usage_tokens(usage: Any) -> Dict[str, int]:
     """Extract token counts from an OpenAI-compatible response usage payload."""
     prompt_details = None
     if isinstance(usage, dict):
@@ -73,7 +73,7 @@ def _openai_usage_tokens(usage: Any) -> Dict[str, int]:
     }
 
 
-def _resolve_model_profile(model: str) -> ModelProfile:
+def resolve_model_profile(model: str) -> ModelProfile:
     """Resolve a model pointer to a concrete profile or raise if missing."""
     config = get_global_config()
     profile_name = getattr(config.model_pointers, model, None) or model
@@ -86,7 +86,7 @@ def _resolve_model_profile(model: str) -> ModelProfile:
     return model_profile
 
 
-def _determine_tool_mode(model_profile: ModelProfile) -> str:
+def determine_tool_mode(model_profile: ModelProfile) -> str:
     """Return configured tool mode for provider."""
     if model_profile.provider != ProviderType.OPENAI_COMPATIBLE:
         return "native"
@@ -228,7 +228,7 @@ def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _text_mode_history(messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]]) -> List[Union[UserMessage, AssistantMessage]]:
+def text_mode_history(messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]]) -> List[Union[UserMessage, AssistantMessage]]:
     """Convert a message history into text-only form for text mode."""
 
     def _normalize_block(block: Any) -> Optional[Dict[str, Any]]:
@@ -370,7 +370,7 @@ def _normalize_tool_args(raw_args: Any) -> Dict[str, Any]:
     return {}
 
 
-def _build_full_system_prompt(
+def build_full_system_prompt(
     system_prompt: str, context: Dict[str, str], tool_mode: str, tools: List[Tool[Any, Any]]
 ) -> str:
     """Compose the final system prompt including context and tool hints."""
@@ -385,7 +385,7 @@ def _build_full_system_prompt(
     return full_prompt
 
 
-def _log_openai_messages(normalized_messages: List[Dict[str, Any]]) -> None:
+def log_openai_messages(normalized_messages: List[Dict[str, Any]]) -> None:
     """Trace normalized messages for OpenAI calls to simplify debugging."""
     summary_parts = []
     for idx, message in enumerate(normalized_messages):
@@ -401,7 +401,7 @@ def _log_openai_messages(normalized_messages: List[Dict[str, Any]]) -> None:
     logger.debug(f"[query_llm] OpenAI normalized messages: {' | '.join(summary_parts)}")
 
 
-async def _build_anthropic_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[str, Any]]:
+async def build_anthropic_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[str, Any]]:
     """Render tool schemas in Anthropic format."""
     schemas = []
     for tool in tools:
@@ -419,7 +419,7 @@ async def _build_anthropic_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dic
     return schemas
 
 
-async def _build_openai_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[str, Any]]:
+async def build_openai_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[str, Any]]:
     """Render tool schemas in OpenAI function-calling format."""
     openai_tools = []
     for tool in tools:
@@ -437,7 +437,7 @@ async def _build_openai_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[s
     return openai_tools
 
 
-def _content_blocks_from_anthropic_response(
+def content_blocks_from_anthropic_response(
     response: Any, tool_mode: str
 ) -> List[Dict[str, Any]]:
     """Normalize Anthropic response content to our internal block format."""
@@ -462,7 +462,7 @@ def _content_blocks_from_anthropic_response(
     return blocks
 
 
-def _content_blocks_from_openai_choice(choice: Any, tool_mode: str) -> List[Dict[str, Any]]:
+def content_blocks_from_openai_choice(choice: Any, tool_mode: str) -> List[Dict[str, Any]]:
     """Normalize OpenAI-compatible choice to our internal block format."""
     content_blocks = []
     if getattr(choice.message, "content", None):
@@ -497,7 +497,7 @@ def _content_blocks_from_openai_choice(choice: Any, tool_mode: str) -> List[Dict
     return content_blocks
 
 
-def _extract_tool_use_blocks(
+def extract_tool_use_blocks(
     assistant_message: AssistantMessage,
 ) -> List[MessageContent]:
     """Return all tool_use blocks from an assistant message."""
@@ -513,7 +513,7 @@ def _extract_tool_use_blocks(
     return tool_blocks
 
 
-def _tool_result_message(
+def tool_result_message(
     tool_use_id: str, text: str, is_error: bool = False, tool_use_result: Any = None
 ) -> UserMessage:
     """Build a user message representing a tool_result block."""
@@ -523,11 +523,11 @@ def _tool_result_message(
     return create_user_message([block], tool_use_result=tool_use_result)
 
 
-def _format_pydantic_errors(error: ValidationError) -> str:
+def format_pydantic_errors(error: ValidationError) -> str:
     """Render a compact validation error summary."""
     details = []
     for err in error.errors():
-        loc = err.get("loc") or []
+        loc: list[Any] = list(err.get("loc") or [])
         loc_str = ".".join(str(part) for part in loc) if loc else ""
         msg = err.get("msg") or ""
         if loc_str and msg:
