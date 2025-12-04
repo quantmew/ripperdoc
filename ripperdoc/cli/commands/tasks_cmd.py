@@ -232,7 +232,7 @@ def _handle(ui: Any, args: str) -> bool:
         "[tasks_cmd] Handling /tasks command",
         extra={
             "session_id": getattr(ui, "session_id", None),
-            "args": args,
+            "raw_args": args,
         },
     )
     if not parts:
