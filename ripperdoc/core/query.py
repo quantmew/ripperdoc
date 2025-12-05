@@ -8,6 +8,7 @@ import asyncio
 import inspect
 import os
 import time
+from asyncio import CancelledError
 from typing import (
     Any,
     AsyncGenerator,
@@ -589,6 +590,14 @@ async def query(
     assistant_message: Optional[AssistantMessage] = None
 
     while True:
+        if query_context.abort_controller.is_set():
+            assistant_task.cancel()
+            try:
+                await assistant_task
+            except CancelledError:
+                pass
+            yield create_assistant_message(INTERRUPT_MESSAGE)
+            return
         if assistant_task.done():
             assistant_message = await assistant_task
             break
