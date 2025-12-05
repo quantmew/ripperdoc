@@ -49,6 +49,7 @@ from ripperdoc.utils.permissions.tool_permission_utils import (
 from ripperdoc.utils.permissions import PermissionDecision
 from ripperdoc.utils.sandbox_utils import create_sandbox_wrapper, is_sandbox_available
 from ripperdoc.utils.safe_get_cwd import get_original_cwd, safe_get_cwd
+from ripperdoc.utils.shell_utils import build_shell_command, find_suitable_shell
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -151,6 +152,15 @@ build projects, run tests, and interact with the file system."""
 
     async def prompt(self, safe_mode: bool = False) -> str:
         sandbox_available = is_sandbox_available()
+        try:
+            current_shell = find_suitable_shell()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            current_shell = f"Unavailable ({exc})"
+
+        shell_info = (
+            f"Current shell used for execution: {current_shell}\n"
+            f"- Override via RIPPERDOC_SHELL or RIPPERDOC_SHELL_PATH env vars, or pass shellExecutable input.\n"
+        )
 
         read_only_section = ""
         if sandbox_available:
@@ -234,6 +244,8 @@ build projects, run tests, and interact with the file system."""
         base_prompt = dedent(
             f"""\
             Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
+
+            {shell_info}
 
             Before executing the command, please follow these steps:
 
@@ -486,6 +498,22 @@ build projects, run tests, and interact with the file system."""
         """Execute the bash command."""
 
         effective_command, auto_background = self._detect_auto_background(input_data.command)
+        try:
+            resolved_shell = input_data.shell_executable or find_suitable_shell()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            error_output = BashToolOutput(
+                stdout="",
+                stderr=f"Failed to select shell: {exc}",
+                exit_code=-1,
+                command=effective_command,
+                sandbox=bool(input_data.sandbox),
+                is_error=True,
+            )
+            yield ToolResult(
+                data=error_output, result_for_assistant=self.render_result_for_assistant(error_output)
+            )
+            return
+
         timeout_ms = input_data.timeout or DEFAULT_TIMEOUT_MS
         if MAX_BASH_TIMEOUT_MS:
             timeout_ms = min(timeout_ms, MAX_BASH_TIMEOUT_MS)
@@ -544,18 +572,9 @@ build projects, run tests, and interact with the file system."""
             should_background = False
 
         async def _spawn_process() -> asyncio.subprocess.Process:
-            if input_data.shell_executable:
-                return await asyncio.create_subprocess_exec(
-                    input_data.shell_executable,
-                    "-c",
-                    final_command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    stdin=asyncio.subprocess.DEVNULL,
-                    start_new_session=False,
-                )
-            return await asyncio.create_subprocess_shell(
-                final_command,
+            argv = build_shell_command(resolved_shell, final_command)
+            return await asyncio.create_subprocess_exec(
+                *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.DEVNULL,
@@ -592,7 +611,7 @@ build projects, run tests, and interact with the file system."""
                     else (timeout_seconds if timeout_seconds > 0 else None)
                 )
                 task_id = await start_background_command(
-                    final_command, timeout=bg_timeout, shell_executable=input_data.shell_executable
+                    final_command, timeout=bg_timeout, shell_executable=resolved_shell
                 )
 
                 output = BashToolOutput(

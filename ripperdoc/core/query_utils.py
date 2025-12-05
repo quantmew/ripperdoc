@@ -74,7 +74,7 @@ def openai_usage_tokens(usage: Any) -> Dict[str, int]:
 
 
 def resolve_model_profile(model: str) -> ModelProfile:
-    """Resolve a model pointer to a concrete profile or raise if missing."""
+    """Resolve a model pointer to a concrete profile, falling back to a safe default."""
     config = get_global_config()
     profile_name = getattr(config.model_pointers, model, None) or model
     model_profile = config.model_profiles.get(profile_name)
@@ -82,7 +82,11 @@ def resolve_model_profile(model: str) -> ModelProfile:
         fallback_profile = getattr(config.model_pointers, "main", "default")
         model_profile = config.model_profiles.get(fallback_profile)
     if not model_profile:
-        raise ValueError(f"No model profile found for pointer: {model}")
+        logger.warning(
+            "[config] No model profile found; using built-in default profile",
+            extra={"model_pointer": model},
+        )
+        return ModelProfile(provider=ProviderType.OPENAI_COMPATIBLE, model="gpt-4o-mini")
     return model_profile
 
 

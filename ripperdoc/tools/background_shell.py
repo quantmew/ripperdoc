@@ -14,6 +14,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ripperdoc.utils.shell_utils import build_shell_command, find_suitable_shell
 from ripperdoc.utils.log import get_logger
 
 
@@ -153,24 +154,15 @@ async def _start_background_command(
     command: str, timeout: Optional[float] = None, shell_executable: Optional[str] = None
 ) -> str:
     """Launch a background shell command on the dedicated loop."""
-    if shell_executable:
-        process = await asyncio.create_subprocess_exec(
-            shell_executable,
-            "-c",
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL,
-            start_new_session=False,
-        )
-    else:
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL,
-            start_new_session=False,
-        )
+    selected_shell = shell_executable or find_suitable_shell()
+    argv = build_shell_command(selected_shell, command)
+    process = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        stdin=asyncio.subprocess.DEVNULL,
+        start_new_session=False,
+    )
 
     task_id = f"bash_{uuid.uuid4().hex[:8]}"
     record = BackgroundTask(
