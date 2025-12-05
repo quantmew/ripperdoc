@@ -6,6 +6,7 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 import asyncio
 import sys
 import uuid
+import time
 from typing import List, Dict, Any, Optional, Union, Iterable
 from pathlib import Path
 
@@ -34,10 +35,12 @@ from ripperdoc.cli.commands import (
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permissions import make_permission_checker
 from ripperdoc.cli.ui.spinner import Spinner
+from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
 from ripperdoc.utils.message_compaction import (
     compact_messages,
     estimate_conversation_tokens,
+    estimate_tokens_from_text,
     estimate_used_tokens,
     get_context_usage_status,
     get_remaining_context_tokens,
@@ -64,6 +67,95 @@ from ripperdoc.utils.log import enable_session_file_logging, get_logger
 # Type alias for conversation messages
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
+THINKING_WORDS: list[str] = [
+    "Accomplishing",
+    "Actioning",
+    "Actualizing",
+    "Baking",
+    "Booping",
+    "Brewing",
+    "Calculating",
+    "Cerebrating",
+    "Channelling",
+    "Churning",
+    "Clauding",
+    "Coalescing",
+    "Cogitating",
+    "Computing",
+    "Combobulating",
+    "Concocting",
+    "Conjuring",
+    "Considering",
+    "Contemplating",
+    "Cooking",
+    "Crafting",
+    "Creating",
+    "Crunching",
+    "Deciphering",
+    "Deliberating",
+    "Determining",
+    "Discombobulating",
+    "Divining",
+    "Doing",
+    "Effecting",
+    "Elucidating",
+    "Enchanting",
+    "Envisioning",
+    "Finagling",
+    "Flibbertigibbeting",
+    "Forging",
+    "Forming",
+    "Frolicking",
+    "Generating",
+    "Germinating",
+    "Hatching",
+    "Herding",
+    "Honking",
+    "Ideating",
+    "Imagining",
+    "Incubating",
+    "Inferring",
+    "Manifesting",
+    "Marinating",
+    "Meandering",
+    "Moseying",
+    "Mulling",
+    "Mustering",
+    "Musing",
+    "Noodling",
+    "Percolating",
+    "Perusing",
+    "Philosophising",
+    "Pontificating",
+    "Pondering",
+    "Processing",
+    "Puttering",
+    "Puzzling",
+    "Reticulating",
+    "Ruminating",
+    "Scheming",
+    "Schlepping",
+    "Shimmying",
+    "Simmering",
+    "Smooshing",
+    "Spelunking",
+    "Spinning",
+    "Stewing",
+    "Sussing",
+    "Synthesizing",
+    "Thinking",
+    "Tinkering",
+    "Transmuting",
+    "Unfurling",
+    "Unravelling",
+    "Vibing",
+    "Wandering",
+    "Whirring",
+    "Wibbling",
+    "Wizarding",
+    "Working",
+    "Wrangling",
+]
 
 console = Console()
 logger = get_logger()
@@ -739,7 +831,8 @@ class RichUI:
                         },
                     )
 
-            spinner = Spinner(console, "Thinking...", spinner="dots")
+            prompt_tokens_est = estimate_conversation_tokens(messages, protocol=protocol)
+            spinner = ThinkingSpinner(console, prompt_tokens_est)
             # Wrap permission checker to pause the spinner while waiting for user input.
             base_permission_checker = self._permission_checker
 
@@ -759,6 +852,7 @@ class RichUI:
             # Track tool uses by ID so results align even when multiple tools fire.
             tool_registry: Dict[str, Dict[str, Any]] = {}
             last_tool_name = None
+            output_token_est = 0
 
             try:
                 spinner.start()
@@ -853,7 +947,12 @@ class RichUI:
                                 )
                             elif message.content.startswith("Subagent"):
                                 self.display_message("Subagent", message.content, is_tool=True)
-                        spinner.update(f"Working... {message.content}")
+                        if message.tool_use_id == "stream":
+                            delta_tokens = estimate_tokens_from_text(message.content)
+                            output_token_est += delta_tokens
+                            spinner.update_tokens(output_token_est)
+                        else:
+                            spinner.update_tokens(output_token_est, suffix=f"Working... {message.content}")
 
                     # Add message to history
                     self._log_message(message)

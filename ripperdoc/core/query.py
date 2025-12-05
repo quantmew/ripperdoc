@@ -6,28 +6,33 @@ the query-response loop including tool execution.
 
 import asyncio
 import inspect
+import os
 import time
-from typing import Any, AsyncGenerator, Dict, Iterable, List, Optional, Tuple, Union, cast
+from typing import (
+    Any,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
-from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from ripperdoc.core.config import ProviderType, provider_protocol
+from ripperdoc.core.providers import ProviderClient, get_provider_client
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.query_utils import (
-    anthropic_usage_tokens,
-    build_anthropic_tool_schemas,
     build_full_system_prompt,
-    build_openai_tool_schemas,
-    content_blocks_from_anthropic_response,
-    content_blocks_from_openai_choice,
     determine_tool_mode,
     extract_tool_use_blocks,
     format_pydantic_errors,
-    estimate_cost_usd,
     log_openai_messages,
-    openai_usage_tokens,
     resolve_model_profile,
     text_mode_history,
     tool_result_message,
@@ -44,10 +49,12 @@ from ripperdoc.utils.messages import (
     INTERRUPT_MESSAGE,
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
 )
-from ripperdoc.utils.session_usage import record_usage
 
 
 logger = get_logger()
+
+DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_API_TIMEOUT", "120"))
+MAX_LLM_RETRIES = 1
 
 
 def _resolve_tool(
@@ -376,6 +383,11 @@ async def query_llm(
     max_thinking_tokens: int = 0,
     model: str = "main",
     abort_signal: Optional[asyncio.Event] = None,
+    *,
+    progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+    request_timeout: Optional[float] = None,
+    max_retries: int = MAX_LLM_RETRIES,
+    stream: bool = True,
 ) -> AssistantMessage:
     """Query the AI model and return the response.
 
@@ -386,10 +398,16 @@ async def query_llm(
         max_thinking_tokens: Maximum tokens for thinking (0 = disabled)
         model: Model pointer to use
         abort_signal: Event to signal abortion
+        progress_callback: Optional async callback invoked with streamed text chunks
+        request_timeout: Max seconds to wait for a provider response before retrying
+        max_retries: Number of retries on timeout/errors (total attempts = retries + 1)
+        stream: Enable streaming for providers that support it (text-only mode)
 
     Returns:
         AssistantMessage with the model's response
     """
+    request_timeout = request_timeout or DEFAULT_REQUEST_TIMEOUT_SEC
+    request_timeout = request_timeout or DEFAULT_REQUEST_TIMEOUT_SEC
     model_profile = resolve_model_profile(model)
 
     # Normalize messages based on protocol family (Anthropic allows tool blocks; OpenAI-style prefers text-only)
@@ -433,104 +451,36 @@ async def query_llm(
     start_time = time.time()
 
     try:
-        # Create the appropriate client based on provider
-        if model_profile.provider == ProviderType.ANTHROPIC:
-            anthropic_kwargs = {"base_url": model_profile.api_base}
-            if model_profile.api_key:
-                anthropic_kwargs["api_key"] = model_profile.api_key
-            auth_token = getattr(model_profile, "auth_token", None)
-            if auth_token:
-                anthropic_kwargs["auth_token"] = auth_token
+        client: Optional[ProviderClient] = get_provider_client(model_profile.provider)
+        if client is None:
+            duration_ms = (time.time() - start_time) * 1000
+            error_msg = create_assistant_message(
+                content=(
+                    "Gemini protocol is not supported yet in Ripperdoc. "
+                    "Please configure an Anthropic or OpenAI-compatible model."
+                ),
+                duration_ms=duration_ms,
+            )
+            error_msg.is_api_error_message = True
+            return error_msg
 
-            async with AsyncAnthropic(**anthropic_kwargs) as client:
-                tool_schemas = await build_anthropic_tool_schemas(tools)
-                response = await client.messages.create(
-                    model=model_profile.model,
-                    max_tokens=model_profile.max_tokens,
-                    system=system_prompt,
-                    messages=normalized_messages,  # type: ignore[arg-type]
-                    tools=tool_schemas if tool_schemas else None,  # type: ignore
-                    temperature=model_profile.temperature,
-                )
+        provider_response = await client.call(
+            model_profile=model_profile,
+            system_prompt=system_prompt,
+            normalized_messages=normalized_messages,
+            tools=tools,
+            tool_mode=tool_mode,
+            stream=stream,
+            progress_callback=progress_callback,
+            request_timeout=request_timeout,
+            max_retries=max_retries,
+        )
 
-                duration_ms = (time.time() - start_time) * 1000
-
-                usage_tokens = anthropic_usage_tokens(getattr(response, "usage", None))
-                cost_usd = estimate_cost_usd(model_profile, usage_tokens)
-                record_usage(
-                    model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
-                )
-
-                content_blocks = content_blocks_from_anthropic_response(response, tool_mode)
-                tool_use_blocks = [
-                    block for block in response.content if getattr(block, "type", None) == "tool_use"
-                ]
-                logger.info(
-                    "[query_llm] Received response from Anthropic",
-                    extra={
-                        "model": model_profile.model,
-                        "duration_ms": round(duration_ms, 2),
-                        "usage_tokens": usage_tokens,
-                        "tool_use_blocks": len(tool_use_blocks),
-                    },
-                )
-
-                return create_assistant_message(
-                    content=content_blocks,
-                    cost_usd=cost_usd,
-                    duration_ms=duration_ms,
-                )
-
-        elif model_profile.provider == ProviderType.OPENAI_COMPATIBLE:
-            # OpenAI-compatible APIs (OpenAI, DeepSeek, Mistral, etc.)
-            async with AsyncOpenAI(api_key=model_profile.api_key, base_url=model_profile.api_base) as client:
-                openai_tools = await build_openai_tool_schemas(tools)
-
-                # Prepare messages for OpenAI format
-                openai_messages = [
-                    {"role": "system", "content": system_prompt}
-                ] + normalized_messages
-
-                # Make the API call
-                openai_response: Any = await client.chat.completions.create(
-                    model=model_profile.model,
-                    messages=openai_messages,
-                    tools=openai_tools if openai_tools else None,  # type: ignore[arg-type]
-                    temperature=model_profile.temperature,
-                    max_tokens=model_profile.max_tokens,
-                )
-
-                duration_ms = (time.time() - start_time) * 1000
-                usage_tokens = openai_usage_tokens(getattr(openai_response, "usage", None))
-                cost_usd = estimate_cost_usd(model_profile, usage_tokens)
-                record_usage(
-                    model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
-                )
-
-                # Convert OpenAI response to our format
-                content_blocks = []
-                choice = openai_response.choices[0]
-
-                logger.info(
-                    "[query_llm] Received response from OpenAI-compatible provider",
-                    extra={
-                        "model": model_profile.model,
-                        "duration_ms": round(duration_ms, 2),
-                        "usage_tokens": usage_tokens,
-                        "finish_reason": getattr(choice, "finish_reason", None),
-                    },
-                )
-
-                content_blocks = content_blocks_from_openai_choice(choice, tool_mode)
-
-                return create_assistant_message(
-                    content=content_blocks, cost_usd=cost_usd, duration_ms=duration_ms
-                )
-
-        elif model_profile.provider == ProviderType.GEMINI:
-            raise NotImplementedError("Gemini protocol is not yet supported.")
-        else:
-            raise NotImplementedError(f"Provider {model_profile.provider} not yet implemented")
+        return create_assistant_message(
+            content=provider_response.content_blocks,
+            cost_usd=provider_response.cost_usd,
+            duration_ms=provider_response.duration_ms,
+        )
 
     except Exception as e:
         # Return error message
@@ -605,14 +555,65 @@ async def query(
         },
     )
 
-    assistant_message = await query_llm(
-        messages,
-        full_system_prompt,
-        tools_for_model,
-        query_context.max_thinking_tokens,
-        query_context.model,
-        query_context.abort_controller,
+    progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue()
+
+    async def _stream_progress(chunk: str) -> None:
+        if not chunk:
+            return
+        try:
+            await progress_queue.put(
+                create_progress_message(
+                    tool_use_id="stream",
+                    sibling_tool_use_ids=set(),
+                    content=chunk,
+                )
+            )
+        except Exception:
+            logger.exception("[query] Failed to enqueue stream progress chunk")
+
+    assistant_task = asyncio.create_task(
+        query_llm(
+            messages,
+            full_system_prompt,
+            tools_for_model,
+            query_context.max_thinking_tokens,
+            query_context.model,
+            query_context.abort_controller,
+            progress_callback=_stream_progress,
+            request_timeout=DEFAULT_REQUEST_TIMEOUT_SEC,
+            max_retries=MAX_LLM_RETRIES,
+            stream=True,
+        )
     )
+
+    assistant_message: Optional[AssistantMessage] = None
+
+    while True:
+        if assistant_task.done():
+            assistant_message = await assistant_task
+            break
+        try:
+            progress = progress_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            waiter = asyncio.create_task(progress_queue.get())
+            done, pending = await asyncio.wait(
+                {assistant_task, waiter}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if assistant_task in done:
+                for task in pending:
+                    task.cancel()
+                assistant_message = await assistant_task
+                break
+            progress = waiter.result()
+        if progress:
+            yield progress
+
+    while not progress_queue.empty():
+        residual = progress_queue.get_nowait()
+        if residual:
+            yield residual
+
+    assert assistant_message is not None
 
     # Check for abort
     if query_context.abort_controller.is_set():

@@ -65,6 +65,7 @@ async def test_permission_denial_does_not_set_abort(monkeypatch: Any):
         max_thinking_tokens: int = 0,
         model: str = "main",
         abort_signal: Any = None,
+        **_: Any,
     ):
         # If we've already returned a tool_result, end the loop with plain text.
         for msg in messages:
@@ -119,6 +120,7 @@ async def test_permission_denial_prevents_tool_execution(monkeypatch: Any):
         max_thinking_tokens: int = 0,
         model: str = "main",
         abort_signal: Any = None,
+        **_: Any,
     ):
         # Always ask to run the tool once.
         return create_assistant_message(

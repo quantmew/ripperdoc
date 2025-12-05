@@ -1,0 +1,173 @@
+"""Shared abstractions for provider clients."""
+
+from __future__ import annotations
+
+import asyncio
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+from ripperdoc.core.config import ModelProfile
+from ripperdoc.core.tool import Tool
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
+
+ProgressCallback = Callable[[str], Awaitable[None]]
+
+
+@dataclass
+class ProviderResponse:
+    """Normalized provider response payload."""
+
+    content_blocks: Any
+    usage_tokens: Dict[str, int]
+    cost_usd: float
+    duration_ms: float
+
+
+class ProviderClient(ABC):
+    """Abstract base for model provider clients."""
+
+    @abstractmethod
+    async def call(
+        self,
+        *,
+        model_profile: ModelProfile,
+        system_prompt: str,
+        normalized_messages: Any,
+        tools: List[Tool[Any, Any]],
+        tool_mode: str,
+        stream: bool,
+        progress_callback: Optional[ProgressCallback],
+        request_timeout: Optional[float],
+        max_retries: int,
+    ) -> ProviderResponse:
+        """Execute a model call and return a normalized response."""
+
+
+def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Strip tool_use blocks that lack a following tool_result to satisfy provider constraints."""
+
+    def _tool_result_ids(msg: Dict[str, Any]) -> set[str]:
+        ids: set[str] = set()
+        content = msg.get("content")
+        if isinstance(content, list):
+            for part in content:
+                part_type = getattr(part, "get", lambda k, default=None: part.__dict__.get(k, default))(
+                    "type", None
+                )
+                if part_type == "tool_result":
+                    tid = (
+                        getattr(part, "tool_use_id", None)
+                        or getattr(part, "id", None)
+                        or part.get("tool_use_id")
+                        or part.get("id")
+                    )
+                    if tid:
+                        ids.add(str(tid))
+        return ids
+
+    sanitized: List[Dict[str, Any]] = []
+    for idx, message in enumerate(normalized_messages):
+        if message.get("role") != "assistant":
+            sanitized.append(message)
+            continue
+
+        content = message.get("content")
+        if not isinstance(content, list):
+            sanitized.append(message)
+            continue
+
+        tool_use_blocks = [
+            part
+            for part in content
+            if (getattr(part, "type", None) or (part.get("type") if isinstance(part, dict) else None))
+            == "tool_use"
+        ]
+        if not tool_use_blocks:
+            sanitized.append(message)
+            continue
+
+        next_msg = normalized_messages[idx + 1] if idx + 1 < len(normalized_messages) else None
+        next_results = _tool_result_ids(next_msg) if next_msg else set()
+
+        # Identify unpaired tool_use IDs
+        unpaired_ids: set[str] = set()
+        for block in tool_use_blocks:
+            block_id = (
+                getattr(block, "tool_use_id", None)
+                or getattr(block, "id", None)
+                or (block.get("tool_use_id") if isinstance(block, dict) else None)
+                or (block.get("id") if isinstance(block, dict) else None)
+            )
+            if block_id and str(block_id) not in next_results:
+                unpaired_ids.add(str(block_id))
+
+        if not unpaired_ids:
+            sanitized.append(message)
+            continue
+
+        # Drop unpaired tool_use blocks
+        filtered_content = []
+        for part in content:
+            part_type = getattr(part, "type", None) or (part.get("type") if isinstance(part, dict) else None)
+            if part_type == "tool_use":
+                block_id = (
+                    getattr(part, "tool_use_id", None)
+                    or getattr(part, "id", None)
+                    or (part.get("tool_use_id") if isinstance(part, dict) else None)
+                    or (part.get("id") if isinstance(part, dict) else None)
+                )
+                if block_id and str(block_id) in unpaired_ids:
+                    continue
+            filtered_content.append(part)
+
+        if not filtered_content:
+            logger.debug(
+                "[provider_clients] Dropped assistant message with unpaired tool_use blocks",
+                extra={"unpaired_ids": list(unpaired_ids)},
+            )
+            continue
+
+        sanitized.append({**message, "content": filtered_content})
+        logger.debug(
+            "[provider_clients] Sanitized message to remove unpaired tool_use blocks",
+            extra={"unpaired_ids": list(unpaired_ids)},
+        )
+
+    return sanitized
+
+
+async def call_with_timeout_and_retries(
+    coro_factory: Callable[[], Awaitable[Any]],
+    request_timeout: Optional[float],
+    max_retries: int,
+) -> Any:
+    """Run a coroutine with timeout and limited retries."""
+    attempts = max(0, int(max_retries)) + 1
+    last_error: Optional[Exception] = None
+    for attempt in range(1, attempts + 1):
+        try:
+            if request_timeout and request_timeout > 0:
+                return await asyncio.wait_for(coro_factory(), timeout=request_timeout)
+            return await coro_factory()
+        except asyncio.TimeoutError as exc:
+            last_error = exc
+            logger.warning(
+                "[provider_clients] Request timed out; retrying",
+                extra={"attempt": attempt, "max_retries": attempts - 1},
+            )
+            if attempt == attempts:
+                raise
+        except Exception as exc:
+            last_error = exc
+            if attempt == attempts:
+                raise
+            logger.warning(
+                "[provider_clients] Request failed; retrying",
+                extra={"attempt": attempt, "max_retries": attempts - 1, "error": str(exc)},
+            )
+    if last_error:
+        raise last_error
+    raise RuntimeError("Unexpected error executing request with retries")
