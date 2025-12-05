@@ -34,7 +34,7 @@ def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[
     env_var = next((name for name in env_candidates if os.environ.get(name)), None)
     if env_var:
         return (f"{env_var} (env)", env_var)
-    if profile.api_key:
+    if profile.api_key or getattr(profile, "auth_token", None):
         return ("Configured in profile", None)
     return ("Missing", None)
 
