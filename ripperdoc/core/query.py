@@ -25,6 +25,7 @@ from ripperdoc.core.query_utils import (
     determine_tool_mode,
     extract_tool_use_blocks,
     format_pydantic_errors,
+    estimate_cost_usd,
     log_openai_messages,
     openai_usage_tokens,
     resolve_model_profile,
@@ -455,10 +456,10 @@ async def query_llm(
                 duration_ms = (time.time() - start_time) * 1000
 
                 usage_tokens = anthropic_usage_tokens(getattr(response, "usage", None))
-                record_usage(model_profile.model, duration_ms=duration_ms, **usage_tokens)
-
-                # Calculate cost (simplified, should use actual pricing)
-                cost_usd = 0.0  # TODO: Implement cost calculation
+                cost_usd = estimate_cost_usd(model_profile, usage_tokens)
+                record_usage(
+                    model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
+                )
 
                 content_blocks = content_blocks_from_anthropic_response(response, tool_mode)
                 tool_use_blocks = [
@@ -501,8 +502,10 @@ async def query_llm(
 
                 duration_ms = (time.time() - start_time) * 1000
                 usage_tokens = openai_usage_tokens(getattr(openai_response, "usage", None))
-                record_usage(model_profile.model, duration_ms=duration_ms, **usage_tokens)
-                cost_usd = 0.0  # TODO: Implement cost calculation
+                cost_usd = estimate_cost_usd(model_profile, usage_tokens)
+                record_usage(
+                    model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
+                )
 
                 # Convert OpenAI response to our format
                 content_blocks = []

@@ -110,6 +110,9 @@ class ModelProfile(BaseModel):
     # Tool handling for OpenAI-compatible providers. "native" uses tool_calls, "text" flattens tool
     # interactions into plain text to support providers that reject tool roles.
     openai_tool_mode: Literal["native", "text"] = "native"
+    # Pricing (USD per 1M tokens). Leave as 0 to skip cost calculation.
+    input_cost_per_million_tokens: float = 0.0
+    output_cost_per_million_tokens: float = 0.0
 
 
 class ModelPointers(BaseModel):

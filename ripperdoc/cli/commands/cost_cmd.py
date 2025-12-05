@@ -32,6 +32,7 @@ def _handle(ui: Any, _: str) -> bool:
     total_cache_read = usage.total_cache_read_tokens
     total_cache_creation = usage.total_cache_creation_tokens
     total_tokens = total_input + total_output + total_cache_read + total_cache_creation
+    total_cost = usage.total_cost_usd
 
     ui.console.print("\n[bold]Session token usage[/bold]")
     ui.console.print(
@@ -44,6 +45,8 @@ def _handle(ui: Any, _: str) -> bool:
             f"{_fmt_tokens(total_cache_creation)} write"
         )
     ui.console.print(f" Requests: {usage.total_requests}")
+    if total_cost:
+        ui.console.print(f" Cost: ${total_cost:.4f}")
     if usage.total_duration_ms:
         ui.console.print(f" API time: {_format_duration(usage.total_duration_ms)}")
 
@@ -62,6 +65,8 @@ def _handle(ui: Any, _: str) -> bool:
         if stats.duration_ms:
             line += f", {_format_duration(stats.duration_ms)} total"
         line += ")"
+        if stats.cost_usd:
+            line += f", ${stats.cost_usd:.4f}"
         ui.console.print(line)
 
     return True

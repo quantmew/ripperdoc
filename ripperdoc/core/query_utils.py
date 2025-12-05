@@ -73,6 +73,22 @@ def openai_usage_tokens(usage: Any) -> Dict[str, int]:
     }
 
 
+def estimate_cost_usd(model_profile: ModelProfile, usage_tokens: Dict[str, int]) -> float:
+    """Compute USD cost using per-1M token pricing from the model profile."""
+    input_price = getattr(model_profile, "input_cost_per_million_tokens", 0.0) or 0.0
+    output_price = getattr(model_profile, "output_cost_per_million_tokens", 0.0) or 0.0
+
+    total_input_tokens = (
+        _safe_int(usage_tokens.get("input_tokens"))
+        + _safe_int(usage_tokens.get("cache_read_input_tokens"))
+        + _safe_int(usage_tokens.get("cache_creation_input_tokens"))
+    )
+    output_tokens = _safe_int(usage_tokens.get("output_tokens"))
+
+    cost = (total_input_tokens * input_price + output_tokens * output_price) / 1_000_000
+    return float(cost)
+
+
 def resolve_model_profile(model: str) -> ModelProfile:
     """Resolve a model pointer to a concrete profile, falling back to a safe default."""
     config = get_global_config()

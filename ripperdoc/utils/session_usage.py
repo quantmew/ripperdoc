@@ -17,6 +17,7 @@ class ModelUsage:
     cache_creation_input_tokens: int = 0
     requests: int = 0
     duration_ms: float = 0.0
+    cost_usd: float = 0.0
 
 
 @dataclass
@@ -49,6 +50,10 @@ class SessionUsage:
     def total_duration_ms(self) -> float:
         return sum(usage.duration_ms for usage in self.models.values())
 
+    @property
+    def total_cost_usd(self) -> float:
+        return sum(usage.cost_usd for usage in self.models.values())
+
 
 _SESSION_USAGE = SessionUsage()
 
@@ -76,6 +81,7 @@ def record_usage(
     cache_read_input_tokens: int = 0,
     cache_creation_input_tokens: int = 0,
     duration_ms: float = 0.0,
+    cost_usd: float = 0.0,
 ) -> None:
     """Record a single model invocation."""
     global _SESSION_USAGE
@@ -88,6 +94,7 @@ def record_usage(
     usage.cache_creation_input_tokens += _as_int(cache_creation_input_tokens)
     usage.duration_ms += float(duration_ms) if duration_ms and duration_ms > 0 else 0.0
     usage.requests += 1
+    usage.cost_usd += float(cost_usd) if cost_usd and cost_usd > 0 else 0.0
 
 
 def get_session_usage() -> SessionUsage:
