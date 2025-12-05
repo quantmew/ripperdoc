@@ -30,6 +30,14 @@ def test_model_profile_creation():
     assert profile.api_key == "test_key"
 
 
+def test_model_profile_auth_token():
+    """Anthropic profiles should allow setting auth_token."""
+    profile = ModelProfile(
+        provider=ProviderType.ANTHROPIC, model="claude-3-5-sonnet-20241022", auth_token="tok"
+    )
+    assert profile.auth_token == "tok"
+
+
 def test_provider_type_normalizes_aliases():
     """ProviderType should treat legacy provider names as protocol families."""
     assert ProviderType("openai-compatible") == ProviderType.OPENAI_COMPATIBLE
@@ -56,7 +64,7 @@ def test_config_manager():
         # Modify and save
         config.has_completed_onboarding = True
         config.model_profiles["test"] = ModelProfile(
-            provider=ProviderType.ANTHROPIC, model="test-model"
+            provider=ProviderType.ANTHROPIC, model="test-model", auth_token="tok"
         )
         manager.save_global_config(config)
 
@@ -65,6 +73,7 @@ def test_config_manager():
         loaded_config = manager.get_global_config()
         assert loaded_config.has_completed_onboarding
         assert "test" in loaded_config.model_profiles
+        assert loaded_config.model_profiles["test"].auth_token == "tok"
 
 
 def test_project_config():

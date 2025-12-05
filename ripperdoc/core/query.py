@@ -434,7 +434,14 @@ async def query_llm(
     try:
         # Create the appropriate client based on provider
         if model_profile.provider == ProviderType.ANTHROPIC:
-            async with AsyncAnthropic(api_key=model_profile.api_key) as client:
+            anthropic_kwargs = {"base_url": model_profile.api_base}
+            if model_profile.api_key:
+                anthropic_kwargs["api_key"] = model_profile.api_key
+            auth_token = getattr(model_profile, "auth_token", None)
+            if auth_token:
+                anthropic_kwargs["auth_token"] = auth_token
+
+            async with AsyncAnthropic(**anthropic_kwargs) as client:
                 tool_schemas = await build_anthropic_tool_schemas(tools)
                 response = await client.messages.create(
                     model=model_profile.model,

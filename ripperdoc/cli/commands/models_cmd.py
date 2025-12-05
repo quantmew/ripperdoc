@@ -113,6 +113,15 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         api_key_input = getpass("API key (leave blank to keep unset): ").strip()
         api_key = api_key_input or (existing_profile.api_key if existing_profile else None)
 
+        auth_token = existing_profile.auth_token if existing_profile else None
+        if provider == ProviderType.ANTHROPIC:
+            auth_token_input = getpass(
+                "Auth token (Anthropic only, leave blank to keep unset): "
+            ).strip()
+            auth_token = auth_token_input or auth_token
+        else:
+            auth_token = None
+
         api_base_default = existing_profile.api_base if existing_profile else ""
         api_base = (
             console.input(
@@ -163,6 +172,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             max_tokens=max_tokens,
             temperature=temperature,
             context_window=context_window,
+            auth_token=auth_token,
         )
 
         try:
@@ -222,6 +232,18 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         else:
             api_key = existing_profile.api_key
 
+        auth_token = existing_profile.auth_token
+        if provider == ProviderType.ANTHROPIC or existing_profile.provider == ProviderType.ANTHROPIC:
+            auth_label = "[set]" if auth_token else "[not set]"
+            auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear): "
+            auth_token_input = getpass(auth_prompt).strip()
+            if auth_token_input == "-":
+                auth_token = None
+            elif auth_token_input:
+                auth_token = auth_token_input
+        else:
+            auth_token = None
+
         api_base = (
             console.input(f"API base (optional) [{existing_profile.api_base or ''}]: ").strip()
             or existing_profile.api_base
@@ -255,6 +277,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             max_tokens=max_tokens,
             temperature=temperature,
             context_window=context_window,
+            auth_token=auth_token,
         )
 
         try:
@@ -335,6 +358,11 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             markup=False,
         )
         console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}", markup=False)
+        if profile.provider == ProviderType.ANTHROPIC:
+            console.print(
+                f"      auth_token: {'***' if getattr(profile, 'auth_token', None) else 'Not set'}",
+                markup=False,
+            )
         if profile.openai_tool_mode:
             console.print(f"      openai_tool_mode: {profile.openai_tool_mode}", markup=False)
     pointer_labels = ", ".join(f"{p}->{v or '-'}" for p, v in pointer_map.items())

@@ -100,6 +100,8 @@ class ModelProfile(BaseModel):
     provider: ProviderType
     model: str
     api_key: Optional[str] = None
+    # Anthropic supports either api_key or auth_token; api_key takes precedence when both are set.
+    auth_token: Optional[str] = None
     api_base: Optional[str] = None
     max_tokens: int = 4096
     temperature: float = 0.7
