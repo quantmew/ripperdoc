@@ -14,6 +14,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import atexit
+
 from ripperdoc.utils.shell_utils import build_shell_command, find_suitable_shell
 from ripperdoc.utils.log import get_logger
 
@@ -44,6 +46,7 @@ _tasks_lock = threading.Lock()
 _background_loop: Optional[asyncio.AbstractEventLoop] = None
 _background_thread: Optional[threading.Thread] = None
 _loop_lock = threading.Lock()
+_shutdown_registered = False
 
 
 def _ensure_background_loop() -> asyncio.AbstractEventLoop:
@@ -75,7 +78,16 @@ def _ensure_background_loop() -> asyncio.AbstractEventLoop:
 
         _background_loop = loop
         _background_thread = thread
+        _register_shutdown_hook()
         return loop
+
+
+def _register_shutdown_hook() -> None:
+    global _shutdown_registered
+    if _shutdown_registered:
+        return
+    atexit.register(shutdown_background_shell)
+    _shutdown_registered = True
 
 
 def _submit_to_background_loop(coro: Any) -> concurrent.futures.Future:
@@ -287,3 +299,35 @@ def list_background_tasks() -> List[str]:
     """Return known background task ids."""
     with _tasks_lock:
         return list(_tasks.keys())
+
+
+def shutdown_background_shell() -> None:
+    """Stop background tasks/loop to avoid asyncio 'Event loop is closed' warnings."""
+    global _background_loop, _background_thread
+
+    loop = _background_loop
+    with _tasks_lock:
+        tasks = list(_tasks.values())
+        _tasks.clear()
+
+    for task in tasks:
+        try:
+            task.killed = True
+            task.process.kill()
+        except Exception:
+            pass
+        for reader in task.reader_tasks:
+            if loop and loop.is_running():
+                loop.call_soon_threadsafe(reader.cancel)
+        task.done_event.set()
+
+    if loop and loop.is_running():
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
+    if _background_thread and _background_thread.is_alive():
+        _background_thread.join(timeout=2)
+
+    _background_loop = None
+    _background_thread = None
