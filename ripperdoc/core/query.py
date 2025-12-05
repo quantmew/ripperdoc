@@ -102,6 +102,143 @@ async def _check_tool_permissions(
         return False, None
 
 
+async def _run_tool_use_generator(
+    tool: Tool[Any, Any],
+    tool_use_id: str,
+    tool_name: str,
+    parsed_input: Any,
+    sibling_ids: set[str],
+    tool_context: ToolUseContext,
+) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+    """Execute a single tool_use and yield progress/results."""
+    try:
+        async for output in tool.call(parsed_input, tool_context):
+            if isinstance(output, ToolProgress):
+                yield create_progress_message(
+                    tool_use_id=tool_use_id,
+                    sibling_tool_use_ids=sibling_ids,
+                    content=output.content,
+                )
+                logger.debug(f"[query] Progress from tool_use_id={tool_use_id}: {output.content}")
+            elif isinstance(output, ToolResult):
+                result_content = output.result_for_assistant or str(output.data)
+                result_msg = tool_result_message(
+                    tool_use_id, result_content, tool_use_result=output.data
+                )
+                yield result_msg
+                logger.debug(
+                    f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
+                    f"result_len={len(result_content)}"
+                )
+    except Exception as exc:
+        logger.exception(
+            f"Error executing tool '{tool_name}'",
+            extra={"tool": tool_name, "tool_use_id": tool_use_id},
+        )
+        yield tool_result_message(
+            tool_use_id, f"Error executing tool: {str(exc)}", is_error=True
+        )
+
+
+def _group_tool_calls_by_concurrency(
+    prepared_calls: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Group consecutive tool calls by their concurrency safety."""
+    groups: List[Dict[str, Any]] = []
+    for call in prepared_calls:
+        is_safe = bool(call.get("is_concurrency_safe"))
+        if groups and groups[-1]["is_concurrency_safe"] == is_safe:
+            groups[-1]["items"].append(call)
+        else:
+            groups.append({"is_concurrency_safe": is_safe, "items": [call]})
+    return groups
+
+
+async def _execute_tools_sequentially(
+    items: List[Dict[str, Any]], tool_results: List[UserMessage]
+) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+    """Run tool generators one by one."""
+    for item in items:
+        gen = item.get("generator")
+        if not gen:
+            continue
+        async for message in gen:
+            if isinstance(message, UserMessage):
+                tool_results.append(message)
+            yield message
+
+
+async def _execute_tools_in_parallel(
+    items: List[Dict[str, Any]], tool_results: List[UserMessage]
+) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+    """Run tool generators concurrently."""
+    generators = [call["generator"] for call in items if call.get("generator")]
+    async for message in _run_concurrent_tool_uses(generators, tool_results):
+        yield message
+
+
+async def _run_tools_concurrently(
+    prepared_calls: List[Dict[str, Any]], tool_results: List[UserMessage]
+) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+    """Run tools grouped by concurrency safety (parallel for safe groups)."""
+    for group in _group_tool_calls_by_concurrency(prepared_calls):
+        if group["is_concurrency_safe"]:
+            logger.debug(
+                f"[query] Executing {len(group['items'])} concurrency-safe tool(s) in parallel"
+            )
+            async for message in _execute_tools_in_parallel(group["items"], tool_results):
+                yield message
+        else:
+            logger.debug(
+                f"[query] Executing {len(group['items'])} tool(s) sequentially (not concurrency safe)"
+            )
+            async for message in _run_tools_serially(group["items"], tool_results):
+                yield message
+
+
+async def _run_tools_serially(
+    prepared_calls: List[Dict[str, Any]], tool_results: List[UserMessage]
+) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+    """Run all tools sequentially (helper for clarity)."""
+    async for message in _execute_tools_sequentially(prepared_calls, tool_results):
+        yield message
+
+
+async def _run_concurrent_tool_uses(
+    generators: List[AsyncGenerator[Union[UserMessage, ProgressMessage], None]],
+    tool_results: List[UserMessage],
+) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+    """Drain multiple tool generators concurrently and stream outputs."""
+    if not generators:
+        return
+
+    queue: asyncio.Queue[Optional[Union[UserMessage, ProgressMessage]]] = asyncio.Queue()
+
+    async def _consume(gen: AsyncGenerator[Union[UserMessage, ProgressMessage], None]) -> None:
+        try:
+            async for message in gen:
+                await queue.put(message)
+        except Exception:
+            logger.exception("[query] Unexpected error while consuming tool generator")
+        finally:
+            await queue.put(None)
+
+    tasks = [asyncio.create_task(_consume(gen)) for gen in generators]
+    active = len(tasks)
+
+    try:
+        while active:
+            message = await queue.get()
+            if message is None:
+                active -= 1
+                continue
+            if isinstance(message, UserMessage):
+                tool_results.append(message)
+            yield message
+    finally:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 class ToolRegistry:
     """Track available tools, including deferred ones, and expose search/activation helpers."""
 
@@ -495,6 +632,7 @@ async def query(
     sibling_ids = set(
         getattr(t, "tool_use_id", None) or getattr(t, "id", None) or "" for t in tool_use_blocks
     )
+    prepared_calls: List[Dict[str, Any]] = []
 
     for tool_use in tool_use_blocks:
         tool_name = tool_use.name
@@ -511,19 +649,19 @@ async def query(
             continue
         assert tool is not None
 
-        tool_context = ToolUseContext(
-            safe_mode=query_context.safe_mode,
-            verbose=query_context.verbose,
-            permission_checker=can_use_tool_fn,
-            tool_registry=query_context.tool_registry,
-            abort_signal=query_context.abort_controller,
-        )
-
         try:
             parsed_input = tool.input_schema(**tool_input)
             logger.debug(
                 f"[query] tool_use_id={tool_use_id} name={tool_name} parsed_input="
                 f"{str(parsed_input)[:500]}"
+            )
+
+            tool_context = ToolUseContext(
+                safe_mode=query_context.safe_mode,
+                verbose=query_context.verbose,
+                permission_checker=can_use_tool_fn,
+                tool_registry=query_context.tool_registry,
+                abort_signal=query_context.abort_controller,
             )
 
             validation = await tool.validate_input(parsed_input, tool_context)
@@ -555,26 +693,19 @@ async def query(
                     permission_denied = True
                     break
 
-            async for output in tool.call(parsed_input, tool_context):
-                if isinstance(output, ToolProgress):
-                    progress = create_progress_message(
-                        tool_use_id=tool_use_id,
-                        sibling_tool_use_ids=sibling_ids,
-                        content=output.content,
-                    )
-                    yield progress
-                    logger.debug(f"[query] Progress from tool_use_id={tool_use_id}: {output.content}")
-                elif isinstance(output, ToolResult):
-                    result_content = output.result_for_assistant or str(output.data)
-                    result_msg = tool_result_message(
-                        tool_use_id, result_content, tool_use_result=output.data
-                    )
-                    tool_results.append(result_msg)
-                    yield result_msg
-                    logger.debug(
-                        f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
-                        f"result_len={len(result_content)}"
-                    )
+            prepared_calls.append(
+                {
+                    "is_concurrency_safe": tool.is_concurrency_safe(),
+                    "generator": _run_tool_use_generator(
+                        tool,
+                        tool_use_id,
+                        tool_name,
+                        parsed_input,
+                        sibling_ids,
+                        tool_context,
+                    ),
+                }
+            )
 
         except ValidationError as ve:
             detail_text = format_pydantic_errors(ve)
@@ -599,6 +730,13 @@ async def query(
 
         if permission_denied:
             break
+
+    if permission_denied:
+        return
+
+    if prepared_calls:
+        async for message in _run_tools_concurrently(prepared_calls, tool_results):
+            yield message
 
     # Check for abort after tools
     if query_context.abort_controller.is_set():
