@@ -31,6 +31,7 @@ from ripperdoc.utils.mcp import (
 )
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
+from ripperdoc.utils.prompt import prompt_secret
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -199,7 +200,11 @@ def check_onboarding() -> bool:
         )
         api_base = click.prompt("API Base URL")
 
-    api_key = click.prompt("Enter your API key", hide_input=True)
+    api_key = ""
+    while not api_key:
+        api_key = prompt_secret("Enter your API key").strip()
+        if not api_key:
+            console.print("[red]API key is required.[/red]")
 
     provider = ProviderType(provider_choice)
 

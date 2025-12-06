@@ -1,6 +1,4 @@
-from typing import Any
-from getpass import getpass
-from typing import Optional
+from typing import Any, Optional
 
 from rich.markup import escape
 
@@ -14,6 +12,7 @@ from ripperdoc.core.config import (
     set_model_pointer,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.prompt import prompt_secret
 
 from .base import SlashCommand
 
@@ -110,13 +109,13 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print("[red]Model name is required.[/red]")
             return True
 
-        api_key_input = getpass("API key (leave blank to keep unset): ").strip()
+        api_key_input = prompt_secret("API key (leave blank to keep unset)").strip()
         api_key = api_key_input or (existing_profile.api_key if existing_profile else None)
 
         auth_token = existing_profile.auth_token if existing_profile else None
         if provider == ProviderType.ANTHROPIC:
-            auth_token_input = getpass(
-                "Auth token (Anthropic only, leave blank to keep unset): "
+            auth_token_input = prompt_secret(
+                "Auth token (Anthropic only, leave blank to keep unset)"
             ).strip()
             auth_token = auth_token_input or auth_token
         else:
@@ -223,8 +222,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         )
 
         api_key_label = "[set]" if existing_profile.api_key else "[not set]"
-        api_key_prompt = f"API key {api_key_label} (Enter=keep, '-'=clear): "
-        api_key_input = getpass(api_key_prompt).strip()
+        api_key_prompt = f"API key {api_key_label} (Enter=keep, '-'=clear)"
+        api_key_input = prompt_secret(api_key_prompt).strip()
         if api_key_input == "-":
             api_key = None
         elif api_key_input:
@@ -238,8 +237,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             or existing_profile.provider == ProviderType.ANTHROPIC
         ):
             auth_label = "[set]" if auth_token else "[not set]"
-            auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear): "
-            auth_token_input = getpass(auth_prompt).strip()
+            auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear)"
+            auth_token_input = prompt_secret(auth_prompt).strip()
             if auth_token_input == "-":
                 auth_token = None
             elif auth_token_input:
