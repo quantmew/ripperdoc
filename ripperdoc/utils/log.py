@@ -101,7 +101,8 @@ class RipperdocLogger:
                 # Swallow errors while rotating handlers; console logging should continue.
                 self.logger.exception("[logging] Failed to remove existing file handler")
 
-        file_handler = logging.FileHandler(log_file)
+        # Use UTF-8 to avoid Windows code page encoding errors when logs contain non-ASCII text.
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_formatter = StructuredFormatter("%(asctime)s [%(levelname)s] %(message)s")
         file_handler.setFormatter(file_formatter)
