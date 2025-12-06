@@ -5,8 +5,6 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 
 import asyncio
 import sys
-import select
-import threading
 import uuid
 import time
 from typing import List, Dict, Any, Optional, Union, Iterable
@@ -289,26 +287,6 @@ class RichUI:
                 "[ui] Failed to append prompt history",
                 extra={"session_id": self.session_id},
             )
-
-    def _start_escape_listener(self, abort_event: asyncio.Event) -> threading.Event:
-        """Start a background listener that sets abort_event when ESC is pressed."""
-        stop_flag = threading.Event()
-
-        def _listen() -> None:
-            try:
-                while not stop_flag.is_set():
-                    readable, _, _ = select.select([sys.stdin], [], [], 0.2)
-                    if not readable:
-                        continue
-                    char = sys.stdin.read(1)
-                    if char == "\x1b":  # ESC
-                        abort_event.set()
-                        break
-            except Exception:
-                logger.exception("[ui] Escape listener failed", extra={"session_id": self.session_id})
-
-        threading.Thread(target=_listen, daemon=True).start()
-        return stop_flag
 
     def replay_conversation(self, messages: List[Dict[str, Any]]) -> None:
         """Render a conversation history in the console and seed prompt history."""
@@ -855,9 +833,6 @@ class RichUI:
 
             prompt_tokens_est = estimate_conversation_tokens(messages, protocol=protocol)
             spinner = ThinkingSpinner(console, prompt_tokens_est)
-            abort_listener: Optional[threading.Event] = None
-            if self.query_context and self.query_context.abort_controller:
-                abort_listener = self._start_escape_listener(self.query_context.abort_controller)
             # Wrap permission checker to pause the spinner while waiting for user input.
             base_permission_checker = self._permission_checker
 
@@ -996,8 +971,6 @@ class RichUI:
                     logger.exception(
                         "[ui] Failed to stop spinner", extra={"session_id": self.session_id}
                     )
-                if abort_listener:
-                    abort_listener.set()
 
                 # Update conversation history
                 self.conversation_messages = messages

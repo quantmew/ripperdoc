@@ -7,6 +7,7 @@ from ripperdoc.utils.messages import (
     create_progress_message,
     normalize_messages_for_api,
 )
+from ripperdoc.core.providers.base import sanitize_tool_history
 
 
 def test_create_user_message():
@@ -68,3 +69,55 @@ def test_message_with_tool_result():
     assert msg.type == "user"
     assert isinstance(msg.message.content, list)
     assert len(msg.message.content) == 1
+
+
+def test_sanitize_tool_history_keeps_multiple_tool_results():
+    """Ensure tool_use blocks are retained when results arrive in later messages."""
+    normalized = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "call_1", "name": "foo", "input": {}},
+                {"type": "tool_use", "id": "call_2", "name": "bar", "input": {}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "call_1", "text": "ok"}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "call_2", "text": "ok"}],
+        },
+    ]
+
+    sanitized = sanitize_tool_history(normalized)
+
+    tool_use_ids = [
+        block["id"] for block in sanitized[0]["content"] if block.get("type") == "tool_use"
+    ]
+    assert set(tool_use_ids) == {"call_1", "call_2"}
+
+
+def test_sanitize_tool_history_drops_unpaired_tool_use():
+    """Unpaired tool_use blocks should still be removed."""
+    normalized = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "call_1", "name": "foo", "input": {}},
+                {"type": "tool_use", "id": "call_2", "name": "bar", "input": {}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "call_1", "text": "ok"}],
+        },
+    ]
+
+    sanitized = sanitize_tool_history(normalized)
+
+    tool_use_ids = [
+        block["id"] for block in sanitized[0]["content"] if block.get("type") == "tool_use"
+    ]
+    assert tool_use_ids == ["call_1"]

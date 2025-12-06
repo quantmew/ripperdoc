@@ -68,6 +68,16 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
                         ids.add(str(tid))
         return ids
 
+    # Build a lookahead map so we can pair tool_use blocks with tool_results that may
+    # appear in any later message (not just the immediate next one).
+    tool_results_after: List[set[str]] = []
+    if normalized_messages:
+        tool_results_after = [set() for _ in normalized_messages]
+        future_ids: set[str] = set()
+        for idx in range(len(normalized_messages) - 1, -1, -1):
+            tool_results_after[idx] = set(future_ids)
+            future_ids.update(_tool_result_ids(normalized_messages[idx]))
+
     sanitized: List[Dict[str, Any]] = []
     for idx, message in enumerate(normalized_messages):
         if message.get("role") != "assistant":
@@ -89,8 +99,7 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
             sanitized.append(message)
             continue
 
-        next_msg = normalized_messages[idx + 1] if idx + 1 < len(normalized_messages) else None
-        next_results = _tool_result_ids(next_msg) if next_msg else set()
+        future_results = tool_results_after[idx] if tool_results_after else set()
 
         # Identify unpaired tool_use IDs
         unpaired_ids: set[str] = set()
@@ -101,7 +110,7 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
                 or (block.get("tool_use_id") if isinstance(block, dict) else None)
                 or (block.get("id") if isinstance(block, dict) else None)
             )
-            if block_id and str(block_id) not in next_results:
+            if block_id and str(block_id) not in future_results:
                 unpaired_ids.add(str(block_id))
 
         if not unpaired_ids:
