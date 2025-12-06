@@ -40,6 +40,7 @@ class ToolUseContext(BaseModel):
     verbose: bool = False
     permission_checker: Optional[Any] = None
     read_file_timestamps: Dict[str, float] = {}
+    file_state_cache: Dict[str, Any] = {}
     tool_registry: Optional[Any] = None
     abort_signal: Optional[Any] = None
     model_config = ConfigDict(arbitrary_types_allowed=True)

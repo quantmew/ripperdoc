@@ -17,6 +17,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.file_watch import record_snapshot
 
 logger = get_logger()
 
@@ -124,6 +125,18 @@ NEVER write new files unless explicitly required by the user."""
                 f.write(input_data.content)
 
             bytes_written = len(input_data.content.encode("utf-8"))
+
+            try:
+                record_snapshot(
+                    input_data.file_path,
+                    input_data.content,
+                    getattr(context, "file_state_cache", {}),
+                )
+            except Exception:
+                logger.exception(
+                    "[file_write_tool] Failed to record file snapshot",
+                    extra={"file_path": input_data.file_path},
+                )
 
             output = FileWriteToolOutput(
                 file_path=input_data.file_path,

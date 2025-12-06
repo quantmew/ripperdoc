@@ -16,6 +16,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.file_watch import record_snapshot
 
 logger = get_logger()
 
@@ -184,6 +185,18 @@ match exactly (including whitespace and indentation)."""
             # Write the file
             with open(input_data.file_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
+
+            try:
+                record_snapshot(
+                    input_data.file_path,
+                    new_content,
+                    getattr(context, "file_state_cache", {}),
+                )
+            except Exception:
+                logger.exception(
+                    "[file_edit_tool] Failed to record file snapshot",
+                    extra={"file_path": input_data.file_path},
+                )
 
             # Generate diff for display
             import difflib

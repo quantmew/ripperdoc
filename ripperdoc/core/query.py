@@ -39,12 +39,14 @@ from ripperdoc.core.query_utils import (
     tool_result_message,
 )
 from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
+from ripperdoc.utils.file_watch import ChangedFileNotice, detect_changed_files
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
     ProgressMessage,
     UserMessage,
     create_assistant_message,
+    create_user_message,
     create_progress_message,
     normalize_messages_for_api,
     INTERRUPT_MESSAGE,
@@ -109,6 +111,22 @@ async def _check_tool_permissions(
             extra={"tool": getattr(tool, "name", None)},
         )
         return False, None
+
+
+def _format_changed_file_notice(notices: List[ChangedFileNotice]) -> str:
+    """Render a system notice about files that changed on disk."""
+    lines: List[str] = [
+        "System notice: Files you previously read have changed on disk.",
+        "Please re-read the affected files before making further edits.",
+        "",
+    ]
+    for notice in notices:
+        lines.append(f"- {notice.file_path}")
+        summary = (notice.summary or "").rstrip()
+        if summary:
+            indented = "\n".join(f"    {line}" for line in summary.splitlines())
+            lines.append(indented)
+    return "\n".join(lines)
 
 
 async def _run_tool_use_generator(
@@ -357,6 +375,7 @@ class QueryContext:
         self.model = model
         self.verbose = verbose
         self.abort_controller = asyncio.Event()
+        self.file_state_cache: Dict[str, Any] = {}
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -540,6 +559,9 @@ async def query(
     # Work on a copy so external mutations (e.g., UI appending messages while consuming)
     # do not interfere with recursion or normalization.
     messages = list(messages)
+    change_notices = detect_changed_files(query_context.file_state_cache)
+    if change_notices:
+        messages.append(create_user_message(_format_changed_file_notice(change_notices)))
     model_profile = resolve_model_profile(query_context.model)
     tool_mode = determine_tool_mode(model_profile)
     tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else query_context.all_tools()
@@ -681,6 +703,8 @@ async def query(
                 verbose=query_context.verbose,
                 permission_checker=can_use_tool_fn,
                 tool_registry=query_context.tool_registry,
+                file_state_cache=query_context.file_state_cache,
+                read_file_timestamps=query_context.file_state_cache,
                 abort_signal=query_context.abort_controller,
             )
 

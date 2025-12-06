@@ -16,6 +16,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.file_watch import record_snapshot
 
 logger = get_logger()
 
@@ -142,6 +143,21 @@ and limit to read only a portion of the file."""
                 selected_lines = lines[offset:]
 
             content = "".join(selected_lines)
+
+            # Remember what we read so we can detect user edits later.
+            try:
+                record_snapshot(
+                    input_data.file_path,
+                    content,
+                    getattr(context, "file_state_cache", {}),
+                    offset=offset,
+                    limit=limit,
+                )
+            except Exception:
+                logger.exception(
+                    "[file_read_tool] Failed to record file snapshot",
+                    extra={"file_path": input_data.file_path},
+                )
 
             output = FileReadToolOutput(
                 content=content,

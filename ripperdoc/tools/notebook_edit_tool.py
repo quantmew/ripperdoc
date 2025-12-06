@@ -20,6 +20,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.file_watch import record_snapshot
 
 
 logger = get_logger()
@@ -272,6 +273,17 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             )
 
             path.write_text(json.dumps(nb_json, indent=1), encoding="utf-8")
+            try:
+                record_snapshot(
+                    input_data.notebook_path,
+                    json.dumps(nb_json, indent=1),
+                    getattr(context, "file_state_cache", {}),
+                )
+            except Exception:
+                logger.exception(
+                    "[notebook_edit_tool] Failed to record file snapshot",
+                    extra={"file_path": input_data.notebook_path},
+                )
 
             output = NotebookEditOutput(
                 new_source=new_source,

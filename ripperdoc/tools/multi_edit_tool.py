@@ -18,6 +18,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.file_watch import record_snapshot
 
 logger = get_logger()
 
@@ -360,6 +361,17 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         file_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             file_path.write_text(updated_content, encoding="utf-8")
+            try:
+                record_snapshot(
+                    str(file_path),
+                    updated_content,
+                    getattr(context, "file_state_cache", {}),
+                )
+            except Exception:
+                logger.exception(
+                    "[multi_edit_tool] Failed to record file snapshot",
+                    extra={"file_path": str(file_path)},
+                )
         except Exception as exc:
             logger.exception(
                 "[multi_edit_tool] Error writing edited file",
