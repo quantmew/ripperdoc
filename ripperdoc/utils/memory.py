@@ -72,9 +72,7 @@ def _read_file_with_type(file_path: Path, file_type: str) -> Optional[MemoryFile
         content = file_path.read_text(encoding="utf-8", errors="ignore")
         return MemoryFile(path=str(file_path), type=file_type, content=content)
     except PermissionError:
-        logger.exception(
-            "[memory] Permission error reading file", extra={"path": str(file_path)}
-        )
+        logger.exception("[memory] Permission error reading file", extra={"path": str(file_path)})
         return None
     except OSError:
         logger.exception("[memory] OS error reading file", extra={"path": str(file_path)})

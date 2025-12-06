@@ -12,8 +12,7 @@ logger = get_logger()
 
 
 def safe_parse_json(json_text: Optional[str], log_error: bool = True) -> Optional[Any]:
-    """Best-effort JSON.parse wrapper that returns None on failure.
-    """
+    """Best-effort JSON.parse wrapper that returns None on failure."""
     if not json_text:
         return None
     try:

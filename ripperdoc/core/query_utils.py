@@ -131,9 +131,7 @@ def _parse_text_mode_json_blocks(text: str) -> Optional[List[Dict[str, Any]]]:
     if not text or not isinstance(text, str):
         return None
 
-    code_blocks = re.findall(
-        r"```(?:\s*json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE
-    )
+    code_blocks = re.findall(r"```(?:\s*json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE)
     candidates = [blk.strip() for blk in code_blocks if blk.strip()]
 
     def _normalize_blocks(parsed: object) -> Optional[List[Dict[str, Any]]]:
@@ -232,7 +230,9 @@ def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
 
         schema_json = ""
         try:
-            schema_json = json.dumps(tool.input_schema.model_json_schema(), ensure_ascii=False, indent=2)
+            schema_json = json.dumps(
+                tool.input_schema.model_json_schema(), ensure_ascii=False, indent=2
+            )
         except (AttributeError, TypeError, ValueError) as exc:
             logger.debug(
                 "[tool_prompt] Failed to render input_schema",
@@ -246,7 +246,12 @@ def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
 
     example_blocks = [
         {"type": "text", "text": "好的，我来帮你查看一下README.md文件"},
-        {"type": "tool_use", "tool_use_id": "tool_id_000001", "tool": "View", "input": {"file_path": "README.md"}},
+        {
+            "type": "tool_use",
+            "tool_use_id": "tool_id_000001",
+            "tool": "View",
+            "input": {"file_path": "README.md"},
+        },
     ]
     lines.append("Example:")
     lines.append("```json")
@@ -256,7 +261,9 @@ def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
     return "\n".join(lines)
 
 
-def text_mode_history(messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]]) -> List[Union[UserMessage, AssistantMessage]]:
+def text_mode_history(
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+) -> List[Union[UserMessage, AssistantMessage]]:
     """Convert a message history into text-only form for text mode."""
 
     def _normalize_block(block: Any) -> Optional[Dict[str, Any]]:
@@ -297,9 +304,13 @@ def text_mode_history(messages: List[Union[UserMessage, AssistantMessage, Progre
         if isinstance(content, list):
             normalized_blocks = []
             for block in content:
-                block_type = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
-                block_text = getattr(block, "text", None) if hasattr(block, "text") else (
-                    block.get("text") if isinstance(block, dict) else None
+                block_type = getattr(block, "type", None) or (
+                    block.get("type") if isinstance(block, dict) else None
+                )
+                block_text = (
+                    getattr(block, "text", None)
+                    if hasattr(block, "text")
+                    else (block.get("text") if isinstance(block, dict) else None)
                 )
                 if block_type == "text" and isinstance(block_text, str):
                     parsed_nested = _parse_text_mode_json_blocks(block_text)
@@ -315,7 +326,9 @@ def text_mode_history(messages: List[Union[UserMessage, AssistantMessage, Progre
         elif isinstance(content, str):
             parsed_blocks = _parse_text_mode_json_blocks(content)
             if parsed_blocks:
-                text_content = f"```json\n{json.dumps(parsed_blocks, ensure_ascii=False, indent=2)}\n```"
+                text_content = (
+                    f"```json\n{json.dumps(parsed_blocks, ensure_ascii=False, indent=2)}\n```"
+                )
             else:
                 text_content = content
         else:
@@ -329,7 +342,9 @@ def text_mode_history(messages: List[Union[UserMessage, AssistantMessage, Progre
     return converted
 
 
-def _maybe_convert_json_block_to_tool_use(content_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _maybe_convert_json_block_to_tool_use(
+    content_blocks: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     """Convert any text blocks containing JSON content to structured content blocks."""
     if not content_blocks:
         return content_blocks
@@ -465,9 +480,7 @@ async def build_openai_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[st
     return openai_tools
 
 
-def content_blocks_from_anthropic_response(
-    response: Any, tool_mode: str
-) -> List[Dict[str, Any]]:
+def content_blocks_from_anthropic_response(response: Any, tool_mode: str) -> List[Dict[str, Any]]:
     """Normalize Anthropic response content to our internal block format."""
     blocks: List[Dict[str, Any]] = []
     for block in getattr(response, "content", []) or []:

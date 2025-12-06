@@ -31,14 +31,17 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
     def print_agents_usage() -> None:
         console.print("[bold]/agents[/bold] — list configured agents")
         console.print(
-            "[bold]/agents create <name> [location] [model][/bold] — create agent (location: user|project, default user)"
+            "[bold]/agents create <name> [location] [model][/bold] — "
+            "create agent (location: user|project, default user)"
         )
         console.print("[bold]/agents edit <name> [location][/bold] — edit an existing agent")
         console.print(
-            "[bold]/agents delete <name> [location][/bold] — delete agent (location: user|project, default user)"
+            "[bold]/agents delete <name> [location][/bold] — "
+            "delete agent (location: user|project, default user)"
         )
         console.print(
-            f"[dim]Agent files live in ~/.ripperdoc/{AGENT_DIR_NAME} or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
+            f"[dim]Agent files live in ~/.ripperdoc/{AGENT_DIR_NAME} "
+            f"or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
         )
         console.print(
             "[dim]Model can be a profile name or pointer (task/main/etc). Defaults to 'task'.[/dim]"
@@ -92,7 +95,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             and model_input not in pointer_map
         ):
             console.print(
-                "[yellow]Model not found in profiles or pointers; will fall back to main if unavailable.[/yellow]"
+                "[yellow]Model not found in profiles or pointers; "
+                "will fall back to main if unavailable.[/yellow]"
             )
 
         try:

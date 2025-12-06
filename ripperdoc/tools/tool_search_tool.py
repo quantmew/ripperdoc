@@ -119,7 +119,9 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
     def is_concurrency_safe(self) -> bool:
         return True
 
-    def needs_permissions(self, input_data: Optional[ToolSearchInput] = None) -> bool:  # noqa: ARG002
+    def needs_permissions(
+        self, input_data: Optional[ToolSearchInput] = None
+    ) -> bool:  # noqa: ARG002
         return False
 
     async def validate_input(
@@ -280,9 +282,11 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
                     "name": name,
                     "user_facing_name": tool.user_facing_name(),
                     "description": description,
-                    "active": getattr(registry, "is_active", lambda *_: False)(name)
-                    if hasattr(registry, "is_active")
-                    else False,
+                    "active": (
+                        getattr(registry, "is_active", lambda *_: False)(name)
+                        if hasattr(registry, "is_active")
+                        else False
+                    ),
                     "deferred": name in getattr(registry, "deferred_names", set()),
                     "score": 0.0,
                 }

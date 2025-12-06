@@ -46,14 +46,17 @@ class OpenAIClient(ProviderClient):
     ) -> ProviderResponse:
         start_time = time.time()
         openai_tools = await build_openai_tool_schemas(tools)
-        openai_messages: List[Dict[str, object]] = [{"role": "system", "content": system_prompt}] + sanitize_tool_history(
-            list(normalized_messages)
-        )
+        openai_messages: List[Dict[str, object]] = [
+            {"role": "system", "content": system_prompt}
+        ] + sanitize_tool_history(list(normalized_messages))
         collected_text: List[str] = []
 
         can_stream = stream and tool_mode == "text" and not openai_tools
 
-        async with AsyncOpenAI(api_key=model_profile.api_key, base_url=model_profile.api_base) as client:
+        async with AsyncOpenAI(
+            api_key=model_profile.api_key, base_url=model_profile.api_base
+        ) as client:
+
             async def _stream_request() -> Dict[str, Dict[str, int]]:
                 stream_resp = await client.chat.completions.create(  # type: ignore[call-overload]
                     model=model_profile.model,
@@ -71,7 +74,9 @@ class OpenAIClient(ProviderClient):
                     if delta_content:
                         if isinstance(delta_content, list):
                             for part in delta_content:
-                                text_val = getattr(part, "text", None) or getattr(part, "content", None)
+                                text_val = getattr(part, "text", None) or getattr(
+                                    part, "content", None
+                                )
                                 if isinstance(text_val, str):
                                     text_delta += text_val
                         elif isinstance(delta_content, str):
@@ -105,7 +110,9 @@ class OpenAIClient(ProviderClient):
         duration_ms = (time.time() - start_time) * 1000
         usage_tokens = openai_usage_tokens(getattr(openai_response, "usage", None))
         cost_usd = estimate_cost_usd(model_profile, usage_tokens)
-        record_usage(model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens)
+        record_usage(
+            model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
+        )
 
         finish_reason: Optional[str]
         if can_stream:

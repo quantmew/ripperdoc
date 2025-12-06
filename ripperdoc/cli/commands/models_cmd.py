@@ -233,7 +233,10 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             api_key = existing_profile.api_key
 
         auth_token = existing_profile.auth_token
-        if provider == ProviderType.ANTHROPIC or existing_profile.provider == ProviderType.ANTHROPIC:
+        if (
+            provider == ProviderType.ANTHROPIC
+            or existing_profile.provider == ProviderType.ANTHROPIC
+        ):
             auth_label = "[set]" if auth_token else "[not set]"
             auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear): "
             auth_token_input = getpass(auth_prompt).strip()

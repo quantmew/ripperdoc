@@ -54,9 +54,7 @@ class StructuredFormatter(logging.Formatter):
         }
         if extras:
             try:
-                serialized = json.dumps(
-                    extras, sort_keys=True, ensure_ascii=True, default=str
-                )
+                serialized = json.dumps(extras, sort_keys=True, ensure_ascii=True, default=str)
             except Exception:
                 serialized = str(extras)
             return f"{message} | {serialized}"

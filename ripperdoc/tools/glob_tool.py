@@ -112,7 +112,11 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
         rendered_path = ""
         if input_data.path:
             candidate_path = Path(input_data.path)
-            absolute_path = candidate_path if candidate_path.is_absolute() else (base_path / candidate_path).resolve()
+            absolute_path = (
+                candidate_path
+                if candidate_path.is_absolute()
+                else (base_path / candidate_path).resolve()
+            )
 
             try:
                 relative_path = absolute_path.relative_to(base_path)

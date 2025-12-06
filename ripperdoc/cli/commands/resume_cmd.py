@@ -30,7 +30,8 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
             if 0 <= idx < len(sessions):
                 return sessions[idx]
             ui.console.print(
-                f"[red]Invalid session index {escape(str(idx))}. Choose 0-{len(sessions) - 1}.[/red]"
+                f"[red]Invalid session index {escape(str(idx))}. "
+                f"Choose 0-{len(sessions) - 1}.[/red]"
             )
         else:
             # Treat arg as session id if it matches.
@@ -60,7 +61,8 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
     idx = int(choice_text)
     if idx < 0 or idx >= len(sessions):
         ui.console.print(
-            f"[red]Invalid session index {escape(str(idx))}. Choose 0-{len(sessions) - 1}.[/red]"
+            f"[red]Invalid session index {escape(str(idx))}. "
+            f"Choose 0-{len(sessions) - 1}.[/red]"
         )
         return None
     return sessions[idx]

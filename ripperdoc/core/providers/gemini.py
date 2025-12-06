@@ -90,7 +90,9 @@ class GeminiClient(ProviderClient):
                 duration_ms=0.0,
             )
 
-        api_key = model_profile.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        api_key = (
+            model_profile.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        )
         genai.configure(api_key=api_key, client_options={"api_endpoint": model_profile.api_base})
 
         # Flatten normalized messages into a single text prompt (Gemini supports multi-turn, but keep it simple).
@@ -146,9 +148,11 @@ class GeminiClient(ProviderClient):
         usage_tokens = _extract_usage_metadata(response)
         cost_usd = 0.0  # Pricing unknown; leave as 0
 
-        content_blocks = [{"type": "text", "text": "".join(collected_text)}] if collected_text else [
-            {"type": "text", "text": _collect_text_parts(response)}
-        ]
+        content_blocks = (
+            [{"type": "text", "text": "".join(collected_text)}]
+            if collected_text
+            else [{"type": "text", "text": _collect_text_parts(response)}]
+        )
 
         logger.info(
             "[gemini_client] Response received",

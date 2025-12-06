@@ -40,6 +40,7 @@ def _status_row(label: str, status: str, detail: str = "") -> Tuple[str, str, st
 def _api_key_status(provider: ProviderType, profile_key: Optional[str]) -> Tuple[str, str]:
     """Check API key presence and source."""
     import os
+
     for env_var in api_key_env_candidates(provider):
         if os.environ.get(env_var):
             masked = os.environ[env_var]
@@ -59,7 +60,9 @@ def _model_status(project_path: Path) -> List[Tuple[str, str, str]]:
     rows: List[Tuple[str, str, str]] = []
 
     if not profile:
-        rows.append(_status_row("Model profile", "error", "No profile configured for pointer 'main'"))
+        rows.append(
+            _status_row("Model profile", "error", "No profile configured for pointer 'main'")
+        )
         return rows
 
     if pointer not in config.model_profiles:
@@ -147,10 +150,14 @@ def _project_status(project_path: Path) -> Tuple[str, str, str]:
         config = get_project_config(project_path)
         # Access a field to ensure model parsing does not throw.
         _ = len(config.allowed_tools)
-        return _status_row("Project config", "ok", f".ripperdoc/config.json loaded for {project_path}")
+        return _status_row(
+            "Project config", "ok", f".ripperdoc/config.json loaded for {project_path}"
+        )
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("[doctor] Failed to load project config", exc_info=exc)
-        return _status_row("Project config", "warn", f"Could not read .ripperdoc/config.json: {exc}")
+        return _status_row(
+            "Project config", "warn", f"Could not read .ripperdoc/config.json: {exc}"
+        )
 
 
 def _render_table(console: Any, rows: List[Tuple[str, str, str]]) -> None:
@@ -185,7 +192,8 @@ def _handle(ui: Any, _: str) -> bool:
             ui.console.print(f"  • {escape(err)}")
 
     ui.console.print(
-        "\n[dim]If a check is failing, run `ripperdoc` without flags to rerun onboarding or update ~/.ripperdoc.json[/dim]"
+        "\n[dim]If a check is failing, run `ripperdoc` without flags "
+        "to rerun onboarding or update ~/.ripperdoc.json[/dim]"
     )
     return True
 

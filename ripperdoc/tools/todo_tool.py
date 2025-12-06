@@ -361,9 +361,7 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
             )
             yield ToolResult(data=output, result_for_assistant=result_text)
         except Exception as exc:
-            logger.exception(
-                "[todo_tool] Error updating todos", extra={"error": str(exc)}
-            )
+            logger.exception("[todo_tool] Error updating todos", extra={"error": str(exc)})
             error = f"Error updating todos: {exc}"
             yield ToolResult(
                 data=TodoToolOutput(

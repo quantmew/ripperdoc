@@ -402,9 +402,7 @@ def find_latest_assistant_usage_tokens(
             if tokens > 0:
                 return tokens
         except Exception:
-            logger.debug(
-                "[message_compaction] Failed to parse usage tokens", exc_info=True
-            )
+            logger.debug("[message_compaction] Failed to parse usage tokens", exc_info=True)
             continue
     return 0
 
@@ -441,9 +439,7 @@ def _run_cleanup_callbacks() -> None:
         try:
             callback()
         except Exception as exc:
-            logger.debug(
-                f"[message_compaction] Cleanup callback failed: {exc}", exc_info=True
-            )
+            logger.debug(f"[message_compaction] Cleanup callback failed: {exc}", exc_info=True)
 
 
 def _normalize_tool_use_id(block: Any) -> str:

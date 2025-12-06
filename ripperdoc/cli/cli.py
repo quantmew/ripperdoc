@@ -147,7 +147,9 @@ async def run_query(
             console.print("\n[yellow]Interrupted by user[/yellow]")
         except Exception as e:
             console.print(f"[red]Error: {escape(str(e))}[/red]")
-            logger.exception("[cli] Unhandled error while running prompt", extra={"session_id": session_id})
+            logger.exception(
+                "[cli] Unhandled error while running prompt", extra={"session_id": session_id}
+            )
             if verbose:
                 import traceback
 

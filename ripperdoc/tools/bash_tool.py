@@ -510,7 +510,8 @@ build projects, run tests, and interact with the file system."""
                 is_error=True,
             )
             yield ToolResult(
-                data=error_output, result_for_assistant=self.render_result_for_assistant(error_output)
+                data=error_output,
+                result_for_assistant=self.render_result_for_assistant(error_output),
             )
             return
 

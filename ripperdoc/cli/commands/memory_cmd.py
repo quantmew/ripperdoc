@@ -103,7 +103,8 @@ def _open_in_editor(path: Path, console: Any) -> bool:
     editor_cmd = _determine_editor_command()
     if not editor_cmd:
         console.print(
-            f"[yellow]No editor configured. Set $EDITOR or $VISUAL, or manually edit: {escape(str(path))}[/yellow]"
+            f"[yellow]No editor configured. Set $EDITOR or $VISUAL, "
+            f"or manually edit: {escape(str(path))}[/yellow]"
         )
         return False
 
@@ -152,9 +153,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             "global": "user",
         }
         if scope not in scope_aliases:
-            ui.console.print(
-                "[red]Unknown scope. Use one of: project, local, user.[/red]"
-            )
+            ui.console.print("[red]Unknown scope. Use one of: project, local, user.[/red]")
             return True
 
         resolved_scope = scope_aliases[scope]
@@ -175,9 +174,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
 
         _open_in_editor(target_path, ui.console)
 
-        messages: List[str] = [
-            f"{heading}: {escape(_shorten_path(target_path, project_path))}"
-        ]
+        messages: List[str] = [f"{heading}: {escape(_shorten_path(target_path, project_path))}"]
         if created:
             messages.append("Created new memory file.")
         if gitignore_added:
@@ -189,12 +186,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         return True
 
     _render_memory_table(ui.console, project_path)
-    ui.console.print(
-        "[dim]Usage: /memory project | /memory local | /memory user[/dim]"
-    )
-    ui.console.print(
-        "[dim]Project and user memories feed directly into the system prompt.[/dim]"
-    )
+    ui.console.print("[dim]Usage: /memory project | /memory local | /memory user[/dim]")
+    ui.console.print("[dim]Project and user memories feed directly into the system prompt.[/dim]")
     return True
 
 

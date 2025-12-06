@@ -54,9 +54,9 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
         content = msg.get("content")
         if isinstance(content, list):
             for part in content:
-                part_type = getattr(part, "get", lambda k, default=None: part.__dict__.get(k, default))(
-                    "type", None
-                )
+                part_type = getattr(
+                    part, "get", lambda k, default=None: part.__dict__.get(k, default)
+                )("type", None)
                 if part_type == "tool_result":
                     tid = (
                         getattr(part, "tool_use_id", None)
@@ -92,7 +92,10 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
         tool_use_blocks = [
             part
             for part in content
-            if (getattr(part, "type", None) or (part.get("type") if isinstance(part, dict) else None))
+            if (
+                getattr(part, "type", None)
+                or (part.get("type") if isinstance(part, dict) else None)
+            )
             == "tool_use"
         ]
         if not tool_use_blocks:
@@ -120,7 +123,9 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
         # Drop unpaired tool_use blocks
         filtered_content = []
         for part in content:
-            part_type = getattr(part, "type", None) or (part.get("type") if isinstance(part, dict) else None)
+            part_type = getattr(part, "type", None) or (
+                part.get("type") if isinstance(part, dict) else None
+            )
             if part_type == "tool_use":
                 block_id = (
                     getattr(part, "tool_use_id", None)

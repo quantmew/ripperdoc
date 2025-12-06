@@ -204,7 +204,7 @@ async def build_tool_description(
     except Exception:
         logger.exception(
             "[tool] Failed to build input example section",
-            extra={"tool": getattr(tool, 'name', None)},
+            extra={"tool": getattr(tool, "name", None)},
         )
         return description_text
 
@@ -223,7 +223,7 @@ def tool_input_examples(tool: Tool[Any, Any], limit: int = 5) -> List[Dict[str, 
         except Exception:
             logger.exception(
                 "[tool] Failed to format tool input example",
-                extra={"tool": getattr(tool, 'name', None)},
+                extra={"tool": getattr(tool, "name", None)},
             )
             continue
     return results

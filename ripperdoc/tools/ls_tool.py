@@ -142,22 +142,22 @@ def _should_skip(
     path: Path,
     root_path: Path,
     patterns: list[str],
-    ignore_map: Optional[Dict[Optional[Path], List[str]]] = None
+    ignore_map: Optional[Dict[Optional[Path], List[str]]] = None,
 ) -> bool:
     name = path.name
     if name.startswith("."):
         return True
     if "__pycache__" in path.parts:
         return True
-    
+
     # Check against ignore patterns
     if ignore_map and should_ignore_path(path, root_path, ignore_map):
         return True
-    
+
     # Also check against direct patterns for backward compatibility
     if patterns and _matches_ignore(path, root_path, patterns):
         return True
-    
+
     return False
 
 
@@ -346,7 +346,9 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
         try:
             root_path = _resolve_directory_path(input_data.path)
         except Exception:
-            return ValidationResult(result=False, message=f"Unable to resolve path: {input_data.path}")
+            return ValidationResult(
+                result=False, message=f"Unable to resolve path: {input_data.path}"
+            )
 
         if not root_path.is_absolute():
             return ValidationResult(result=False, message=f"Path is not absolute: {root_path}")
@@ -392,7 +394,9 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
             return f'path: "{input_data.path}"{ignore_display}'
 
         try:
-            relative_path = _relative_path_for_display(resolved_path, base_path) or resolved_path.as_posix()
+            relative_path = (
+                _relative_path_for_display(resolved_path, base_path) or resolved_path.as_posix()
+            )
         except Exception:
             relative_path = str(resolved_path)
 
@@ -431,18 +435,18 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
             git_root = get_git_root(root_path)
             if git_root:
                 git_info["repository"] = str(git_root)
-                
+
                 branch = get_current_git_branch(root_path)
                 if branch:
                     git_info["branch"] = branch
-                
+
                 commit_hash = get_git_commit_hash(root_path)
                 if commit_hash:
                     git_info["commit"] = commit_hash
-                
+
                 is_clean = is_working_directory_clean(root_path)
                 git_info["clean"] = "yes" if is_clean else "no (uncommitted changes)"
-                
+
                 tracked, untracked = get_git_status_files(root_path)
                 if tracked or untracked:
                     status_info = []

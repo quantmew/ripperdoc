@@ -50,9 +50,19 @@ class AgentLoadResult:
     failed_files: List[Tuple[Path, str]]
 
 
-GENERAL_AGENT_PROMPT = """You are a general-purpose subagent for Ripperdoc. Work autonomously on the task provided by the parent agent. Use the allowed tools to research, edit files, and run commands as needed. When you finish, provide a concise report describing what you changed, what you investigated, and any follow-ups the parent agent should share with the user."""
+GENERAL_AGENT_PROMPT = (
+    "You are a general-purpose subagent for Ripperdoc. Work autonomously on the task "
+    "provided by the parent agent. Use the allowed tools to research, edit files, and "
+    "run commands as needed. When you finish, provide a concise report describing what "
+    "you changed, what you investigated, and any follow-ups the parent agent should "
+    "share with the user."
+)
 
-CODE_REVIEW_AGENT_PROMPT = """You are a code review subagent. Inspect the code and summarize risks, bugs, missing tests, security concerns, and regressions. Do not make code changes. Provide clear, actionable feedback that the parent agent can relay to the user."""
+CODE_REVIEW_AGENT_PROMPT = (
+    "You are a code review subagent. Inspect the code and summarize risks, bugs, "
+    "missing tests, security concerns, and regressions. Do not make code changes. "
+    "Provide clear, actionable feedback that the parent agent can relay to the user."
+)
 
 
 def _built_in_agents() -> List[AgentDefinition]:
@@ -136,9 +146,7 @@ def _parse_agent_file(
     try:
         text = path.read_text(encoding="utf-8")
     except Exception as exc:
-        logger.exception(
-            "Failed to read agent file", extra={"error": str(exc), "path": str(path)}
-        )
+        logger.exception("Failed to read agent file", extra={"error": str(exc), "path": str(path)})
         return None, f"Failed to read agent file {path}: {exc}"
 
     frontmatter, body = _split_frontmatter(text)

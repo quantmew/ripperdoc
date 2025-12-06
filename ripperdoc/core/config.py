@@ -260,7 +260,10 @@ class ConfigManager:
                 self._project_config = ProjectConfig()
                 logger.debug(
                     "[config] Project config not found; using defaults",
-                    extra={"path": str(config_path), "project_path": str(self.current_project_path)},
+                    extra={
+                        "path": str(config_path),
+                        "project_path": str(self.current_project_path),
+                    },
                 )
 
         return self._project_config

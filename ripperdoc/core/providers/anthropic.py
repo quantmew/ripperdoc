@@ -66,6 +66,7 @@ class AnthropicClient(ProviderClient):
         normalized_messages = sanitize_tool_history(list(normalized_messages))
 
         async with await self._client(anthropic_kwargs) as client:
+
             async def _stream_request() -> Any:
                 async with client.messages.stream(
                     model=model_profile.model,
@@ -109,7 +110,9 @@ class AnthropicClient(ProviderClient):
         duration_ms = (time.time() - start_time) * 1000
         usage_tokens = anthropic_usage_tokens(getattr(response, "usage", None))
         cost_usd = estimate_cost_usd(model_profile, usage_tokens)
-        record_usage(model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens)
+        record_usage(
+            model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
+        )
 
         content_blocks = content_blocks_from_anthropic_response(response, tool_mode)
         if stream and collected_text and tool_mode == "text":

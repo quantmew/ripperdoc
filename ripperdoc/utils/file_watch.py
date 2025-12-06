@@ -59,9 +59,7 @@ def _read_portion(file_path: str, offset: int, limit: Optional[int]) -> str:
     return "".join(selected)
 
 
-def _build_diff_summary(
-    old_content: str, new_content: str, file_path: str, max_lines: int
-) -> str:
+def _build_diff_summary(old_content: str, new_content: str, file_path: str, max_lines: int) -> str:
     diff = list(
         difflib.unified_diff(
             old_content.splitlines(),
@@ -134,4 +132,3 @@ def detect_changed_files(
         )
 
     return notices
-

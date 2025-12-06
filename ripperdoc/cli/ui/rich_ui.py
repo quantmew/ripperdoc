@@ -6,7 +6,6 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 import asyncio
 import sys
 import uuid
-import time
 from typing import List, Dict, Any, Optional, Union, Iterable
 from pathlib import Path
 
@@ -952,7 +951,9 @@ class RichUI:
                             output_token_est += delta_tokens
                             spinner.update_tokens(output_token_est)
                         else:
-                            spinner.update_tokens(output_token_est, suffix=f"Working... {message.content}")
+                            spinner.update_tokens(
+                                output_token_est, suffix=f"Working... {message.content}"
+                            )
 
                     # Add message to history
                     self._log_message(message)

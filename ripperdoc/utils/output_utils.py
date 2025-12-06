@@ -151,9 +151,7 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, A
         available = max(0, max_chars - len(marker))
         keep_start = min(TRUNCATE_KEEP_START, available // 2)
         keep_end = min(TRUNCATE_KEEP_END, available - keep_start)
-        marker = _choose_marker(
-            max(0, original_length - (keep_start + keep_end)), max_chars
-        )
+        marker = _choose_marker(max(0, original_length - (keep_start + keep_end)), max_chars)
 
     available = max(0, max_chars - len(marker))
     # Ensure kept sections fit the final budget; trim end first, then start if needed.

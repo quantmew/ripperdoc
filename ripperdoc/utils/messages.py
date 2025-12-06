@@ -371,9 +371,7 @@ def normalize_messages_for_api(
                     api_blocks.append(_content_block_to_api(block))
                 normalized.append({"role": "user", "content": api_blocks})
             else:
-                normalized.append(
-                    {"role": "user", "content": user_content}  # type: ignore
-                )
+                normalized.append({"role": "user", "content": user_content})  # type: ignore
         elif msg_type == "assistant":
             asst_content = _msg_content(msg)
             if isinstance(asst_content, list):
@@ -428,9 +426,7 @@ def normalize_messages_for_api(
                     api_blocks.append(_content_block_to_api(block))
                 normalized.append({"role": "assistant", "content": api_blocks})
             else:
-                normalized.append(
-                    {"role": "assistant", "content": asst_content}  # type: ignore
-                )
+                normalized.append({"role": "assistant", "content": asst_content})  # type: ignore
 
     logger.debug(
         f"[normalize_messages_for_api] protocol={protocol} tool_mode={effective_tool_mode} "

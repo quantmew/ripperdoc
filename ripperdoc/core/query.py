@@ -25,7 +25,7 @@ from typing import (
 
 from pydantic import ValidationError
 
-from ripperdoc.core.config import ProviderType, provider_protocol
+from ripperdoc.core.config import provider_protocol
 from ripperdoc.core.providers import ProviderClient, get_provider_client
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.query_utils import (
@@ -175,14 +175,10 @@ async def _run_tool_use_generator(
             f"Error executing tool '{tool_name}'",
             extra={"tool": tool_name, "tool_use_id": tool_use_id},
         )
-        yield tool_result_message(
-            tool_use_id, f"Error executing tool: {str(exc)}", is_error=True
-        )
+        yield tool_result_message(tool_use_id, f"Error executing tool: {str(exc)}", is_error=True)
 
 
-def _group_tool_calls_by_concurrency(
-    prepared_calls: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+def _group_tool_calls_by_concurrency(prepared_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Group consecutive tool calls by their concurrency safety."""
     groups: List[Dict[str, Any]] = []
     for call in prepared_calls:
@@ -522,9 +518,9 @@ async def query_llm(
             extra={
                 "model": getattr(model_profile, "model", None),
                 "model_pointer": model,
-                "provider": getattr(model_profile.provider, "value", None)
-                if model_profile
-                else None,
+                "provider": (
+                    getattr(model_profile.provider, "value", None) if model_profile else None
+                ),
             },
         )
         duration_ms = (time.time() - start_time) * 1000
