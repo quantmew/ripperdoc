@@ -55,7 +55,7 @@ class GeminiClient(ProviderClient):
         *,
         model_profile: ModelProfile,
         system_prompt: str,
-        normalized_messages: Any,
+        normalized_messages: List[Dict[str, Any]],
         tools: List[Tool[Any, Any]],
         tool_mode: str,
         stream: bool,
@@ -95,12 +95,19 @@ class GeminiClient(ProviderClient):
 
         # Flatten normalized messages into a single text prompt (Gemini supports multi-turn, but keep it simple).
         prompt_parts: List[str] = [system_prompt]
-        for msg in normalized_messages:
-            role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", "")
+        for msg in normalized_messages:  # type: ignore[assignment]
+            role: str = (
+                str(msg.get("role", "")) if isinstance(msg, dict) else str(getattr(msg, "role", ""))  # type: ignore[assignment]
+            )
             content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
             if isinstance(content, list):
                 for item in content:
-                    text_val = getattr(item, "text", None) or item.get("text", "") if isinstance(item, dict) else ""
+                    text_val = (
+                        getattr(item, "text", None)
+                        or item.get("text", "")  # type: ignore[union-attr]
+                        if isinstance(item, dict)
+                        else ""
+                    )
                     if text_val:
                         prompt_parts.append(f"{role}: {text_val}")
             elif isinstance(content, str):
@@ -111,7 +118,7 @@ class GeminiClient(ProviderClient):
         collected_text: List[str] = []
         start_time = time.time()
 
-        async def _stream_request() -> Any:
+        async def _stream_request() -> Dict[str, Dict[str, int]]:
             stream_resp = model.generate_content(full_prompt, stream=True)
             usage_tokens: Dict[str, int] = {}
             for chunk in stream_resp:

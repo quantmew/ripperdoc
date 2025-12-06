@@ -20,7 +20,7 @@ ProgressCallback = Callable[[str], Awaitable[None]]
 class ProviderResponse:
     """Normalized provider response payload."""
 
-    content_blocks: Any
+    content_blocks: List[Dict[str, Any]]
     usage_tokens: Dict[str, int]
     cost_usd: float
     duration_ms: float
@@ -35,7 +35,7 @@ class ProviderClient(ABC):
         *,
         model_profile: ModelProfile,
         system_prompt: str,
-        normalized_messages: Any,
+        normalized_messages: List[Dict[str, Any]],
         tools: List[Tool[Any, Any]],
         tool_mode: str,
         stream: bool,

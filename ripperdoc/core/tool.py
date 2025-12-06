@@ -8,6 +8,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, List, Optional, TypeVar, Generic, Union
 from pydantic import BaseModel, ConfigDict, Field
+from ripperdoc.utils.file_watch import FileSnapshot
 from ripperdoc.utils.log import get_logger
 
 
@@ -39,8 +40,8 @@ class ToolUseContext(BaseModel):
     safe_mode: bool = False
     verbose: bool = False
     permission_checker: Optional[Any] = None
-    read_file_timestamps: Dict[str, float] = {}
-    file_state_cache: Dict[str, Any] = {}
+    read_file_timestamps: Dict[str, float] = Field(default_factory=dict)
+    file_state_cache: Dict[str, "FileSnapshot"] = Field(default_factory=dict)
     tool_registry: Optional[Any] = None
     abort_signal: Optional[Any] = None
     model_config = ConfigDict(arbitrary_types_allowed=True)

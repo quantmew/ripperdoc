@@ -31,7 +31,7 @@ class MessageContent(BaseModel):
     id: Optional[str] = None
     tool_use_id: Optional[str] = None
     name: Optional[str] = None
-    input: Optional[Dict[str, Any]] = None
+    input: Optional[Dict[str, object]] = None
     is_error: Optional[bool] = None
 
 
@@ -120,7 +120,7 @@ class Message(BaseModel):
     content: Union[str, List[MessageContent]]
     uuid: str = ""
 
-    def __init__(self, **data: Any) -> None:
+    def __init__(self, **data: object) -> None:
         if "uuid" not in data or not data["uuid"]:
             data["uuid"] = str(uuid4())
         super().__init__(**data)
@@ -132,9 +132,9 @@ class UserMessage(BaseModel):
     type: str = "user"
     message: Message
     uuid: str = ""
-    tool_use_result: Optional[Any] = None
+    tool_use_result: Optional[object] = None
 
-    def __init__(self, **data: Any) -> None:
+    def __init__(self, **data: object) -> None:
         if "uuid" not in data or not data["uuid"]:
             data["uuid"] = str(uuid4())
         super().__init__(**data)
@@ -150,7 +150,7 @@ class AssistantMessage(BaseModel):
     duration_ms: float = 0.0
     is_api_error_message: bool = False
 
-    def __init__(self, **data: Any) -> None:
+    def __init__(self, **data: object) -> None:
         if "uuid" not in data or not data["uuid"]:
             data["uuid"] = str(uuid4())
         super().__init__(**data)
@@ -167,14 +167,14 @@ class ProgressMessage(BaseModel):
     sibling_tool_use_ids: set[str] = set()
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self, **data: Any) -> None:
+    def __init__(self, **data: object) -> None:
         if "uuid" not in data or not data["uuid"]:
             data["uuid"] = str(uuid4())
         super().__init__(**data)
 
 
 def create_user_message(
-    content: Union[str, List[Dict[str, Any]]], tool_use_result: Optional[Any] = None
+    content: Union[str, List[Dict[str, Any]]], tool_use_result: Optional[object] = None
 ) -> UserMessage:
     """Create a user message."""
     if isinstance(content, str):

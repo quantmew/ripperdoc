@@ -39,10 +39,11 @@ from ripperdoc.core.query_utils import (
     tool_result_message,
 )
 from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
-from ripperdoc.utils.file_watch import ChangedFileNotice, detect_changed_files
+from ripperdoc.utils.file_watch import ChangedFileNotice, FileSnapshot, detect_changed_files
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
+    MessageContent,
     ProgressMessage,
     UserMessage,
     create_assistant_message,
@@ -73,11 +74,23 @@ def _resolve_tool(
     )
 
 
+ToolPermissionCallable = Callable[
+    [Tool[Any, Any], Any],
+    Union[
+        PermissionResult,
+        Dict[str, Any],
+        Tuple[bool, Optional[str]],
+        bool,
+        Awaitable[Union[PermissionResult, Dict[str, Any], Tuple[bool, Optional[str]], bool]],
+    ],
+]
+
+
 async def _check_tool_permissions(
     tool: Tool[Any, Any],
     parsed_input: Any,
     query_context: "QueryContext",
-    can_use_tool_fn: Optional[Any],
+    can_use_tool_fn: Optional[ToolPermissionCallable],
 ) -> tuple[bool, Optional[str]]:
     """Evaluate whether a tool call is allowed."""
     try:
@@ -375,7 +388,7 @@ class QueryContext:
         self.model = model
         self.verbose = verbose
         self.abort_controller = asyncio.Event()
-        self.file_state_cache: Dict[str, Any] = {}
+        self.file_state_cache: Dict[str, FileSnapshot] = {}
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -442,7 +455,7 @@ async def query_llm(
     else:
         messages_for_model = messages
 
-    normalized_messages = normalize_messages_for_api(
+    normalized_messages: List[Dict[str, Any]] = normalize_messages_for_api(
         messages_for_model, protocol=protocol, tool_mode=tool_mode
     )
     logger.info(
@@ -527,7 +540,7 @@ async def query(
     system_prompt: str,
     context: Dict[str, str],
     query_context: QueryContext,
-    can_use_tool_fn: Optional[Any] = None,
+    can_use_tool_fn: Optional[ToolPermissionCallable] = None,
 ) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
     """Execute a query with tool support.
 
@@ -653,7 +666,7 @@ async def query(
 
     yield assistant_message
 
-    tool_use_blocks = extract_tool_use_blocks(assistant_message)
+    tool_use_blocks: List[MessageContent] = extract_tool_use_blocks(assistant_message)
     text_blocks = (
         len(assistant_message.message.content)
         if isinstance(assistant_message.message.content, list)
@@ -704,7 +717,6 @@ async def query(
                 permission_checker=can_use_tool_fn,
                 tool_registry=query_context.tool_registry,
                 file_state_cache=query_context.file_state_cache,
-                read_file_timestamps=query_context.file_state_cache,
                 abort_signal=query_context.abort_controller,
             )
 

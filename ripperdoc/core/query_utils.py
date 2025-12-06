@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Union
 from uuid import uuid4
 
 from json_repair import repair_json
@@ -26,17 +26,25 @@ from ripperdoc.utils.messages import (
 logger = get_logger()
 
 
-def _safe_int(value: Any) -> int:
+def _safe_int(value: object) -> int:
     """Best-effort int conversion for usage counters."""
     try:
         if value is None:
             return 0
-        return int(value)
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            return int(value)
+        if hasattr(value, "__int__"):
+            return int(value)  # type: ignore[arg-type]
+        return 0
     except (TypeError, ValueError):
         return 0
 
 
-def _get_usage_field(usage: Any, field: str) -> int:
+def _get_usage_field(usage: Optional[Mapping[str, Any] | object], field: str) -> int:
     """Fetch a usage field from either a dict or object."""
     if usage is None:
         return 0
@@ -45,7 +53,7 @@ def _get_usage_field(usage: Any, field: str) -> int:
     return _safe_int(getattr(usage, field, 0))
 
 
-def anthropic_usage_tokens(usage: Any) -> Dict[str, int]:
+def anthropic_usage_tokens(usage: Optional[Mapping[str, Any] | object]) -> Dict[str, int]:
     """Extract token counts from an Anthropic response usage payload."""
     return {
         "input_tokens": _get_usage_field(usage, "input_tokens"),
@@ -55,7 +63,7 @@ def anthropic_usage_tokens(usage: Any) -> Dict[str, int]:
     }
 
 
-def openai_usage_tokens(usage: Any) -> Dict[str, int]:
+def openai_usage_tokens(usage: Optional[Mapping[str, Any] | object]) -> Dict[str, int]:
     """Extract token counts from an OpenAI-compatible response usage payload."""
     prompt_details = None
     if isinstance(usage, dict):
@@ -128,7 +136,7 @@ def _parse_text_mode_json_blocks(text: str) -> Optional[List[Dict[str, Any]]]:
     )
     candidates = [blk.strip() for blk in code_blocks if blk.strip()]
 
-    def _normalize_blocks(parsed: Any) -> Optional[List[Dict[str, Any]]]:
+    def _normalize_blocks(parsed: object) -> Optional[List[Dict[str, Any]]]:
         raw_blocks = parsed if isinstance(parsed, list) else [parsed]
         normalized: List[Dict[str, Any]] = []
         for raw in raw_blocks:

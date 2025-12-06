@@ -19,11 +19,13 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Tuple,
     Union,
 )
 
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import QueryContext, query as _core_query
+from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.tool import Tool
 from ripperdoc.tools.task_tool import TaskTool
@@ -42,7 +44,16 @@ from ripperdoc.utils.mcp import (
 )
 
 MessageType = Union[UserMessage, AssistantMessage, ProgressMessage]
-PermissionChecker = Callable[[Tool[Any, Any], Any], Union[Awaitable[Any], Any]]
+PermissionChecker = Callable[
+    [Tool[Any, Any], Any],
+    Union[
+        PermissionResult,
+        Dict[str, Any],
+        Tuple[bool, Optional[str]],
+        bool,
+        Awaitable[Union[PermissionResult, Dict[str, Any], Tuple[bool, Optional[str]], bool]],
+    ],
+]
 QueryRunner = Callable[
     [
         List[MessageType],
