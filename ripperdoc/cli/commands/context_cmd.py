@@ -9,11 +9,11 @@ from ripperdoc.core.query import QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.message_compaction import (
-    estimate_tokens_from_text,
     get_remaining_context_tokens,
     resolve_auto_compact_enabled,
     summarize_context_usage,
 )
+from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.mcp import (
     estimate_mcp_tokens,
     format_mcp_instructions,
@@ -60,7 +60,7 @@ def _handle(ui: Any, _: str) -> bool:
         mcp_instructions=mcp_instructions,
     )
     memory_instructions = build_memory_instructions()
-    memory_tokens = estimate_tokens_from_text(memory_instructions) if memory_instructions else 0
+    memory_tokens = estimate_tokens(memory_instructions) if memory_instructions else 0
     mcp_tokens = estimate_mcp_tokens(servers) if mcp_instructions else 0
 
     breakdown = summarize_context_usage(
@@ -98,7 +98,7 @@ def _handle(ui: Any, _: str) -> bool:
                     display = f"{display} ({server})"
                 try:
                     schema = tool.input_schema.model_json_schema()
-                    token_est = estimate_tokens_from_text(json.dumps(schema, sort_keys=True))
+                    token_est = estimate_tokens(json.dumps(schema, sort_keys=True))
                 except Exception:
                     token_est = 0
                 lines.append(f"     └ {display}: {format_tokens(token_est)} tokens")

@@ -39,12 +39,12 @@ from ripperdoc.cli.ui.context_display import context_usage_lines
 from ripperdoc.utils.message_compaction import (
     compact_messages,
     estimate_conversation_tokens,
-    estimate_tokens_from_text,
     estimate_used_tokens,
     get_context_usage_status,
     get_remaining_context_tokens,
     resolve_auto_compact_enabled,
 )
+from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.mcp import (
     format_mcp_instructions,
     load_mcp_servers_async,
@@ -448,6 +448,13 @@ class RichUI:
             else:
                 success = getattr(tool_data, "success", None)
                 failed = failed or (success is False)
+            failed = failed or bool(self._get_tool_field(tool_data, "is_error"))
+
+        warning_text = None
+        token_estimate = None
+        if tool_data is not None:
+            warning_text = self._get_tool_field(tool_data, "warning")
+            token_estimate = self._get_tool_field(tool_data, "token_estimate")
 
         if failed:
             if content:
@@ -455,6 +462,17 @@ class RichUI:
             else:
                 self.console.print(f"  ⎿  [red]{escape(sender)} failed[/red]")
             return
+
+        if warning_text:
+            self.console.print(f"  ⎿  [yellow]{escape(str(warning_text))}[/yellow]")
+            if token_estimate:
+                self.console.print(
+                    f"      [dim]Estimated tokens: {escape(str(token_estimate))}[/dim]"
+                )
+        elif token_estimate and self.verbose:
+            self.console.print(
+                f"  ⎿  [dim]Estimated tokens: {escape(str(token_estimate))}[/dim]"
+            )
 
         if not content:
             self.console.print("  ⎿  [dim]Tool completed[/]")
@@ -947,7 +965,7 @@ class RichUI:
                             elif message.content.startswith("Subagent"):
                                 self.display_message("Subagent", message.content, is_tool=True)
                         if message.tool_use_id == "stream":
-                            delta_tokens = estimate_tokens_from_text(message.content)
+                            delta_tokens = estimate_tokens(message.content)
                             output_token_est += delta_tokens
                             spinner.update_tokens(output_token_est)
                         else:

@@ -30,6 +30,7 @@ from ripperdoc.utils.mcp import (
     load_mcp_servers_async,
     shutdown_mcp_runtime,
 )
+from ripperdoc.utils.token_estimation import estimate_tokens
 
 
 logger = get_logger()
@@ -39,6 +40,55 @@ try:
 except Exception:  # pragma: no cover - SDK may be missing at runtime
     mcp_types = None  # type: ignore[assignment]
     logger.exception("[mcp_tools] MCP SDK unavailable during import")
+
+DEFAULT_MAX_MCP_OUTPUT_TOKENS = 25_000
+MIN_MCP_OUTPUT_TOKENS = 1_000
+DEFAULT_MCP_WARNING_FRACTION = 0.8
+
+
+def _get_mcp_token_limits() -> tuple[int, int]:
+    """Compute warning and hard limits for MCP output size."""
+    max_tokens = os.getenv("RIPPERDOC_MCP_MAX_OUTPUT_TOKENS")
+    try:
+        max_tokens_int = int(max_tokens) if max_tokens else DEFAULT_MAX_MCP_OUTPUT_TOKENS
+    except (TypeError, ValueError):
+        max_tokens_int = DEFAULT_MAX_MCP_OUTPUT_TOKENS
+    max_tokens_int = max(MIN_MCP_OUTPUT_TOKENS, max_tokens_int)
+
+    warn_env = os.getenv("RIPPERDOC_MCP_WARNING_TOKENS")
+    try:
+        warn_tokens_int = int(warn_env) if warn_env else int(max_tokens_int * DEFAULT_MCP_WARNING_FRACTION)
+    except (TypeError, ValueError):
+        warn_tokens_int = int(max_tokens_int * DEFAULT_MCP_WARNING_FRACTION)
+    warn_tokens_int = max(MIN_MCP_OUTPUT_TOKENS, min(warn_tokens_int, max_tokens_int))
+    return warn_tokens_int, max_tokens_int
+
+
+def _evaluate_mcp_output_size(
+    result_text: Optional[str],
+    server_name: str,
+    tool_name: str,
+) -> tuple[Optional[str], Optional[str], int]:
+    """Return (warning, error, token_estimate) for an MCP result text."""
+    warn_tokens, max_tokens = _get_mcp_token_limits()
+    token_estimate = estimate_tokens(result_text or "")
+
+    if token_estimate > max_tokens:
+        error_text = (
+            f"MCP response from {server_name}:{tool_name} is ~{token_estimate:,} tokens, "
+            f"which exceeds the configured limit of {max_tokens}. "
+            "Refine the request (pagination/filtering) or raise RIPPERDOC_MCP_MAX_OUTPUT_TOKENS."
+        )
+        return None, error_text, token_estimate
+
+    warning_text = None
+    if result_text and token_estimate >= warn_tokens:
+        line_count = result_text.count("\n") + 1
+        warning_text = (
+            f"WARNING: Large MCP response (~{token_estimate:,} tokens, {line_count:,} lines). "
+            "This can fill the context quickly; consider pagination or filters."
+        )
+    return warning_text, None, token_estimate
 
 
 def _content_block_to_text(block: Any) -> str:
@@ -370,6 +420,9 @@ class ReadMcpResourceOutput(BaseModel):
     uri: str
     content: Optional[str] = None
     contents: List[ResourceContentPart] = Field(default_factory=list)
+    token_estimate: Optional[int] = None
+    warning: Optional[str] = None
+    is_error: bool = False
 
 
 class McpToolCallOutput(BaseModel):
@@ -382,6 +435,8 @@ class McpToolCallOutput(BaseModel):
     content_blocks: Optional[List[Any]] = None
     structured_content: Optional[dict] = None
     is_error: bool = False
+    token_estimate: Optional[int] = None
+    warning: Optional[str] = None
 
 
 class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
@@ -552,9 +607,35 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
         read_result: Any = ReadMcpResourceOutput(
             server=input_data.server, uri=input_data.uri, content=content_text, contents=parts
         )
+        assistant_text = self.render_result_for_assistant(read_result)  # type: ignore[arg-type]
+        warning_text, error_text, token_estimate = _evaluate_mcp_output_size(
+            assistant_text, input_data.server, f"resource:{input_data.uri}"
+        )
+
+        if error_text:
+            limited_result = ReadMcpResourceOutput(
+                server=input_data.server,
+                uri=input_data.uri,
+                content=None,
+                contents=[],
+                token_estimate=token_estimate,
+                warning=None,
+                is_error=True,
+            )
+            yield ToolResult(data=limited_result, result_for_assistant=error_text)
+            return
+
+        annotated_result = read_result.model_copy(
+            update={"token_estimate": token_estimate, "warning": warning_text}
+        )
+
+        final_text = assistant_text or ""
+        if not final_text and warning_text:
+            final_text = warning_text
+
         yield ToolResult(
-            data=read_result,
-            result_for_assistant=self.render_result_for_assistant(read_result),  # type: ignore[arg-type]
+            data=annotated_result,
+            result_for_assistant=final_text,  # type: ignore[arg-type]
         )
 
 
@@ -715,9 +796,37 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                 structured_content=structured,
                 is_error=getattr(call_result, "isError", False),
             )
+            base_result_text = self.render_result_for_assistant(output)
+            warning_text, error_text, token_estimate = _evaluate_mcp_output_size(
+                base_result_text, self.server_name, self.tool_info.name
+            )
+
+            if error_text:
+                limited_output = McpToolCallOutput(
+                    server=self.server_name,
+                    tool=self.tool_info.name,
+                    content=None,
+                    text=None,
+                    content_blocks=None,
+                    structured_content=None,
+                    is_error=True,
+                    token_estimate=token_estimate,
+                    warning=None,
+                )
+                yield ToolResult(data=limited_output, result_for_assistant=error_text)
+                return
+
+            annotated_output = output.model_copy(
+                update={"token_estimate": token_estimate, "warning": warning_text}
+            )
+
+            final_text = base_result_text or ""
+            if not final_text and warning_text:
+                final_text = warning_text
+
             yield ToolResult(
-                data=output,
-                result_for_assistant=self.render_result_for_assistant(output),
+                data=annotated_output,
+                result_for_assistant=final_text,
             )
         except Exception as exc:  # pragma: no cover - runtime errors
             output = McpToolCallOutput(

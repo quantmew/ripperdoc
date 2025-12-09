@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 from ripperdoc.core.config import GlobalConfig, ModelProfile, get_global_config
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.messages import (
     AssistantMessage,
     MessageContent,
@@ -140,10 +140,8 @@ def _parse_truthy_env_value(value: Optional[str]) -> bool:
 
 
 def estimate_tokens_from_text(text: str) -> int:
-    """Rough token estimate using a 4-characters-per-token rule."""
-    if not text:
-        return 0
-    return max(1, math.ceil(len(text) / 4))
+    """Estimate token count using shared token estimation helper."""
+    return estimate_tokens(text)
 
 
 def _stringify_content(content: Union[str, List[MessageContent], None]) -> str:

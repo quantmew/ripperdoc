@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from ripperdoc import __version__
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.message_compaction import estimate_tokens_from_text
+from ripperdoc.utils.token_estimation import estimate_tokens
 
 logger = get_logger()
 
@@ -482,7 +482,7 @@ def format_mcp_instructions(servers: List[McpServerInfo]) -> str:
 def estimate_mcp_tokens(servers: List[McpServerInfo]) -> int:
     """Estimate token usage for MCP instructions."""
     mcp_text = format_mcp_instructions(servers)
-    return estimate_tokens_from_text(mcp_text)
+    return estimate_tokens(mcp_text)
 
 
 __all__ = [
