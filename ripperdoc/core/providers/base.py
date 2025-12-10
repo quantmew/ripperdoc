@@ -217,20 +217,8 @@ async def call_with_timeout_and_retries(
             )
             await asyncio.sleep(delay_seconds)
         except Exception as exc:
-            last_error = exc
-            if attempt == attempts:
-                break
-            delay_seconds = _retry_delay_seconds(attempt)
-            logger.warning(
-                "[provider_clients] Request failed; retrying",
-                extra={
-                    "attempt": attempt,
-                    "max_retries": attempts - 1,
-                    "delay_seconds": round(delay_seconds, 3),
-                    "error": str(exc),
-                },
-            )
-            await asyncio.sleep(delay_seconds)
+            # Non-timeout errors are not retried; surface immediately.
+            raise
     if last_error:
-        raise RuntimeError(f"Request failed after {attempts} attempts") from last_error
+        raise RuntimeError(f"Request timed out after {attempts} attempts") from last_error
     raise RuntimeError("Unexpected error executing request with retries")
