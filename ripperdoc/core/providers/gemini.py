@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import time
 from typing import Any, Dict, List, Optional
@@ -13,6 +12,7 @@ from ripperdoc.core.providers.base import (
     ProviderClient,
     ProviderResponse,
     call_with_timeout_and_retries,
+    iter_with_timeout,
 )
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
@@ -120,16 +120,11 @@ class GeminiClient(ProviderClient):
         model = genai.GenerativeModel(model_profile.model)
         collected_text: List[str] = []
         start_time = time.time()
-        keepalive_event: Optional[asyncio.Event] = (
-            asyncio.Event() if stream and progress_callback else None
-        )
 
         async def _stream_request() -> Dict[str, Dict[str, int]]:
             stream_resp = model.generate_content(full_prompt, stream=True)
             usage_tokens: Dict[str, int] = {}
-            for chunk in stream_resp:
-                if keepalive_event:
-                    keepalive_event.set()
+            async for chunk in iter_with_timeout(stream_resp, request_timeout):
                 text_delta = _collect_text_parts(chunk)
                 if text_delta:
                     collected_text.append(text_delta)
@@ -144,11 +139,11 @@ class GeminiClient(ProviderClient):
         async def _non_stream_request() -> Any:
             return model.generate_content(full_prompt)
 
+        timeout_for_call = None if stream and progress_callback else request_timeout
         response: Any = await call_with_timeout_and_retries(
             _stream_request if stream and progress_callback else _non_stream_request,
-            request_timeout,
+            timeout_for_call,
             max_retries,
-            keepalive_event=keepalive_event,
         )
 
         duration_ms = (time.time() - start_time) * 1000

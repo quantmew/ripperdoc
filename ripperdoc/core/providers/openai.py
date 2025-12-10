@@ -14,6 +14,7 @@ from ripperdoc.core.providers.base import (
     ProviderClient,
     ProviderResponse,
     call_with_timeout_and_retries,
+    iter_with_timeout,
     sanitize_tool_history,
 )
 from ripperdoc.core.query_utils import (
@@ -53,14 +54,13 @@ class OpenAIClient(ProviderClient):
         collected_text: List[str] = []
 
         can_stream = stream and tool_mode == "text" and not openai_tools
-        keepalive_event: Optional[asyncio.Event] = asyncio.Event() if can_stream else None
 
         async with AsyncOpenAI(
             api_key=model_profile.api_key, base_url=model_profile.api_base
         ) as client:
 
             async def _stream_request() -> Dict[str, Dict[str, int]]:
-                stream_resp = await client.chat.completions.create(  # type: ignore[call-overload]
+                stream_coro = client.chat.completions.create(  # type: ignore[call-overload]
                     model=model_profile.model,
                     messages=cast(Any, openai_messages),
                     tools=None,
@@ -68,10 +68,13 @@ class OpenAIClient(ProviderClient):
                     max_tokens=model_profile.max_tokens,
                     stream=True,
                 )
+                stream_resp = (
+                    await asyncio.wait_for(stream_coro, timeout=request_timeout)
+                    if request_timeout and request_timeout > 0
+                    else await stream_coro
+                )
                 usage_tokens: Dict[str, int] = {}
-                async for chunk in stream_resp:
-                    if keepalive_event:
-                        keepalive_event.set()
+                async for chunk in iter_with_timeout(stream_resp, request_timeout):
                     delta = getattr(chunk.choices[0], "delta", None)
                     delta_content = getattr(delta, "content", None) if delta else None
                     text_delta = ""
@@ -105,11 +108,11 @@ class OpenAIClient(ProviderClient):
                     max_tokens=model_profile.max_tokens,
                 )
 
+            timeout_for_call = None if can_stream else request_timeout
             openai_response: Any = await call_with_timeout_and_retries(
                 _stream_request if can_stream else _non_stream_request,
-                request_timeout,
+                timeout_for_call,
                 max_retries,
-                keepalive_event=keepalive_event,
             )
 
         duration_ms = (time.time() - start_time) * 1000

@@ -14,6 +14,7 @@ from ripperdoc.core.providers.base import (
     ProviderClient,
     ProviderResponse,
     call_with_timeout_and_retries,
+    iter_with_timeout,
     sanitize_tool_history,
 )
 from ripperdoc.core.query_utils import (
@@ -65,22 +66,25 @@ class AnthropicClient(ProviderClient):
             anthropic_kwargs["auth_token"] = auth_token
 
         normalized_messages = sanitize_tool_history(list(normalized_messages))
-        keepalive_event: Optional[asyncio.Event] = asyncio.Event() if stream else None
 
         async with await self._client(anthropic_kwargs) as client:
 
             async def _stream_request() -> Any:
-                async with client.messages.stream(
+                stream_cm = client.messages.stream(
                     model=model_profile.model,
                     max_tokens=model_profile.max_tokens,
                     system=system_prompt,
                     messages=normalized_messages,  # type: ignore[arg-type]
                     tools=tool_schemas if tool_schemas else None,  # type: ignore
                     temperature=model_profile.temperature,
-                ) as stream_resp:
-                    async for text in stream_resp.text_stream:
-                        if keepalive_event:
-                            keepalive_event.set()
+                )
+                stream_resp = (
+                    await asyncio.wait_for(stream_cm.__aenter__(), timeout=request_timeout)
+                    if request_timeout and request_timeout > 0
+                    else await stream_cm.__aenter__()
+                )
+                try:
+                    async for text in iter_with_timeout(stream_resp.text_stream, request_timeout):
                         if text:
                             collected_text.append(text)
                             if progress_callback:
@@ -94,6 +98,8 @@ class AnthropicClient(ProviderClient):
                     if getter:
                         return await getter()
                     return None
+                finally:
+                    await stream_cm.__aexit__(None, None, None)
 
             async def _non_stream_request() -> Any:
                 return await client.messages.create(
@@ -105,11 +111,11 @@ class AnthropicClient(ProviderClient):
                     temperature=model_profile.temperature,
                 )
 
+            timeout_for_call = None if stream else request_timeout
             response = await call_with_timeout_and_retries(
                 _stream_request if stream else _non_stream_request,
-                request_timeout,
+                timeout_for_call,
                 max_retries,
-                keepalive_event=keepalive_event,
             )
 
         duration_ms = (time.time() - start_time) * 1000
