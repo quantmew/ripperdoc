@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -161,19 +162,65 @@ def _retry_delay_seconds(attempt: int, base_delay: float = 0.5, max_delay: float
     return capped_base + jitter
 
 
+async def _run_with_keepalive_timeout(
+    coro_factory: Callable[[], Awaitable[Any]],
+    request_timeout: float,
+    keepalive_event: asyncio.Event,
+) -> Any:
+    """Enforce a per-chunk timeout by resetting on keepalive_event signals."""
+    task = asyncio.create_task(coro_factory())
+    keepalive_event.clear()
+    try:
+        while True:
+            keepalive_waiter: Optional[asyncio.Task[bool]] = asyncio.create_task(
+                keepalive_event.wait()
+            )
+            done, _ = await asyncio.wait(
+                {task, keepalive_waiter}, timeout=request_timeout, return_when=asyncio.FIRST_COMPLETED
+            )
+            if task in done:
+                keepalive_waiter.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await keepalive_waiter
+                return task.result()
+            if keepalive_waiter in done:
+                keepalive_event.clear()
+                keepalive_waiter.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await keepalive_waiter
+                continue
+            keepalive_waiter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await keepalive_waiter
+            raise asyncio.TimeoutError("Stream stalled without data")
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 async def call_with_timeout_and_retries(
     coro_factory: Callable[[], Awaitable[Any]],
     request_timeout: Optional[float],
     max_retries: int,
+    *,
+    keepalive_event: Optional[asyncio.Event] = None,
 ) -> Any:
     """Run a coroutine with timeout and limited retries (exponential backoff)."""
     attempts = max(0, int(max_retries)) + 1
     last_error: Optional[Exception] = None
+
+    async def _execute_once() -> Any:
+        if request_timeout and request_timeout > 0 and keepalive_event:
+            return await _run_with_keepalive_timeout(coro_factory, request_timeout, keepalive_event)
+        if request_timeout and request_timeout > 0:
+            return await asyncio.wait_for(coro_factory(), timeout=request_timeout)
+        return await coro_factory()
+
     for attempt in range(1, attempts + 1):
         try:
-            if request_timeout and request_timeout > 0:
-                return await asyncio.wait_for(coro_factory(), timeout=request_timeout)
-            return await coro_factory()
+            return await _execute_once()
         except asyncio.TimeoutError as exc:
             last_error = exc
             if attempt == attempts:

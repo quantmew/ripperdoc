@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from typing import Any, Dict, List, Optional
@@ -119,11 +120,16 @@ class GeminiClient(ProviderClient):
         model = genai.GenerativeModel(model_profile.model)
         collected_text: List[str] = []
         start_time = time.time()
+        keepalive_event: Optional[asyncio.Event] = (
+            asyncio.Event() if stream and progress_callback else None
+        )
 
         async def _stream_request() -> Dict[str, Dict[str, int]]:
             stream_resp = model.generate_content(full_prompt, stream=True)
             usage_tokens: Dict[str, int] = {}
             for chunk in stream_resp:
+                if keepalive_event:
+                    keepalive_event.set()
                 text_delta = _collect_text_parts(chunk)
                 if text_delta:
                     collected_text.append(text_delta)
@@ -142,6 +148,7 @@ class GeminiClient(ProviderClient):
             _stream_request if stream and progress_callback else _non_stream_request,
             request_timeout,
             max_retries,
+            keepalive_event=keepalive_event,
         )
 
         duration_ms = (time.time() - start_time) * 1000

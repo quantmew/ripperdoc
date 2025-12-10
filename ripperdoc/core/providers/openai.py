@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Dict, List, Optional, cast
 
@@ -52,6 +53,7 @@ class OpenAIClient(ProviderClient):
         collected_text: List[str] = []
 
         can_stream = stream and tool_mode == "text" and not openai_tools
+        keepalive_event: Optional[asyncio.Event] = asyncio.Event() if can_stream else None
 
         async with AsyncOpenAI(
             api_key=model_profile.api_key, base_url=model_profile.api_base
@@ -68,6 +70,8 @@ class OpenAIClient(ProviderClient):
                 )
                 usage_tokens: Dict[str, int] = {}
                 async for chunk in stream_resp:
+                    if keepalive_event:
+                        keepalive_event.set()
                     delta = getattr(chunk.choices[0], "delta", None)
                     delta_content = getattr(delta, "content", None) if delta else None
                     text_delta = ""
@@ -105,6 +109,7 @@ class OpenAIClient(ProviderClient):
                 _stream_request if can_stream else _non_stream_request,
                 request_timeout,
                 max_retries,
+                keepalive_event=keepalive_event,
             )
 
         duration_ms = (time.time() - start_time) * 1000

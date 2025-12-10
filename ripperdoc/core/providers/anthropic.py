@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -64,6 +65,7 @@ class AnthropicClient(ProviderClient):
             anthropic_kwargs["auth_token"] = auth_token
 
         normalized_messages = sanitize_tool_history(list(normalized_messages))
+        keepalive_event: Optional[asyncio.Event] = asyncio.Event() if stream else None
 
         async with await self._client(anthropic_kwargs) as client:
 
@@ -77,6 +79,8 @@ class AnthropicClient(ProviderClient):
                     temperature=model_profile.temperature,
                 ) as stream_resp:
                     async for text in stream_resp.text_stream:
+                        if keepalive_event:
+                            keepalive_event.set()
                         if text:
                             collected_text.append(text)
                             if progress_callback:
@@ -105,6 +109,7 @@ class AnthropicClient(ProviderClient):
                 _stream_request if stream else _non_stream_request,
                 request_timeout,
                 max_retries,
+                keepalive_event=keepalive_event,
             )
 
         duration_ms = (time.time() - start_time) * 1000
