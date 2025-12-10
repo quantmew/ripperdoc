@@ -58,7 +58,7 @@ from ripperdoc.utils.messages import (
 logger = get_logger()
 
 DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_API_TIMEOUT", "120"))
-MAX_LLM_RETRIES = 1
+MAX_LLM_RETRIES = int(os.getenv("RIPPERDOC_MAX_RETRIES", "10"))
 
 
 def _resolve_tool(

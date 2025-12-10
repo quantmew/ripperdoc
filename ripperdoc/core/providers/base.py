@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -153,12 +154,19 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
     return sanitized
 
 
+def _retry_delay_seconds(attempt: int, base_delay: float = 0.5, max_delay: float = 32.0) -> float:
+    """Calculate exponential backoff with jitter."""
+    capped_base = min(base_delay * (2 ** max(0, attempt - 1)), max_delay)
+    jitter = random.random() * 0.25 * capped_base
+    return capped_base + jitter
+
+
 async def call_with_timeout_and_retries(
     coro_factory: Callable[[], Awaitable[Any]],
     request_timeout: Optional[float],
     max_retries: int,
 ) -> Any:
-    """Run a coroutine with timeout and limited retries."""
+    """Run a coroutine with timeout and limited retries (exponential backoff)."""
     attempts = max(0, int(max_retries)) + 1
     last_error: Optional[Exception] = None
     for attempt in range(1, attempts + 1):
@@ -168,20 +176,33 @@ async def call_with_timeout_and_retries(
             return await coro_factory()
         except asyncio.TimeoutError as exc:
             last_error = exc
+            if attempt == attempts:
+                break
+            delay_seconds = _retry_delay_seconds(attempt)
             logger.warning(
                 "[provider_clients] Request timed out; retrying",
-                extra={"attempt": attempt, "max_retries": attempts - 1},
+                extra={
+                    "attempt": attempt,
+                    "max_retries": attempts - 1,
+                    "delay_seconds": round(delay_seconds, 3),
+                },
             )
-            if attempt == attempts:
-                raise
+            await asyncio.sleep(delay_seconds)
         except Exception as exc:
             last_error = exc
             if attempt == attempts:
-                raise
+                break
+            delay_seconds = _retry_delay_seconds(attempt)
             logger.warning(
                 "[provider_clients] Request failed; retrying",
-                extra={"attempt": attempt, "max_retries": attempts - 1, "error": str(exc)},
+                extra={
+                    "attempt": attempt,
+                    "max_retries": attempts - 1,
+                    "delay_seconds": round(delay_seconds, 3),
+                    "error": str(exc),
+                },
             )
+            await asyncio.sleep(delay_seconds)
     if last_error:
-        raise last_error
+        raise RuntimeError(f"Request failed after {attempts} attempts") from last_error
     raise RuntimeError("Unexpected error executing request with retries")
