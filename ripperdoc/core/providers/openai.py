@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Dict, List, Optional, cast
+from uuid import uuid4
 
 from openai import AsyncOpenAI
 
@@ -21,6 +22,7 @@ from ripperdoc.core.query_utils import (
     build_openai_tool_schemas,
     content_blocks_from_openai_choice,
     estimate_cost_usd,
+    _normalize_tool_args,
     openai_usage_tokens,
 )
 from ripperdoc.core.tool import Tool
@@ -52,31 +54,46 @@ class OpenAIClient(ProviderClient):
             {"role": "system", "content": system_prompt}
         ] + sanitize_tool_history(list(normalized_messages))
         collected_text: List[str] = []
+        streamed_tool_calls: Dict[int, Dict[str, Optional[str]]] = {}
+        streamed_tool_text: List[str] = []
+        streamed_usage: Dict[str, int] = {}
 
-        can_stream = stream and tool_mode == "text" and not openai_tools
+        can_stream_text = stream and tool_mode == "text" and not openai_tools
+        can_stream_tools = stream and tool_mode != "text" and bool(openai_tools)
+        can_stream = can_stream_text or can_stream_tools
 
         async with AsyncOpenAI(
             api_key=model_profile.api_key, base_url=model_profile.api_base
         ) as client:
 
             async def _stream_request() -> Dict[str, Dict[str, int]]:
+                announced_tool_indexes: set[int] = set()
                 stream_coro = client.chat.completions.create(  # type: ignore[call-overload]
                     model=model_profile.model,
                     messages=cast(Any, openai_messages),
-                    tools=None,
+                    tools=openai_tools if can_stream_tools else None,
                     temperature=model_profile.temperature,
                     max_tokens=model_profile.max_tokens,
                     stream=True,
+                    stream_options={"include_usage": True},
                 )
                 stream_resp = (
                     await asyncio.wait_for(stream_coro, timeout=request_timeout)
                     if request_timeout and request_timeout > 0
                     else await stream_coro
                 )
-                usage_tokens: Dict[str, int] = {}
                 async for chunk in iter_with_timeout(stream_resp, request_timeout):
+                    if getattr(chunk, "usage", None):
+                        streamed_usage.update(openai_usage_tokens(chunk.usage))
+
+                    if not getattr(chunk, "choices", None):
+                        continue
                     delta = getattr(chunk.choices[0], "delta", None)
-                    delta_content = getattr(delta, "content", None) if delta else None
+                    if not delta:
+                        continue
+
+                    # Text deltas (rare in native tool mode but supported)
+                    delta_content = getattr(delta, "content", None)
                     text_delta = ""
                     if delta_content:
                         if isinstance(delta_content, list):
@@ -89,15 +106,50 @@ class OpenAIClient(ProviderClient):
                         elif isinstance(delta_content, str):
                             text_delta += delta_content
                     if text_delta:
-                        collected_text.append(text_delta)
+                        target_collector = streamed_tool_text if can_stream_tools else collected_text
+                        target_collector.append(text_delta)
                         if progress_callback:
                             try:
                                 await progress_callback(text_delta)
                             except Exception:
                                 logger.exception("[openai_client] Stream callback failed")
-                    if getattr(chunk, "usage", None):
-                        usage_tokens = openai_usage_tokens(chunk.usage)
-                return {"usage": usage_tokens}
+
+                    # Tool call deltas for native tool mode
+                    if not can_stream_tools:
+                        continue
+
+                    for tool_delta in getattr(delta, "tool_calls", []) or []:
+                        idx = getattr(tool_delta, "index", 0) or 0
+                        state = streamed_tool_calls.get(idx, {"id": None, "name": None, "arguments": ""})
+
+                        if getattr(tool_delta, "id", None):
+                            state["id"] = tool_delta.id
+
+                        function_delta = getattr(tool_delta, "function", None)
+                        if function_delta:
+                            fn_name = getattr(function_delta, "name", None)
+                            if fn_name:
+                                state["name"] = fn_name
+                            args_delta = getattr(function_delta, "arguments", None)
+                            if args_delta:
+                                state["arguments"] = (state.get("arguments") or "") + args_delta
+                                if progress_callback:
+                                    try:
+                                        await progress_callback(args_delta)
+                                    except Exception:
+                                        logger.exception("[openai_client] Stream callback failed")
+
+                        if idx not in announced_tool_indexes and state.get("name"):
+                            announced_tool_indexes.add(idx)
+                            if progress_callback:
+                                try:
+                                    await progress_callback(f"[tool:{state['name']}]")
+                                except Exception:
+                                    logger.exception("[openai_client] Stream callback failed")
+
+                        streamed_tool_calls[idx] = state
+
+                return {"usage": streamed_usage}
 
             async def _non_stream_request() -> Any:
                 return await client.chat.completions.create(  # type: ignore[call-overload]
@@ -116,15 +168,36 @@ class OpenAIClient(ProviderClient):
             )
 
         duration_ms = (time.time() - start_time) * 1000
-        usage_tokens = openai_usage_tokens(getattr(openai_response, "usage", None))
+        usage_tokens = streamed_usage if can_stream else openai_usage_tokens(
+            getattr(openai_response, "usage", None)
+        )
         cost_usd = estimate_cost_usd(model_profile, usage_tokens)
         record_usage(
             model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
         )
 
         finish_reason: Optional[str]
-        if can_stream:
+        if can_stream_text:
             content_blocks = [{"type": "text", "text": "".join(collected_text)}]
+            finish_reason = "stream"
+        elif can_stream_tools:
+            content_blocks: List[Dict[str, Any]] = []
+            if streamed_tool_text:
+                content_blocks.append({"type": "text", "text": "".join(streamed_tool_text)})
+            for idx in sorted(streamed_tool_calls.keys()):
+                call = streamed_tool_calls[idx]
+                name = call.get("name")
+                if not name:
+                    continue
+                tool_use_id = call.get("id") or str(uuid4())
+                content_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "tool_use_id": tool_use_id,
+                        "name": name,
+                        "input": _normalize_tool_args(call.get("arguments")),
+                    }
+                )
             finish_reason = "stream"
         else:
             choice = openai_response.choices[0]
