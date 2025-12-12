@@ -35,6 +35,7 @@ dependencies = [
     "mcp[cli]>=1.22.0",
     "json_repair>=0.54.2",
     "tiktoken>=0.7.0",
+    "google-genai>=0.3.0",
 ]
 
 [project.optional-dependencies]
