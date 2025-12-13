@@ -47,6 +47,12 @@ _background_loop: Optional[asyncio.AbstractEventLoop] = None
 _background_thread: Optional[threading.Thread] = None
 _loop_lock = threading.Lock()
 _shutdown_registered = False
+def _safe_log_exception(message: str, **extra: Any) -> None:
+    """Log an exception but never let logging failures bubble up."""
+    try:
+        logger.exception(message, extra=extra)
+    except Exception:
+        pass
 
 
 def _ensure_background_loop() -> asyncio.AbstractEventLoop:
@@ -301,11 +307,8 @@ def list_background_tasks() -> List[str]:
         return list(_tasks.keys())
 
 
-def shutdown_background_shell() -> None:
-    """Stop background tasks/loop to avoid asyncio 'Event loop is closed' warnings."""
-    global _background_loop, _background_thread
-
-    loop = _background_loop
+async def _shutdown_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Drain running background processes before stopping the loop."""
     with _tasks_lock:
         tasks = list(_tasks.values())
         _tasks.clear()
@@ -313,21 +316,68 @@ def shutdown_background_shell() -> None:
     for task in tasks:
         try:
             task.killed = True
-            task.process.kill()
+            with contextlib.suppress(ProcessLookupError):
+                task.process.kill()
+            try:
+                with contextlib.suppress(ProcessLookupError):
+                    await asyncio.wait_for(task.process.wait(), timeout=1.5)
+            except asyncio.TimeoutError:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    task.process.kill()
+                with contextlib.suppress(asyncio.TimeoutError, ProcessLookupError):
+                    await asyncio.wait_for(task.process.wait(), timeout=0.5)
+            task.exit_code = task.process.returncode or -1
         except Exception:
-            pass
-        for reader in task.reader_tasks:
-            if loop and loop.is_running():
-                loop.call_soon_threadsafe(reader.cancel)
-        task.done_event.set()
+            _safe_log_exception(
+                "Error shutting down background task",
+                task_id=task.id,
+                command=task.command,
+            )
+        finally:
+            await _finalize_reader_tasks(task.reader_tasks)
+            task.done_event.set()
 
-    if loop and loop.is_running():
-        try:
-            loop.call_soon_threadsafe(loop.stop)
-        except Exception:
-            pass
-    if _background_thread and _background_thread.is_alive():
-        _background_thread.join(timeout=2)
+    current = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks(loop) if t is not current]
+    for task in pending:
+        task.cancel()
+    if pending:
+        with contextlib.suppress(Exception):
+            await asyncio.gather(*pending, return_exceptions=True)
 
-    _background_loop = None
-    _background_thread = None
+    with contextlib.suppress(Exception):
+        await loop.shutdown_asyncgens()
+
+
+def shutdown_background_shell() -> None:
+    """Stop background tasks/loop to avoid asyncio 'Event loop is closed' warnings."""
+    global _background_loop, _background_thread
+
+    loop = _background_loop
+    thread = _background_thread
+
+    if not loop or loop.is_closed():
+        _background_loop = None
+        _background_thread = None
+        return
+
+    try:
+        if loop.is_running():
+            try:
+                fut = asyncio.run_coroutine_threadsafe(_shutdown_loop(loop), loop)
+                fut.result(timeout=3)
+            except Exception:
+                logger.debug("Failed to cleanly shutdown background loop", exc_info=True)
+            try:
+                loop.call_soon_threadsafe(loop.stop)
+            except Exception:
+                logger.debug("Failed to stop background loop", exc_info=True)
+        else:
+            loop.run_until_complete(_shutdown_loop(loop))
+    finally:
+        if thread and thread.is_alive():
+            thread.join(timeout=2)
+        with contextlib.suppress(Exception):
+            loop.close()
+        _background_loop = None
+        _background_thread = None

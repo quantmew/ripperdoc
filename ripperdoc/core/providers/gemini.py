@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import inspect
 import os
@@ -15,6 +14,7 @@ from ripperdoc.core.providers.base import (
     ProgressCallback,
     ProviderClient,
     ProviderResponse,
+    call_with_timeout_and_retries,
     iter_with_timeout,
 )
 from ripperdoc.core.query_utils import _normalize_tool_args, build_tool_description
@@ -25,6 +25,14 @@ from ripperdoc.core.query_utils import estimate_cost_usd
 
 logger = get_logger()
 
+# Constants
+GEMINI_SDK_IMPORT_ERROR = (
+    "Gemini client requires the 'google-genai' package. "
+    "Install it with: pip install google-genai"
+)
+GEMINI_MODELS_ENDPOINT_ERROR = "Gemini client is missing 'models' endpoint"
+GEMINI_GENERATE_CONTENT_ERROR = "Gemini client is missing generate_content() method"
+
 
 def _extract_usage_metadata(payload: Any) -> Dict[str, int]:
     """Best-effort token extraction from Gemini responses."""
@@ -34,11 +42,17 @@ def _extract_usage_metadata(payload: Any) -> Dict[str, int]:
     if not usage and getattr(payload, "candidates", None):
         usage = getattr(payload.candidates[0], "usage_metadata", None)
 
-    get = lambda key: int(getattr(usage, key, 0) or 0) if usage else 0  # noqa: E731
+    def safe_get_int(key: str) -> int:
+        """Safely extract integer value from usage metadata."""
+        if not usage:
+            return 0
+        value = getattr(usage, key, 0)
+        return int(value) if value else 0
+
     return {
-        "input_tokens": get("prompt_token_count") + get("cached_content_token_count"),
-        "output_tokens": get("candidates_token_count"),
-        "cache_read_input_tokens": get("cached_content_token_count"),
+        "input_tokens": safe_get_int("prompt_token_count") + safe_get_int("cached_content_token_count"),
+        "output_tokens": safe_get_int("candidates_token_count"),
+        "cache_read_input_tokens": safe_get_int("cached_content_token_count"),
         "cache_creation_input_tokens": 0,
     }
 
@@ -80,24 +94,34 @@ def _extract_function_calls(parts: List[Any]) -> List[Dict[str, Any]]:
 
 
 def _flatten_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
-    """Inline $ref entries and drop $defs/$ref for Gemini Schema compatibility."""
+    """Inline $ref entries and drop $defs/$ref for Gemini Schema compatibility.
+
+    Gemini API doesn't support JSON Schema references, so this function
+    resolves all $ref pointers by inlining the referenced definitions.
+    """
     definitions = copy.deepcopy(schema.get("$defs") or schema.get("definitions") or {})
 
     def _resolve(node: Any) -> Any:
+        """Recursively resolve $ref pointers and remove unsupported fields."""
         if isinstance(node, dict):
+            # Handle $ref resolution
             ref = node.get("$ref")
             if isinstance(ref, str) and ref.startswith("#/"):
                 ref_key = ref.split("/")[-1]
                 if ref_key in definitions:
                     return _resolve(copy.deepcopy(definitions[ref_key]))
+
+            # Process remaining fields, excluding schema metadata
             resolved: Dict[str, Any] = {}
             for key, value in node.items():
                 if key in {"$ref", "$defs", "definitions"}:
                     continue
                 resolved[key] = _resolve(value)
             return resolved
+
         if isinstance(node, list):
             return [_resolve(item) for item in node]
+
         return node
 
     return _resolve(copy.deepcopy(schema))
@@ -168,10 +192,12 @@ def _convert_messages_to_genai_contents(
         return {"text": text}
 
     def _mk_part_from_function_call(name: str, args: Dict[str, Any], call_id: Optional[str]) -> Any:
-        tool_name_by_id[call_id or name or str(uuid4())] = name
+        # Store mapping using actual call_id if available, otherwise generate one
+        actual_id = call_id or str(uuid4())
+        tool_name_by_id[actual_id] = name
         if genai_types:
             return genai_types.Part(function_call=genai_types.FunctionCall(name=name, args=args))
-        return {"function_call": {"name": name, "args": args, "id": call_id}}
+        return {"function_call": {"name": name, "args": args, "id": actual_id}}
 
     def _mk_part_from_function_response(
         name: str, response: Dict[str, Any], call_id: Optional[str]
@@ -243,9 +269,7 @@ class GeminiClient(ProviderClient):
         try:
             from google import genai  # type: ignore
         except Exception as exc:  # pragma: no cover - import guard
-            raise RuntimeError(
-                "Gemini client requires the 'google-genai' package. Install it to enable Gemini support."
-            ) from exc
+            raise RuntimeError(GEMINI_SDK_IMPORT_ERROR) from exc
 
         client_kwargs: Dict[str, Any] = {}
         api_key = model_profile.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -313,7 +337,7 @@ class GeminiClient(ProviderClient):
                 getattr(client, "aio", None), "models", None
             )
             if models_api is None:
-                raise RuntimeError("Gemini client is missing 'models' endpoint")
+                raise RuntimeError(GEMINI_MODELS_ENDPOINT_ERROR)
 
             generate_fn = getattr(models_api, "generate_content", None)
             stream_fn = getattr(models_api, "generate_content_stream", None) or getattr(
@@ -328,7 +352,7 @@ class GeminiClient(ProviderClient):
                     return result
 
                 if generate_fn is None:
-                    raise RuntimeError("Gemini client is missing generate_content()")
+                    raise RuntimeError(GEMINI_GENERATE_CONTENT_ERROR)
 
                 if _supports_stream_arg(generate_fn):
                     gen_kwargs = dict(generate_kwargs)
@@ -348,7 +372,7 @@ class GeminiClient(ProviderClient):
                 return _single_chunk_stream()
 
             if generate_fn is None:
-                raise RuntimeError("Gemini client is missing generate_content()")
+                raise RuntimeError(GEMINI_GENERATE_CONTENT_ERROR)
 
             result = generate_fn(**generate_kwargs)
             if inspect.isawaitable(result):
@@ -361,7 +385,8 @@ class GeminiClient(ProviderClient):
 
                 # Normalize streams into an async iterator to avoid StopIteration surfacing through
                 # asyncio executors and to handle sync iterables.
-                async def _to_async_iter(obj: Any):
+                def _to_async_iter(obj: Any):
+                    """Convert various iterable types to async generator."""
                     if inspect.isasyncgen(obj) or hasattr(obj, "__aiter__"):
                         async def _wrap_async():
                             async for item in obj:
@@ -380,7 +405,7 @@ class GeminiClient(ProviderClient):
 
                     return _single()
 
-                stream_iter = await _to_async_iter(stream_resp)
+                stream_iter = _to_async_iter(stream_resp)
 
                 async for chunk in iter_with_timeout(stream_iter, request_timeout):
                     candidates = getattr(chunk, "candidates", None) or []
@@ -397,7 +422,12 @@ class GeminiClient(ProviderClient):
                         function_calls.extend(_extract_function_calls(parts))
                     usage_tokens = _extract_usage_metadata(chunk) or usage_tokens
             else:
-                response = await _call_generate(streaming=False)
+                # Use retry logic for non-streaming calls
+                response = await call_with_timeout_and_retries(
+                    lambda: _call_generate(streaming=False),
+                    request_timeout,
+                    max_retries,
+                )
                 candidates = getattr(response, "candidates", None) or []
                 if candidates:
                     parts = _collect_parts(candidates[0])
