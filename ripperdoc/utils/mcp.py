@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import shlex
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -97,10 +98,48 @@ def _ensure_str_dict(raw: object) -> Dict[str, str]:
     return result
 
 
+def _normalize_command(
+    raw_command: Any, raw_args: Any
+) -> tuple[Optional[str], List[str]]:
+    """Normalize MCP server command/args.
+
+    Supports:
+    - command as list -> first element is executable, rest are args
+    - command as string with spaces -> shlex.split into executable/args (when args empty)
+    - command as plain string -> used as-is
+    """
+    args: List[str] = []
+    if isinstance(raw_args, list):
+        args = [str(a) for a in raw_args]
+
+    # Command provided as list: treat first token as command.
+    if isinstance(raw_command, list):
+        tokens = [str(t) for t in raw_command if str(t)]
+        if not tokens:
+            return None, args
+        return tokens[0], tokens[1:] + args
+
+    if not isinstance(raw_command, str):
+        return None, args
+
+    command_str = raw_command.strip()
+    if not command_str:
+        return None, args
+
+    if not args and (" " in command_str or "\t" in command_str):
+        try:
+            tokens = shlex.split(command_str)
+        except ValueError:
+            tokens = [command_str]
+        if tokens:
+            return tokens[0], tokens[1:]
+
+    return command_str, args
+
+
 def _parse_server(name: str, raw: Dict[str, Any]) -> McpServerInfo:
     server_type = str(raw.get("type") or raw.get("transport") or "").strip().lower()
-    command = raw.get("command")
-    args = raw.get("args") if isinstance(raw.get("args"), list) else []
+    command, args = _normalize_command(raw.get("command"), raw.get("args"))
     url = str(raw.get("url") or raw.get("uri") or "").strip() or None
 
     if not server_type:
@@ -121,7 +160,7 @@ def _parse_server(name: str, raw: Dict[str, Any]) -> McpServerInfo:
         type=server_type,
         url=url,
         description=description,
-        command=str(command) if isinstance(command, str) else None,
+        command=command,
         args=[str(a) for a in args] if args else [],
         env=env,
         headers=headers,

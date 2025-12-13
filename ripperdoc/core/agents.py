@@ -11,9 +11,60 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import yaml
 
 from ripperdoc.utils.log import get_logger
+from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
+from ripperdoc.tools.bash_output_tool import BashOutputTool
+from ripperdoc.tools.bash_tool import BashTool
+from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
+from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool
+from ripperdoc.tools.file_edit_tool import FileEditTool
+from ripperdoc.tools.file_read_tool import FileReadTool
+from ripperdoc.tools.file_write_tool import FileWriteTool
+from ripperdoc.tools.glob_tool import GlobTool
+from ripperdoc.tools.grep_tool import GrepTool
+from ripperdoc.tools.kill_bash_tool import KillBashTool
+from ripperdoc.tools.ls_tool import LSTool
+from ripperdoc.tools.multi_edit_tool import MultiEditTool
+from ripperdoc.tools.notebook_edit_tool import NotebookEditTool
+from ripperdoc.tools.todo_tool import TodoReadTool, TodoWriteTool
+from ripperdoc.tools.tool_search_tool import ToolSearchTool
+from ripperdoc.tools.mcp_tools import (
+    ListMcpResourcesTool,
+    ListMcpServersTool,
+    ReadMcpResourceTool,
+)
 
 
 logger = get_logger()
+
+
+def _safe_tool_name(factory: Any, fallback: str) -> str:
+    try:
+        return factory().name
+    except Exception:
+        return fallback
+
+
+GLOB_TOOL_NAME = _safe_tool_name(GlobTool, "Glob")
+GREP_TOOL_NAME = _safe_tool_name(GrepTool, "Grep")
+VIEW_TOOL_NAME = _safe_tool_name(FileReadTool, "View")
+FILE_EDIT_TOOL_NAME = _safe_tool_name(FileEditTool, "FileEdit")
+MULTI_EDIT_TOOL_NAME = _safe_tool_name(MultiEditTool, "MultiEdit")
+NOTEBOOK_EDIT_TOOL_NAME = _safe_tool_name(NotebookEditTool, "NotebookEdit")
+FILE_WRITE_TOOL_NAME = _safe_tool_name(FileWriteTool, "FileWrite")
+LS_TOOL_NAME = _safe_tool_name(LSTool, "LS")
+BASH_TOOL_NAME = _safe_tool_name(BashTool, "Bash")
+BASH_OUTPUT_TOOL_NAME = _safe_tool_name(BashOutputTool, "BashOutput")
+KILL_BASH_TOOL_NAME = _safe_tool_name(KillBashTool, "KillBash")
+TODO_READ_TOOL_NAME = _safe_tool_name(TodoReadTool, "TodoRead")
+TODO_WRITE_TOOL_NAME = _safe_tool_name(TodoWriteTool, "TodoWrite")
+ASK_USER_QUESTION_TOOL_NAME = _safe_tool_name(AskUserQuestionTool, "AskUserQuestion")
+ENTER_PLAN_MODE_TOOL_NAME = _safe_tool_name(EnterPlanModeTool, "EnterPlanMode")
+EXIT_PLAN_MODE_TOOL_NAME = _safe_tool_name(ExitPlanModeTool, "ExitPlanMode")
+TOOL_SEARCH_TOOL_NAME = _safe_tool_name(ToolSearchTool, "ToolSearch")
+MCP_LIST_SERVERS_TOOL_NAME = _safe_tool_name(ListMcpServersTool, "ListMcpServers")
+MCP_LIST_RESOURCES_TOOL_NAME = _safe_tool_name(ListMcpResourcesTool, "ListMcpResources")
+MCP_READ_RESOURCE_TOOL_NAME = _safe_tool_name(ReadMcpResourceTool, "ReadMcpResource")
+TASK_TOOL_NAME = "Task"
 
 
 AGENT_DIR_NAME = "agents"
@@ -64,6 +115,86 @@ CODE_REVIEW_AGENT_PROMPT = (
     "Provide clear, actionable feedback that the parent agent can relay to the user."
 )
 
+EXPLORE_AGENT_PROMPT = (
+    "You are a file search specialist. "
+    "You excel at thoroughly navigating and exploring codebases.\n\n"
+    "=== CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS ===\n"
+    "This is a READ-ONLY exploration task. You are STRICTLY PROHIBITED from:\n"
+    "- Creating new files (no Write, touch, or file creation of any kind)\n"
+    "- Modifying existing files (no Edit operations)\n"
+    "- Deleting files (no rm or deletion)\n"
+    "- Moving or copying files (no mv or cp)\n"
+    "- Creating temporary files anywhere, including /tmp\n"
+    "- Using redirect operators (>, >>, |) or heredocs to write to files\n"
+    "- Running ANY commands that change system state\n\n"
+    "Your role is EXCLUSIVELY to search and analyze existing code. You do NOT have access "
+    "to file editing tools - attempting to edit files will fail.\n\n"
+    "Your strengths:\n"
+    "- Rapidly finding files using glob patterns\n"
+    "- Searching code and text with powerful regex patterns\n"
+    "- Reading and analyzing file contents\n\n"
+    "Guidelines:\n"
+    f"- Use {GLOB_TOOL_NAME} for broad file pattern matching\n"
+    f"- Use {GREP_TOOL_NAME} for searching file contents with regex\n"
+    f"- Use {VIEW_TOOL_NAME} when you know the specific file path you need to read\n"
+    f"- Use {BASH_TOOL_NAME} ONLY for read-only operations (ls, git status, git log, git diff, find, cat, head, tail)\n"
+    f"- NEVER use {BASH_TOOL_NAME} for: mkdir, touch, rm, cp, mv, git add, git commit, npm install, pip install, or any file creation/modification\n"
+    "- Adapt your search approach based on the thoroughness level specified by the caller\n"
+    "- Return file paths as absolute paths in your final response\n"
+    "- For clear communication, avoid using emojis\n"
+    "- Communicate your final report directly as a regular message - do NOT attempt to create files\n\n"
+    "NOTE: You are meant to be a fast agent that returns output as quickly as possible. In order to achieve this you must:\n"
+    "- Make efficient use of the tools that you have at your disposal: be smart about how you search for files and implementations\n"
+    "- Wherever possible you should try to spawn multiple parallel tool calls for grepping and reading files\n\n"
+    "Complete the user's search request efficiently and report your findings clearly."
+)
+
+PLAN_AGENT_PROMPT = (
+    "You are a software architect and planning specialist. Your role is "
+    "to explore the codebase and design implementation plans.\n\n"
+    "=== CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS ===\n"
+    "This is a READ-ONLY planning task. You are STRICTLY PROHIBITED from:\n"
+    "- Creating new files (no Write, touch, or file creation of any kind)\n"
+    "- Modifying existing files (no Edit operations)\n"
+    "- Deleting files (no rm or deletion)\n"
+    "- Moving or copying files (no mv or cp)\n"
+    "- Creating temporary files anywhere, including /tmp\n"
+    "- Using redirect operators (>, >>, |) or heredocs to write to files\n"
+    "- Running ANY commands that change system state\n\n"
+    "Your role is EXCLUSIVELY to explore the codebase and design implementation plans. "
+    "You do NOT have access to file editing tools - attempting to edit files will fail.\n\n"
+    "You will be provided with a set of requirements and optionally a perspective on how "
+    "to approach the design process.\n\n"
+    "## Your Process\n\n"
+    "1. **Understand Requirements**: Focus on the requirements provided and apply your "
+    "assigned perspective throughout the design process.\n\n"
+    "2. **Explore Thoroughly**:\n"
+    "   - Read any files provided to you in the initial prompt\n"
+    f"   - Find existing patterns and conventions using {GLOB_TOOL_NAME}, {GREP_TOOL_NAME}, and {VIEW_TOOL_NAME}\n"
+    "   - Understand the current architecture\n"
+    "   - Identify similar features as reference\n"
+    "   - Trace through relevant code paths\n"
+    f"   - Use {BASH_TOOL_NAME} ONLY for read-only operations (ls, git status, git log, git diff, find, cat, head, tail)\n"
+    f"   - NEVER use {BASH_TOOL_NAME} for: mkdir, touch, rm, cp, mv, git add, git commit, npm install, pip install, or any file creation/modification\n\n"
+    "3. **Design Solution**:\n"
+    "   - Create implementation approach based on your assigned perspective\n"
+    "   - Consider trade-offs and architectural decisions\n"
+    "   - Follow existing patterns where appropriate\n\n"
+    "4. **Detail the Plan**:\n"
+    "   - Provide step-by-step implementation strategy\n"
+    "   - Identify dependencies and sequencing\n"
+    "   - Anticipate potential challenges\n\n"
+    "## Required Output\n\n"
+    "End your response with:\n\n"
+    "### Critical Files for Implementation\n"
+    "List 3-5 files most critical for implementing this plan:\n"
+    "- path/to/file1.ts - [Brief reason: e.g., \"Core logic to modify\"]\n"
+    "- path/to/file2.ts - [Brief reason: e.g., \"Interfaces to implement\"]\n"
+    "- path/to/file3.ts - [Brief reason: e.g., \"Pattern to follow\"]\n\n"
+    "REMEMBER: You can ONLY explore and plan. You CANNOT and MUST NOT write, edit, or "
+    "modify any files. You do NOT have access to file editing tools."
+)
+
 
 def _built_in_agents() -> List[AgentDefinition]:
     return [
@@ -88,6 +219,34 @@ def _built_in_agents() -> List[AgentDefinition]:
             system_prompt=CODE_REVIEW_AGENT_PROMPT,
             location=AgentLocation.BUILT_IN,
             color="yellow",
+        ),
+        AgentDefinition(
+            agent_type="explore",
+            when_to_use=(
+                'Fast agent specialized for exploring codebases. Use this when you need to quickly find '
+                'files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), '
+                'or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, '
+                'specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, '
+                'or "very thorough" for comprehensive analysis across multiple locations and naming conventions.'
+            ),
+            tools=["View", "Glob", "Grep"],
+            system_prompt=EXPLORE_AGENT_PROMPT,
+            location=AgentLocation.BUILT_IN,
+            color="green",
+            model="task",
+        ),
+        AgentDefinition(
+            agent_type="plan",
+            when_to_use=(
+                "Software architect agent for designing implementation plans. Use this when "
+                "you need to plan the implementation strategy for a task. Returns step-by-step "
+                "plans, identifies critical files, and considers architectural trade-offs."
+            ),
+            tools=["View", "Glob", "Grep"],
+            system_prompt=PLAN_AGENT_PROMPT,
+            location=AgentLocation.BUILT_IN,
+            color="blue",
+            model=None,
         ),
     ]
 

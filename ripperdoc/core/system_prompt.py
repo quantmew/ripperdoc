@@ -8,7 +8,15 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any, Dict, Iterable, List, Optional
 
-from ripperdoc.core.agents import clear_agent_cache, load_agent_definitions, summarize_agent
+from ripperdoc.core.agents import (
+    BASH_TOOL_NAME,
+    TASK_TOOL_NAME,
+    TODO_WRITE_TOOL_NAME,
+    TOOL_SEARCH_TOOL_NAME,
+    clear_agent_cache,
+    load_agent_definitions,
+    summarize_agent,
+)
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 
@@ -174,10 +182,13 @@ def build_system_prompt(
 ) -> str:
     _ = user_prompt, context
     tool_names = {tool.name for tool in tools}
-    todo_tool_name = "TodoWrite"
+    todo_tool_name = TODO_WRITE_TOOL_NAME
     todo_available = todo_tool_name in tool_names
-    task_available = "Task" in tool_names
-    shell_tool_name = next((tool.name for tool in tools if tool.name.lower() == "bash"), "Bash")
+    task_available = TASK_TOOL_NAME in tool_names
+    shell_tool_name = next(
+        (tool.name for tool in tools if tool.name.lower() == BASH_TOOL_NAME.lower()),
+        BASH_TOOL_NAME,
+    )
 
     main_prompt = dedent(
         f"""\
@@ -353,7 +364,7 @@ def build_system_prompt(
             1,
             "- Use the Task tool with configured subagents when the task matches an agent's description. Always set subagent_type.",
         )
-    if "ToolSearch" in tool_names:
+    if TOOL_SEARCH_TOOL_NAME in tool_names:
         tool_usage_lines.insert(
             1,
             "- Use the ToolSearch tool to discover and activate deferred or MCP tools. Keep searches focused and load only 3-5 relevant tools.",
@@ -409,7 +420,7 @@ def build_system_prompt(
         build_environment_prompt(),
         DEFENSIVE_SECURITY_GUIDELINE,
         always_use_todo,
-        build_commit_workflow_prompt(shell_tool_name, todo_tool_name, "Task"),
+        build_commit_workflow_prompt(shell_tool_name, todo_tool_name, TASK_TOOL_NAME),
         code_references,
     ]
 

@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field
 from ripperdoc.core.agents import (
     AgentDefinition,
     AgentLoadResult,
+    FILE_EDIT_TOOL_NAME,
+    GREP_TOOL_NAME,
+    VIEW_TOOL_NAME,
     clear_agent_cache,
     load_agent_definitions,
     resolve_agent_tools,
@@ -70,12 +73,92 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         del safe_mode
         clear_agent_cache()
         agents: AgentLoadResult = load_agent_definitions()
-        agent_lines = "\n".join(summarize_agent(agent) for agent in agents.active_agents)
+
+        agent_lines: List[str] = []
+        for agent in agents.active_agents:
+            properties = (
+                "Properties: access to current context; "
+                if getattr(agent, "fork_context", False)
+                else ""
+            )
+            tools_label = "All tools"
+            if getattr(agent, "tools", None):
+                tools_label = (
+                    "All tools" if "*" in agent.tools else ", ".join(agent.tools)
+                )
+            agent_lines.append(
+                f"- {agent.agent_type}: {agent.when_to_use} ({properties}Tools: {tools_label})"
+            )
+
+        agent_block = "\n".join(agent_lines) or "- general-purpose (built-in)"
+
+        task_tool_name = self.name
+        file_read_tool_name = VIEW_TOOL_NAME
+        search_tool_name = GREP_TOOL_NAME
+        code_tool_name = FILE_EDIT_TOOL_NAME
+        background_fetch_tool_name = task_tool_name
+
         return (
-            "Use this tool to delegate a well-scoped task to a subagent. "
-            "Always set subagent_type to one of the available agent types below. "
-            "Provide a detailed prompt so the agent can work autonomously and return a single, concise report.\n\n"
-            f"Available agents:\n{agent_lines or '- general-purpose (built-in)'}"
+            f"Launch a new agent to handle complex, multi-step tasks autonomously. \n\n"
+            f"The {task_tool_name} tool launches specialized agents (subprocesses) that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.\n\n"
+            f"Available agent types and the tools they have access to:\n"
+            f"{agent_block}\n\n"
+            f"When using the {task_tool_name} tool, you must specify a subagent_type parameter to select which agent type to use.\n\n"
+            f"When NOT to use the {task_tool_name} tool:\n"
+            f"- If you want to read a specific file path, use the {file_read_tool_name} or {search_tool_name} tool instead of the {task_tool_name} tool, to find the match more quickly\n"
+            f'- If you are searching for a specific class definition like "class Foo", use the {search_tool_name} tool instead, to find the match more quickly\n'
+            f"- If you are searching for code within a specific file or set of 2-3 files, use the {file_read_tool_name} tool instead of the {task_tool_name} tool, to find the match more quickly\n"
+            "- Other tasks that are not related to the agent descriptions above\n"
+            "\n"
+            "\n"
+            "Usage notes:\n"
+            "- Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses\n"
+            "- When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.\n"
+            f"- You can optionally run agents in the background using the run_in_background parameter. When an agent runs in the background, you will need to use {background_fetch_tool_name} to retrieve its results once it's done. You can continue to work while background agents run - When you need their results to continue you can use {background_fetch_tool_name} in blocking mode to pause and wait for their results.\n"
+            "- Agents can be resumed using the `resume` parameter by passing the agent ID from a previous invocation. When resumed, the agent continues with its full previous context preserved. When NOT resuming, each invocation starts fresh and you should provide a detailed task description with all necessary context.\n"
+            "- When the agent is done, it will return a single message back to you along with its agent ID. You can use this ID to resume the agent later if needed for follow-up work.\n"
+            "- Provide clear, detailed prompts so the agent can work autonomously and return exactly the information you need.\n"
+            '- Agents with "access to current context" can see the full conversation history before the tool call. When using these agents, you can write concise prompts that reference earlier context (e.g., "investigate the error discussed above") instead of repeating information. The agent will receive all prior messages and understand the context.\n'
+            "- The agent's outputs should generally be trusted\n"
+            "- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent\n"
+            "- If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.\n"
+            f'- If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple {task_tool_name} tool use content blocks. For example, if you need to launch both a code-reviewer agent and a test-runner agent in parallel, send a single message with both tool calls.\n'
+            "\n"
+            "Example usage:\n"
+            "\n"
+            "<example_agent_descriptions>\n"
+            '"code-reviewer": use this agent after you are done writing a signficant piece of code\n'
+            '"greeting-responder": use this agent when to respond to user greetings with a friendly joke\n'
+            "</example_agent_description>\n"
+            "\n"
+            "<example>\n"
+            'user: "Please write a function that checks if a number is prime"\n'
+            "assistant: Sure let me write a function that checks if a number is prime\n"
+            f"assistant: First let me use the {code_tool_name} tool to write a function that checks if a number is prime\n"
+            f"assistant: I'm going to use the {code_tool_name} tool to write the following code:\n"
+            "<code>\n"
+            "function isPrime(n) {\n"
+            "  if (n <= 1) return false\n"
+            "  for (let i = 2; i * i <= n; i++) {\n"
+            "    if (n % i === 0) return false\n"
+            "  }\n"
+            "  return true\n"
+            "}\n"
+            "</code>\n"
+            "<commentary>\n"
+            "Since a signficant piece of code was written and the task was completed, now use the code-reviewer agent to review the code\n"
+            "</commentary>\n"
+            "assistant: Now let me use the code-reviewer agent to review the code\n"
+            f"assistant: Uses the {task_tool_name} tool to launch the code-reviewer agent \n"
+            "</example>\n"
+            "\n"
+            "<example>\n"
+            'user: "Hello"\n'
+            "<commentary>\n"
+            "Since the user is greeting, use the greeting-responder agent to respond with a friendly joke\n"
+            "</commentary>\n"
+            f'assistant: "I\'m going to use the {task_tool_name} tool to launch the greeting-responder agent\"\n'
+            "</example>"
         )
 
     def is_read_only(self) -> bool:
