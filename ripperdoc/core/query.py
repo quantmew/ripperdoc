@@ -377,6 +377,8 @@ class QueryContext:
         safe_mode: bool = False,
         model: str = "main",
         verbose: bool = False,
+        pause_ui: Optional[Callable[[], None]] = None,
+        resume_ui: Optional[Callable[[], None]] = None,
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
@@ -385,6 +387,8 @@ class QueryContext:
         self.verbose = verbose
         self.abort_controller = asyncio.Event()
         self.file_state_cache: Dict[str, FileSnapshot] = {}
+        self.pause_ui = pause_ui
+        self.resume_ui = resume_ui
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -714,6 +718,8 @@ async def query(
                 tool_registry=query_context.tool_registry,
                 file_state_cache=query_context.file_state_cache,
                 abort_signal=query_context.abort_controller,
+                pause_ui=query_context.pause_ui,
+                resume_ui=query_context.resume_ui,
             )
 
             validation = await tool.validate_input(parsed_input, tool_context)

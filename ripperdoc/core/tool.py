@@ -44,6 +44,13 @@ class ToolUseContext(BaseModel):
     file_state_cache: Dict[str, "FileSnapshot"] = Field(default_factory=dict)
     tool_registry: Optional[Any] = None
     abort_signal: Optional[Any] = None
+    # UI control callbacks for tools that need user interaction
+    pause_ui: Optional[Any] = Field(default=None, description="Callback to pause UI spinner")
+    resume_ui: Optional[Any] = Field(default=None, description="Callback to resume UI spinner")
+    # Plan mode control callback
+    on_exit_plan_mode: Optional[Any] = Field(
+        default=None, description="Callback invoked when exiting plan mode"
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 

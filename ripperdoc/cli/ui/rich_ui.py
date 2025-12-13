@@ -850,6 +850,21 @@ class RichUI:
 
             prompt_tokens_est = estimate_conversation_tokens(messages, protocol=protocol)
             spinner = ThinkingSpinner(console, prompt_tokens_est)
+
+            # Define pause/resume callbacks for tools that need user interaction
+            def pause_ui() -> None:
+                if spinner:
+                    spinner.stop()
+
+            def resume_ui() -> None:
+                if spinner:
+                    spinner.start()
+                    spinner.update("Thinking...")
+
+            # Set the UI callbacks on the query context
+            self.query_context.pause_ui = pause_ui
+            self.query_context.resume_ui = resume_ui
+
             # Wrap permission checker to pause the spinner while waiting for user input.
             base_permission_checker = self._permission_checker
 

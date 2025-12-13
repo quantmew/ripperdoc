@@ -18,6 +18,9 @@ from ripperdoc.tools.glob_tool import GlobTool
 from ripperdoc.tools.ls_tool import LSTool
 from ripperdoc.tools.grep_tool import GrepTool
 from ripperdoc.tools.todo_tool import TodoReadTool, TodoWriteTool
+from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
+from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
+from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool
 from ripperdoc.tools.task_tool import TaskTool
 from ripperdoc.tools.tool_search_tool import ToolSearchTool
 from ripperdoc.tools.mcp_tools import (
@@ -47,6 +50,9 @@ def get_default_tools() -> List[Tool[Any, Any]]:
         GrepTool(),
         TodoReadTool(),
         TodoWriteTool(),
+        AskUserQuestionTool(),
+        EnterPlanModeTool(),
+        ExitPlanModeTool(),
         ToolSearchTool(),
         ListMcpServersTool(),
         ListMcpResourcesTool(),
