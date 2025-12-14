@@ -17,6 +17,7 @@ from ripperdoc.tools.file_write_tool import FileWriteTool
 from ripperdoc.tools.glob_tool import GlobTool
 from ripperdoc.tools.ls_tool import LSTool
 from ripperdoc.tools.grep_tool import GrepTool
+from ripperdoc.tools.skill_tool import SkillTool
 from ripperdoc.tools.todo_tool import TodoReadTool, TodoWriteTool
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
 from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
@@ -48,6 +49,7 @@ def get_default_tools() -> List[Tool[Any, Any]]:
         GlobTool(),
         LSTool(),
         GrepTool(),
+        SkillTool(),
         TodoReadTool(),
         TodoWriteTool(),
         AskUserQuestionTool(),

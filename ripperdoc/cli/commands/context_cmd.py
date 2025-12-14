@@ -7,6 +7,7 @@ from ripperdoc.cli.ui.context_display import format_tokens
 from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.query import QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.core.skills import build_skill_summary, load_all_skills
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.message_compaction import (
     get_remaining_context_tokens,
@@ -53,14 +54,27 @@ def _handle(ui: Any, _: str) -> bool:
 
     servers = asyncio.run(_load_servers())
     mcp_instructions = format_mcp_instructions(servers)
+    skill_result = load_all_skills(ui.project_path)
+    for err in skill_result.errors:
+        logger.warning(
+            "[skills] Failed to load skill",
+            extra={"path": str(err.path), "reason": err.reason, "session_id": getattr(ui, "session_id", None)},
+        )
+    skill_instructions = build_skill_summary(skill_result.skills)
+    additional_instructions: List[str] = []
+    if skill_instructions:
+        additional_instructions.append(skill_instructions)
+    memory_instructions = build_memory_instructions()
+    if memory_instructions:
+        additional_instructions.append(memory_instructions)
     base_system_prompt = build_system_prompt(
         ui.query_context.tools,
         "",
         {},
+        additional_instructions=additional_instructions or None,
         mcp_instructions=mcp_instructions,
     )
-    memory_instructions = build_memory_instructions()
-    memory_tokens = estimate_tokens(memory_instructions) if memory_instructions else 0
+    memory_tokens = 0
     mcp_tokens = estimate_mcp_tokens(servers) if mcp_instructions else 0
 
     breakdown = summarize_context_usage(

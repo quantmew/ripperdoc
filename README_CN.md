@@ -10,6 +10,7 @@ Ripperdoc 是一个 AI 驱动的终端助手，专为编码任务设计，提供
 - **代码库理解** - 分析项目结构和代码关系
 - **命令执行** - 运行 shell 命令并获得实时反馈
 - **工具系统** - 可扩展架构，支持专用工具
+- **Agent Skills** - 通过 SKILL.md 按需扩展能力
 - **子代理系统** - 将任务委托给具有自己工具范围的专用代理
 - **丰富 UI** - 美观的终端界面，支持语法高亮
 - **文件操作** - 读取、写入、编辑、搜索和管理文件
@@ -83,6 +84,15 @@ ripperdoc
 ### 安全模式权限
 
 安全模式是默认设置。使用 `--unsafe` 跳过权限提示。选择 `a`/`always` 允许在当前会话中使用某个工具（不会跨会话持久化）。
+
+### Agent Skills
+
+用可复用的 Skill 包扩展 Ripperdoc：
+
+- 个人技能放在 `~/.ripperdoc/skills/<技能名>/SKILL.md`
+- 项目技能放在 `.ripperdoc/skills/<技能名>/SKILL.md`，可随仓库一起提交
+- 每个 `SKILL.md` 以 YAML 头开始：`name`、`description`，可选 `allowed-tools`、`model`、`max-thinking-tokens`，正文写具体指令；相关文件可放在同目录
+- Ripperdoc 会在系统提示中列出技能名称和描述，匹配时通过 `Skill` 工具自动加载完整内容
 
 ## 示例
 

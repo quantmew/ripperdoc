@@ -13,6 +13,7 @@ Ripperdoc is an AI-powered terminal assistant for coding tasks, providing an int
 - **Codebase Understanding** - Analyzes project structure and code relationships
 - **Command Execution** - Run shell commands with real-time feedback
 - **Tool System** - Extensible architecture with specialized tools
+- **Agent Skills** - Load SKILL.md bundles to extend the agent on demand
 - **Subagents** - Delegate tasks to specialized agents with their own tool scopes
 - **File Operations** - Read, write, edit, search, and manage files
 - **Todo Tracking** - Plan, read, and update persistent todo lists per project
@@ -79,6 +80,15 @@ See the [examples/](examples/) directory for complete SDK usage examples.
 ### Safe Mode Permissions
 
 Safe mode is the default. Use `--unsafe` to skip permission prompts. Choose `a`/`always` to allow a tool for the current session (not persisted across sessions).
+
+### Agent Skills
+
+Extend Ripperdoc with reusable Skill bundles:
+
+- Personal skills live in `~/.ripperdoc/skills/<skill-name>/SKILL.md`
+- Project skills live in `.ripperdoc/skills/<skill-name>/SKILL.md` and can be checked into git
+- Each `SKILL.md` starts with YAML frontmatter (`name`, `description`, optional `allowed-tools`, `model`, `max-thinking-tokens`) followed by the instructions; add supporting files alongside it
+- Ripperdoc exposes skill names/descriptions in the system prompt and loads full content on demand via the `Skill` tool
 
 ## Examples
 

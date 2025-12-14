@@ -27,6 +27,7 @@ from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import QueryContext, query as _core_query
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.core.skills import build_skill_summary, load_all_skills
 from ripperdoc.core.tool import Tool
 from ripperdoc.tools.task_tool import TaskTool
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
@@ -42,6 +43,7 @@ from ripperdoc.utils.mcp import (
     load_mcp_servers_async,
     shutdown_mcp_runtime,
 )
+from ripperdoc.utils.log import get_logger
 
 MessageType = Union[UserMessage, AssistantMessage, ProgressMessage]
 PermissionChecker = Callable[
@@ -66,6 +68,8 @@ QueryRunner = Callable[
 ]
 
 _END_OF_STREAM = object()
+
+logger = get_logger()
 
 
 def _coerce_to_path(path: Union[str, Path]) -> Path:
@@ -281,12 +285,21 @@ class RipperdocClient:
             return self.options.system_prompt
 
         instructions: List[str] = []
+        project_path = _coerce_to_path(self.options.cwd or Path.cwd())
+        skill_result = load_all_skills(project_path)
+        for err in skill_result.errors:
+            logger.warning(
+                "[skills] Failed to load skill",
+                extra={"path": str(err.path), "reason": err.reason},
+            )
+        skill_instructions = build_skill_summary(skill_result.skills)
+        if skill_instructions:
+            instructions.append(skill_instructions)
         instructions.extend(self.options.extra_instructions())
         memory = build_memory_instructions()
         if memory:
             instructions.append(memory)
 
-        project_path = _coerce_to_path(self.options.cwd or Path.cwd())
         dynamic_tools = await load_dynamic_mcp_tools_async(project_path)
         if dynamic_tools:
             self._tools = merge_tools_with_dynamic(self._tools, dynamic_tools)
