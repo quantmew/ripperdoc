@@ -339,8 +339,8 @@ async def _shutdown_loop(loop: asyncio.AbstractEventLoop) -> None:
 
     current = asyncio.current_task()
     pending = [t for t in asyncio.all_tasks(loop) if t is not current]
-    for task in pending:
-        task.cancel()
+    for pending_task in pending:
+        pending_task.cancel()
     if pending:
         with contextlib.suppress(Exception):
             await asyncio.gather(*pending, return_exceptions=True)

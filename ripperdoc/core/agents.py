@@ -39,7 +39,8 @@ logger = get_logger()
 
 def _safe_tool_name(factory: Any, fallback: str) -> str:
     try:
-        return factory().name
+        name = getattr(factory(), "name", None)
+        return str(name) if name else fallback
     except Exception:
         return fallback
 

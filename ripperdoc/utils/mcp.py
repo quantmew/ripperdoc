@@ -18,11 +18,11 @@ from ripperdoc.utils.token_estimation import estimate_tokens
 logger = get_logger()
 
 try:
-    import mcp.types as mcp_types
-    from mcp.client.session import ClientSession
-    from mcp.client.sse import sse_client
-    from mcp.client.stdio import StdioServerParameters, stdio_client
-    from mcp.client.streamable_http import streamablehttp_client
+    import mcp.types as mcp_types  # type: ignore[import-not-found]
+    from mcp.client.session import ClientSession  # type: ignore[import-not-found]
+    from mcp.client.sse import sse_client  # type: ignore[import-not-found]
+    from mcp.client.stdio import StdioServerParameters, stdio_client  # type: ignore[import-not-found]
+    from mcp.client.streamable_http import streamablehttp_client  # type: ignore[import-not-found]
 
     MCP_AVAILABLE = True
 except Exception:  # pragma: no cover - handled gracefully at runtime

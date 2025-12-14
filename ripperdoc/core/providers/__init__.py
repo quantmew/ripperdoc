@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Optional, TYPE_CHECKING, Type
+from typing import Optional, TYPE_CHECKING, Type, cast
 
 from ripperdoc.core.config import ProviderType
 from ripperdoc.core.providers.base import ProviderClient
@@ -21,7 +21,7 @@ def _load_client(module: str, cls: str, extra: str) -> Type[ProviderClient]:
     """Dynamically import a provider client, pointing users to the right extra."""
     try:
         mod = importlib.import_module(f"ripperdoc.core.providers.{module}")
-        client_cls = getattr(mod, cls, None)
+        client_cls = cast(Type[ProviderClient], getattr(mod, cls, None))
         if client_cls is None:
             raise ImportError(f"{cls} not found in {module}")
         return client_cls

@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Union
 from uuid import uuid4
 
-from json_repair import repair_json
+from json_repair import repair_json  # type: ignore[import-not-found]
 from pydantic import ValidationError
 
 from ripperdoc.core.config import ModelProfile, ProviderType, get_global_config

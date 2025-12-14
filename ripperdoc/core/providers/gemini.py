@@ -6,7 +6,7 @@ import copy
 import inspect
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterable, AsyncIterator, Dict, List, Optional, Tuple, cast
 from uuid import uuid4
 
 from ripperdoc.core.config import ModelProfile
@@ -124,7 +124,7 @@ def _flatten_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
 
         return node
 
-    return _resolve(copy.deepcopy(schema))
+    return cast(Dict[str, Any], _resolve(copy.deepcopy(schema)))
 
 
 def _supports_stream_arg(fn: Any) -> bool:
@@ -327,12 +327,16 @@ class GeminiClient(ProviderClient):
             except Exception:  # pragma: no cover - fallback when SDK not installed
                 config["tools"] = [{"function_declarations": declarations}]
 
-        generate_kwargs = {"model": model_profile.model, "contents": contents, "config": config}
+        generate_kwargs: Dict[str, Any] = {
+            "model": model_profile.model,
+            "contents": contents,
+            "config": config,
+        }
         usage_tokens: Dict[str, int] = {}
         collected_text: List[str] = []
         function_calls: List[Dict[str, Any]] = []
 
-        async def _call_generate(streaming: bool):
+        async def _call_generate(streaming: bool) -> Any:
             models_api = getattr(client, "models", None) or getattr(
                 getattr(client, "aio", None), "models", None
             )
@@ -355,7 +359,7 @@ class GeminiClient(ProviderClient):
                     raise RuntimeError(GEMINI_GENERATE_CONTENT_ERROR)
 
                 if _supports_stream_arg(generate_fn):
-                    gen_kwargs = dict(generate_kwargs)
+                    gen_kwargs: Dict[str, Any] = dict(generate_kwargs)
                     gen_kwargs["stream"] = True
                     result = generate_fn(**gen_kwargs)
                     if inspect.isawaitable(result):
@@ -366,7 +370,8 @@ class GeminiClient(ProviderClient):
                 result = generate_fn(**generate_kwargs)
                 if inspect.isawaitable(result):
                     result = await result
-                async def _single_chunk_stream():
+
+                async def _single_chunk_stream() -> AsyncIterator[Any]:
                     yield result
 
                 return _single_chunk_stream()
@@ -374,10 +379,10 @@ class GeminiClient(ProviderClient):
             if generate_fn is None:
                 raise RuntimeError(GEMINI_GENERATE_CONTENT_ERROR)
 
-            result = generate_fn(**generate_kwargs)
-            if inspect.isawaitable(result):
-                return await result
-            return result
+                result = generate_fn(**generate_kwargs)
+                if inspect.isawaitable(result):
+                    return await result
+                return result
 
         try:
             if stream:
@@ -385,22 +390,22 @@ class GeminiClient(ProviderClient):
 
                 # Normalize streams into an async iterator to avoid StopIteration surfacing through
                 # asyncio executors and to handle sync iterables.
-                def _to_async_iter(obj: Any):
+                def _to_async_iter(obj: Any) -> AsyncIterator[Any]:
                     """Convert various iterable types to async generator."""
                     if inspect.isasyncgen(obj) or hasattr(obj, "__aiter__"):
-                        async def _wrap_async():
+                        async def _wrap_async() -> AsyncIterator[Any]:
                             async for item in obj:
                                 yield item
 
                         return _wrap_async()
                     if hasattr(obj, "__iter__"):
-                        async def _wrap_sync():
+                        async def _wrap_sync() -> AsyncIterator[Any]:
                             for item in obj:
                                 yield item
 
                         return _wrap_sync()
 
-                    async def _single():
+                    async def _single() -> AsyncIterator[Any]:
                         yield obj
 
                     return _single()

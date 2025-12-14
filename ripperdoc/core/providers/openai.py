@@ -167,6 +167,23 @@ class OpenAIClient(ProviderClient):
                 max_retries,
             )
 
+            if (
+                can_stream_text
+                and not collected_text
+                and not streamed_tool_calls
+                and not streamed_tool_text
+            ):
+                logger.debug(
+                    "[openai_client] Streaming returned no content; retrying without stream",
+                    extra={"model": model_profile.model},
+                )
+                can_stream = False
+                can_stream_text = False
+                can_stream_tools = False
+                openai_response = await call_with_timeout_and_retries(
+                    _non_stream_request, request_timeout, max_retries
+                )
+
         duration_ms = (time.time() - start_time) * 1000
         usage_tokens = streamed_usage if can_stream else openai_usage_tokens(
             getattr(openai_response, "usage", None)
@@ -176,12 +193,25 @@ class OpenAIClient(ProviderClient):
             model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
         )
 
-        finish_reason: Optional[str]
+        if not can_stream and (not openai_response or not getattr(openai_response, "choices", None)):
+            logger.warning(
+                "[openai_client] No choices returned from OpenAI response",
+                extra={"model": model_profile.model},
+            )
+            empty_text = "Model returned no content."
+            return ProviderResponse(
+                content_blocks=[{"type": "text", "text": empty_text}],
+                usage_tokens=usage_tokens,
+                cost_usd=cost_usd,
+                duration_ms=duration_ms,
+            )
+
+        content_blocks: List[Dict[str, Any]] = []
+        finish_reason: Optional[str] = None
         if can_stream_text:
             content_blocks = [{"type": "text", "text": "".join(collected_text)}]
             finish_reason = "stream"
         elif can_stream_tools:
-            content_blocks: List[Dict[str, Any]] = []
             if streamed_tool_text:
                 content_blocks.append({"type": "text", "text": "".join(streamed_tool_text)})
             for idx in sorted(streamed_tool_calls.keys()):

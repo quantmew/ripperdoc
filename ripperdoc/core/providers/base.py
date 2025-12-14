@@ -6,7 +6,17 @@ import asyncio
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
+from typing import (
+    Any,
+    AsyncIterable,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+)
 
 from ripperdoc.core.config import ModelProfile
 from ripperdoc.core.tool import Tool
@@ -156,11 +166,13 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
 
 def _retry_delay_seconds(attempt: int, base_delay: float = 0.5, max_delay: float = 32.0) -> float:
     """Calculate exponential backoff with jitter."""
-    capped_base = min(base_delay * (2 ** max(0, attempt - 1)), max_delay)
-    jitter = random.random() * 0.25 * capped_base
-    return capped_base + jitter
+    capped_base: float = float(min(base_delay * (2 ** max(0, attempt - 1)), max_delay))
+    jitter: float = float(random.random() * 0.25 * capped_base)
+    return float(capped_base + jitter)
 
-async def iter_with_timeout(stream: Iterable[Any], timeout: Optional[float]):
+async def iter_with_timeout(
+    stream: Iterable[Any] | AsyncIterable[Any], timeout: Optional[float]
+) -> AsyncIterator[Any]:
     """Yield items from an async or sync iterable, enforcing per-item timeout if provided."""
     if timeout is None or timeout <= 0:
         if hasattr(stream, "__aiter__"):
@@ -216,7 +228,7 @@ async def call_with_timeout_and_retries(
                 },
             )
             await asyncio.sleep(delay_seconds)
-        except Exception as exc:
+        except Exception:
             # Non-timeout errors are not retried; surface immediately.
             raise
     if last_error:
