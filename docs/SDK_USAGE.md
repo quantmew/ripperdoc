@@ -60,3 +60,12 @@ asyncio.run(main())
 - `model`, `max_thinking_tokens`, `context`, `permission_checker` pass directly into the core query pipeline.
 
 Messages emitted by the SDK are the existing `UserMessage`, `AssistantMessage`, and `ProgressMessage` classes from `ripperdoc.utils.messages`. API keys and model profiles are loaded the same way as the CLI (environment variables or `~/.ripperdoc.json`).
+
+## Thinking / reasoning mode
+
+- Set `max_thinking_tokens` on `RipperdocOptions` (or QueryContext) to request a thinking-capable run.
+- OpenAI-compatible models: DeepSeek adds `thinking={"type": "enabled"}`, GPT-5/OpenRouter reasoning models send a `reasoning` effort hint, and qwen/dashscope toggles `enable_thinking` when thinking is requested.
+- Gemini: maps `max_thinking_tokens` to `thinking_config` (`thinking_budget` for 2.5, `thinking_level` for 3) and turns on `include_thoughts` so summaries come back.
+- Anthropic: when `max_thinking_tokens > 0`, sends `thinking={type: enabled, budget_tokens: N}` and preserves returned `thinking`/`redacted_thinking` blocks; the UI renders a dim “Thinking” preview.
+- Reasoning traces (`reasoning_content` / `reasoning_details`) are stored on assistant messages and replayed automatically in the next turn so tool-calling loops keep the chain-of-thought intact.
+- You can force a thinking protocol by setting `thinking_mode` on a model profile (`deepseek`, `openrouter`, `qwen`, `gemini_openai`, `openai_reasoning`) to bypass heuristics.

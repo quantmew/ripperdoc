@@ -4,8 +4,10 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 """
 
 import asyncio
+import json
 import sys
 import uuid
+import re
 from typing import List, Dict, Any, Optional, Union, Iterable
 from pathlib import Path
 
@@ -702,12 +704,39 @@ class RichUI:
             parts: List[str] = []
             for block in content:
                 text = getattr(block, "text", None)
+                if text is None:
+                    text = getattr(block, "thinking", None)
                 if not text and isinstance(block, dict):
-                    text = block.get("text")
+                    text = block.get("text") or block.get("thinking") or block.get("data")
                 if text:
                     parts.append(str(text))
             return "\n".join(parts)
         return ""
+
+    def _format_reasoning_preview(self, reasoning: Any) -> str:
+        """Best-effort stringify for reasoning/thinking traces."""
+        if reasoning is None:
+            return ""
+        if isinstance(reasoning, str):
+            preview = reasoning.strip()
+        else:
+            try:
+                preview = json.dumps(reasoning, ensure_ascii=False)
+            except Exception:
+                preview = str(reasoning)
+        preview = preview.strip()
+        if len(preview) > 4000:
+            preview = preview[:4000] + "…"
+        return preview
+
+    def _print_reasoning(self, reasoning: Any) -> None:
+        """Display thinking traces in a dim style."""
+        preview = self._format_reasoning_preview(reasoning)
+        if not preview:
+            return
+        # Collapse excessive blank lines to keep the thinking block compact.
+        preview = re.sub(r"\n{2,}", "\n", preview)
+        self.console.print(f"[dim]🧠 Thinking: {escape(preview)}[/]")
 
     def _render_transcript(self, messages: List[ConversationMessage]) -> str:
         """Render a simple transcript for summarization."""
@@ -905,6 +934,14 @@ class RichUI:
                     permission_checker,  # type: ignore[arg-type]
                 ):
                     if message.type == "assistant" and isinstance(message, AssistantMessage):
+                        meta = getattr(getattr(message, "message", None), "metadata", {}) or {}
+                        reasoning_payload = (
+                            meta.get("reasoning_content")
+                            or meta.get("reasoning")
+                            or meta.get("reasoning_details")
+                        )
+                        if reasoning_payload:
+                            self._print_reasoning(reasoning_payload)
                         # Extract text content from assistant message
                         if isinstance(message.message.content, str):
                             self.display_message("Ripperdoc", message.message.content)

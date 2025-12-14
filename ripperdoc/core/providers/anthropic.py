@@ -53,10 +53,13 @@ class AnthropicClient(ProviderClient):
         progress_callback: Optional[ProgressCallback],
         request_timeout: Optional[float],
         max_retries: int,
+        max_thinking_tokens: int,
     ) -> ProviderResponse:
         start_time = time.time()
         tool_schemas = await build_anthropic_tool_schemas(tools)
         collected_text: List[str] = []
+        reasoning_parts: List[str] = []
+        response_metadata: Dict[str, Any] = {}
 
         anthropic_kwargs = {"base_url": model_profile.api_base}
         if model_profile.api_key:
@@ -66,6 +69,10 @@ class AnthropicClient(ProviderClient):
             anthropic_kwargs["auth_token"] = auth_token
 
         normalized_messages = sanitize_tool_history(list(normalized_messages))
+
+        thinking_payload: Optional[Dict[str, Any]] = None
+        if max_thinking_tokens > 0:
+            thinking_payload = {"type": "enabled", "budget_tokens": max_thinking_tokens}
 
         async with await self._client(anthropic_kwargs) as client:
 
@@ -77,6 +84,7 @@ class AnthropicClient(ProviderClient):
                     messages=normalized_messages,  # type: ignore[arg-type]
                     tools=tool_schemas if tool_schemas else None,  # type: ignore
                     temperature=model_profile.temperature,
+                    thinking=thinking_payload,
                 )
                 stream_resp = (
                     await asyncio.wait_for(stream_cm.__aenter__(), timeout=request_timeout)
@@ -109,6 +117,7 @@ class AnthropicClient(ProviderClient):
                     messages=normalized_messages,  # type: ignore[arg-type]
                     tools=tool_schemas if tool_schemas else None,  # type: ignore
                     temperature=model_profile.temperature,
+                    thinking=thinking_payload,
                 )
 
             timeout_for_call = None if stream else request_timeout
@@ -126,8 +135,14 @@ class AnthropicClient(ProviderClient):
         )
 
         content_blocks = content_blocks_from_anthropic_response(response, tool_mode)
-        if stream and collected_text and tool_mode == "text":
-            content_blocks = [{"type": "text", "text": "".join(collected_text)}]
+        for blk in content_blocks:
+            if blk.get("type") == "thinking":
+                thinking_text = blk.get("thinking") or blk.get("text") or ""
+                if thinking_text:
+                    reasoning_parts.append(str(thinking_text))
+        if reasoning_parts:
+            response_metadata["reasoning_content"] = "\n".join(reasoning_parts)
+        # Streaming progress is handled via text_stream; final content retains thinking blocks.
 
         logger.info(
             "[anthropic_client] Response received",
@@ -144,4 +159,5 @@ class AnthropicClient(ProviderClient):
             usage_tokens=usage_tokens,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
+            metadata=response_metadata,
         )

@@ -121,3 +121,42 @@ def test_sanitize_tool_history_drops_unpaired_tool_use():
         block["id"] for block in sanitized[0]["content"] if block.get("type") == "tool_use"
     ]
     assert tool_use_ids == ["call_1"]
+
+
+def test_normalize_messages_with_reasoning_metadata():
+    """Ensure reasoning metadata is preserved for OpenAI-style messages."""
+    assistant = create_assistant_message(
+        [
+            {
+                "type": "tool_use",
+                "tool_use_id": "call_reason",
+                "name": "demo",
+                "input": {},
+            }
+        ],
+        metadata={"reasoning_content": "thinking..."},
+    )
+    user = create_user_message(
+        [{"type": "tool_result", "tool_use_id": "call_reason", "text": "done"}]
+    )
+
+    normalized = normalize_messages_for_api([assistant, user], protocol="openai")
+    asst_messages = [msg for msg in normalized if msg.get("role") == "assistant"]
+    assert asst_messages, "assistant messages should be present"
+    assert asst_messages[-1].get("reasoning_content") == "thinking..."
+
+
+def test_normalize_messages_preserves_thinking_block():
+    """Thinking/redacted thinking blocks should be passed through for Anthropic."""
+    assistant = create_assistant_message(
+        [
+            {"type": "thinking", "thinking": "step 1", "signature": "sig"},
+            {"type": "redacted_thinking", "data": "encrypted"},
+            {"type": "text", "text": "answer"},
+        ]
+    )
+
+    normalized = normalize_messages_for_api([assistant], protocol="anthropic")
+    assert normalized and normalized[0].get("content")
+    kinds = [blk.get("type") for blk in normalized[0]["content"]]
+    assert kinds[:2] == ["thinking", "redacted_thinking"]

@@ -49,9 +49,12 @@ def _extract_usage_metadata(payload: Any) -> Dict[str, int]:
         value = getattr(usage, key, 0)
         return int(value) if value else 0
 
+    thought_tokens = safe_get_int("thoughts_token_count")
+    candidate_tokens = safe_get_int("candidates_token_count")
+
     return {
         "input_tokens": safe_get_int("prompt_token_count") + safe_get_int("cached_content_token_count"),
-        "output_tokens": safe_get_int("candidates_token_count"),
+        "output_tokens": candidate_tokens + thought_tokens,
         "cache_read_input_tokens": safe_get_int("cached_content_token_count"),
         "cache_creation_input_tokens": 0,
     }
@@ -141,6 +144,36 @@ def _supports_stream_arg(fn: Any) -> bool:
         if param.name == "stream":
             return True
     return False
+
+
+def _build_thinking_config(max_thinking_tokens: int, model_name: str) -> Dict[str, Any]:
+    """Map max_thinking_tokens to Gemini thinking_config settings."""
+    if max_thinking_tokens <= 0:
+        return {}
+    name = (model_name or "").lower()
+    config: Dict[str, Any] = {"include_thoughts": True}
+    if "gemini-3" in name:
+        config["thinking_level"] = "low" if max_thinking_tokens <= 2048 else "high"
+    else:
+        config["thinking_budget"] = max_thinking_tokens
+    return config
+
+
+def _collect_thoughts_from_parts(parts: List[Any]) -> List[str]:
+    """Extract thought summaries from parts flagged as thoughts."""
+    snippets: List[str] = []
+    for part in parts:
+        is_thought = getattr(part, "thought", None)
+        if is_thought is None and isinstance(part, dict):
+            is_thought = part.get("thought")
+        if not is_thought:
+            continue
+        text_val = getattr(part, "text", None) or getattr(part, "content", None) or getattr(
+            part, "raw_text", None
+        )
+        if isinstance(text_val, str):
+            snippets.append(text_val)
+    return snippets
 
 
 async def _async_build_tool_declarations(tools: List[Tool[Any, Any]]) -> List[Dict[str, Any]]:
@@ -295,6 +328,7 @@ class GeminiClient(ProviderClient):
         progress_callback: Optional[ProgressCallback],
         request_timeout: Optional[float],
         max_retries: int,
+        max_thinking_tokens: int,
     ) -> ProviderResponse:
         start_time = time.time()
 
@@ -319,6 +353,14 @@ class GeminiClient(ProviderClient):
         config: Dict[str, Any] = {"system_instruction": system_prompt}
         if model_profile.max_tokens:
             config["max_output_tokens"] = model_profile.max_tokens
+        thinking_config = _build_thinking_config(max_thinking_tokens, model_profile.model)
+        if thinking_config:
+            try:
+                from google.genai import types as genai_types  # type: ignore
+
+                config["thinking_config"] = genai_types.ThinkingConfig(**thinking_config)
+            except Exception:  # pragma: no cover - fallback when SDK not installed
+                config["thinking_config"] = thinking_config
         if declarations:
             try:
                 from google.genai import types as genai_types  # type: ignore
@@ -335,6 +377,8 @@ class GeminiClient(ProviderClient):
         usage_tokens: Dict[str, int] = {}
         collected_text: List[str] = []
         function_calls: List[Dict[str, Any]] = []
+        reasoning_parts: List[str] = []
+        response_metadata: Dict[str, Any] = {}
 
         async def _call_generate(streaming: bool) -> Any:
             models_api = getattr(client, "models", None) or getattr(
@@ -416,14 +460,16 @@ class GeminiClient(ProviderClient):
                     candidates = getattr(chunk, "candidates", None) or []
                     for candidate in candidates:
                         parts = _collect_parts(candidate)
+                        text_chunk = _collect_text_from_parts(parts)
                         if progress_callback:
-                            text_delta = _collect_text_from_parts(parts)
-                            if text_delta:
+                            if text_chunk:
                                 try:
-                                    await progress_callback(text_delta)
+                                    await progress_callback(text_chunk)
                                 except Exception:
                                     logger.exception("[gemini_client] Stream callback failed")
-                        collected_text.append(_collect_text_from_parts(parts))
+                        if text_chunk:
+                            collected_text.append(text_chunk)
+                        reasoning_parts.extend(_collect_thoughts_from_parts(parts))
                         function_calls.extend(_extract_function_calls(parts))
                     usage_tokens = _extract_usage_metadata(chunk) or usage_tokens
             else:
@@ -437,6 +483,7 @@ class GeminiClient(ProviderClient):
                 if candidates:
                     parts = _collect_parts(candidates[0])
                     collected_text.append(_collect_text_from_parts(parts))
+                    reasoning_parts.extend(_collect_thoughts_from_parts(parts))
                     function_calls.extend(_extract_function_calls(parts))
                 else:
                     # Fallback: try to read text directly
@@ -455,6 +502,8 @@ class GeminiClient(ProviderClient):
         combined_text = "".join(collected_text).strip()
         if combined_text:
             content_blocks.append({"type": "text", "text": combined_text})
+        if reasoning_parts:
+            response_metadata["reasoning_content"] = "".join(reasoning_parts)
 
         for call in function_calls:
             if not call.get("name"):
@@ -493,4 +542,5 @@ class GeminiClient(ProviderClient):
             usage_tokens=usage_tokens,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
+            metadata=response_metadata,
         )

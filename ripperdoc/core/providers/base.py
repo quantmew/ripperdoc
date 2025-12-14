@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import random
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     AsyncIterable,
@@ -35,6 +35,7 @@ class ProviderResponse:
     usage_tokens: Dict[str, int]
     cost_usd: float
     duration_ms: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class ProviderClient(ABC):
@@ -53,6 +54,7 @@ class ProviderClient(ABC):
         progress_callback: Optional[ProgressCallback],
         request_timeout: Optional[float],
         max_retries: int,
+        max_thinking_tokens: int,
     ) -> ProviderResponse:
         """Execute a model call and return a normalized response."""
 

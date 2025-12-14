@@ -121,6 +121,7 @@ async def run_query(
                                 Markdown(message.message.content),
                                 title="Ripperdoc",
                                 border_style="cyan",
+                                padding=(0, 1),
                             )
                         )
                     else:
@@ -133,6 +134,7 @@ async def run_query(
                                             Markdown(block["text"]),
                                             title="Ripperdoc",
                                             border_style="cyan",
+                                            padding=(0, 1),
                                         )
                                     )
                             else:
@@ -142,6 +144,7 @@ async def run_query(
                                             Markdown(block.text or ""),
                                             title="Ripperdoc",
                                             border_style="cyan",
+                                            padding=(0, 1),
                                         )
                                     )
 

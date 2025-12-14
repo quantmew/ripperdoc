@@ -66,16 +66,43 @@ def anthropic_usage_tokens(usage: Optional[Mapping[str, Any] | object]) -> Dict[
 def openai_usage_tokens(usage: Optional[Mapping[str, Any] | object]) -> Dict[str, int]:
     """Extract token counts from an OpenAI-compatible response usage payload."""
     prompt_details = None
+    input_details = None
+    output_details = None
     if isinstance(usage, dict):
         prompt_details = usage.get("prompt_tokens_details")
+        input_details = usage.get("input_tokens_details")
+        output_details = usage.get("output_tokens_details")
     else:
         prompt_details = getattr(usage, "prompt_tokens_details", None)
+        input_details = getattr(usage, "input_tokens_details", None)
+        output_details = getattr(usage, "output_tokens_details", None)
 
-    cache_read_tokens = _get_usage_field(prompt_details, "cached_tokens") if prompt_details else 0
+    cache_read_tokens = 0
+    if prompt_details:
+        cache_read_tokens = _get_usage_field(prompt_details, "cached_tokens")
+    if not cache_read_tokens and input_details:
+        cache_read_tokens = _get_usage_field(input_details, "cached_tokens")
+
+    input_tokens = _get_usage_field(usage, "prompt_tokens")
+    if not input_tokens:
+        input_tokens = _get_usage_field(usage, "input_tokens")
+
+    output_tokens = _get_usage_field(usage, "completion_tokens")
+    if not output_tokens:
+        output_tokens = _get_usage_field(usage, "output_tokens")
+
+    reasoning_tokens = _get_usage_field(output_details, "reasoning_tokens") if output_details else 0
+    if reasoning_tokens:
+        if output_tokens <= 0:
+            output_tokens = reasoning_tokens
+        elif output_tokens < reasoning_tokens:
+            output_tokens = output_tokens + reasoning_tokens
+        else:
+            output_tokens = max(output_tokens, reasoning_tokens)
 
     return {
-        "input_tokens": _get_usage_field(usage, "prompt_tokens"),
-        "output_tokens": _get_usage_field(usage, "completion_tokens"),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
         "cache_read_input_tokens": cache_read_tokens,
         "cache_creation_input_tokens": 0,
     }
@@ -487,6 +514,23 @@ def content_blocks_from_anthropic_response(response: Any, tool_mode: str) -> Lis
         btype = getattr(block, "type", None)
         if btype == "text":
             blocks.append({"type": "text", "text": getattr(block, "text", "")})
+        elif btype == "thinking":
+            blocks.append(
+                {
+                    "type": "thinking",
+                    "thinking": getattr(block, "thinking", None) or "",
+                    "signature": getattr(block, "signature", None),
+                }
+            )
+        elif btype == "redacted_thinking":
+            # Preserve encrypted payload for replay even if we don't display it.
+            blocks.append(
+                {
+                    "type": "redacted_thinking",
+                    "data": getattr(block, "data", None),
+                    "signature": getattr(block, "signature", None),
+                }
+            )
         elif btype == "tool_use":
             raw_input = getattr(block, "input", {}) or {}
             blocks.append(

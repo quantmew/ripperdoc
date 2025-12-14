@@ -32,6 +32,79 @@ from ripperdoc.utils.session_usage import record_usage
 logger = get_logger()
 
 
+def _effort_from_tokens(max_thinking_tokens: int) -> Optional[str]:
+    """Map a thinking token budget to a coarse effort label."""
+    if max_thinking_tokens <= 0:
+        return None
+    if max_thinking_tokens <= 1024:
+        return "low"
+    if max_thinking_tokens <= 8192:
+        return "medium"
+    return "high"
+
+
+def _detect_openai_vendor(model_profile: ModelProfile) -> str:
+    """Best-effort vendor hint for OpenAI-compatible endpoints."""
+    override = getattr(model_profile, "thinking_mode", None)
+    if isinstance(override, str) and override.strip():
+        return override.strip().lower()
+    base = (model_profile.api_base or "").lower()
+    name = (model_profile.model or "").lower()
+    if "openrouter.ai" in base:
+        return "openrouter"
+    if "deepseek" in base or name.startswith("deepseek"):
+        return "deepseek"
+    if "dashscope" in base or "qwen" in name:
+        return "qwen"
+    if "generativelanguage.googleapis.com" in base or name.startswith("gemini"):
+        return "gemini_openai"
+    if "gpt-5" in name:
+        return "openai_reasoning"
+    return "openai"
+
+
+def _build_thinking_kwargs(
+    model_profile: ModelProfile, max_thinking_tokens: int
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Return (extra_body, top_level_kwargs) for thinking-enabled calls."""
+    extra_body: Dict[str, Any] = {}
+    top_level: Dict[str, Any] = {}
+    vendor = _detect_openai_vendor(model_profile)
+    effort = _effort_from_tokens(max_thinking_tokens)
+
+    if vendor == "deepseek":
+        if max_thinking_tokens != 0:
+            extra_body["thinking"] = {"type": "enabled"}
+    elif vendor == "qwen":
+        if max_thinking_tokens > 0:
+            extra_body["enable_thinking"] = True
+        elif max_thinking_tokens == 0:
+            extra_body["enable_thinking"] = False
+    elif vendor == "openrouter":
+        if max_thinking_tokens > 0:
+            extra_body["reasoning"] = {"max_tokens": max_thinking_tokens}
+        elif max_thinking_tokens == 0:
+            extra_body["reasoning"] = {"effort": "none"}
+    elif vendor == "gemini_openai":
+        google_cfg: Dict[str, Any] = {}
+        if max_thinking_tokens > 0:
+            google_cfg["thinking_budget"] = max_thinking_tokens
+            google_cfg["include_thoughts"] = True
+        if google_cfg:
+            extra_body["google"] = {"thinking_config": google_cfg}
+        if effort:
+            top_level["reasoning_effort"] = effort
+            extra_body.setdefault("reasoning", {"effort": effort})
+    elif vendor == "openai_reasoning":
+        if effort:
+            extra_body["reasoning"] = {"effort": effort}
+    else:
+        if effort:
+            extra_body["reasoning"] = {"effort": effort}
+
+    return extra_body, top_level
+
+
 class OpenAIClient(ProviderClient):
     """OpenAI-compatible client with streaming and non-streaming support."""
 
@@ -47,6 +120,7 @@ class OpenAIClient(ProviderClient):
         progress_callback: Optional[ProgressCallback],
         request_timeout: Optional[float],
         max_retries: int,
+        max_thinking_tokens: int,
     ) -> ProviderResponse:
         start_time = time.time()
         openai_tools = await build_openai_tool_schemas(tools)
@@ -57,10 +131,16 @@ class OpenAIClient(ProviderClient):
         streamed_tool_calls: Dict[int, Dict[str, Optional[str]]] = {}
         streamed_tool_text: List[str] = []
         streamed_usage: Dict[str, int] = {}
+        stream_reasoning_text: List[str] = []
+        stream_reasoning_details: List[Any] = []
+        response_metadata: Dict[str, Any] = {}
 
         can_stream_text = stream and tool_mode == "text" and not openai_tools
         can_stream_tools = stream and tool_mode != "text" and bool(openai_tools)
         can_stream = can_stream_text or can_stream_tools
+        thinking_extra_body, thinking_top_level = _build_thinking_kwargs(
+            model_profile, max_thinking_tokens
+        )
 
         async with AsyncOpenAI(
             api_key=model_profile.api_key, base_url=model_profile.api_base
@@ -68,14 +148,20 @@ class OpenAIClient(ProviderClient):
 
             async def _stream_request() -> Dict[str, Dict[str, int]]:
                 announced_tool_indexes: set[int] = set()
+                stream_kwargs: Dict[str, Any] = {
+                    "model": model_profile.model,
+                    "messages": cast(Any, openai_messages),
+                    "tools": openai_tools if openai_tools else None,
+                    "temperature": model_profile.temperature,
+                    "max_tokens": model_profile.max_tokens,
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    **thinking_top_level,
+                }
+                if thinking_extra_body:
+                    stream_kwargs["extra_body"] = thinking_extra_body
                 stream_coro = client.chat.completions.create(  # type: ignore[call-overload]
-                    model=model_profile.model,
-                    messages=cast(Any, openai_messages),
-                    tools=openai_tools if can_stream_tools else None,
-                    temperature=model_profile.temperature,
-                    max_tokens=model_profile.max_tokens,
-                    stream=True,
-                    stream_options={"include_usage": True},
+                    **stream_kwargs
                 )
                 stream_resp = (
                     await asyncio.wait_for(stream_coro, timeout=request_timeout)
@@ -105,6 +191,21 @@ class OpenAIClient(ProviderClient):
                                     text_delta += text_val
                         elif isinstance(delta_content, str):
                             text_delta += delta_content
+                    delta_reasoning = getattr(delta, "reasoning_content", None) or getattr(
+                        delta, "reasoning", None
+                    )
+                    if isinstance(delta_reasoning, str):
+                        stream_reasoning_text.append(delta_reasoning)
+                    elif isinstance(delta_reasoning, list):
+                        for item in delta_reasoning:
+                            if isinstance(item, str):
+                                stream_reasoning_text.append(item)
+                    delta_reasoning_details = getattr(delta, "reasoning_details", None)
+                    if delta_reasoning_details:
+                        if isinstance(delta_reasoning_details, list):
+                            stream_reasoning_details.extend(delta_reasoning_details)
+                        else:
+                            stream_reasoning_details.append(delta_reasoning_details)
                     if text_delta:
                         target_collector = streamed_tool_text if can_stream_tools else collected_text
                         target_collector.append(text_delta)
@@ -152,12 +253,18 @@ class OpenAIClient(ProviderClient):
                 return {"usage": streamed_usage}
 
             async def _non_stream_request() -> Any:
+                kwargs: Dict[str, Any] = {
+                    "model": model_profile.model,
+                    "messages": cast(Any, openai_messages),
+                    "tools": openai_tools if openai_tools else None,  # type: ignore[arg-type]
+                    "temperature": model_profile.temperature,
+                    "max_tokens": model_profile.max_tokens,
+                    **thinking_top_level,
+                }
+                if thinking_extra_body:
+                    kwargs["extra_body"] = thinking_extra_body
                 return await client.chat.completions.create(  # type: ignore[call-overload]
-                    model=model_profile.model,
-                    messages=cast(Any, openai_messages),
-                    tools=openai_tools if openai_tools else None,  # type: ignore[arg-type]
-                    temperature=model_profile.temperature,
-                    max_tokens=model_profile.max_tokens,
+                    **kwargs
                 )
 
             timeout_for_call = None if can_stream else request_timeout
@@ -204,6 +311,7 @@ class OpenAIClient(ProviderClient):
                 usage_tokens=usage_tokens,
                 cost_usd=cost_usd,
                 duration_ms=duration_ms,
+                metadata=response_metadata,
             )
 
         content_blocks: List[Dict[str, Any]] = []
@@ -233,6 +341,28 @@ class OpenAIClient(ProviderClient):
             choice = openai_response.choices[0]
             content_blocks = content_blocks_from_openai_choice(choice, tool_mode)
             finish_reason = cast(Optional[str], getattr(choice, "finish_reason", None))
+            message_obj = getattr(choice, "message", None) or choice
+            reasoning_content = getattr(message_obj, "reasoning_content", None)
+            if reasoning_content:
+                response_metadata["reasoning_content"] = reasoning_content
+            reasoning_field = getattr(message_obj, "reasoning", None)
+            if reasoning_field:
+                response_metadata["reasoning"] = reasoning_field
+                if "reasoning_content" not in response_metadata and isinstance(
+                    reasoning_field, str
+                ):
+                    response_metadata["reasoning_content"] = reasoning_field
+            reasoning_details = getattr(message_obj, "reasoning_details", None)
+            if reasoning_details:
+                response_metadata["reasoning_details"] = reasoning_details
+
+        if can_stream:
+            if stream_reasoning_text:
+                joined = "".join(stream_reasoning_text)
+                response_metadata["reasoning_content"] = joined
+                response_metadata.setdefault("reasoning", joined)
+            if stream_reasoning_details:
+                response_metadata["reasoning_details"] = stream_reasoning_details
 
         logger.info(
             "[openai_client] Response received",
@@ -250,4 +380,5 @@ class OpenAIClient(ProviderClient):
             usage_tokens=usage_tokens,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
+            metadata=response_metadata,
         )

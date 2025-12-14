@@ -507,12 +507,14 @@ async def query_llm(
             progress_callback=progress_callback,
             request_timeout=request_timeout,
             max_retries=max_retries,
+            max_thinking_tokens=max_thinking_tokens,
         )
 
         return create_assistant_message(
             content=provider_response.content_blocks,
             cost_usd=provider_response.cost_usd,
             duration_ms=provider_response.duration_ms,
+            metadata=provider_response.metadata,
         )
 
     except Exception as e:

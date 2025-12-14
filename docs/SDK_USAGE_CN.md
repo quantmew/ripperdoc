@@ -73,6 +73,15 @@ asyncio.run(main())
 - `context`: 额外上下文字典，会拼接进系统提示。
 - `model`, `max_thinking_tokens`, `verbose`: 透传到核心查询上下文。
 
+## 思考 / 推理模式
+
+- 在 `RipperdocOptions`（或 QueryContext）上设置 `max_thinking_tokens` 来请求思考模式。
+- OpenAI 兼容模型：DeepSeek 会携带 `thinking={"type": "enabled"}`，GPT-5/OpenRouter 推理模型发送 `reasoning` 努力度提示，qwen/dashscope 在请求思考时设置 `enable_thinking`。
+- Gemini：把 `max_thinking_tokens` 映射到 `thinking_config`（2.5 使用 `thinking_budget`，3 使用 `thinking_level`），并开启 `include_thoughts` 以返回思考摘要。
+- Anthropic：`max_thinking_tokens>0` 时发送 `thinking={type: enabled, budget_tokens: N}`，会保留返回的 `thinking`/`redacted_thinking` 块，UI 会以浅灰色“Thinking”预览显示。
+- 返回的 `reasoning_content` / `reasoning_details` 会保存在 assistant 消息上，并在下一轮自动带回，工具调用时保持思路连续。
+- 若自动探测不准，可在模型 profile 上设置 `thinking_mode`（如 `deepseek`、`openrouter`、`qwen`、`gemini_openai`、`openai_reasoning`）强制指定思考协议。
+
 ## 工具过滤与 Task 子代理
 使用 `allowed_tools`/`disallowed_tools` 过滤后，SDK 会重建默认的 Task 工具，使子代理仅能看到过滤后的基础工具集合，避免越权。
 

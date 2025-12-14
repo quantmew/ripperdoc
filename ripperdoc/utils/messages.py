@@ -6,7 +6,7 @@ for communication with AI models.
 
 import json
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from uuid import uuid4
 from enum import Enum
 from ripperdoc.utils.log import get_logger
@@ -27,6 +27,9 @@ class MessageContent(BaseModel):
 
     type: str
     text: Optional[str] = None
+    thinking: Optional[str] = None
+    signature: Optional[str] = None
+    data: Optional[str] = None
     # Some providers return tool_use IDs as "id", others as "tool_use_id"
     id: Optional[str] = None
     tool_use_id: Optional[str] = None
@@ -38,6 +41,18 @@ class MessageContent(BaseModel):
 def _content_block_to_api(block: MessageContent) -> Dict[str, Any]:
     """Convert a MessageContent block to API-ready dict for tool protocols."""
     block_type = getattr(block, "type", None)
+    if block_type == "thinking":
+        return {
+            "type": "thinking",
+            "thinking": getattr(block, "thinking", None) or getattr(block, "text", None) or "",
+            "signature": getattr(block, "signature", None),
+        }
+    if block_type == "redacted_thinking":
+        return {
+            "type": "redacted_thinking",
+            "data": getattr(block, "data", None) or getattr(block, "text", None) or "",
+            "signature": getattr(block, "signature", None),
+        }
     if block_type == "tool_use":
         return {
             "type": "tool_use",
@@ -118,6 +133,8 @@ class Message(BaseModel):
 
     role: MessageRole
     content: Union[str, List[MessageContent]]
+    reasoning: Optional[Any] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     uuid: str = ""
 
     def __init__(self, **data: object) -> None:
@@ -208,7 +225,11 @@ def create_user_message(
 
 
 def create_assistant_message(
-    content: Union[str, List[Dict[str, Any]]], cost_usd: float = 0.0, duration_ms: float = 0.0
+    content: Union[str, List[Dict[str, Any]]],
+    cost_usd: float = 0.0,
+    duration_ms: float = 0.0,
+    reasoning: Optional[Any] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> AssistantMessage:
     """Create an assistant message."""
     if isinstance(content, str):
@@ -216,7 +237,12 @@ def create_assistant_message(
     else:
         message_content = [MessageContent(**item) for item in content]
 
-    message = Message(role=MessageRole.ASSISTANT, content=message_content)
+    message = Message(
+        role=MessageRole.ASSISTANT,
+        content=message_content,
+        reasoning=reasoning,
+        metadata=metadata or {},
+    )
 
     return AssistantMessage(message=message, cost_usd=cost_usd, duration_ms=duration_ms)
 
@@ -263,6 +289,28 @@ def normalize_messages_for_api(
             if "content" in msg:
                 return msg.get("content")
         return None
+
+    def _msg_metadata(msg: Any) -> Dict[str, Any]:
+        message_obj = getattr(msg, "message", None)
+        if message_obj is not None and hasattr(message_obj, "metadata"):
+            try:
+                meta = getattr(message_obj, "metadata", {}) or {}
+                meta_dict = dict(meta) if isinstance(meta, dict) else {}
+            except Exception:
+                meta_dict = {}
+            reasoning_val = getattr(message_obj, "reasoning", None)
+            if reasoning_val is not None and "reasoning" not in meta_dict:
+                meta_dict["reasoning"] = reasoning_val
+            return meta_dict
+        if isinstance(msg, dict):
+            message_payload = msg.get("message")
+            if isinstance(message_payload, dict):
+                meta = message_payload.get("metadata") or {}
+                meta_dict = dict(meta) if isinstance(meta, dict) else {}
+                if "reasoning" not in meta_dict and "reasoning" in message_payload:
+                    meta_dict["reasoning"] = message_payload.get("reasoning")
+                return meta_dict
+        return {}
 
     def _block_type(block: Any) -> Optional[str]:
         if hasattr(block, "type"):
@@ -352,6 +400,7 @@ def normalize_messages_for_api(
 
         if msg_type == "user":
             user_content = _msg_content(msg)
+            meta = _msg_metadata(msg)
             if isinstance(user_content, list):
                 if protocol == "openai":
                     # Map each block to an OpenAI-style message
@@ -362,6 +411,11 @@ def normalize_messages_for_api(
                         mapped = _content_block_to_openai(block)
                         if mapped:
                             openai_msgs.append(mapped)
+                    if meta and openai_msgs:
+                        for candidate in openai_msgs:
+                            for key in ("reasoning_content", "reasoning_details", "reasoning"):
+                                if key in meta and meta[key] is not None:
+                                    candidate[key] = meta[key]
                     normalized.extend(openai_msgs)
                     continue
                 api_blocks = []
@@ -374,6 +428,7 @@ def normalize_messages_for_api(
                 normalized.append({"role": "user", "content": user_content})  # type: ignore
         elif msg_type == "assistant":
             asst_content = _msg_content(msg)
+            meta = _msg_metadata(msg)
             if isinstance(asst_content, list):
                 if protocol == "openai":
                     assistant_openai_msgs: List[Dict[str, Any]] = []
@@ -417,6 +472,10 @@ def normalize_messages_for_api(
                                 "tool_calls": tool_calls,
                             }
                         )
+                    if meta and assistant_openai_msgs:
+                        for key in ("reasoning_content", "reasoning_details", "reasoning"):
+                            if key in meta and meta[key] is not None:
+                                assistant_openai_msgs[-1][key] = meta[key]
                     normalized.extend(assistant_openai_msgs)
                     continue
                 api_blocks = []
