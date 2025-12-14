@@ -39,6 +39,7 @@ from ripperdoc.core.query_utils import (
     tool_result_message,
 )
 from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
+from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.file_watch import ChangedFileNotice, FileSnapshot, detect_changed_files
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
@@ -365,6 +366,52 @@ class ToolRegistry:
             tool = self._tool_map.get(name)
             if tool:
                 yield name, tool
+
+
+def _apply_skill_context_updates(
+    tool_results: List[UserMessage], query_context: "QueryContext"
+) -> None:
+    """Update query context based on Skill tool outputs."""
+    for message in tool_results:
+        data = getattr(message, "tool_use_result", None)
+        if not isinstance(data, dict):
+            continue
+        skill_name = (
+            data.get("skill")
+            or data.get("command_name")
+            or data.get("commandName")
+            or data.get("command")
+        )
+        if not skill_name:
+            continue
+
+        allowed_tools = data.get("allowed_tools") or data.get("allowedTools") or []
+        if allowed_tools and getattr(query_context, "tool_registry", None):
+            try:
+                query_context.tool_registry.activate_tools(
+                    [tool for tool in allowed_tools if isinstance(tool, str) and tool.strip()]
+                )
+            except Exception:
+                logger.exception("[query] Failed to activate tools listed in skill output")
+
+        model_hint = data.get("model")
+        if isinstance(model_hint, str) and model_hint.strip():
+            logger.debug(
+                "[query] Applying model hint from skill",
+                extra={"skill": skill_name, "model": model_hint},
+            )
+            query_context.model = model_hint.strip()
+
+        max_tokens = data.get("max_thinking_tokens")
+        if max_tokens is None:
+            max_tokens = data.get("maxThinkingTokens")
+        parsed_max = parse_optional_int(max_tokens)
+        if parsed_max is not None:
+            logger.debug(
+                "[query] Applying max thinking tokens from skill",
+                extra={"skill": skill_name, "max_thinking_tokens": parsed_max},
+            )
+            query_context.max_thinking_tokens = parsed_max
 
 
 class QueryContext:
@@ -797,6 +844,8 @@ async def query(
     if prepared_calls:
         async for message in _run_tools_concurrently(prepared_calls, tool_results):
             yield message
+
+    _apply_skill_context_updates(tool_results, query_context)
 
     # Check for abort after tools
     if query_context.abort_controller.is_set():

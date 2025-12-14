@@ -3,7 +3,14 @@
 Skills are small capability bundles defined by SKILL.md files that live under
 `~/.ripperdoc/skills` or `.ripperdoc/skills` in a project. Only the skill
 metadata (name + description) should be added to the system prompt up front;
-the full content is loaded on demand via the Skill tool.
+the full content is loaded on demand via the Skill tool. Optional frontmatter
+fields include:
+- allowed-tools: Comma-separated list of tools that are allowed/preferred.
+- model: Model pointer hint for this skill.
+- max-thinking-tokens: Reasoning budget hint for this skill.
+- disable-model-invocation: If true, block the Skill tool from loading this
+  skill.
+- type: Skill kind (defaults to "prompt").
 """
 
 from __future__ import annotations
@@ -16,6 +23,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
+from ripperdoc.utils.coerce import parse_boolish, parse_optional_int
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -46,6 +54,8 @@ class SkillDefinition:
     allowed_tools: List[str]
     model: Optional[str] = None
     max_thinking_tokens: Optional[int] = None
+    skill_type: str = "prompt"
+    disable_model_invocation: bool = False
 
 
 @dataclass
@@ -99,17 +109,6 @@ def _normalize_allowed_tools(value: object) -> List[str]:
     return []
 
 
-def _parse_optional_int(value: object) -> Optional[int]:
-    try:
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return int(value)
-        return int(str(value).strip())
-    except Exception:
-        return None
-
-
 def _load_skill_file(path: Path, location: SkillLocation) -> Tuple[Optional[SkillDefinition], Optional[SkillLoadError]]:
     """Parse a single SKILL.md file."""
     try:
@@ -139,8 +138,18 @@ def _load_skill_file(path: Path, location: SkillLocation) -> Tuple[Optional[Skil
     )
     model_value = frontmatter.get("model")
     model = model_value if isinstance(model_value, str) and model_value.strip() else None
-    max_thinking_tokens = _parse_optional_int(
+    max_thinking_tokens = parse_optional_int(
         frontmatter.get("max-thinking-tokens") or frontmatter.get("max_thinking_tokens")
+    )
+    raw_type = (
+        frontmatter.get("type")
+        or frontmatter.get("skill-type")
+        or frontmatter.get("skill_type")
+        or "prompt"
+    )
+    skill_type = str(raw_type).strip().lower() if isinstance(raw_type, str) else "prompt"
+    disable_model_invocation = parse_boolish(
+        frontmatter.get("disable-model-invocation") or frontmatter.get("disable_model_invocation")
     )
 
     skill = SkillDefinition(
@@ -153,6 +162,8 @@ def _load_skill_file(path: Path, location: SkillLocation) -> Tuple[Optional[Skil
         allowed_tools=allowed_tools,
         model=model,
         max_thinking_tokens=max_thinking_tokens,
+        skill_type=skill_type or "prompt",
+        disable_model_invocation=disable_model_invocation,
     )
     return skill, None
 

@@ -91,7 +91,8 @@ ripperdoc
 
 - 个人技能放在 `~/.ripperdoc/skills/<技能名>/SKILL.md`
 - 项目技能放在 `.ripperdoc/skills/<技能名>/SKILL.md`，可随仓库一起提交
-- 每个 `SKILL.md` 以 YAML 头开始：`name`、`description`，可选 `allowed-tools`、`model`、`max-thinking-tokens`，正文写具体指令；相关文件可放在同目录
+- 每个 `SKILL.md` 以 YAML 头开始：`name`、`description`，可选 `allowed-tools`、`model`、`max-thinking-tokens`、`disable-model-invocation`，正文写具体指令；相关文件可放在同目录
+- 通过 `Skill` 工具加载后，技能中的模型和思考预算提示会自动作用于当前会话
 - Ripperdoc 会在系统提示中列出技能名称和描述，匹配时通过 `Skill` 工具自动加载完整内容
 
 ## 示例

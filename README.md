@@ -87,7 +87,8 @@ Extend Ripperdoc with reusable Skill bundles:
 
 - Personal skills live in `~/.ripperdoc/skills/<skill-name>/SKILL.md`
 - Project skills live in `.ripperdoc/skills/<skill-name>/SKILL.md` and can be checked into git
-- Each `SKILL.md` starts with YAML frontmatter (`name`, `description`, optional `allowed-tools`, `model`, `max-thinking-tokens`) followed by the instructions; add supporting files alongside it
+- Each `SKILL.md` starts with YAML frontmatter (`name`, `description`, optional `allowed-tools`, `model`, `max-thinking-tokens`, `disable-model-invocation`) followed by the instructions; add supporting files alongside it
+- Model and max-thinking-token hints from skills are applied automatically for the rest of the session after you load them with the `Skill` tool
 - Ripperdoc exposes skill names/descriptions in the system prompt and loads full content on demand via the `Skill` tool
 
 ## Examples

@@ -34,6 +34,7 @@ class SkillToolInput(BaseModel):
 class SkillToolOutput(BaseModel):
     """Structured output for a loaded skill."""
 
+    success: bool = True
     skill: str
     description: str
     location: str
@@ -42,6 +43,8 @@ class SkillToolOutput(BaseModel):
     allowed_tools: List[str] = Field(default_factory=list)
     model: Optional[str] = None
     max_thinking_tokens: Optional[int] = None
+    skill_type: str = "prompt"
+    disable_model_invocation: bool = False
     content: str
 
 
@@ -58,9 +61,9 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
 
     async def description(self) -> str:
         return (
-            "Load a skill's instructions from SKILL.md under .ripperdoc/skills or ~/.ripperdoc/skills. "
-            "Use this when a skill's description matches the user's request. "
-            "The tool returns the skill content and notes about allowed tools or model hints."
+            "Execute a skill by name to load its SKILL.md instructions. "
+            "Use this only when the skill description clearly matches the user's request. "
+            "Skill metadata may include allowed-tools, model, or max-thinking-tokens hints."
         )
 
     @property
@@ -83,6 +86,8 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
         return (
             "Load a skill by name to read its SKILL.md content. "
             "Only call this when the skill description is clearly relevant. "
+            "If the skill specifies allowed-tools, model, or max-thinking-tokens in frontmatter, "
+            "assume those hints apply for subsequent reasoning. "
             "Skill files may reference additional files under the same directory; "
             "use file tools to read them if needed."
         )
@@ -91,7 +96,7 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
         return True
 
     def is_concurrency_safe(self) -> bool:
-        return True
+        return False
 
     def needs_permissions(self, input_data: Optional[SkillToolInput] = None) -> bool:  # noqa: ARG002
         return False
@@ -101,10 +106,27 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
     ) -> ValidationResult:
         skill_name = (input_data.skill or "").strip().lstrip("/")
         if not skill_name:
-            return ValidationResult(result=False, message="Provide a skill name to load.")
+            return ValidationResult(
+                result=False, message="Provide a skill name to load.", error_code=1
+            )
         skill = find_skill(skill_name, project_path=self._project_path, home=self._home)
         if not skill:
-            return ValidationResult(result=False, message=f"Unknown skill: {skill_name}")
+            return ValidationResult(
+                result=False, message=f"Unknown skill: {skill_name}", error_code=2
+            )
+        if skill.disable_model_invocation:
+            return ValidationResult(
+                result=False,
+                message=f"Skill {skill_name} is blocked by disable-model-invocation.",
+                error_code=4,
+            )
+        if skill.skill_type and skill.skill_type != "prompt":
+            return ValidationResult(
+                result=False,
+                message=f"Skill {skill_name} is not a prompt-based skill (type={skill.skill_type}).",
+                error_code=5,
+                meta={"skill_type": skill.skill_type},
+            )
         return ValidationResult(result=True)
 
     def _render_result(self, skill: SkillDefinition) -> str:
@@ -127,6 +149,7 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
 
     def _to_output(self, skill: SkillDefinition) -> SkillToolOutput:
         return SkillToolOutput(
+            success=True,
             skill=skill.name,
             description=skill.description,
             location=skill.location.value,
@@ -135,6 +158,8 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             allowed_tools=list(skill.allowed_tools),
             model=skill.model,
             max_thinking_tokens=skill.max_thinking_tokens,
+            skill_type=skill.skill_type,
+            disable_model_invocation=skill.disable_model_invocation,
             content=skill.content,
         )
 
@@ -150,6 +175,9 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             )
             yield ToolResult(data={"error": error_text}, result_for_assistant=error_text)
             return
+        if skill.allowed_tools and context.tool_registry is not None:
+            # Ensure preferred tools for this skill are activated in the registry.
+            context.tool_registry.activate_tools(skill.allowed_tools)
 
         output = self._to_output(skill)
         yield ToolResult(data=output, result_for_assistant=self._render_result(skill))
