@@ -4,7 +4,9 @@ Allows the AI to search for patterns in files.
 """
 
 import asyncio
-from typing import AsyncGenerator, Optional, List
+import re
+import shutil
+from typing import AsyncGenerator, Optional, List, Tuple
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
@@ -19,6 +21,8 @@ from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
+MAX_GREP_OUTPUT_CHARS = 20000
+
 
 GREP_USAGE = (
     "A powerful search tool built on ripgrep.\n\n"
@@ -27,9 +31,48 @@ GREP_USAGE = (
     '- Supports regex patterns (e.g., "log.*Error", "function\\s+\\w+")\n'
     '- Filter files with the glob parameter (e.g., "*.js", "**/*.tsx")\n'
     '- Output modes: "content" shows matching lines, "files_with_matches" (default) shows only file paths, "count" shows match counts\n'
+    "- Use head_limit to cap the number of returned entries (similar to piping through head -N) to avoid overwhelming output\n"
+    f"- Outputs are automatically truncated to around {MAX_GREP_OUTPUT_CHARS} characters to stay within context limits; narrow patterns for more detail\n"
     "- For open-ended searches that need multiple rounds, iterate with Glob and Grep rather than shell commands\n"
     "- Patterns are line-based; craft patterns accordingly and escape braces if needed (e.g., use `interface\\{\\}` to find `interface{}`)"
 )
+
+
+def truncate_with_ellipsis(text: str, max_chars: int = MAX_GREP_OUTPUT_CHARS) -> Tuple[str, bool, int]:
+    """Trim long output and note how many lines were removed."""
+    if len(text) <= max_chars:
+        return text, False, 0
+
+    remaining = text[max_chars:]
+    truncated_lines = remaining.count("\n") + (1 if remaining else 0)
+    truncated_text = f"{text[:max_chars]}\n\n... [{truncated_lines} lines truncated] ..."
+    return truncated_text, True, truncated_lines
+
+
+def apply_head_limit(lines: List[str], head_limit: Optional[int]) -> Tuple[List[str], int]:
+    """Limit the number of lines returned, recording how many were omitted."""
+    if head_limit is None or head_limit <= 0:
+        return lines, 0
+    if len(lines) <= head_limit:
+        return lines, 0
+    return lines[:head_limit], len(lines) - head_limit
+
+
+def _split_globs(glob_value: str) -> List[str]:
+    """Split a glob string by whitespace and commas."""
+    if not glob_value:
+        return []
+    globs: List[str] = []
+    for token in re.split(r"\s+", glob_value.strip()):
+        if not token:
+            continue
+        globs.extend([part for part in token.split(",") if part])
+    return globs
+
+
+def _normalize_glob_for_grep(glob_pattern: str) -> str:
+    """grep --include matches basenames; drop path components to avoid mismatches like **/*.py."""
+    return glob_pattern.split("/")[-1] or glob_pattern
 
 
 class GrepToolInput(BaseModel):
@@ -44,6 +87,10 @@ class GrepToolInput(BaseModel):
     output_mode: str = Field(
         default="files_with_matches",
         description="Output mode: 'files_with_matches', 'content', or 'count'",
+    )
+    head_limit: Optional[int] = Field(
+        default=None,
+        description="Limit output to the first N results (similar to piping to head -N) to avoid huge responses.",
     )
 
 
@@ -63,6 +110,9 @@ class GrepToolOutput(BaseModel):
     pattern: str
     total_files: int
     total_matches: int
+    output_mode: str = "files_with_matches"
+    head_limit: Optional[int] = None
+    omitted_results: int = 0
 
 
 class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
@@ -115,33 +165,64 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             return ValidationResult(
                 result=False, message=f"Invalid output_mode. Must be one of: {valid_modes}"
             )
+        if input_data.head_limit is not None and input_data.head_limit <= 0:
+            return ValidationResult(result=False, message="head_limit must be positive")
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: GrepToolOutput) -> str:
         """Format output for the AI."""
-        if output.total_files == 0:
+        if output.total_files == 0 or output.total_matches == 0:
             return f"No matches found for pattern: {output.pattern}"
 
-        result = f"Found {output.total_matches} match(es) in {output.total_files} file(s) for '{output.pattern}':\n\n"
+        lines: List[str] = []
+        summary: str
 
-        for match in output.matches[:100]:  # Limit to first 100
-            if match.content:
-                result += f"{match.file}:{match.line_number}: {match.content}\n"
-            elif match.count:
-                result += f"{match.file}: {match.count} matches\n"
-            else:
-                result += f"{match.file}\n"
+        if output.output_mode == "files_with_matches":
+            summary = f"Found {output.total_files} file(s) matching '{output.pattern}'."
+            lines = [match.file for match in output.matches if match.file]
+        elif output.output_mode == "count":
+            summary = (
+                f"Found {output.total_matches} total match(es) across {output.total_files} file(s) "
+                f"for '{output.pattern}'."
+            )
+            lines = [
+                f"{match.file}: {match.count if match.count is not None else 0}"
+                for match in output.matches
+                if match.file
+            ]
+        else:
+            summary = (
+                f"Found {output.total_matches} match(es) in {output.total_files} file(s) "
+                f"for '{output.pattern}':"
+            )
+            for match in output.matches:
+                if match.content is None:
+                    continue
+                line_number = f":{match.line_number}" if match.line_number is not None else ""
+                lines.append(f"{match.file}{line_number}: {match.content}")
 
-        if len(output.matches) > 100:
-            result += f"\n... and {len(output.matches) - 100} more matches"
+        if output.omitted_results:
+            lines.append(
+                f"... and {output.omitted_results} more result(s) not shown"
+                f"{' (use head_limit to control output size)' if output.head_limit else ''}"
+            )
 
-        return result
+        result = summary
+        if lines:
+            result += "\n\n" + "\n".join(lines)
+
+        truncated_result, did_truncate, _ = truncate_with_ellipsis(result)
+        if did_truncate:
+            truncated_result += "\n(Output truncated; refine the pattern or lower head_limit for more detail.)"
+        return truncated_result
 
     def render_tool_use_message(self, input_data: GrepToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
         msg = f"Grep: {input_data.pattern}"
         if input_data.glob:
             msg += f" in {input_data.glob}"
+        if input_data.head_limit:
+            msg += f" (head_limit={input_data.head_limit})"
         return msg
 
     async def call(
@@ -152,24 +233,52 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         try:
             search_path = input_data.path or "."
 
-            # Build grep command
-            cmd = ["grep", "-r"]
+            use_ripgrep = shutil.which("rg") is not None
+            pattern = input_data.pattern
 
-            if input_data.case_insensitive:
-                cmd.append("-i")
+            if use_ripgrep:
+                cmd = ["rg", "--color", "never"]
+                if input_data.case_insensitive:
+                    cmd.append("-i")
+                if input_data.output_mode == "files_with_matches":
+                    cmd.append("-l")
+                elif input_data.output_mode == "count":
+                    cmd.append("-c")
+                else:
+                    cmd.append("-n")
 
-            if input_data.output_mode == "files_with_matches":
-                cmd.extend(["-l"])  # Files with matches
-            elif input_data.output_mode == "count":
-                cmd.extend(["-c"])  # Count per file
+                for glob_pattern in _split_globs(input_data.glob or ""):
+                    cmd.extend(["--glob", glob_pattern])
+
+                if pattern.startswith("-"):
+                    cmd.extend(["-e", pattern])
+                else:
+                    cmd.append(pattern)
+
+                cmd.append(search_path)
             else:
-                cmd.extend(["-n"])  # Line numbers
+                # Fallback to grep (note: grep --include matches basenames only)
+                cmd = ["grep", "-r", "--color=never", "-P"]
 
-            cmd.append(input_data.pattern)
-            cmd.append(search_path)
+                if input_data.case_insensitive:
+                    cmd.append("-i")
 
-            if input_data.glob:
-                cmd.extend(["--include", input_data.glob])
+                if input_data.output_mode == "files_with_matches":
+                    cmd.extend(["-l"])  # Files with matches
+                elif input_data.output_mode == "count":
+                    cmd.extend(["-c"])  # Count per file
+                else:
+                    cmd.extend(["-n"])  # Line numbers
+
+                for glob_pattern in _split_globs(input_data.glob or ""):
+                    cmd.extend(["--include", _normalize_glob_for_grep(glob_pattern)])
+
+                if pattern.startswith("-"):
+                    cmd.extend(["-e", pattern])
+                else:
+                    cmd.append(pattern)
+
+                cmd.append(search_path)
 
             # Run grep asynchronously
             process = await asyncio.create_subprocess_exec(
@@ -181,19 +290,30 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
 
             # Parse output
             matches: List[GrepMatch] = []
+            total_matches = 0
+            total_files = 0
+            omitted_results = 0
+            stdout_text = stdout.decode("utf-8", errors="ignore") if stdout else ""
+            lines = [line for line in stdout_text.split("\n") if line]
 
-            if returncode == 0:
-                lines = stdout.decode("utf-8").strip().split("\n")
+            if returncode in (0, 1):  # 0 = matches found, 1 = no matches (ripgrep/grep)
+                display_lines, omitted_results = apply_head_limit(lines, input_data.head_limit)
 
-                for line in lines:
-                    if not line:
-                        continue
+                if input_data.output_mode == "files_with_matches":
+                    total_files = len(set(lines))
+                    total_matches = len(lines)
+                    matches = [GrepMatch(file=line) for line in display_lines]
 
-                    if input_data.output_mode == "files_with_matches":
-                        matches.append(GrepMatch(file=line))
+                elif input_data.output_mode == "count":
+                    total_files = len(set(line.split(":", 1)[0] for line in lines if line))
+                    total_match_count = 0
+                    for line in lines:
+                        parts = line.rsplit(":", 1)
+                        if len(parts) == 2 and parts[1].isdigit():
+                            total_match_count += int(parts[1])
+                    total_matches = total_match_count
 
-                    elif input_data.output_mode == "count":
-                        # Format: file:count
+                    for line in display_lines:
                         parts = line.rsplit(":", 1)
                         if len(parts) == 2:
                             matches.append(
@@ -202,8 +322,10 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                                 )
                             )
 
-                    else:  # content mode
-                        # Format: file:line:content
+                else:  # content mode
+                    total_files = len({line.split(":", 1)[0] for line in lines if line})
+                    total_matches = len(lines)
+                    for line in display_lines:
                         parts = line.split(":", 2)
                         if len(parts) >= 3:
                             matches.append(
@@ -217,8 +339,11 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             output = GrepToolOutput(
                 matches=matches,
                 pattern=input_data.pattern,
-                total_files=len(set(m.file for m in matches)),
-                total_matches=len(matches),
+                total_files=total_files,
+                total_matches=total_matches,
+                output_mode=input_data.output_mode,
+                head_limit=input_data.head_limit,
+                omitted_results=omitted_results,
             )
 
             yield ToolResult(
