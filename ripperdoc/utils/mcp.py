@@ -384,6 +384,12 @@ class McpRuntime:
         )
         try:
             await self._exit_stack.aclose()
+        except* BaseException as exc:  # pragma: no cover - defensive shutdown
+            # Swallow noisy ExceptionGroups from stdio_client cancel scopes during exit.
+            logger.debug(
+                "[mcp] Suppressed MCP shutdown error",
+                extra={"error": str(exc), "project_path": str(self.project_path)},
+            )
         finally:
             self.sessions.clear()
             self.servers.clear()
@@ -392,10 +398,16 @@ class McpRuntime:
 _runtime_var: contextvars.ContextVar[Optional[McpRuntime]] = contextvars.ContextVar(
     "ripperdoc_mcp_runtime", default=None
 )
+# Fallback for synchronous contexts (e.g., run_until_complete) where contextvars
+# don't propagate values back to the caller.
+_global_runtime: Optional[McpRuntime] = None
 
 
 def _get_runtime() -> Optional[McpRuntime]:
-    return _runtime_var.get()
+    runtime = _runtime_var.get()
+    if runtime:
+        return runtime
+    return _global_runtime
 
 
 def get_existing_mcp_runtime() -> Optional[McpRuntime]:
@@ -407,6 +419,7 @@ async def ensure_mcp_runtime(project_path: Optional[Path] = None) -> McpRuntime:
     runtime = _get_runtime()
     project_path = project_path or Path.cwd()
     if runtime and not runtime._closed and runtime.project_path == project_path:
+        _runtime_var.set(runtime)
         logger.debug(
             "[mcp] Reusing existing MCP runtime",
             extra={
@@ -427,6 +440,9 @@ async def ensure_mcp_runtime(project_path: Optional[Path] = None) -> McpRuntime:
     configs = _load_server_configs(project_path)
     await runtime.connect(configs)
     _runtime_var.set(runtime)
+    # Keep a module-level reference so sync callers that hop event loops can reuse it.
+    global _global_runtime
+    _global_runtime = runtime
     return runtime
 
 
@@ -434,8 +450,13 @@ async def shutdown_mcp_runtime() -> None:
     runtime = _get_runtime()
     if not runtime:
         return
-    await runtime.aclose()
+    try:
+        await runtime.aclose()
+    except* BaseException as exc:  # pragma: no cover - defensive for ExceptionGroup
+        logger.debug("[mcp] Suppressed MCP runtime shutdown error", extra={"error": str(exc)})
     _runtime_var.set(None)
+    global _global_runtime
+    _global_runtime = None
 
 
 async def load_mcp_servers_async(project_path: Optional[Path] = None) -> List[McpServerInfo]:

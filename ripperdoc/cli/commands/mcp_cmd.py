@@ -1,21 +1,26 @@
-import asyncio
-
 from rich.markup import escape
 
-from ripperdoc.utils.mcp import load_mcp_servers_async, shutdown_mcp_runtime
+from ripperdoc.utils.mcp import load_mcp_servers_async
 
 from typing import Any
 from .base import SlashCommand
 
 
+def _run_in_ui(ui: Any, coro: Any) -> Any:
+    runner = getattr(ui, "run_async", None)
+    if callable(runner):
+        return runner(coro)
+    # Fallback for non-UI contexts.
+    import asyncio
+
+    return asyncio.run(coro)
+
+
 def _handle(ui: Any, _: str) -> bool:
     async def _load() -> list:
-        try:
-            return await load_mcp_servers_async(ui.project_path)
-        finally:
-            await shutdown_mcp_runtime()
+        return await load_mcp_servers_async(ui.project_path)
 
-    servers = asyncio.run(_load())
+    servers = _run_in_ui(ui, _load())
     if not servers:
         ui.console.print(
             "[yellow]No MCP servers configured. Add servers to ~/.ripperdoc/mcp.json, ~/.mcp.json, or a project .mcp.json file.[/yellow]"

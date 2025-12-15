@@ -883,17 +883,12 @@ def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[Dyn
     except RuntimeError:
         pass
 
-    async def _load_and_cleanup() -> List[DynamicMcpTool]:
+    async def _load_and_keep() -> List[DynamicMcpTool]:
         runtime = await ensure_mcp_runtime(project_path)
-        try:
-            return _build_dynamic_mcp_tools(runtime)
-        finally:
-            # Close the runtime inside the same event loop to avoid asyncgen
-            # shutdown errors when asyncio.run tears down the loop.
-            await shutdown_mcp_runtime()
+        return _build_dynamic_mcp_tools(runtime)
 
     try:
-        return asyncio.run(_load_and_cleanup())
+        return asyncio.run(_load_and_keep())
     except Exception as exc:  # pragma: no cover - SDK/runtime failures
         logger.exception(
             "Failed to initialize MCP runtime for dynamic tools (sync)",

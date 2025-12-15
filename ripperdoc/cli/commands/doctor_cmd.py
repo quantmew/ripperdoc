@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from rich.markup import escape
 from rich.panel import Panel
@@ -18,7 +17,7 @@ from ripperdoc.core.config import (
 )
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.mcp import load_mcp_servers_async, shutdown_mcp_runtime
+from ripperdoc.utils.mcp import load_mcp_servers_async
 from ripperdoc.utils.sandbox_utils import is_sandbox_available
 
 from .base import SlashCommand
@@ -108,19 +107,23 @@ def _sandbox_status() -> Tuple[str, str, str]:
     return _status_row("Sandbox", "warn", "Sandbox runtime not detected; commands run normally")
 
 
-def _mcp_status(project_path: Path) -> Tuple[List[Tuple[str, str, str]], List[str]]:
+def _mcp_status(
+    project_path: Path, runner: Optional[Callable[[Any], Any]] = None
+) -> Tuple[List[Tuple[str, str, str]], List[str]]:
     """Return MCP status rows and errors."""
     rows: List[Tuple[str, str, str]] = []
     errors: List[str] = []
 
     async def _load() -> List[Any]:
-        try:
-            return await load_mcp_servers_async(project_path)
-        finally:
-            await shutdown_mcp_runtime()
+        return await load_mcp_servers_async(project_path)
 
     try:
-        servers = asyncio.run(_load())
+        if runner is None:
+            import asyncio
+
+            servers = asyncio.run(_load())
+        else:
+            servers = runner(_load())
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("[doctor] Failed to load MCP servers", exc_info=exc)
         rows.append(_status_row("MCP", "error", f"Failed to load MCP config: {exc}"))
@@ -179,7 +182,8 @@ def _handle(ui: Any, _: str) -> bool:
     project_row = _project_status(project_path)
     results.append(project_row)
 
-    mcp_rows, mcp_errors = _mcp_status(project_path)
+    runner = getattr(ui, "run_async", None)
+    mcp_rows, mcp_errors = _mcp_status(project_path, runner=runner)
     results.extend(mcp_rows)
     results.append(_sandbox_status())
 

@@ -213,6 +213,8 @@ class RichUI:
         session_id: Optional[str] = None,
         log_file_path: Optional[Path] = None,
     ):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
         self.console = console
         self.safe_mode = safe_mode
         self.verbose = verbose
@@ -246,6 +248,14 @@ class RichUI:
         self._permission_checker = (
             make_permission_checker(self.project_path, safe_mode) if safe_mode else None
         )
+        # Keep MCP runtime alive for the whole UI session. Create it on the UI loop up front.
+        try:
+            self._run_async(ensure_mcp_runtime(self.project_path))
+        except Exception:
+            logger.exception(
+                "[ui] Failed to initialize MCP runtime at startup",
+                extra={"session_id": self.session_id},
+            )
 
     def _context_usage_lines(
         self, breakdown: Any, model_label: str, auto_compact_enabled: bool
@@ -1064,9 +1074,23 @@ class RichUI:
                         "project_path": str(self.project_path),
                     },
                 )
-        finally:
-            await shutdown_mcp_runtime()
-            await shutdown_mcp_runtime()
+        except Exception as exc:
+            logger.exception(
+                "[ui] Unhandled error during query processing",
+                extra={"session_id": self.session_id},
+            )
+            self.display_message("System", f"Error: {str(exc)}", is_tool=True)
+
+    def _run_async(self, coro: Any) -> Any:
+        """Run a coroutine on the persistent event loop."""
+        if self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+        return self._loop.run_until_complete(coro)
+
+    def run_async(self, coro: Any) -> Any:
+        """Public wrapper for running coroutines on the UI event loop."""
+        return self._run_async(coro)
 
     def handle_slash_command(self, user_input: str) -> bool:
         """Handle slash commands. Returns True if the input was handled."""
@@ -1139,60 +1163,78 @@ class RichUI:
             extra={"session_id": self.session_id, "log_file": str(self.log_file_path)},
         )
 
-        while not self._should_exit:
-            try:
-                # Get user input
-                user_input = session.prompt("> ")
+        try:
+            while not self._should_exit:
+                try:
+                    # Get user input
+                    user_input = session.prompt("> ")
 
-                if not user_input.strip():
-                    continue
-
-                if user_input.strip() == "?":
-                    self._print_shortcuts()
-                    console.print()
-                    continue
-
-                # Handle slash commands locally
-                if user_input.startswith("/"):
-                    logger.debug(
-                        "[ui] Received slash command",
-                        extra={"session_id": self.session_id, "command": user_input},
-                    )
-                    handled = self.handle_slash_command(user_input)
-                    if self._should_exit:
-                        break
-                    if handled:
-                        console.print()  # spacing
+                    if not user_input.strip():
                         continue
 
-                # Process the query
-                logger.info(
-                    "[ui] Processing interactive prompt",
-                    extra={
-                        "session_id": self.session_id,
-                        "prompt_length": len(user_input),
-                        "prompt_preview": user_input[:200],
-                    },
-                )
-                asyncio.run(self.process_query(user_input))
+                    if user_input.strip() == "?":
+                        self._print_shortcuts()
+                        console.print()
+                        continue
 
-                console.print()  # Add spacing between interactions
+                    # Handle slash commands locally
+                    if user_input.startswith("/"):
+                        logger.debug(
+                            "[ui] Received slash command",
+                            extra={"session_id": self.session_id, "command": user_input},
+                        )
+                        handled = self.handle_slash_command(user_input)
+                        if self._should_exit:
+                            break
+                        if handled:
+                            console.print()  # spacing
+                            continue
 
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Goodbye![/yellow]")
-                break
-            except EOFError:
-                console.print("\n[yellow]Goodbye![/yellow]")
-                break
-            except Exception as e:
-                console.print(f"[red]Error: {escape(str(e))}[/]")
-                logger.exception(
-                    "[ui] Error in interactive loop", extra={"session_id": self.session_id}
-                )
-                if self.verbose:
-                    import traceback
+                    # Process the query
+                    logger.info(
+                        "[ui] Processing interactive prompt",
+                        extra={
+                            "session_id": self.session_id,
+                            "prompt_length": len(user_input),
+                            "prompt_preview": user_input[:200],
+                        },
+                    )
+                    self._run_async(self.process_query(user_input))
 
-                    console.print(traceback.format_exc())
+                    console.print()  # Add spacing between interactions
+
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]Goodbye![/yellow]")
+                    break
+                except EOFError:
+                    console.print("\n[yellow]Goodbye![/yellow]")
+                    break
+                except Exception as e:
+                    console.print(f"[red]Error: {escape(str(e))}[/]")
+                    logger.exception(
+                        "[ui] Error in interactive loop", extra={"session_id": self.session_id}
+                    )
+                    if self.verbose:
+                        import traceback
+
+                        console.print(traceback.format_exc())
+        finally:
+            try:
+                try:
+                    self._run_async(shutdown_mcp_runtime())
+                except Exception as exc:  # pragma: no cover - defensive shutdown
+                    logger.warning(
+                        "[ui] Failed to shut down MCP runtime cleanly",
+                        extra={"error": str(exc), "session_id": self.session_id},
+                    )
+            finally:
+                if not self._loop.is_closed():
+                    try:
+                        self._loop.run_until_complete(self._loop.shutdown_asyncgens())
+                    except Exception:
+                        logger.exception("[ui] Failed to shutdown async generators")
+                    self._loop.close()
+                asyncio.set_event_loop(None)
 
     async def _run_manual_compact(self, custom_instructions: str) -> None:
         """Manual compaction: clear bulky tool output and summarize conversation."""

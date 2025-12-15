@@ -1,4 +1,3 @@
-import asyncio
 import json
 from typing import List, Any
 
@@ -19,7 +18,6 @@ from ripperdoc.utils.mcp import (
     estimate_mcp_tokens,
     format_mcp_instructions,
     load_mcp_servers_async,
-    shutdown_mcp_runtime,
 )
 from ripperdoc.utils.log import get_logger
 
@@ -47,12 +45,15 @@ def _handle(ui: Any, _: str) -> bool:
         )
 
     async def _load_servers() -> List[Any]:
-        try:
-            return await load_mcp_servers_async(ui.project_path)
-        finally:
-            await shutdown_mcp_runtime()
+        return await load_mcp_servers_async(ui.project_path)
 
-    servers = asyncio.run(_load_servers())
+    runner = getattr(ui, "run_async", None)
+    if callable(runner):
+        servers = runner(_load_servers())
+    else:
+        import asyncio
+
+        servers = asyncio.run(_load_servers())
     mcp_instructions = format_mcp_instructions(servers)
     skill_result = load_all_skills(ui.project_path)
     for err in skill_result.errors:

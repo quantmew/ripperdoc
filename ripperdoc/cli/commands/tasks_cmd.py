@@ -157,8 +157,13 @@ def _kill_task(ui: Any, task_id: str) -> bool:
         )
         return True
 
+    runner = getattr(ui, "run_async", None)
+
     try:
-        killed = asyncio.run(kill_background_task(task_id))
+        if callable(runner):
+            killed = runner(kill_background_task(task_id))
+        else:
+            killed = asyncio.run(kill_background_task(task_id))
     except Exception as exc:
         console.print(f"[red]Error stopping task {escape(task_id)}: {escape(str(exc))}[/red]")
         logger.exception(
