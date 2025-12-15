@@ -117,9 +117,7 @@ def format_option_display(option: OptionInput, index: int) -> str:
     return f"  {index}. {option.label}{desc}"
 
 
-def format_question_prompt(
-    question: QuestionInput, question_num: int, total: int
-) -> str:
+def format_question_prompt(question: QuestionInput, question_num: int, total: int) -> str:
     """Format a question for terminal display."""
     header = truncate_header(question.header)
     lines = [
@@ -137,9 +135,7 @@ def format_question_prompt(
 
     if question.multiSelect:
         lines.append("")
-        lines.append(
-            "  Enter numbers separated by commas (e.g., 1,3), or 'o' for other: "
-        )
+        lines.append("  Enter numbers separated by commas (e.g., 1,3), or 'o' for other: ")
     else:
         lines.append("")
         lines.append("  Enter choice (1-{}) or 'o' for other: ".format(len(question.options) + 1))
@@ -204,9 +200,7 @@ async def prompt_user_for_answer(
                             f"  Invalid selection. Enter numbers from 1 to {len(question.options) + 1}."
                         )
                     except ValueError:
-                        print(
-                            "  Invalid input. Enter numbers separated by commas."
-                        )
+                        print("  Invalid input. Enter numbers separated by commas.")
                 else:
                     # Single selection
                     try:
@@ -232,7 +226,9 @@ async def prompt_user_for_answer(
         except EOFError:
             return None
         except Exception as e:
-            logger.exception("[ask_user_question_tool] Error during prompt", extra={"error": str(e)})
+            logger.exception(
+                "[ask_user_question_tool] Error during prompt", extra={"error": str(e)}
+            )
             return None
 
     return await loop.run_in_executor(None, _prompt)
@@ -291,7 +287,8 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
         return True
 
     def needs_permissions(
-        self, input_data: Optional[AskUserQuestionToolInput] = None  # noqa: ARG002
+        self,
+        input_data: Optional[AskUserQuestionToolInput] = None,  # noqa: ARG002
     ) -> bool:
         return False
 
@@ -305,9 +302,7 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
 
         for question in input_data.questions:
             if question.question in seen_questions:
-                return ValidationResult(
-                    result=False, message="Question texts must be unique"
-                )
+                return ValidationResult(result=False, message="Question texts must be unique")
             seen_questions.add(question.question)
 
             option_labels: set[str] = set()
@@ -338,7 +333,9 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
         )
 
     def render_tool_use_message(
-        self, input_data: AskUserQuestionToolInput, verbose: bool = False  # noqa: ARG002
+        self,
+        input_data: AskUserQuestionToolInput,
+        verbose: bool = False,  # noqa: ARG002
     ) -> str:
         """Render the tool use message for display."""
         question_count = len(input_data.questions)

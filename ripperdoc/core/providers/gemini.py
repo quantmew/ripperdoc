@@ -6,7 +6,7 @@ import copy
 import inspect
 import os
 import time
-from typing import Any, AsyncIterable, AsyncIterator, Dict, List, Optional, Tuple, cast
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, cast
 from uuid import uuid4
 
 from ripperdoc.core.config import ModelProfile
@@ -27,8 +27,7 @@ logger = get_logger()
 
 # Constants
 GEMINI_SDK_IMPORT_ERROR = (
-    "Gemini client requires the 'google-genai' package. "
-    "Install it with: pip install google-genai"
+    "Gemini client requires the 'google-genai' package. Install it with: pip install google-genai"
 )
 GEMINI_MODELS_ENDPOINT_ERROR = "Gemini client is missing 'models' endpoint"
 GEMINI_GENERATE_CONTENT_ERROR = "Gemini client is missing generate_content() method"
@@ -53,7 +52,8 @@ def _extract_usage_metadata(payload: Any) -> Dict[str, int]:
     candidate_tokens = safe_get_int("candidates_token_count")
 
     return {
-        "input_tokens": safe_get_int("prompt_token_count") + safe_get_int("cached_content_token_count"),
+        "input_tokens": safe_get_int("prompt_token_count")
+        + safe_get_int("cached_content_token_count"),
         "output_tokens": candidate_tokens + thought_tokens,
         "cache_read_input_tokens": safe_get_int("cached_content_token_count"),
         "cache_creation_input_tokens": 0,
@@ -75,8 +75,10 @@ def _collect_parts(candidate: Any) -> List[Any]:
 def _collect_text_from_parts(parts: List[Any]) -> str:
     texts: List[str] = []
     for part in parts:
-        text_val = getattr(part, "text", None) or getattr(part, "content", None) or getattr(
-            part, "raw_text", None
+        text_val = (
+            getattr(part, "text", None)
+            or getattr(part, "content", None)
+            or getattr(part, "raw_text", None)
         )
         if isinstance(text_val, str):
             texts.append(text_val)
@@ -168,8 +170,10 @@ def _collect_thoughts_from_parts(parts: List[Any]) -> List[str]:
             is_thought = part.get("thought")
         if not is_thought:
             continue
-        text_val = getattr(part, "text", None) or getattr(part, "content", None) or getattr(
-            part, "raw_text", None
+        text_val = (
+            getattr(part, "text", None)
+            or getattr(part, "content", None)
+            or getattr(part, "raw_text", None)
         )
         if isinstance(text_val, str):
             snippets.append(text_val)
@@ -181,22 +185,27 @@ async def _async_build_tool_declarations(tools: List[Tool[Any, Any]]) -> List[Di
     try:
         from google.genai import types as genai_types  # type: ignore
     except Exception:  # pragma: no cover - fallback when SDK not installed
-        genai_types = None
+        genai_types = None  # type: ignore[assignment]
 
     for tool in tools:
         description = await build_tool_description(tool, include_examples=True, max_examples=2)
         parameters_schema = _flatten_schema(tool.input_schema.model_json_schema())
         if genai_types:
+            func_decl = genai_types.FunctionDeclaration(
+                name=tool.name,
+                description=description,
+                parameters_json_schema=parameters_schema,
+            )
             declarations.append(
-                genai_types.FunctionDeclaration(
-                    name=tool.name,
-                    description=description,
-                    parameters=genai_types.Schema(**parameters_schema),
-                )
+                func_decl.model_dump(mode="json", exclude_none=True)
             )
         else:
             declarations.append(
-                {"name": tool.name, "description": description, "parameters": parameters_schema}
+                {
+                    "name": tool.name,
+                    "description": description,
+                    "parameters_json_schema": parameters_schema,
+                }
             )
     return declarations
 
@@ -217,7 +226,7 @@ def _convert_messages_to_genai_contents(
     try:
         from google.genai import types as genai_types  # type: ignore
     except Exception:  # pragma: no cover - fallback when SDK not installed
-        genai_types = None
+        genai_types = None  # type: ignore[assignment]
 
     def _mk_part_from_text(text: str) -> Any:
         if genai_types:
@@ -305,15 +314,15 @@ class GeminiClient(ProviderClient):
             raise RuntimeError(GEMINI_SDK_IMPORT_ERROR) from exc
 
         client_kwargs: Dict[str, Any] = {}
-        api_key = model_profile.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        api_key = (
+            model_profile.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        )
         if api_key:
             client_kwargs["api_key"] = api_key
         if model_profile.api_base:
             from google.genai import types as genai_types  # type: ignore
 
-            client_kwargs["http_options"] = genai_types.HttpOptions(
-                base_url=model_profile.api_base
-            )
+            client_kwargs["http_options"] = genai_types.HttpOptions(base_url=model_profile.api_base)
         return genai.Client(**client_kwargs)
 
     async def call(
@@ -362,12 +371,7 @@ class GeminiClient(ProviderClient):
             except Exception:  # pragma: no cover - fallback when SDK not installed
                 config["thinking_config"] = thinking_config
         if declarations:
-            try:
-                from google.genai import types as genai_types  # type: ignore
-
-                config["tools"] = [genai_types.Tool(function_declarations=declarations)]
-            except Exception:  # pragma: no cover - fallback when SDK not installed
-                config["tools"] = [{"function_declarations": declarations}]
+            config["tools"] = [{"function_declarations": declarations}]
 
         generate_kwargs: Dict[str, Any] = {
             "model": model_profile.model,
@@ -437,12 +441,14 @@ class GeminiClient(ProviderClient):
                 def _to_async_iter(obj: Any) -> AsyncIterator[Any]:
                     """Convert various iterable types to async generator."""
                     if inspect.isasyncgen(obj) or hasattr(obj, "__aiter__"):
+
                         async def _wrap_async() -> AsyncIterator[Any]:
                             async for item in obj:
                                 yield item
 
                         return _wrap_async()
                     if hasattr(obj, "__iter__"):
+
                         async def _wrap_sync() -> AsyncIterator[Any]:
                             for item in obj:
                                 yield item

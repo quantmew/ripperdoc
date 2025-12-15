@@ -119,9 +119,7 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
     def is_concurrency_safe(self) -> bool:
         return True
 
-    def needs_permissions(
-        self, input_data: Optional[ToolSearchInput] = None
-    ) -> bool:  # noqa: ARG002
+    def needs_permissions(self, input_data: Optional[ToolSearchInput] = None) -> bool:  # noqa: ARG002
         return False
 
     async def validate_input(

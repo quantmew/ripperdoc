@@ -38,7 +38,9 @@ GREP_USAGE = (
 )
 
 
-def truncate_with_ellipsis(text: str, max_chars: int = MAX_GREP_OUTPUT_CHARS) -> Tuple[str, bool, int]:
+def truncate_with_ellipsis(
+    text: str, max_chars: int = MAX_GREP_OUTPUT_CHARS
+) -> Tuple[str, bool, int]:
     """Trim long output and note how many lines were removed."""
     if len(text) <= max_chars:
         return text, False, 0
@@ -213,7 +215,9 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
 
         truncated_result, did_truncate, _ = truncate_with_ellipsis(result)
         if did_truncate:
-            truncated_result += "\n(Output truncated; refine the pattern or lower head_limit for more detail.)"
+            truncated_result += (
+                "\n(Output truncated; refine the pattern or lower head_limit for more detail.)"
+            )
         return truncated_result
 
     def render_tool_use_message(self, input_data: GrepToolInput, verbose: bool = False) -> str:

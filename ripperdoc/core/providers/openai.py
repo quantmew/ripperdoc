@@ -207,7 +207,9 @@ class OpenAIClient(ProviderClient):
                         else:
                             stream_reasoning_details.append(delta_reasoning_details)
                     if text_delta:
-                        target_collector = streamed_tool_text if can_stream_tools else collected_text
+                        target_collector = (
+                            streamed_tool_text if can_stream_tools else collected_text
+                        )
                         target_collector.append(text_delta)
                         if progress_callback:
                             try:
@@ -221,7 +223,9 @@ class OpenAIClient(ProviderClient):
 
                     for tool_delta in getattr(delta, "tool_calls", []) or []:
                         idx = getattr(tool_delta, "index", 0) or 0
-                        state = streamed_tool_calls.get(idx, {"id": None, "name": None, "arguments": ""})
+                        state = streamed_tool_calls.get(
+                            idx, {"id": None, "name": None, "arguments": ""}
+                        )
 
                         if getattr(tool_delta, "id", None):
                             state["id"] = tool_delta.id
@@ -292,15 +296,19 @@ class OpenAIClient(ProviderClient):
                 )
 
         duration_ms = (time.time() - start_time) * 1000
-        usage_tokens = streamed_usage if can_stream else openai_usage_tokens(
-            getattr(openai_response, "usage", None)
+        usage_tokens = (
+            streamed_usage
+            if can_stream
+            else openai_usage_tokens(getattr(openai_response, "usage", None))
         )
         cost_usd = estimate_cost_usd(model_profile, usage_tokens)
         record_usage(
             model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
         )
 
-        if not can_stream and (not openai_response or not getattr(openai_response, "choices", None)):
+        if not can_stream and (
+            not openai_response or not getattr(openai_response, "choices", None)
+        ):
             logger.warning(
                 "[openai_client] No choices returned from OpenAI response",
                 extra={"model": model_profile.model},

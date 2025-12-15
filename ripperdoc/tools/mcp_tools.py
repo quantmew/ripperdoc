@@ -57,7 +57,9 @@ def _get_mcp_token_limits() -> tuple[int, int]:
 
     warn_env = os.getenv("RIPPERDOC_MCP_WARNING_TOKENS")
     try:
-        warn_tokens_int = int(warn_env) if warn_env else int(max_tokens_int * DEFAULT_MCP_WARNING_FRACTION)
+        warn_tokens_int = (
+            int(warn_env) if warn_env else int(max_tokens_int * DEFAULT_MCP_WARNING_FRACTION)
+        )
     except (TypeError, ValueError):
         warn_tokens_int = int(max_tokens_int * DEFAULT_MCP_WARNING_FRACTION)
     warn_tokens_int = max(MIN_MCP_OUTPUT_TOKENS, min(warn_tokens_int, max_tokens_int))

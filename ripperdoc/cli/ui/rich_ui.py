@@ -473,9 +473,7 @@ class RichUI:
                     f"      [dim]Estimated tokens: {escape(str(token_estimate))}[/dim]"
                 )
         elif token_estimate and self.verbose:
-            self.console.print(
-                f"  ⎿  [dim]Estimated tokens: {escape(str(token_estimate))}[/dim]"
-            )
+            self.console.print(f"  ⎿  [dim]Estimated tokens: {escape(str(token_estimate))}[/dim]")
 
         if not content:
             self.console.print("  ⎿  [dim]Tool completed[/]")
@@ -808,7 +806,11 @@ class RichUI:
             for err in skill_result.errors:
                 logger.warning(
                     "[skills] Failed to load skill",
-                    extra={"path": str(err.path), "reason": err.reason, "session_id": self.session_id},
+                    extra={
+                        "path": str(err.path),
+                        "reason": err.reason,
+                        "session_id": self.session_id,
+                    },
                 )
             skill_instructions = build_skill_summary(skill_result.skills)
             additional_instructions: List[str] = []

@@ -189,9 +189,9 @@ PLAN_AGENT_PROMPT = (
     "End your response with:\n\n"
     "### Critical Files for Implementation\n"
     "List 3-5 files most critical for implementing this plan:\n"
-    "- path/to/file1.ts - [Brief reason: e.g., \"Core logic to modify\"]\n"
-    "- path/to/file2.ts - [Brief reason: e.g., \"Interfaces to implement\"]\n"
-    "- path/to/file3.ts - [Brief reason: e.g., \"Pattern to follow\"]\n\n"
+    '- path/to/file1.ts - [Brief reason: e.g., "Core logic to modify"]\n'
+    '- path/to/file2.ts - [Brief reason: e.g., "Interfaces to implement"]\n'
+    '- path/to/file3.ts - [Brief reason: e.g., "Pattern to follow"]\n\n'
     "REMEMBER: You can ONLY explore and plan. You CANNOT and MUST NOT write, edit, or "
     "modify any files. You do NOT have access to file editing tools."
 )
@@ -224,7 +224,7 @@ def _built_in_agents() -> List[AgentDefinition]:
         AgentDefinition(
             agent_type="explore",
             when_to_use=(
-                'Fast agent specialized for exploring codebases. Use this when you need to quickly find '
+                "Fast agent specialized for exploring codebases. Use this when you need to quickly find "
                 'files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), '
                 'or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, '
                 'specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, '

@@ -9,12 +9,13 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 # Optional: use tiktoken for accurate counts when available.
+_TIKTOKEN_ENCODING: tiktoken.Encoding | None = None
 try:  # pragma: no cover - optional dependency
     import tiktoken  # type: ignore
 
     _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
 except Exception:  # pragma: no cover - runtime fallback
-    _TIKTOKEN_ENCODING = None
+    pass
 
 
 def estimate_tokens(text: str) -> int:

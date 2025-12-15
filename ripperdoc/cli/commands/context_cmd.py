@@ -58,7 +58,11 @@ def _handle(ui: Any, _: str) -> bool:
     for err in skill_result.errors:
         logger.warning(
             "[skills] Failed to load skill",
-            extra={"path": str(err.path), "reason": err.reason, "session_id": getattr(ui, "session_id", None)},
+            extra={
+                "path": str(err.path),
+                "reason": err.reason,
+                "session_id": getattr(ui, "session_id", None),
+            },
         )
     skill_instructions = build_skill_summary(skill_result.skills)
     additional_instructions: List[str] = []

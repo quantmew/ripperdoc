@@ -172,6 +172,7 @@ def _retry_delay_seconds(attempt: int, base_delay: float = 0.5, max_delay: float
     jitter: float = float(random.random() * 0.25 * capped_base)
     return float(capped_base + jitter)
 
+
 async def iter_with_timeout(
     stream: Iterable[Any] | AsyncIterable[Any], timeout: Optional[float]
 ) -> AsyncIterator[Any]:
@@ -196,7 +197,9 @@ async def iter_with_timeout(
         iterator = iter(stream)
         while True:
             try:
-                next_item = await asyncio.wait_for(asyncio.to_thread(next, iterator), timeout=timeout)
+                next_item = await asyncio.wait_for(
+                    asyncio.to_thread(next, iterator), timeout=timeout
+                )
             except StopIteration:
                 break
             yield next_item

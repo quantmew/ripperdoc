@@ -97,7 +97,8 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         return True
 
     def needs_permissions(
-        self, input_data: Optional[ExitPlanModeToolInput] = None  # noqa: ARG002
+        self,
+        input_data: Optional[ExitPlanModeToolInput] = None,  # noqa: ARG002
     ) -> bool:
         return True
 
@@ -119,7 +120,9 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         return f"Exit plan mode and start coding now. Plan:\n{output.plan}"
 
     def render_tool_use_message(
-        self, input_data: ExitPlanModeToolInput, verbose: bool = False  # noqa: ARG002
+        self,
+        input_data: ExitPlanModeToolInput,
+        verbose: bool = False,  # noqa: ARG002
     ) -> str:
         """Render the tool use message for display."""
         plan = input_data.plan

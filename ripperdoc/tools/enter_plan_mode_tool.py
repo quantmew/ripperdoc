@@ -164,7 +164,8 @@ class EnterPlanModeTool(Tool[EnterPlanModeToolInput, EnterPlanModeToolOutput]):
         return True
 
     def needs_permissions(
-        self, input_data: Optional[EnterPlanModeToolInput] = None  # noqa: ARG002
+        self,
+        input_data: Optional[EnterPlanModeToolInput] = None,  # noqa: ARG002
     ) -> bool:
         return True
 
@@ -188,7 +189,9 @@ class EnterPlanModeTool(Tool[EnterPlanModeToolInput, EnterPlanModeToolOutput]):
         return f"{output.message}\n\n{PLAN_MODE_INSTRUCTIONS}"
 
     def render_tool_use_message(
-        self, input_data: EnterPlanModeToolInput, verbose: bool = False  # noqa: ARG002
+        self,
+        input_data: EnterPlanModeToolInput,
+        verbose: bool = False,  # noqa: ARG002
     ) -> str:
         """Render the tool use message for display."""
         return "Requesting to enter plan mode"

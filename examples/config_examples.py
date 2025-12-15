@@ -91,7 +91,7 @@ SAFE_MODE = {
 }
 
 
-def create_config_file(config: dict, path: str = "~/.ripperdoc.json"):
+def create_config_file(config: dict, path: str = "~/.ripperdoc.json") -> None:
     """
     Create a configuration file from a config dictionary.
 

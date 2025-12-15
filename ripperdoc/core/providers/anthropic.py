@@ -84,7 +84,7 @@ class AnthropicClient(ProviderClient):
                     messages=normalized_messages,  # type: ignore[arg-type]
                     tools=tool_schemas if tool_schemas else None,  # type: ignore
                     temperature=model_profile.temperature,
-                    thinking=thinking_payload,
+                    thinking=thinking_payload,  # type: ignore[arg-type]
                 )
                 stream_resp = (
                     await asyncio.wait_for(stream_cm.__aenter__(), timeout=request_timeout)
@@ -117,7 +117,7 @@ class AnthropicClient(ProviderClient):
                     messages=normalized_messages,  # type: ignore[arg-type]
                     tools=tool_schemas if tool_schemas else None,  # type: ignore
                     temperature=model_profile.temperature,
-                    thinking=thinking_payload,
+                    thinking=thinking_payload,  # type: ignore[arg-type]
                 )
 
             timeout_for_call = None if stream else request_timeout

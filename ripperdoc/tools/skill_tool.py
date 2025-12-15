@@ -102,7 +102,9 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
         return False
 
     async def validate_input(
-        self, input_data: SkillToolInput, context: Optional[ToolUseContext] = None  # noqa: ARG002
+        self,
+        input_data: SkillToolInput,
+        context: Optional[ToolUseContext] = None,  # noqa: ARG002
     ) -> ValidationResult:
         skill_name = (input_data.skill or "").strip().lstrip("/")
         if not skill_name:

@@ -98,9 +98,7 @@ def _ensure_str_dict(raw: object) -> Dict[str, str]:
     return result
 
 
-def _normalize_command(
-    raw_command: Any, raw_args: Any
-) -> tuple[Optional[str], List[str]]:
+def _normalize_command(raw_command: Any, raw_args: Any) -> tuple[Optional[str], List[str]]:
     """Normalize MCP server command/args.
 
     Supports:

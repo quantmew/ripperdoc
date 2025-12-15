@@ -583,10 +583,7 @@ async def query_llm(
         content = f"Error querying AI model: {str(e)}"
 
         if context_error:
-            content = (
-                "The request exceeded the model's context window. "
-                f"{context_error.message}"
-            )
+            content = f"The request exceeded the model's context window. {context_error.message}"
             metadata = {
                 "context_length_exceeded": True,
                 "context_length_provider": context_error.provider,

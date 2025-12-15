@@ -113,7 +113,9 @@ async def test_skill_tool_loads_skill_content(tmp_path: Path) -> None:
     assert getattr(data, "skill", None) == "helper"
     assert getattr(data, "allowed_tools", []) == ["View"]
 
-    missing_validation = await tool.validate_input(SkillToolInput(skill="missing"), ToolUseContext())
+    missing_validation = await tool.validate_input(
+        SkillToolInput(skill="missing"), ToolUseContext()
+    )
     assert not missing_validation.result
 
 
@@ -132,7 +134,9 @@ async def test_skill_tool_rejects_disabled_or_non_prompt(tmp_path: Path) -> None
         extra_frontmatter="disable-model-invocation: true",
     )
     tool = SkillTool(project_path=project_dir, home=home_dir)
-    disabled_validation = await tool.validate_input(SkillToolInput(skill="blocked"), ToolUseContext())
+    disabled_validation = await tool.validate_input(
+        SkillToolInput(skill="blocked"), ToolUseContext()
+    )
     assert not disabled_validation.result
     assert disabled_validation.error_code == 4
 

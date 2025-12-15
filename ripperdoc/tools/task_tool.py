@@ -83,9 +83,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             )
             tools_label = "All tools"
             if getattr(agent, "tools", None):
-                tools_label = (
-                    "All tools" if "*" in agent.tools else ", ".join(agent.tools)
-                )
+                tools_label = "All tools" if "*" in agent.tools else ", ".join(agent.tools)
             agent_lines.append(
                 f"- {agent.agent_type}: {agent.when_to_use} ({properties}Tools: {tools_label})"
             )
@@ -157,7 +155,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             "<commentary>\n"
             "Since the user is greeting, use the greeting-responder agent to respond with a friendly joke\n"
             "</commentary>\n"
-            f'assistant: "I\'m going to use the {task_tool_name} tool to launch the greeting-responder agent\"\n'
+            f'assistant: "I\'m going to use the {task_tool_name} tool to launch the greeting-responder agent"\n'
             "</example>"
         )
 

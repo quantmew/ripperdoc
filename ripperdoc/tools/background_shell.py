@@ -47,6 +47,8 @@ _background_loop: Optional[asyncio.AbstractEventLoop] = None
 _background_thread: Optional[threading.Thread] = None
 _loop_lock = threading.Lock()
 _shutdown_registered = False
+
+
 def _safe_log_exception(message: str, **extra: Any) -> None:
     """Log an exception but never let logging failures bubble up."""
     try:

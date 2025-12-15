@@ -61,8 +61,7 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
     idx = int(choice_text)
     if idx < 0 or idx >= len(sessions):
         ui.console.print(
-            f"[red]Invalid session index {escape(str(idx))}. "
-            f"Choose 0-{len(sessions) - 1}.[/red]"
+            f"[red]Invalid session index {escape(str(idx))}. Choose 0-{len(sessions) - 1}.[/red]"
         )
         return None
     return sessions[idx]

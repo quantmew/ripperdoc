@@ -109,12 +109,16 @@ def _normalize_allowed_tools(value: object) -> List[str]:
     return []
 
 
-def _load_skill_file(path: Path, location: SkillLocation) -> Tuple[Optional[SkillDefinition], Optional[SkillLoadError]]:
+def _load_skill_file(
+    path: Path, location: SkillLocation
+) -> Tuple[Optional[SkillDefinition], Optional[SkillLoadError]]:
     """Parse a single SKILL.md file."""
     try:
         text = path.read_text(encoding="utf-8")
     except Exception as exc:
-        logger.exception("[skills] Failed to read skill file", extra={"path": str(path), "error": str(exc)})
+        logger.exception(
+            "[skills] Failed to read skill file", extra={"path": str(path), "error": str(exc)}
+        )
         return None, SkillLoadError(path=path, reason=f"Failed to read file: {exc}")
 
     frontmatter, body = _split_frontmatter(text)
@@ -168,7 +172,9 @@ def _load_skill_file(path: Path, location: SkillLocation) -> Tuple[Optional[Skil
     return skill, None
 
 
-def _load_skill_dir(path: Path, location: SkillLocation) -> Tuple[List[SkillDefinition], List[SkillLoadError]]:
+def _load_skill_dir(
+    path: Path, location: SkillLocation
+) -> Tuple[List[SkillDefinition], List[SkillLoadError]]:
     """Load skills from a directory that either contains SKILL.md or subdirectories."""
     skills: List[SkillDefinition] = []
     errors: List[SkillLoadError] = []
