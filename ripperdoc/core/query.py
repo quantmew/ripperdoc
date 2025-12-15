@@ -40,6 +40,7 @@ from ripperdoc.core.query_utils import (
 )
 from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.utils.coerce import parse_optional_int
+from ripperdoc.utils.context_length_errors import detect_context_length_error
 from ripperdoc.utils.file_watch import ChangedFileNotice, FileSnapshot, detect_changed_files
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
@@ -577,8 +578,32 @@ async def query_llm(
             },
         )
         duration_ms = (time.time() - start_time) * 1000
+        context_error = detect_context_length_error(e)
+        metadata = None
+        content = f"Error querying AI model: {str(e)}"
+
+        if context_error:
+            content = (
+                "The request exceeded the model's context window. "
+                f"{context_error.message}"
+            )
+            metadata = {
+                "context_length_exceeded": True,
+                "context_length_provider": context_error.provider,
+                "context_length_error_code": context_error.error_code,
+                "context_length_status_code": context_error.status_code,
+            }
+            logger.info(
+                "[query_llm] Detected context-length error; consider compacting history",
+                extra={
+                    "provider": context_error.provider,
+                    "error_code": context_error.error_code,
+                    "status_code": context_error.status_code,
+                },
+            )
+
         error_msg = create_assistant_message(
-            content=f"Error querying AI model: {str(e)}", duration_ms=duration_ms
+            content=content, duration_ms=duration_ms, metadata=metadata
         )
         error_msg.is_api_error_message = True
         return error_msg
