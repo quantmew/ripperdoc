@@ -4,6 +4,7 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 """
 
 import asyncio
+import contextlib
 import json
 import sys
 import uuid
@@ -86,7 +87,6 @@ THINKING_WORDS: list[str] = [
     "Cerebrating",
     "Channelling",
     "Churning",
-    "Clauding",
     "Coalescing",
     "Cogitating",
     "Computing",
@@ -1042,103 +1042,108 @@ class RichUI:
             )
             self.display_message("System", f"Error: {str(exc)}", is_tool=True)
 
-    async def _listen_for_esc_key(self) -> bool:
-        """Listen for ESC key press in a non-blocking way.
+    # ─────────────────────────────────────────────────────────────────────────────
+    # ESC Key Interrupt Support
+    # ─────────────────────────────────────────────────────────────────────────────
 
-        Returns True if ESC was pressed, False otherwise.
+    # Keys that trigger interrupt
+    _INTERRUPT_KEYS = {'\x1b', '\x03'}  # ESC, Ctrl+C
+
+    async def _listen_for_interrupt_key(self) -> bool:
+        """Listen for interrupt keys (ESC/Ctrl+C) during query execution.
+
+        Uses raw terminal mode for immediate key detection without waiting
+        for escape sequences to complete.
         """
-        try:
-            inp = create_input()
-            with inp.raw_mode():
-                with inp.attach(lambda: None):
-                    # Check for available input
-                    while self._esc_listener_active:
-                        # Use a short timeout to check periodically
-                        await asyncio.sleep(0.05)
+        import sys
+        import select
+        import termios
+        import tty
 
-                        # Read any available keys
-                        for key_press in inp.read_keys():
-                            if key_press.key == Keys.Escape:
-                                return True
-                            # Also handle Ctrl+C during query execution
-                            if key_press.key == Keys.ControlC:
-                                return True
-        except (OSError, RuntimeError, ValueError) as e:
-            logger.debug(
-                "[ui] ESC listener error: %s: %s",
-                type(e).__name__, e,
-                extra={"session_id": self.session_id},
-            )
+        try:
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+        except (OSError, termios.error, ValueError):
+            return await self._listen_for_interrupt_key_fallback()
+
+        try:
+            tty.setraw(fd)
+            while self._esc_listener_active:
+                await asyncio.sleep(0.02)
+                if select.select([sys.stdin], [], [], 0)[0]:
+                    if sys.stdin.read(1) in self._INTERRUPT_KEYS:
+                        return True
+        except (OSError, ValueError):
+            pass
+        finally:
+            with contextlib.suppress(OSError, termios.error, ValueError):
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
         return False
 
-    async def _run_query_with_esc_interrupt(self, query_coro: Any) -> bool:
-        """Run a query coroutine with ESC key interrupt support.
+    async def _listen_for_interrupt_key_fallback(self) -> bool:
+        """Fallback interrupt listener using prompt_toolkit."""
+        try:
+            inp = create_input()
+            with inp.raw_mode(), inp.attach(lambda: None):
+                while self._esc_listener_active:
+                    await asyncio.sleep(0.02)
+                    for key in inp.read_keys():
+                        if key.key in (Keys.Escape, Keys.ControlC):
+                            return True
+        except (OSError, RuntimeError, ValueError):
+            pass
+        return False
 
-        Returns True if the query was interrupted, False if completed normally.
+    async def _cancel_task(self, task: asyncio.Task) -> None:
+        """Cancel a task and wait for it to finish."""
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    def _trigger_abort(self) -> None:
+        """Signal the query to abort."""
+        if self.query_context and hasattr(self.query_context, "abort_controller"):
+            self.query_context.abort_controller.set()
+
+    async def _run_query_with_esc_interrupt(self, query_coro: Any) -> bool:
+        """Run a query with ESC key interrupt support.
+
+        Returns True if interrupted, False if completed normally.
         """
         self._query_interrupted = False
         self._esc_listener_active = True
 
-        # Create the query task
         query_task = asyncio.create_task(query_coro)
-
-        # Create the ESC listener task
-        esc_task = asyncio.create_task(self._listen_for_esc_key())
+        interrupt_task = asyncio.create_task(self._listen_for_interrupt_key())
 
         try:
-            # Wait for either the query to complete or ESC to be pressed
-            done, pending = await asyncio.wait(
-                {query_task, esc_task},
+            done, _ = await asyncio.wait(
+                {query_task, interrupt_task},
                 return_when=asyncio.FIRST_COMPLETED
             )
 
-            if esc_task in done and esc_task.result():
-                # ESC was pressed - cancel the query
+            # Check if interrupted
+            if interrupt_task in done and interrupt_task.result():
                 self._query_interrupted = True
-
-                # Set the abort controller to stop the query
-                if self.query_context:
-                    abort_controller = getattr(self.query_context, "abort_controller", None)
-                    if abort_controller is not None:
-                        abort_controller.set()
-
-                # Cancel the query task
-                if not query_task.done():
-                    query_task.cancel()
-                    try:
-                        await query_task
-                    except asyncio.CancelledError:
-                        pass
-
+                self._trigger_abort()
+                await self._cancel_task(query_task)
                 return True
 
             # Query completed normally
             if query_task in done:
-                # Make sure to cancel the ESC listener
-                if not esc_task.done():
-                    esc_task.cancel()
-                    try:
-                        await esc_task
-                    except asyncio.CancelledError:
-                        pass
-
-                # Re-raise any exception from the query task
-                query_task.result()
+                await self._cancel_task(interrupt_task)
+                with contextlib.suppress(Exception):
+                    query_task.result()
                 return False
 
             return False
 
         finally:
             self._esc_listener_active = False
-
-            # Clean up any pending tasks
-            for task in [query_task, esc_task]:
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+            await self._cancel_task(query_task)
+            await self._cancel_task(interrupt_task)
 
     def _run_async(self, coro: Any) -> Any:
         """Run a coroutine on the persistent event loop."""
