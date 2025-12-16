@@ -147,7 +147,7 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, _safe_mode: bool = False) -> str:
         return GREP_USAGE
 
     def is_read_only(self) -> bool:
@@ -156,11 +156,11 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
     def is_concurrency_safe(self) -> bool:
         return True
 
-    def needs_permissions(self, input_data: Optional[GrepToolInput] = None) -> bool:
+    def needs_permissions(self, _input_data: Optional[GrepToolInput] = None) -> bool:
         return False
 
     async def validate_input(
-        self, input_data: GrepToolInput, context: Optional[ToolUseContext] = None
+        self, input_data: GrepToolInput, _context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         valid_modes = ["files_with_matches", "content", "count"]
         if input_data.output_mode not in valid_modes:
@@ -220,7 +220,7 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             )
         return truncated_result
 
-    def render_tool_use_message(self, input_data: GrepToolInput, verbose: bool = False) -> str:
+    def render_tool_use_message(self, input_data: GrepToolInput, _verbose: bool = False) -> str:
         """Format the tool use for display."""
         msg = f"Grep: {input_data.pattern}"
         if input_data.glob:
@@ -230,7 +230,7 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         return msg
 
     async def call(
-        self, input_data: GrepToolInput, context: ToolUseContext
+        self, input_data: GrepToolInput, _context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Search for the pattern."""
 

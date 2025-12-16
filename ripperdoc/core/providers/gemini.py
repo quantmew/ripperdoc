@@ -427,11 +427,6 @@ class GeminiClient(ProviderClient):
             if generate_fn is None:
                 raise RuntimeError(GEMINI_GENERATE_CONTENT_ERROR)
 
-                result = generate_fn(**generate_kwargs)
-                if inspect.isawaitable(result):
-                    return await result
-                return result
-
         try:
             if stream:
                 stream_resp = await _call_generate(streaming=True)

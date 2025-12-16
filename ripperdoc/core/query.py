@@ -463,7 +463,7 @@ async def query_llm(
     tools: List[Tool[Any, Any]],
     max_thinking_tokens: int = 0,
     model: str = "main",
-    abort_signal: Optional[asyncio.Event] = None,
+    _abort_signal: Optional[asyncio.Event] = None,
     *,
     progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     request_timeout: Optional[float] = None,
@@ -478,7 +478,7 @@ async def query_llm(
         tools: Available tools
         max_thinking_tokens: Maximum tokens for thinking (0 = disabled)
         model: Model pointer to use
-        abort_signal: Event to signal abortion
+        _abort_signal: Event to signal abortion (currently unused, reserved for future)
         progress_callback: Optional async callback invoked with streamed text chunks
         request_timeout: Max seconds to wait for a provider response before retrying
         max_retries: Number of retries on timeout/errors (total attempts = retries + 1)

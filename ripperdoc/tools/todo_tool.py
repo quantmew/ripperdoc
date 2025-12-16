@@ -309,7 +309,7 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, _safe_mode: bool = False) -> str:
         return TODO_WRITE_PROMPT
 
     def is_read_only(self) -> bool:
@@ -318,13 +318,13 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
     def is_concurrency_safe(self) -> bool:
         return False
 
-    def needs_permissions(self, input_data: Optional[TodoWriteToolInput] = None) -> bool:
+    def needs_permissions(self, _input_data: Optional[TodoWriteToolInput] = None) -> bool:
         return False
 
     async def validate_input(
         self,
         input_data: TodoWriteToolInput,
-        context: Optional[ToolUseContext] = None,
+        _context: Optional[ToolUseContext] = None,
     ) -> ValidationResult:
         todos = [TodoItem(**todo.model_dump()) for todo in input_data.todos]
         ok, message = validate_todos(todos)
@@ -338,14 +338,14 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
     def render_tool_use_message(
         self,
         input_data: TodoWriteToolInput,
-        verbose: bool = False,
+        _verbose: bool = False,
     ) -> str:
         return f"Updating todo list with {len(input_data.todos)} item(s)"
 
     async def call(
         self,
         input_data: TodoWriteToolInput,
-        context: ToolUseContext,
+        _context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
         try:
             todos = [TodoItem(**todo.model_dump()) for todo in input_data.todos]
@@ -403,7 +403,7 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, _safe_mode: bool = False) -> str:
         return (
             "Use TodoRead to fetch the current todo list before making progress or when you need "
             "to confirm the next action. You can request only the next actionable item or filter "
@@ -416,13 +416,13 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
     def is_concurrency_safe(self) -> bool:
         return True
 
-    def needs_permissions(self, input_data: Optional[TodoReadToolInput] = None) -> bool:
+    def needs_permissions(self, _input_data: Optional[TodoReadToolInput] = None) -> bool:
         return False
 
     async def validate_input(
         self,
         input_data: TodoReadToolInput,
-        context: Optional[ToolUseContext] = None,
+        _context: Optional[ToolUseContext] = None,
     ) -> ValidationResult:
         if input_data.limit < 0:
             return ValidationResult(result=False, message="limit cannot be negative")
@@ -445,7 +445,7 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
     def render_tool_use_message(
         self,
         input_data: TodoReadToolInput,
-        verbose: bool = False,
+        _verbose: bool = False,
     ) -> str:
         if input_data.next_only:
             return "Reading next actionable todo"
@@ -454,7 +454,7 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
     async def call(
         self,
         input_data: TodoReadToolInput,
-        context: ToolUseContext,
+        _context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
         all_todos = load_todos()
         filtered = all_todos

@@ -76,7 +76,7 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, _safe_mode: bool = False) -> str:
         return GLOB_USAGE
 
     def is_read_only(self) -> bool:
@@ -85,11 +85,11 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
     def is_concurrency_safe(self) -> bool:
         return True
 
-    def needs_permissions(self, input_data: Optional[GlobToolInput] = None) -> bool:
+    def needs_permissions(self, _input_data: Optional[GlobToolInput] = None) -> bool:
         return False
 
     async def validate_input(
-        self, input_data: GlobToolInput, context: Optional[ToolUseContext] = None
+        self, _input_data: GlobToolInput, _context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         return ValidationResult(result=True)
 
@@ -103,7 +103,7 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
             lines.append("(Results are truncated. Consider using a more specific path or pattern.)")
         return "\n".join(lines)
 
-    def render_tool_use_message(self, input_data: GlobToolInput, verbose: bool = False) -> str:
+    def render_tool_use_message(self, input_data: GlobToolInput, _verbose: bool = False) -> str:
         """Format the tool use for display."""
         if not input_data.pattern:
             return "Glob"
@@ -132,7 +132,7 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
         return f'pattern: "{input_data.pattern}"{path_fragment}'
 
     async def call(
-        self, input_data: GlobToolInput, context: ToolUseContext
+        self, input_data: GlobToolInput, _context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Find files matching the pattern."""
 

@@ -492,29 +492,303 @@ build projects, run tests, and interact with the file system."""
 
         return command, False
 
+    def _create_error_output(
+        self, command: str, stderr: str, sandbox: bool
+    ) -> BashToolOutput:
+        """Create a standardized error output."""
+        return BashToolOutput(
+            stdout="",
+            stderr=stderr,
+            exit_code=-1,
+            command=command,
+            sandbox=sandbox,
+            is_error=True,
+        )
+
+    def _setup_sandbox(
+        self, command: str, sandbox_requested: bool
+    ) -> tuple[Optional[str], Optional[BashToolOutput], Optional[Any]]:
+        """Setup sandbox environment if requested.
+
+        Returns:
+            Tuple of (final_command, error_output, cleanup_fn).
+            If error_output is not None, sandbox setup failed.
+        """
+        if not sandbox_requested:
+            return command, None, None
+
+        if not is_sandbox_available():
+            return None, self._create_error_output(
+                command, "Sandbox mode requested but not available on this system", True
+            ), None
+
+        try:
+            wrapper = create_sandbox_wrapper(command)
+            return wrapper.final_command, None, wrapper.cleanup
+        except Exception as exc:
+            logger.exception(
+                "[bash_tool] Failed to enable sandbox",
+                extra={"command": command, "error": str(exc)},
+            )
+            return None, self._create_error_output(
+                command, f"Failed to enable sandbox: {exc}", True
+            ), None
+
+    async def _run_background_command(
+        self,
+        final_command: str,
+        effective_command: str,
+        resolved_shell: str,
+        timeout_seconds: float,
+        timeout_ms: int,
+        sandbox_requested: bool,
+        start_time: float,
+        input_data: BashToolInput,
+    ) -> Optional[BashToolOutput]:
+        """Run a command in background mode.
+
+        Returns:
+            BashToolOutput on success or error, None if background mode not available.
+        """
+        try:
+            from ripperdoc.tools.background_shell import start_background_command
+        except Exception as e:  # pragma: no cover - defensive import
+            logger.exception(
+                "[bash_tool] Failed to import background shell runner",
+                extra={"command": effective_command},
+            )
+            return self._create_error_output(
+                effective_command, f"Failed to start background task: {str(e)}", sandbox_requested
+            )
+
+        bg_timeout = (
+            None
+            if input_data.timeout is None
+            else (timeout_seconds if timeout_seconds > 0 else None)
+        )
+        task_id = await start_background_command(
+            final_command, timeout=bg_timeout, shell_executable=resolved_shell
+        )
+
+        return BashToolOutput(
+            stdout="",
+            stderr=f"Started background task: {task_id}",
+            exit_code=0,
+            command=effective_command,
+            duration_ms=(asyncio.get_running_loop().time() - start_time) * 1000.0,
+            timeout_ms=timeout_ms if bg_timeout is not None else 0,
+            background_task_id=task_id,
+            sandbox=sandbox_requested,
+            return_code_interpretation=None,
+            summary=f"Command running in background with ID: {task_id}",
+            interrupted=False,
+            is_image=False,
+        )
+
+    async def _execute_foreground_process(
+        self,
+        process: asyncio.subprocess.Process,
+        start_time: float,
+        timeout_seconds: float,
+    ) -> AsyncGenerator[tuple[bool, list[str], list[str], bool], ToolProgress]:
+        """Execute process and yield progress updates.
+
+        Yields:
+            ToolProgress for output updates.
+        Returns (via send):
+            Tuple of (completed, stdout_lines, stderr_lines, timed_out)
+        """
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+        queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        deadline = (
+            loop.time() + timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
+        )
+        timed_out = False
+        last_progress_time = loop.time()
+
+        async def _pump_stream(
+            stream: Optional[asyncio.StreamReader], sink: list[str], label: str
+        ) -> None:
+            if not stream:
+                return
+            async for raw in stream:
+                text = raw.decode("utf-8", errors="replace")
+                sanitized_text = sanitize_output(text)
+                sink.append(sanitized_text)
+                await queue.put((label, sanitized_text.rstrip()))
+
+        pump_tasks = [
+            asyncio.create_task(_pump_stream(process.stdout, stdout_lines, "stdout")),
+            asyncio.create_task(_pump_stream(process.stderr, stderr_lines, "stderr")),
+        ]
+        wait_task = asyncio.create_task(process.wait())
+
+        # Main execution loop with progress reporting
+        while True:
+            done, _ = await asyncio.wait(
+                {wait_task, *pump_tasks}, timeout=0.1, return_when=asyncio.FIRST_COMPLETED
+            )
+
+            now = loop.time()
+
+            # Emit progress updates for newly received output chunks
+            while not queue.empty():
+                label, text = queue.get_nowait()
+                yield ToolProgress(content=f"{label}: {text}")
+
+            # Report progress at intervals
+            if now - last_progress_time >= PROGRESS_INTERVAL_SECONDS:
+                combined_output = "".join(stdout_lines + stderr_lines)
+                if combined_output:
+                    preview = get_last_n_lines(combined_output, 5)
+                    elapsed = format_duration((now - start_time) * 1000)
+                    yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")
+                last_progress_time = now
+
+            # Check timeout
+            if deadline is not None and now >= deadline:
+                timed_out = True
+                await self._force_kill_process(process)
+                if not wait_task.done():
+                    try:
+                        await asyncio.wait_for(wait_task, timeout=1.0)
+                    except asyncio.TimeoutError:
+                        wait_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await wait_task
+                break
+
+            if wait_task in done:
+                break
+
+        # Let stream pumps finish draining
+        try:
+            await asyncio.wait_for(asyncio.gather(*pump_tasks), timeout=1.0)
+        except asyncio.TimeoutError:
+            for task in pump_tasks:
+                if not task.done():
+                    task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+        # Drain remaining data
+        await self._drain_stream(process.stdout, stdout_lines)
+        await self._drain_stream(process.stderr, stderr_lines)
+
+        # Store results in a way that the caller can access
+        self._last_execution_result = (stdout_lines, stderr_lines, timed_out)
+
+    async def _drain_stream(
+        self, stream: Optional[asyncio.StreamReader], sink: list[str]
+    ) -> None:
+        """Drain any remaining data from a stream."""
+        if not stream:
+            return
+        try:
+            remaining = await asyncio.wait_for(stream.read(), timeout=0.5)
+        except asyncio.TimeoutError:
+            return
+        if remaining:
+            sink.append(remaining.decode("utf-8", errors="replace"))
+
+    def _build_final_output(
+        self,
+        command: str,
+        stdout_lines: list[str],
+        stderr_lines: list[str],
+        exit_code: int,
+        duration_ms: float,
+        timeout_ms: int,
+        timeout_seconds: float,
+        timed_out: bool,
+        sandbox_requested: bool,
+        original_command: str,
+    ) -> BashToolOutput:
+        """Build the final output from execution results."""
+        raw_stdout = "".join(stdout_lines)
+        raw_stderr = "".join(stderr_lines)
+
+        # Apply timeout message if needed
+        if timed_out:
+            timeout_msg = f"Command timed out after {timeout_seconds} seconds"
+            raw_stderr = f"{raw_stderr.rstrip()}\n{timeout_msg}" if raw_stderr else timeout_msg
+            exit_code = -1
+
+        # Sanitize and trim outputs
+        raw_stdout = sanitize_output(raw_stdout)
+        raw_stderr = sanitize_output(raw_stderr)
+        trimmed_stdout = trim_blank_lines(raw_stdout)
+        trimmed_stderr = trim_blank_lines(raw_stderr)
+
+        # Interpret exit code
+        exit_result = interpret_exit_code(
+            original_command, exit_code, trimmed_stdout, trimmed_stderr
+        )
+
+        # Build summary for large outputs
+        summary = None
+        combined_output = "\n".join([part for part in (trimmed_stdout, trimmed_stderr) if part])
+        if combined_output and is_output_large(combined_output):
+            summary = get_last_n_lines(combined_output, 20)
+
+        # Truncate outputs if needed
+        stdout_result = truncate_output(trimmed_stdout, max_chars=MAX_OUTPUT_CHARS)
+        stderr_result = truncate_output(trimmed_stderr, max_chars=MAX_OUTPUT_CHARS)
+        is_image = stdout_result.get("is_image", False) or stderr_result.get("is_image", False)
+
+        # Determine if truncated
+        is_truncated = stdout_result["is_truncated"] or stderr_result["is_truncated"]
+        original_length = None
+        if is_truncated:
+            original_length = stdout_result.get("original_length", 0) + stderr_result.get(
+                "original_length", 0
+            )
+
+        return BashToolOutput(
+            stdout=stdout_result["truncated_content"],
+            stderr=stderr_result["truncated_content"],
+            exit_code=exit_code,
+            command=command,
+            duration_ms=duration_ms,
+            timeout_ms=timeout_ms,
+            is_truncated=is_truncated,
+            original_length=original_length,
+            exit_code_meaning=exit_result.semantic_meaning,
+            return_code_interpretation=exit_result.semantic_meaning,
+            summary=summary,
+            interrupted=timed_out,
+            is_image=is_image,
+            sandbox=sandbox_requested,
+            is_error=exit_result.is_error or timed_out,
+        )
+
     async def call(
         self, input_data: BashToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Execute the bash command."""
-
         effective_command, auto_background = self._detect_auto_background(input_data.command)
+
+        # Resolve shell
         try:
             resolved_shell = input_data.shell_executable or find_suitable_shell()
         except Exception as exc:  # pragma: no cover - defensive guard
-            error_output = BashToolOutput(
-                stdout="",
-                stderr=f"Failed to select shell: {exc}",
-                exit_code=-1,
-                command=effective_command,
-                sandbox=bool(input_data.sandbox),
-                is_error=True,
-            )
             yield ToolResult(
-                data=error_output,
-                result_for_assistant=self.render_result_for_assistant(error_output),
+                data=self._create_error_output(
+                    effective_command, f"Failed to select shell: {exc}", bool(input_data.sandbox)
+                ),
+                result_for_assistant=self.render_result_for_assistant(
+                    self._create_error_output(
+                        effective_command,
+                        f"Failed to select shell: {exc}",
+                        bool(input_data.sandbox),
+                    )
+                ),
             )
             return
 
+        # Calculate timeout
         timeout_ms = input_data.timeout or DEFAULT_TIMEOUT_MS
         if MAX_BASH_TIMEOUT_MS:
             timeout_ms = min(timeout_ms, MAX_BASH_TIMEOUT_MS)
@@ -522,59 +796,55 @@ build projects, run tests, and interact with the file system."""
         start = asyncio.get_running_loop().time()
         sandbox_requested = bool(input_data.sandbox)
         should_background = bool(input_data.run_in_background or auto_background)
+
+        # Track read-only state
         previous_read_only = getattr(self, "_current_is_read_only", False)
         self._current_is_read_only = sandbox_requested or is_command_read_only(input_data.command)
 
-        sandbox_cleanup = None
-        final_command = effective_command
+        # Setup sandbox
+        final_command, sandbox_error, sandbox_cleanup = self._setup_sandbox(
+            effective_command, sandbox_requested
+        )
+        if sandbox_error:
+            yield ToolResult(
+                data=sandbox_error,
+                result_for_assistant=self.render_result_for_assistant(sandbox_error),
+            )
+            return
 
-        if sandbox_requested:
-            if not is_sandbox_available():
-                error_output = BashToolOutput(
-                    stdout="",
-                    stderr="Sandbox mode requested but not available on this system",
-                    exit_code=-1,
-                    command=effective_command,
-                    sandbox=sandbox_requested,
-                    is_error=True,
-                )
-                yield ToolResult(
-                    data=error_output,
-                    result_for_assistant=self.render_result_for_assistant(error_output),
-                )
-                return
-            try:
-                wrapper = create_sandbox_wrapper(effective_command)
-                final_command = wrapper.final_command
-                sandbox_cleanup = wrapper.cleanup
-            except Exception as exc:
-                logger.exception(
-                    "[bash_tool] Failed to enable sandbox",
-                    extra={"command": effective_command, "error": str(exc)},
-                )
-                error_output = BashToolOutput(
-                    stdout="",
-                    stderr=f"Failed to enable sandbox: {exc}",
-                    exit_code=-1,
-                    command=effective_command,
-                    sandbox=sandbox_requested,
-                    is_error=True,
-                )
-                yield ToolResult(
-                    data=error_output,
-                    result_for_assistant=self.render_result_for_assistant(error_output),
-                )
-                return
+        final_command = final_command or effective_command
 
+        # Adjust CWD for sandbox
         if sandbox_requested and Path(safe_get_cwd()) != ORIGINAL_CWD:
             os.chdir(ORIGINAL_CWD)
 
+        # Check if background is allowed
         if should_background and not self._is_background_allowed(input_data.command):
             should_background = False
 
-        async def _spawn_process() -> asyncio.subprocess.Process:
+        try:
+            # Background execution
+            if should_background:
+                output = await self._run_background_command(
+                    final_command,
+                    effective_command,
+                    resolved_shell,
+                    timeout_seconds,
+                    timeout_ms,
+                    sandbox_requested,
+                    start,
+                    input_data,
+                )
+                if output:
+                    yield ToolResult(
+                        data=output,
+                        result_for_assistant=self.render_result_for_assistant(output),
+                    )
+                return
+
+            # Spawn foreground process
             argv = build_shell_command(resolved_shell, final_command)
-            return await asyncio.create_subprocess_exec(
+            process = await asyncio.create_subprocess_exec(
                 *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -582,62 +852,7 @@ build projects, run tests, and interact with the file system."""
                 start_new_session=False,
             )
 
-        try:
-            # Background execution: start and return immediately.
-            if should_background:
-                try:
-                    from ripperdoc.tools.background_shell import start_background_command
-                except Exception as e:  # pragma: no cover - defensive import
-                    logger.exception(
-                        "[bash_tool] Failed to import background shell runner",
-                        extra={"command": effective_command},
-                    )
-                    error_output = BashToolOutput(
-                        stdout="",
-                        stderr=f"Failed to start background task: {str(e)}",
-                        exit_code=-1,
-                        command=effective_command,
-                        sandbox=sandbox_requested,
-                        is_error=True,
-                    )
-                    yield ToolResult(
-                        data=error_output,
-                        result_for_assistant=self.render_result_for_assistant(error_output),
-                    )
-                    return
-
-                bg_timeout = (
-                    None
-                    if input_data.timeout is None
-                    else (timeout_seconds if timeout_seconds > 0 else None)
-                )
-                task_id = await start_background_command(
-                    final_command, timeout=bg_timeout, shell_executable=resolved_shell
-                )
-
-                output = BashToolOutput(
-                    stdout="",
-                    stderr=f"Started background task: {task_id}",
-                    exit_code=0,
-                    command=effective_command,
-                    duration_ms=(asyncio.get_running_loop().time() - start) * 1000.0,
-                    timeout_ms=timeout_ms if bg_timeout is not None else 0,
-                    background_task_id=task_id,
-                    sandbox=sandbox_requested,
-                    return_code_interpretation=None,
-                    summary=f"Command running in background with ID: {task_id}",
-                    interrupted=False,
-                    is_image=False,
-                )
-
-                yield ToolResult(
-                    data=output, result_for_assistant=self.render_result_for_assistant(output)
-                )
-                return
-
-            # Run the command
-            process = await _spawn_process()
-
+            # Execute and collect output with progress
             stdout_lines: list[str] = []
             stderr_lines: list[str] = []
             queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
@@ -655,7 +870,6 @@ build projects, run tests, and interact with the file system."""
                     return
                 async for raw in stream:
                     text = raw.decode("utf-8", errors="replace")
-                    # Strip escape/control sequences early so progress updates can't garble the UI
                     sanitized_text = sanitize_output(text)
                     sink.append(sanitized_text)
                     await queue.put((label, sanitized_text.rstrip()))
@@ -666,7 +880,7 @@ build projects, run tests, and interact with the file system."""
             ]
             wait_task = asyncio.create_task(process.wait())
 
-            # Main execution loop with progress reporting
+            # Main execution loop
             while True:
                 done, _ = await asyncio.wait(
                     {wait_task, *pump_tasks}, timeout=0.1, return_when=asyncio.FIRST_COMPLETED
@@ -674,22 +888,18 @@ build projects, run tests, and interact with the file system."""
 
                 now = loop.time()
 
-                # Emit progress updates for newly received output chunks immediately.
                 while not queue.empty():
                     label, text = queue.get_nowait()
                     yield ToolProgress(content=f"{label}: {text}")
 
-                # Report progress at intervals
                 if now - last_progress_time >= PROGRESS_INTERVAL_SECONDS:
                     combined_output = "".join(stdout_lines + stderr_lines)
                     if combined_output:
-                        # Show last few lines as progress
                         preview = get_last_n_lines(combined_output, 5)
                         elapsed = format_duration((now - start) * 1000)
                         yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")
                     last_progress_time = now
 
-                # Check timeout
                 if deadline is not None and now >= deadline:
                     timed_out = True
                     await self._force_kill_process(process)
@@ -705,7 +915,7 @@ build projects, run tests, and interact with the file system."""
                 if wait_task in done:
                     break
 
-            # Let stream pumps finish draining after the process exits/gets killed.
+            # Drain streams
             try:
                 await asyncio.wait_for(asyncio.gather(*pump_tasks), timeout=1.0)
             except asyncio.TimeoutError:
@@ -715,82 +925,22 @@ build projects, run tests, and interact with the file system."""
                     with contextlib.suppress(asyncio.CancelledError):
                         await task
 
-            # Drain any remaining data from streams
-            async def _drain_remaining(
-                stream: Optional[asyncio.StreamReader], sink: list[str]
-            ) -> None:
-                if not stream:
-                    return
-                try:
-                    remaining = await asyncio.wait_for(stream.read(), timeout=0.5)
-                except asyncio.TimeoutError:
-                    return
-                if remaining:
-                    sink.append(remaining.decode("utf-8", errors="replace"))
+            await self._drain_stream(process.stdout, stdout_lines)
+            await self._drain_stream(process.stderr, stderr_lines)
 
-            await _drain_remaining(process.stdout, stdout_lines)
-            await _drain_remaining(process.stderr, stderr_lines)
-
+            # Build final output
             duration_ms = (asyncio.get_running_loop().time() - start) * 1000.0
-            raw_stdout = "".join(stdout_lines)
-            raw_stderr = "".join(stderr_lines)
-            exit_code = process.returncode or 0
-
-            # Apply timeout message if needed
-            if timed_out:
-                timeout_msg = f"Command timed out after {timeout_seconds} seconds"
-                raw_stderr = f"{raw_stderr.rstrip()}\n{timeout_msg}" if raw_stderr else timeout_msg
-                exit_code = -1
-
-            # Sanitize outputs
-            raw_stdout = sanitize_output(raw_stdout)
-            raw_stderr = sanitize_output(raw_stderr)
-
-            # Trim blank lines
-            trimmed_stdout = trim_blank_lines(raw_stdout)
-            trimmed_stderr = trim_blank_lines(raw_stderr)
-
-            # Interpret exit code
-            exit_result = interpret_exit_code(
-                input_data.command, exit_code, trimmed_stdout, trimmed_stderr
-            )
-
-            summary = None
-            combined_output_for_summary = "\n".join(
-                [part for part in (trimmed_stdout, trimmed_stderr) if part]
-            )
-            if combined_output_for_summary and is_output_large(combined_output_for_summary):
-                summary = get_last_n_lines(combined_output_for_summary, 20)
-
-            # Truncate outputs if needed
-            stdout_result = truncate_output(trimmed_stdout, max_chars=MAX_OUTPUT_CHARS)
-            stderr_result = truncate_output(trimmed_stderr, max_chars=MAX_OUTPUT_CHARS)
-            is_image = stdout_result.get("is_image", False) or stderr_result.get("is_image", False)
-
-            # Determine if truncated
-            is_truncated = stdout_result["is_truncated"] or stderr_result["is_truncated"]
-            original_length = None
-            if is_truncated:
-                original_length = stdout_result.get("original_length", 0) + stderr_result.get(
-                    "original_length", 0
-                )
-
-            output = BashToolOutput(
-                stdout=stdout_result["truncated_content"],
-                stderr=stderr_result["truncated_content"],
-                exit_code=exit_code,
-                command=effective_command,
-                duration_ms=duration_ms,
-                timeout_ms=timeout_ms,
-                is_truncated=is_truncated,
-                original_length=original_length,
-                exit_code_meaning=exit_result.semantic_meaning,
-                return_code_interpretation=exit_result.semantic_meaning,
-                summary=summary,
-                interrupted=timed_out,
-                is_image=is_image,
-                sandbox=sandbox_requested,
-                is_error=exit_result.is_error or timed_out,
+            output = self._build_final_output(
+                effective_command,
+                stdout_lines,
+                stderr_lines,
+                process.returncode or 0,
+                duration_ms,
+                timeout_ms,
+                timeout_seconds,
+                timed_out,
+                sandbox_requested,
+                input_data.command,
             )
 
             yield ToolResult(
@@ -802,25 +952,14 @@ build projects, run tests, and interact with the file system."""
                 "[bash_tool] Error executing command",
                 extra={"command": effective_command, "error": str(e)},
             )
-            error_output = BashToolOutput(
-                stdout="",
-                stderr=f"Error executing command: {str(e)}",
-                exit_code=-1,
-                command=effective_command,
-                sandbox=sandbox_requested,
-                summary=None,
-                return_code_interpretation=None,
-                interrupted=False,
-                is_image=False,
-                is_error=True,
+            error_output = self._create_error_output(
+                effective_command, f"Error executing command: {str(e)}", sandbox_requested
             )
-
             yield ToolResult(
                 data=error_output,
                 result_for_assistant=self.render_result_for_assistant(error_output),
             )
         finally:
-            # Restore read-only flag to prior state.
             self._current_is_read_only = previous_read_only
             if sandbox_cleanup:
                 with contextlib.suppress(Exception):

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import os
 import tempfile
-from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, List, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
     Tool,
@@ -26,7 +24,6 @@ from ripperdoc.utils.mcp import (
     ensure_mcp_runtime,
     find_mcp_resource,
     format_mcp_instructions,
-    get_existing_mcp_runtime,
     load_mcp_servers_async,
     shutdown_mcp_runtime,
 )
@@ -44,6 +41,50 @@ except Exception:  # pragma: no cover - SDK may be missing at runtime
 DEFAULT_MAX_MCP_OUTPUT_TOKENS = 25_000
 MIN_MCP_OUTPUT_TOKENS = 1_000
 DEFAULT_MCP_WARNING_FRACTION = 0.8
+
+
+# =============================================================================
+# Base class for MCP tools to reduce code duplication
+# =============================================================================
+
+class BaseMcpTool(Tool):  # type: ignore[type-arg]
+    """Base class for MCP tools with common default implementations.
+
+    Provides default implementations for common MCP tool behaviors:
+    - is_read_only() returns True (MCP tools typically don't modify local state)
+    - is_concurrency_safe() returns True (MCP operations can run in parallel)
+    - needs_permissions() returns False (MCP tools handle their own auth)
+    """
+
+    def is_read_only(self) -> bool:
+        """MCP tools are read-only by default."""
+        return True
+
+    def is_concurrency_safe(self) -> bool:
+        """MCP operations can safely run concurrently."""
+        return True
+
+    def needs_permissions(self, input_data: Optional[Any] = None) -> bool:
+        """MCP tools don't require additional permissions."""
+        return False
+
+    async def validate_server_exists(self, server_name: str) -> ValidationResult:
+        """Validate that a server exists in the MCP runtime.
+
+        Common validation helper for tools that take a server parameter.
+        """
+        runtime = await ensure_mcp_runtime()
+        server_names = {s.name for s in runtime.servers}
+        if server_name not in server_names:
+            return ValidationResult(
+                result=False, message=f"Unknown MCP server '{server_name}'."
+            )
+        return ValidationResult(result=True)
+
+
+# =============================================================================
+# End BaseMcpTool
+# =============================================================================
 
 
 def _get_mcp_token_limits() -> tuple[int, int]:
@@ -93,84 +134,6 @@ def _evaluate_mcp_output_size(
     return warning_text, None, token_estimate
 
 
-def _content_block_to_text(block: Any) -> str:
-    block_type = getattr(block, "type", None) or (
-        block.get("type") if isinstance(block, dict) else None
-    )
-    if block_type == "text":
-        return str(getattr(block, "text", None) or block.get("text", ""))
-    if block_type == "resource":
-        resource = getattr(block, "resource", None) or block.get("resource")
-        prefix = "resource"
-        if isinstance(resource, dict):
-            uri = resource.get("uri") or ""
-            text = resource.get("text") or ""
-            blob = resource.get("blob")
-            if text:
-                return f"[Resource {uri}] {text}"
-            if blob:
-                return f"[Resource {uri}] (binary content {len(str(blob))} chars)"
-        if hasattr(resource, "uri"):
-            uri = getattr(resource, "uri", "")
-            text = getattr(resource, "text", None)
-            blob = getattr(resource, "blob", None)
-            if text:
-                return f"[Resource {uri}] {text}"
-            if blob:
-                return f"[Resource {uri}] (binary content {len(str(blob))} chars)"
-        return prefix
-    if block_type == "resource_link":
-        uri = getattr(block, "uri", None) or (block.get("uri") if isinstance(block, dict) else None)
-        return f"[Resource link] {uri}" if uri else "[Resource link]"
-    if block_type == "image":
-        mime = getattr(block, "mimeType", None) or (
-            block.get("mimeType") if isinstance(block, dict) else None
-        )
-        return f"[Image content {mime or ''}]".strip()
-    if block_type == "audio":
-        mime = getattr(block, "mimeType", None) or (
-            block.get("mimeType") if isinstance(block, dict) else None
-        )
-        return f"[Audio content {mime or ''}]".strip()
-    return str(block)
-
-
-def _render_content_blocks(blocks: List[Any]) -> str:
-    if not blocks:
-        return ""
-    parts = [_content_block_to_text(block) for block in blocks]
-    return "\n".join([p for p in parts if p])
-
-
-def _normalize_content_block(block: Any) -> Any:
-    """Convert MCP content blocks to JSON-serializable structures."""
-    if isinstance(block, dict):
-        return block
-    result: Dict[str, Any] = {}
-    for attr in (
-        "type",
-        "text",
-        "mimeType",
-        "data",
-        "name",
-        "uri",
-        "description",
-        "resource",
-        "blob",
-    ):
-        if hasattr(block, attr):
-            result[attr] = getattr(block, attr)
-    if result:
-        return result
-    return str(block)
-
-
-def _normalize_content_blocks(blocks: Optional[List[Any]]) -> Optional[List[Any]]:
-    if not blocks:
-        return None
-    return [_normalize_content_block(block) for block in blocks]
-
-
 class ListMcpServersInput(BaseModel):
     """Input for listing MCP servers."""
 
@@ -183,7 +146,7 @@ class ListMcpServersOutput(BaseModel):
     servers: List[dict]
 
 
-class ListMcpServersTool(Tool[ListMcpServersInput, ListMcpServersOutput]):
+class ListMcpServersTool(BaseMcpTool, Tool[ListMcpServersInput, ListMcpServersOutput]):
     """List configured MCP servers and their tools."""
 
     @property
@@ -197,18 +160,9 @@ class ListMcpServersTool(Tool[ListMcpServersInput, ListMcpServersOutput]):
     def input_schema(self) -> type[ListMcpServersInput]:
         return ListMcpServersInput
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, _safe_mode: bool = False) -> str:
         servers = await load_mcp_servers_async()
         return format_mcp_instructions(servers)
-
-    def is_read_only(self) -> bool:
-        return True
-
-    def is_concurrency_safe(self) -> bool:
-        return True
-
-    def needs_permissions(self, input_data: Optional[ListMcpServersInput] = None) -> bool:
-        return False
 
     def render_result_for_assistant(self, output: ListMcpServersOutput) -> str:
         if not output.servers:
@@ -223,14 +177,14 @@ class ListMcpServersTool(Tool[ListMcpServersInput, ListMcpServersOutput]):
         return "\n".join(lines)
 
     def render_tool_use_message(
-        self, input_data: ListMcpServersInput, verbose: bool = False
+        self, input_data: ListMcpServersInput, _verbose: bool = False
     ) -> str:
         return f"List MCP servers{f' for {input_data.server}' if input_data.server else ''}"
 
     async def call(
         self,
         input_data: ListMcpServersInput,
-        context: ToolUseContext,
+        _context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
         runtime = await ensure_mcp_runtime()
         servers: List[McpServerInfo] = runtime.servers
@@ -269,7 +223,7 @@ class ListMcpResourcesOutput(BaseModel):
     resources: List[dict]
 
 
-class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
+class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
     """List resources exposed by MCP servers."""
 
     @property
@@ -289,7 +243,7 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
     def input_schema(self) -> type[ListMcpResourcesInput]:
         return ListMcpResourcesInput
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, _safe_mode: bool = False) -> str:
         return (
             "List available resources from configured MCP servers.\n"
             "Each returned resource will include all standard MCP resource fields plus a 'server' field\n"
@@ -299,24 +253,11 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
             "  resources from all servers will be returned."
         )
 
-    def is_read_only(self) -> bool:
-        return True
-
-    def is_concurrency_safe(self) -> bool:
-        return True
-
-    def needs_permissions(self, input_data: Optional[ListMcpResourcesInput] = None) -> bool:
-        return False
-
     async def validate_input(
-        self, input_data: ListMcpResourcesInput, context: Optional[ToolUseContext] = None
+        self, input_data: ListMcpResourcesInput, _context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
-        runtime = await ensure_mcp_runtime()
-        server_names = {s.name for s in runtime.servers}
-        if input_data.server and input_data.server not in server_names:
-            return ValidationResult(
-                result=False, message=f"Unknown MCP server '{input_data.server}'."
-            )
+        if input_data.server:
+            return await self.validate_server_exists(input_data.server)
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: ListMcpResourcesOutput) -> str:
@@ -329,14 +270,14 @@ class ListMcpResourcesTool(Tool[ListMcpResourcesInput, ListMcpResourcesOutput]):
             return str(output.resources)
 
     def render_tool_use_message(
-        self, input_data: ListMcpResourcesInput, verbose: bool = False
+        self, input_data: ListMcpResourcesInput, _verbose: bool = False
     ) -> str:
         return f"List MCP resources{f' for {input_data.server}' if input_data.server else ''}"
 
     async def call(
         self,
         input_data: ListMcpResourcesInput,
-        context: ToolUseContext,
+        _context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
         runtime = await ensure_mcp_runtime()
         servers = runtime.servers
@@ -427,21 +368,7 @@ class ReadMcpResourceOutput(BaseModel):
     is_error: bool = False
 
 
-class McpToolCallOutput(BaseModel):
-    """Standardized output for MCP tool calls."""
-
-    server: str
-    tool: str
-    content: Optional[str] = None
-    text: Optional[str] = None
-    content_blocks: Optional[List[Any]] = None
-    structured_content: Optional[dict] = None
-    is_error: bool = False
-    token_estimate: Optional[int] = None
-    warning: Optional[str] = None
-
-
-class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
+class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
     """Read a resource defined in MCP configuration."""
 
     @property
@@ -462,7 +389,7 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
     def input_schema(self) -> type[ReadMcpResourceInput]:
         return ReadMcpResourceInput
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, _safe_mode: bool = False) -> str:
         return (
             "Reads a specific resource from an MCP server, identified by server name and resource URI.\n\n"
             "Parameters:\n"
@@ -471,24 +398,16 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
             "- save_blobs (optional): If true, write binary content to a temporary file and include the path"
         )
 
-    def is_read_only(self) -> bool:
-        return True
-
-    def is_concurrency_safe(self) -> bool:
-        return True
-
-    def needs_permissions(self, input_data: Optional[ReadMcpResourceInput] = None) -> bool:
-        return False
-
     async def validate_input(
-        self, input_data: ReadMcpResourceInput, context: Optional[ToolUseContext] = None
+        self, input_data: ReadMcpResourceInput, _context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
+        # First validate the server exists
+        server_result = await self.validate_server_exists(input_data.server)
+        if not server_result.result:
+            return server_result
+
+        # Then validate the resource exists on that server
         runtime = await ensure_mcp_runtime()
-        server_names = {s.name for s in runtime.servers}
-        if input_data.server not in server_names:
-            return ValidationResult(
-                result=False, message=f"Unknown MCP server '{input_data.server}'."
-            )
         resource = find_mcp_resource(runtime.servers, input_data.server, input_data.uri)
         if not resource:
             return ValidationResult(
@@ -512,14 +431,14 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
         return output.content
 
     def render_tool_use_message(
-        self, input_data: ReadMcpResourceInput, verbose: bool = False
+        self, input_data: ReadMcpResourceInput, _verbose: bool = False
     ) -> str:
         return f"Read MCP resource {input_data.uri} from {input_data.server}"
 
     async def call(
         self,
         input_data: ReadMcpResourceInput,
-        context: ToolUseContext,
+        _context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
         runtime = await ensure_mcp_runtime()
         session = runtime.sessions.get(input_data.server) if runtime else None
@@ -641,297 +560,23 @@ class ReadMcpResourceTool(Tool[ReadMcpResourceInput, ReadMcpResourceOutput]):
         )
 
 
-def _sanitize_name(name: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in name)
-
-
-def _create_dynamic_input_model(schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
-    raw_schema = schema if isinstance(schema, dict) else {"type": "object"}
-    raw_schema = raw_schema or {"type": "object"}
-
-    class DynamicMcpInput(BaseModel):
-        model_config = ConfigDict(extra="allow")
-
-        @classmethod
-        def model_json_schema(cls, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-            return raw_schema
-
-    DynamicMcpInput.__name__ = (
-        f"McpInput_{abs(hash(json.dumps(raw_schema, sort_keys=True, default=str))) % 10_000_000}"
-    )
-    return DynamicMcpInput
-
-
-def _annotation_flag(tool_info: Any, key: str) -> bool:
-    annotations = getattr(tool_info, "annotations", {}) or {}
-    if hasattr(annotations, "get"):
-        try:
-            return bool(annotations.get(key, False))
-        except Exception:
-            logger.debug("[mcp_tools] Failed to read annotation flag", exc_info=True)
-            return False
-    return False
-
-
-def _render_mcp_tool_result_for_assistant(output: McpToolCallOutput) -> str:
-    if output.text or output.content:
-        return output.text or output.content or ""
-    if output.is_error:
-        return "MCP tool call failed."
-    return f"MCP tool '{output.tool}' returned no content."
-
-
-class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
-    """Runtime wrapper for an MCP tool exposed by a connected server."""
-
-    is_mcp = True
-
-    def __init__(self, server_name: str, tool_info: Any, project_path: Path) -> None:
-        self.server_name = server_name
-        self.tool_info = tool_info
-        self.project_path = project_path
-        self._input_model = _create_dynamic_input_model(getattr(tool_info, "input_schema", None))
-        self._name = f"mcp__{_sanitize_name(server_name)}__{_sanitize_name(tool_info.name)}"
-        self._user_facing = (
-            f"{server_name} - {getattr(tool_info, 'description', '') or tool_info.name} (MCP)"
-        )
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    async def description(self) -> str:
-        desc = getattr(self.tool_info, "description", "") or ""
-        schema = getattr(self.tool_info, "input_schema", None)
-        schema_snippet = json.dumps(schema, indent=2) if schema else ""
-        if schema_snippet:
-            schema_snippet = (
-                schema_snippet if len(schema_snippet) < 800 else schema_snippet[:800] + "..."
-            )
-            return f"{desc}\n\n[MCP tool]\nServer: {self.server_name}\nTool: {self.tool_info.name}\nInput schema:\n{schema_snippet}"
-        return f"{desc}\n\n[MCP tool]\nServer: {self.server_name}\nTool: {self.tool_info.name}"
-
-    @property
-    def input_schema(self) -> type[BaseModel]:
-        return self._input_model
-
-    async def prompt(self, safe_mode: bool = False) -> str:
-        return await self.description()
-
-    def is_read_only(self) -> bool:
-        return _annotation_flag(self.tool_info, "readOnlyHint")
-
-    def is_concurrency_safe(self) -> bool:
-        return self.is_read_only()
-
-    def is_destructive(self) -> bool:
-        return _annotation_flag(self.tool_info, "destructiveHint")
-
-    def is_open_world(self) -> bool:
-        return _annotation_flag(self.tool_info, "openWorldHint")
-
-    def defer_loading(self) -> bool:
-        """Avoid loading all MCP tools into the initial context."""
-        return True
-
-    def needs_permissions(self, input_data: Optional[BaseModel] = None) -> bool:
-        return not self.is_read_only()
-
-    def render_result_for_assistant(self, output: McpToolCallOutput) -> str:
-        return _render_mcp_tool_result_for_assistant(output)
-
-    def render_tool_use_message(self, input_data: BaseModel, verbose: bool = False) -> str:
-        args = input_data.model_dump(exclude_none=True)
-        arg_preview = json.dumps(args) if verbose and args else ""
-        suffix = f" with args {arg_preview}" if arg_preview else ""
-        return f"MCP {self.server_name}:{self.tool_info.name}{suffix}"
-
-    def user_facing_name(self) -> str:
-        return self._user_facing
-
-    async def call(
-        self,
-        input_data: BaseModel,
-        context: ToolUseContext,
-    ) -> AsyncGenerator[ToolOutput, None]:
-        runtime = await ensure_mcp_runtime(self.project_path)
-        session = runtime.sessions.get(self.server_name) if runtime else None
-        if not session:
-            result = McpToolCallOutput(
-                server=self.server_name,
-                tool=self.tool_info.name,
-                content=None,
-                text=None,
-                content_blocks=None,
-                structured_content=None,
-                is_error=True,
-            )
-            yield ToolResult(
-                data=result,
-                result_for_assistant=f"MCP server '{self.server_name}' is not connected.",
-            )
-            return
-
-        try:
-            args = input_data.model_dump(exclude_none=True)
-            call_result = await session.call_tool(
-                self.tool_info.name,
-                args or {},
-            )
-            raw_blocks = getattr(call_result, "content", None)
-            content_blocks = _normalize_content_blocks(raw_blocks)
-            content_text = _render_content_blocks(content_blocks) if content_blocks else None
-            structured = (
-                call_result.structuredContent if hasattr(call_result, "structuredContent") else None
-            )
-            assistant_text = content_text
-            if structured:
-                assistant_text = (assistant_text + "\n" if assistant_text else "") + json.dumps(
-                    structured, indent=2
-                )
-            output = McpToolCallOutput(
-                server=self.server_name,
-                tool=self.tool_info.name,
-                content=assistant_text or None,
-                text=content_text,
-                content_blocks=content_blocks,
-                structured_content=structured,
-                is_error=getattr(call_result, "isError", False),
-            )
-            base_result_text = self.render_result_for_assistant(output)
-            warning_text, error_text, token_estimate = _evaluate_mcp_output_size(
-                base_result_text, self.server_name, self.tool_info.name
-            )
-
-            if error_text:
-                limited_output = McpToolCallOutput(
-                    server=self.server_name,
-                    tool=self.tool_info.name,
-                    content=None,
-                    text=None,
-                    content_blocks=None,
-                    structured_content=None,
-                    is_error=True,
-                    token_estimate=token_estimate,
-                    warning=None,
-                )
-                yield ToolResult(data=limited_output, result_for_assistant=error_text)
-                return
-
-            annotated_output = output.model_copy(
-                update={"token_estimate": token_estimate, "warning": warning_text}
-            )
-
-            final_text = base_result_text or ""
-            if not final_text and warning_text:
-                final_text = warning_text
-
-            yield ToolResult(
-                data=annotated_output,
-                result_for_assistant=final_text,
-            )
-        except Exception as exc:  # pragma: no cover - runtime errors
-            output = McpToolCallOutput(
-                server=self.server_name,
-                tool=self.tool_info.name,
-                content=None,
-                text=None,
-                content_blocks=None,
-                structured_content=None,
-                is_error=True,
-            )
-            logger.exception(
-                "Error calling MCP tool",
-                extra={
-                    "server": self.server_name,
-                    "tool": self.tool_info.name,
-                    "error": str(exc),
-                },
-            )
-            yield ToolResult(
-                data=output,
-                result_for_assistant=f"Error calling MCP tool '{self.tool_info.name}' on '{self.server_name}': {exc}",
-            )
-
-
-def _build_dynamic_mcp_tools(runtime: Optional[Any]) -> List[DynamicMcpTool]:
-    if not runtime or not getattr(runtime, "servers", None):
-        return []
-    tools: List[DynamicMcpTool] = []
-    for server in runtime.servers:
-        if getattr(server, "status", "") != "connected":
-            continue
-        if not getattr(server, "tools", None):
-            continue
-        for tool in server.tools:
-            tools.append(
-                DynamicMcpTool(server.name, tool, getattr(runtime, "project_path", Path.cwd()))
-            )
-    return tools
-
-
-def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[DynamicMcpTool]:
-    """Best-effort synchronous loader for MCP tools."""
-    runtime = get_existing_mcp_runtime()
-    if runtime and not getattr(runtime, "_closed", False):
-        return _build_dynamic_mcp_tools(runtime)
-
-    try:
-        loop = asyncio.get_running_loop()
-        if loop.is_running():
-            return []
-    except RuntimeError:
-        pass
-
-    async def _load_and_keep() -> List[DynamicMcpTool]:
-        runtime = await ensure_mcp_runtime(project_path)
-        return _build_dynamic_mcp_tools(runtime)
-
-    try:
-        return asyncio.run(_load_and_keep())
-    except Exception as exc:  # pragma: no cover - SDK/runtime failures
-        logger.exception(
-            "Failed to initialize MCP runtime for dynamic tools (sync)",
-            extra={"error": str(exc)},
-        )
-        return []
-
-
-async def load_dynamic_mcp_tools_async(project_path: Optional[Path] = None) -> List[DynamicMcpTool]:
-    """Async loader for MCP tools when already in an event loop."""
-    try:
-        runtime = await ensure_mcp_runtime(project_path)
-    except Exception as exc:  # pragma: no cover - SDK/runtime failures
-        logger.exception(
-            "Failed to initialize MCP runtime for dynamic tools (async)",
-            extra={"error": str(exc)},
-        )
-        return []
-    return _build_dynamic_mcp_tools(runtime)
-
-
-def merge_tools_with_dynamic(base_tools: List[Any], dynamic_tools: List[Any]) -> List[Any]:
-    """Merge dynamic MCP tools into the existing tool list and rebuild the Task tool."""
-    from ripperdoc.tools.task_tool import TaskTool  # Local import to avoid cycles
-
-    base_without_task = [tool for tool in base_tools if getattr(tool, "name", None) != "Task"]
-    existing_names = {getattr(tool, "name", None) for tool in base_without_task}
-
-    for tool in dynamic_tools:
-        if getattr(tool, "name", None) in existing_names:
-            continue
-        base_without_task.append(tool)
-        existing_names.add(getattr(tool, "name", None))
-
-    task_tool = TaskTool(lambda: base_without_task)
-    return base_without_task + [task_tool]
-
+# Re-export DynamicMcpTool and related functions from the dedicated module
+# for backward compatibility. The imports are placed at the end to avoid
+# circular import issues since dynamic_mcp_tool.py imports _evaluate_mcp_output_size.
+from ripperdoc.tools.dynamic_mcp_tool import (  # noqa: E402
+    DynamicMcpTool,
+    McpToolCallOutput,
+    load_dynamic_mcp_tools_async,
+    load_dynamic_mcp_tools_sync,
+    merge_tools_with_dynamic,
+)
 
 __all__ = [
     "ListMcpServersTool",
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",
     "DynamicMcpTool",
+    "McpToolCallOutput",
     "load_dynamic_mcp_tools_async",
     "load_dynamic_mcp_tools_sync",
     "merge_tools_with_dynamic",

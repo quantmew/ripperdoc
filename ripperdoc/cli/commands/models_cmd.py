@@ -35,6 +35,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         console.print("[bold]/models edit <name>[/bold] — edit an existing model profile")
         console.print("[bold]/models delete <name>[/bold] — delete a model profile")
         console.print("[bold]/models use <name>[/bold] — set the main model pointer")
+        console.print("[bold]/models use <pointer> <name>[/bold] — set a specific pointer (main/task/reasoning/quick)")
 
     def parse_int(prompt_text: str, default_value: Optional[int]) -> Optional[int]:
         raw = console.input(prompt_text).strip()
@@ -321,20 +322,46 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         return True
 
     if subcmd in ("use", "main", "set-main"):
-        target = tokens[1] if len(tokens) > 1 else console.input("Model to use as main: ").strip()
+        # Support both "/models use <profile>" and "/models use <pointer> <profile>"
+        valid_pointers = {"main", "task", "reasoning", "quick"}
+
+        if len(tokens) >= 3:
+            # /models use <pointer> <profile>
+            pointer = tokens[1].lower()
+            target = tokens[2]
+            if pointer not in valid_pointers:
+                console.print(f"[red]Invalid pointer '{escape(pointer)}'. Valid pointers: {', '.join(valid_pointers)}[/red]")
+                print_models_usage()
+                return True
+        elif len(tokens) >= 2:
+            # Check if second token is a pointer or a profile
+            if tokens[1].lower() in valid_pointers:
+                pointer = tokens[1].lower()
+                target = console.input(f"Model to use for '{pointer}': ").strip()
+            else:
+                # /models use <profile> (defaults to main)
+                pointer = "main"
+                target = tokens[1]
+        else:
+            pointer = console.input("Pointer (main/task/reasoning/quick) [main]: ").strip().lower() or "main"
+            if pointer not in valid_pointers:
+                console.print(f"[red]Invalid pointer '{escape(pointer)}'. Valid pointers: {', '.join(valid_pointers)}[/red]")
+                return True
+            target = console.input(f"Model to use for '{pointer}': ").strip()
+
         if not target:
             console.print("[red]Model name is required.[/red]")
             print_models_usage()
             return True
         try:
-            set_model_pointer("main", target)
-            console.print(f"[green]✓ Main model set to '{escape(target)}'[/green]")
+            set_model_pointer(pointer, target)
+            console.print(f"[green]✓ Pointer '{escape(pointer)}' set to '{escape(target)}'[/green]")
         except Exception as exc:
             console.print(f"[red]{escape(str(exc))}[/red]")
             print_models_usage()
             logger.exception(
-                "[models_cmd] Failed to set main model pointer",
-                extra={"profile": target, "session_id": getattr(ui, "session_id", None)},
+                "[models_cmd] Failed to set model pointer",
+                extra={"pointer": pointer, "profile": target, "session_id": getattr(ui, "session_id", None)},
             )
         return True
 
