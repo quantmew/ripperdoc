@@ -229,6 +229,10 @@ class RichUI:
         self._should_exit: bool = False
         self._query_interrupted: bool = False  # Track if query was interrupted by ESC
         self._esc_listener_active: bool = False  # Track if ESC listener is active
+        self._esc_listener_paused: bool = False  # Pause ESC listener during blocking prompts
+        self._stdin_fd: Optional[int] = None  # Track stdin for raw mode restoration
+        self._stdin_old_settings: Optional[list] = None  # Original terminal settings
+        self._stdin_in_raw_mode: bool = False  # Whether we currently own raw mode
         self.command_list = list_slash_commands()
         self._command_completions = slash_command_completions()
         self._prompt_session: Optional[PromptSession] = None
@@ -943,6 +947,7 @@ class RichUI:
 
             async def permission_checker(tool: Any, parsed_input: Any) -> bool:
                 spinner.stop()
+                was_paused = self._pause_interrupt_listener()
                 try:
                     if base_permission_checker is not None:
                         result = await base_permission_checker(tool, parsed_input)
@@ -958,6 +963,7 @@ class RichUI:
                         return allowed
                     return True
                 finally:
+                    self._resume_interrupt_listener(was_paused)
                     # Wrap spinner restart in try-except to prevent exceptions
                     # from discarding the permission result
                     try:
@@ -1047,6 +1053,29 @@ class RichUI:
     # Keys that trigger interrupt
     _INTERRUPT_KEYS = {'\x1b', '\x03'}  # ESC, Ctrl+C
 
+    def _pause_interrupt_listener(self) -> bool:
+        """Pause ESC listener and restore cooked terminal mode if we own raw mode."""
+        prev = self._esc_listener_paused
+        self._esc_listener_paused = True
+        try:
+            import termios
+        except ImportError:
+            return prev
+
+        if (
+            self._stdin_fd is not None
+            and self._stdin_old_settings is not None
+            and self._stdin_in_raw_mode
+        ):
+            with contextlib.suppress(OSError, termios.error, ValueError):
+                termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._stdin_old_settings)
+            self._stdin_in_raw_mode = False
+        return prev
+
+    def _resume_interrupt_listener(self, previous_state: bool) -> None:
+        """Restore paused state to what it was before a blocking prompt."""
+        self._esc_listener_paused = previous_state
+
     async def _listen_for_interrupt_key(self) -> bool:
         """Listen for interrupt keys (ESC/Ctrl+C) during query execution.
 
@@ -1064,9 +1093,25 @@ class RichUI:
         except (OSError, termios.error, ValueError):
             return False
 
+        self._stdin_fd = fd
+        self._stdin_old_settings = old_settings
+        raw_enabled = False
         try:
-            tty.setraw(fd)
             while self._esc_listener_active:
+                if self._esc_listener_paused:
+                    if raw_enabled:
+                        with contextlib.suppress(OSError, termios.error, ValueError):
+                            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                        raw_enabled = False
+                        self._stdin_in_raw_mode = False
+                    await asyncio.sleep(0.05)
+                    continue
+
+                if not raw_enabled:
+                    tty.setraw(fd)
+                    raw_enabled = True
+                    self._stdin_in_raw_mode = True
+
                 await asyncio.sleep(0.02)
                 if select.select([sys.stdin], [], [], 0)[0]:
                     if sys.stdin.read(1) in self._INTERRUPT_KEYS:
@@ -1074,8 +1119,12 @@ class RichUI:
         except (OSError, ValueError):
             pass
         finally:
+            self._stdin_in_raw_mode = False
             with contextlib.suppress(OSError, termios.error, ValueError):
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                if raw_enabled:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            self._stdin_fd = None
+            self._stdin_old_settings = None
 
         return False
 
