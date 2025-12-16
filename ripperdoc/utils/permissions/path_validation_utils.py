@@ -90,18 +90,20 @@ def _validate_path(raw_path: str, cwd: str, allowed_dirs: Set[str]) -> tuple[boo
     return _is_path_allowed(resolved, allowed_dirs), str(resolved)
 
 
-def _extract_paths_for_command(
+def _check_command_paths(
     command: str, args: List[str], cwd: str, allowed_dirs: Set[str]
 ) -> ValidationResponse:
     if command == "cd":
         target = args[0] if args else os.path.expanduser("~")
         allowed, resolved = _validate_path(target, cwd, allowed_dirs)
     elif command == "ls":
-        candidates = [arg for arg in args if not arg.startswith("-")] or ["."]
-        for candidate in candidates:
-            allowed, resolved = _validate_path(candidate, cwd, allowed_dirs)
-            if not allowed:
-                break
+        # ls is a read-only command, allow it to run on any path
+        # This enables viewing system directories like /usr, /etc, etc.
+        return ValidationResponse(
+            behavior="passthrough",
+            message="ls is a read-only command, no path restrictions applied",
+            rule_suggestions=None,
+        )
     elif command == "find":
         paths: list[str] = []
         for arg in args:
@@ -132,13 +134,12 @@ def _extract_paths_for_command(
 
     preview = _format_allowed_dirs_preview(sorted(allowed_dirs))
     action = {
-        "cd": "change directories to",
-        "ls": "list files in",
+        "cd": "change directory to",
         "find": "search files in",
     }.get(command, "access")
     return ValidationResponse(
         behavior="ask",
-        message=f"{command} in '{resolved}' was blocked. For security, this session may only {action} the allowed working directories: {preview}.",
+        message=f"Requesting permission to {action} '{resolved}' (outside allowed directories: {preview})",
         rule_suggestions=None,
     )
 
@@ -167,7 +168,7 @@ def validate_shell_command_paths(
             rule_suggestions=None,
         )
 
-    return _extract_paths_for_command(first, rest, cwd, allowed_dirs)
+    return _check_command_paths(first, rest, cwd, allowed_dirs)
 
 
 __all__ = ["ValidationResponse", "validate_shell_command_paths"]

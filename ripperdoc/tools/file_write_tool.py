@@ -160,9 +160,11 @@ NEVER write new files unless explicitly required by the user."""
 
             bytes_written = len(input_data.content.encode("utf-8"))
 
+            # Use absolute path to ensure consistency with validation lookup
+            abs_file_path = os.path.abspath(input_data.file_path)
             try:
                 record_snapshot(
-                    input_data.file_path,
+                    abs_file_path,
                     input_data.content,
                     getattr(context, "file_state_cache", {}),
                 )
@@ -170,7 +172,7 @@ NEVER write new files unless explicitly required by the user."""
                 logger.warning(
                     "[file_write_tool] Failed to record file snapshot: %s: %s",
                     type(exc).__name__, exc,
-                    extra={"file_path": input_data.file_path},
+                    extra={"file_path": abs_file_path},
                 )
 
             output = FileWriteToolOutput(

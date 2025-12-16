@@ -314,9 +314,11 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             )
 
             path.write_text(json.dumps(nb_json, indent=1), encoding="utf-8")
+            # Use resolved absolute path to ensure consistency with validation lookup
+            abs_notebook_path = str(path.resolve())
             try:
                 record_snapshot(
-                    input_data.notebook_path,
+                    abs_notebook_path,
                     json.dumps(nb_json, indent=1),
                     getattr(context, "file_state_cache", {}),
                 )
@@ -324,7 +326,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
                 logger.warning(
                     "[notebook_edit_tool] Failed to record file snapshot: %s: %s",
                     type(exc).__name__, exc,
-                    extra={"file_path": input_data.notebook_path},
+                    extra={"file_path": abs_notebook_path},
                 )
 
             output = NotebookEditOutput(

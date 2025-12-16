@@ -318,6 +318,24 @@ build projects, run tests, and interact with the file system."""
         deny_rules = permission_context.get("denied_rules") or set()
         allowed_dirs = permission_context.get("allowed_working_directories") or {safe_get_cwd()}
 
+        # Check for sensitive directory access with read-only commands (cd, find).
+        # These should ask for user confirmation rather than being blocked outright.
+        cwd = safe_get_cwd()
+        path_validation = validate_shell_command_paths(
+            input_data.command,
+            cwd,
+            allowed_dirs,
+        )
+        if path_validation.behavior == "ask":
+            # For read-only directory operations, ask user for confirmation
+            return PermissionDecision(
+                behavior="ask",
+                message=path_validation.message,
+                updated_input=input_data,
+                decision_reason={"type": "sensitive_directory_access"},
+                rule_suggestions=path_validation.rule_suggestions,
+            )
+
         decision = evaluate_shell_command_permissions(
             input_data,
             allow_rules,
@@ -366,14 +384,8 @@ build projects, run tests, and interact with the file system."""
                 result=False, message="Sandbox mode requested but not available."
             )
 
-        cwd = safe_get_cwd()
-        path_validation = validate_shell_command_paths(
-            input_data.command,
-            cwd,
-            {cwd},
-        )
-        if path_validation.behavior == "ask":
-            return ValidationResult(result=False, message=path_validation.message)
+        # Note: Path validation for sensitive directories (cd/find to /usr, /etc, etc.)
+        # is now handled in check_permissions() to allow user confirmation for read-only ops.
 
         # Block backgrounding commands we explicitly ignore.
         if input_data.run_in_background:

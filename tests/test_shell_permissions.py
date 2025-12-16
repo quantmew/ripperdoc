@@ -218,13 +218,30 @@ def test_path_validation_blocks_outside_allowed(tmp_path: Path):
     allowed = {str(tmp_path)}
     result = validate_shell_command_paths("cd /", str(tmp_path), allowed)
     assert result.behavior == "ask"
-    assert "blocked" in result.message.lower()
+    assert "permission" in result.message.lower() or "outside" in result.message.lower()
 
 
 def test_path_validation_allows_within_allowed(tmp_path: Path):
     """cd into an allowed directory should pass."""
     allowed = {str(tmp_path)}
     result = validate_shell_command_paths(f"cd {tmp_path}", str(tmp_path), allowed)
+    assert result.behavior == "passthrough"
+
+
+def test_ls_allows_any_path(tmp_path: Path):
+    """ls is a read-only command and should be allowed on any path."""
+    allowed = {str(tmp_path)}
+    # ls to /usr should be allowed even though it's outside allowed dirs
+    result = validate_shell_command_paths("ls /usr", str(tmp_path), allowed)
+    assert result.behavior == "passthrough"
+    assert "read-only" in result.message.lower()
+
+    # ls to /etc should also be allowed
+    result = validate_shell_command_paths("ls -la /etc", str(tmp_path), allowed)
+    assert result.behavior == "passthrough"
+
+    # ls to root should also be allowed
+    result = validate_shell_command_paths("ls /", str(tmp_path), allowed)
     assert result.behavior == "passthrough"
 
 

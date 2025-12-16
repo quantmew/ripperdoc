@@ -153,9 +153,11 @@ and limit to read only a portion of the file."""
             content = "".join(selected_lines)
 
             # Remember what we read so we can detect user edits later.
+            # Use absolute path to ensure consistency with Edit tool's lookup
+            abs_file_path = os.path.abspath(input_data.file_path)
             try:
                 record_snapshot(
-                    input_data.file_path,
+                    abs_file_path,
                     content,
                     getattr(context, "file_state_cache", {}),
                     offset=offset,

@@ -227,9 +227,11 @@ match exactly (including whitespace and indentation)."""
             with open(input_data.file_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
 
+            # Use absolute path to ensure consistency with validation lookup
+            abs_file_path = os.path.abspath(input_data.file_path)
             try:
                 record_snapshot(
-                    input_data.file_path,
+                    abs_file_path,
                     new_content,
                     getattr(context, "file_state_cache", {}),
                 )
@@ -237,7 +239,7 @@ match exactly (including whitespace and indentation)."""
                 logger.warning(
                     "[file_edit_tool] Failed to record file snapshot: %s: %s",
                     type(exc).__name__, exc,
-                    extra={"file_path": input_data.file_path},
+                    extra={"file_path": abs_file_path},
                 )
 
             # Generate diff for display
