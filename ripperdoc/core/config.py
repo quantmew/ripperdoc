@@ -164,6 +164,12 @@ class ProjectConfig(BaseModel):
     bash_deny_rules: list[str] = Field(default_factory=list)
     working_directories: list[str] = Field(default_factory=list)
 
+    # Path ignore patterns (gitignore-style)
+    ignore_patterns: list[str] = Field(
+        default_factory=list,
+        description="Gitignore-style patterns for paths to ignore in file operations"
+    )
+
     # Context
     context: Dict[str, str] = Field(default_factory=dict)
     context_files: list[str] = Field(default_factory=list)

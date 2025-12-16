@@ -4,6 +4,7 @@ Allows the AI to edit files by replacing text.
 """
 
 import os
+from pathlib import Path
 from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, Field
 
@@ -17,6 +18,7 @@ from ripperdoc.core.tool import (
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.file_watch import record_snapshot
+from ripperdoc.utils.path_ignore import check_path_for_tool
 
 logger = get_logger()
 
@@ -154,6 +156,12 @@ match exactly (including whitespace and indentation)."""
                 )
         except OSError:
             pass  # File mtime check failed, proceed anyway
+
+        # Check if path is ignored (warning for edit operations)
+        file_path_obj = Path(file_path)
+        should_proceed, warning_msg = check_path_for_tool(file_path_obj, tool_name="Edit", warn_only=True)
+        if warning_msg:
+            logger.warning("[file_edit_tool] %s", warning_msg)
 
         return ValidationResult(result=True)
 

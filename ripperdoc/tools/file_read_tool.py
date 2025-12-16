@@ -4,6 +4,7 @@ Allows the AI to read file contents.
 """
 
 import os
+from pathlib import Path
 from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, Field
 
@@ -17,6 +18,7 @@ from ripperdoc.core.tool import (
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.file_watch import record_snapshot
+from ripperdoc.utils.path_ignore import check_path_for_tool, is_path_ignored
 
 logger = get_logger()
 
@@ -101,6 +103,12 @@ and limit to read only a portion of the file."""
             return ValidationResult(
                 result=False, message=f"Path is not a file: {input_data.file_path}"
             )
+
+        # Check if path is ignored (warning only for read operations)
+        file_path = Path(input_data.file_path)
+        should_proceed, warning_msg = check_path_for_tool(file_path, tool_name="Read", warn_only=True)
+        if warning_msg:
+            logger.info("[file_read_tool] %s", warning_msg)
 
         return ValidationResult(result=True)
 
