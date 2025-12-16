@@ -932,8 +932,12 @@ class RichUI:
 
             def pause_ui() -> None:
                 spinner.stop()
+                # Pause ESC listener to restore normal terminal mode for user input
+                self._esc_listener_active = False
 
             def resume_ui() -> None:
+                # Resume ESC listener
+                self._esc_listener_active = True
                 spinner.start()
                 spinner.update("Thinking...")
 
@@ -1052,32 +1056,41 @@ class RichUI:
     async def _listen_for_interrupt_key(self) -> bool:
         """Listen for interrupt keys (ESC/Ctrl+C) during query execution.
 
-        Uses raw terminal mode for immediate key detection without waiting
-        for escape sequences to complete.
+        Uses brief raw terminal mode polls for immediate key detection while
+        allowing normal terminal operation between polls.
         """
         import sys
         import select
         import termios
         import tty
 
-        try:
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-        except (OSError, termios.error, ValueError):
-            return await self._listen_for_interrupt_key_fallback()
+        while self._esc_listener_active:
+            await asyncio.sleep(0.02)
 
-        try:
-            tty.setraw(fd)
-            while self._esc_listener_active:
-                await asyncio.sleep(0.02)
+            # Skip if listener was paused (e.g., for permission dialogs)
+            if not self._esc_listener_active:
+                break
+
+            # Briefly enter raw mode to check for keys
+            try:
+                fd = sys.stdin.fileno()
+                old_settings = termios.tcgetattr(fd)
+            except (OSError, termios.error, ValueError):
+                continue
+
+            try:
+                tty.setraw(fd)
+                # Non-blocking check
                 if select.select([sys.stdin], [], [], 0)[0]:
-                    if sys.stdin.read(1) in self._INTERRUPT_KEYS:
+                    char = sys.stdin.read(1)
+                    if char in self._INTERRUPT_KEYS:
                         return True
-        except (OSError, ValueError):
-            pass
-        finally:
-            with contextlib.suppress(OSError, termios.error, ValueError):
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            except (OSError, ValueError):
+                pass
+            finally:
+                # Always restore terminal settings immediately
+                with contextlib.suppress(OSError, termios.error, ValueError):
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
         return False
 
