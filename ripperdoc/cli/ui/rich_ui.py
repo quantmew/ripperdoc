@@ -23,6 +23,8 @@ from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.input import create_input
+from prompt_toolkit.keys import Keys
 
 from ripperdoc import __version__
 from ripperdoc.core.config import get_global_config, provider_protocol
@@ -227,6 +229,8 @@ class RichUI:
         self.query_context: Optional[QueryContext] = None
         self._current_tool: Optional[str] = None
         self._should_exit: bool = False
+        self._query_interrupted: bool = False  # Track if query was interrupted by ESC
+        self._esc_listener_active: bool = False  # Track if ESC listener is active
         self.command_list = list_slash_commands()
         self._command_completions = slash_command_completions()
         self._prompt_session: Optional[PromptSession] = None
@@ -1038,12 +1042,120 @@ class RichUI:
             )
             self.display_message("System", f"Error: {str(exc)}", is_tool=True)
 
+    async def _listen_for_esc_key(self) -> bool:
+        """Listen for ESC key press in a non-blocking way.
+
+        Returns True if ESC was pressed, False otherwise.
+        """
+        try:
+            inp = create_input()
+            with inp.raw_mode():
+                with inp.attach(lambda: None):
+                    # Check for available input
+                    while self._esc_listener_active:
+                        # Use a short timeout to check periodically
+                        await asyncio.sleep(0.05)
+
+                        # Read any available keys
+                        for key_press in inp.read_keys():
+                            if key_press.key == Keys.Escape:
+                                return True
+                            # Also handle Ctrl+C during query execution
+                            if key_press.key == Keys.ControlC:
+                                return True
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.debug(
+                "[ui] ESC listener error: %s: %s",
+                type(e).__name__, e,
+                extra={"session_id": self.session_id},
+            )
+        return False
+
+    async def _run_query_with_esc_interrupt(self, query_coro: Any) -> bool:
+        """Run a query coroutine with ESC key interrupt support.
+
+        Returns True if the query was interrupted, False if completed normally.
+        """
+        self._query_interrupted = False
+        self._esc_listener_active = True
+
+        # Create the query task
+        query_task = asyncio.create_task(query_coro)
+
+        # Create the ESC listener task
+        esc_task = asyncio.create_task(self._listen_for_esc_key())
+
+        try:
+            # Wait for either the query to complete or ESC to be pressed
+            done, pending = await asyncio.wait(
+                {query_task, esc_task},
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if esc_task in done and esc_task.result():
+                # ESC was pressed - cancel the query
+                self._query_interrupted = True
+
+                # Set the abort controller to stop the query
+                if self.query_context:
+                    abort_controller = getattr(self.query_context, "abort_controller", None)
+                    if abort_controller is not None:
+                        abort_controller.set()
+
+                # Cancel the query task
+                if not query_task.done():
+                    query_task.cancel()
+                    try:
+                        await query_task
+                    except asyncio.CancelledError:
+                        pass
+
+                return True
+
+            # Query completed normally
+            if query_task in done:
+                # Make sure to cancel the ESC listener
+                if not esc_task.done():
+                    esc_task.cancel()
+                    try:
+                        await esc_task
+                    except asyncio.CancelledError:
+                        pass
+
+                # Re-raise any exception from the query task
+                query_task.result()
+                return False
+
+            return False
+
+        finally:
+            self._esc_listener_active = False
+
+            # Clean up any pending tasks
+            for task in [query_task, esc_task]:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
     def _run_async(self, coro: Any) -> Any:
         """Run a coroutine on the persistent event loop."""
         if self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
         return self._loop.run_until_complete(coro)
+
+    def _run_async_with_esc_interrupt(self, coro: Any) -> bool:
+        """Run a coroutine with ESC key interrupt support.
+
+        Returns True if interrupted by ESC, False if completed normally.
+        """
+        if self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+        return self._loop.run_until_complete(self._run_query_with_esc_interrupt(coro))
 
     def run_async(self, coro: Any) -> Any:
         """Public wrapper for running coroutines on the UI event loop."""
@@ -1112,7 +1224,7 @@ class RichUI:
         # Display status
         console.print(create_status_bar())
         console.print()
-        console.print("[dim]Tip: type '/' then press Tab to see available commands.[/dim]\n")
+        console.print("[dim]Tip: type '/' then press Tab to see available commands. Press ESC to interrupt a running query.[/dim]\n")
 
         session = self.get_prompt_session()
         logger.info(
@@ -1156,7 +1268,14 @@ class RichUI:
                             "prompt_preview": user_input[:200],
                         },
                     )
-                    self._run_async(self.process_query(user_input))
+                    interrupted = self._run_async_with_esc_interrupt(self.process_query(user_input))
+
+                    if interrupted:
+                        console.print("\n[red]■ Conversation interrupted[/red] · [dim]Tell the model what to do differently.[/dim]")
+                        logger.info(
+                            "[ui] Query interrupted by ESC key",
+                            extra={"session_id": self.session_id},
+                        )
 
                     console.print()  # Add spacing between interactions
 
