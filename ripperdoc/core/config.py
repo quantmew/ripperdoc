@@ -143,6 +143,10 @@ class GlobalConfig(BaseModel):
     auto_compact_enabled: bool = True
     context_token_limit: Optional[int] = None
 
+    # User-level permission rules (applied globally)
+    user_allow_rules: list[str] = Field(default_factory=list)
+    user_deny_rules: list[str] = Field(default_factory=list)
+
     # Onboarding
     has_completed_onboarding: bool = False
     last_onboarding_version: Optional[str] = None
@@ -154,7 +158,7 @@ class GlobalConfig(BaseModel):
 class ProjectConfig(BaseModel):
     """Project-specific configuration stored in .ripperdoc/config.json"""
 
-    # Tool permissions
+    # Tool permissions (project level - checked into git)
     allowed_tools: list[str] = Field(default_factory=list)
     bash_allow_rules: list[str] = Field(default_factory=list)
     bash_deny_rules: list[str] = Field(default_factory=list)
@@ -180,6 +184,14 @@ class ProjectConfig(BaseModel):
     last_session_id: Optional[str] = None
 
 
+class ProjectLocalConfig(BaseModel):
+    """Project-local configuration stored in .ripperdoc/config.local.json (not checked into git)"""
+
+    # Local permission rules (project-specific but not shared)
+    local_allow_rules: list[str] = Field(default_factory=list)
+    local_deny_rules: list[str] = Field(default_factory=list)
+
+
 class ConfigManager:
     """Manages global and project-specific configuration."""
 
@@ -188,6 +200,7 @@ class ConfigManager:
         self.current_project_path: Optional[Path] = None
         self._global_config: Optional[GlobalConfig] = None
         self._project_config: Optional[ProjectConfig] = None
+        self._project_local_config: Optional[ProjectLocalConfig] = None
 
     def get_global_config(self) -> GlobalConfig:
         """Load and return global configuration."""
@@ -300,6 +313,91 @@ class ConfigManager:
                 "allowed_tools": len(config.allowed_tools),
             },
         )
+
+    def get_project_local_config(self, project_path: Optional[Path] = None) -> ProjectLocalConfig:
+        """Load and return project-local configuration (not checked into git)."""
+        if project_path is not None:
+            if self.current_project_path != project_path:
+                self._project_local_config = None
+            self.current_project_path = project_path
+
+        if self.current_project_path is None:
+            return ProjectLocalConfig()
+
+        config_path = self.current_project_path / ".ripperdoc" / "config.local.json"
+
+        if self._project_local_config is None:
+            if config_path.exists():
+                try:
+                    data = json.loads(config_path.read_text())
+                    self._project_local_config = ProjectLocalConfig(**data)
+                    logger.debug(
+                        "[config] Loaded project-local config",
+                        extra={
+                            "path": str(config_path),
+                            "project_path": str(self.current_project_path),
+                        },
+                    )
+                except (json.JSONDecodeError, OSError, IOError, UnicodeDecodeError, ValueError, TypeError) as e:
+                    logger.warning(
+                        "Error loading project-local config: %s: %s",
+                        type(e).__name__, e,
+                        extra={"error": str(e), "path": str(config_path)},
+                    )
+                    self._project_local_config = ProjectLocalConfig()
+            else:
+                self._project_local_config = ProjectLocalConfig()
+
+        return self._project_local_config
+
+    def save_project_local_config(
+        self, config: ProjectLocalConfig, project_path: Optional[Path] = None
+    ) -> None:
+        """Save project-local configuration."""
+        if project_path is not None:
+            self.current_project_path = project_path
+
+        if self.current_project_path is None:
+            return
+
+        config_dir = self.current_project_path / ".ripperdoc"
+        config_dir.mkdir(exist_ok=True)
+
+        config_path = config_dir / "config.local.json"
+        self._project_local_config = config
+        config_path.write_text(config.model_dump_json(indent=2))
+
+        # Ensure config.local.json is in .gitignore
+        self._ensure_gitignore_entry("config.local.json")
+
+        logger.debug(
+            "[config] Saved project-local config",
+            extra={
+                "path": str(config_path),
+                "project_path": str(self.current_project_path),
+            },
+        )
+
+    def _ensure_gitignore_entry(self, entry: str) -> bool:
+        """Ensure an entry exists in .ripperdoc/.gitignore. Returns True if added."""
+        if self.current_project_path is None:
+            return False
+
+        gitignore_path = self.current_project_path / ".ripperdoc" / ".gitignore"
+        try:
+            text = ""
+            if gitignore_path.exists():
+                text = gitignore_path.read_text(encoding="utf-8", errors="ignore")
+                existing_lines = text.splitlines()
+                if entry in existing_lines:
+                    return False
+            with gitignore_path.open("a", encoding="utf-8") as f:
+                if text and not text.endswith("\n"):
+                    f.write("\n")
+                f.write(f"{entry}\n")
+            return True
+        except (OSError, IOError):
+            return False
 
     def get_api_key(self, provider: ProviderType) -> Optional[str]:
         """Get API key for a provider."""
@@ -441,3 +539,15 @@ def set_model_pointer(pointer: str, profile_name: str) -> GlobalConfig:
 def get_current_model_profile(pointer: str = "main") -> Optional[ModelProfile]:
     """Convenience wrapper to fetch the active profile for a pointer."""
     return config_manager.get_current_model_profile(pointer)
+
+
+def get_project_local_config(project_path: Optional[Path] = None) -> ProjectLocalConfig:
+    """Get project-local configuration (not checked into git)."""
+    return config_manager.get_project_local_config(project_path)
+
+
+def save_project_local_config(
+    config: ProjectLocalConfig, project_path: Optional[Path] = None
+) -> None:
+    """Save project-local configuration."""
+    config_manager.save_project_local_config(config, project_path)

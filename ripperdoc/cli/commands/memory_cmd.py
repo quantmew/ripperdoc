@@ -195,7 +195,7 @@ command = SlashCommand(
     name="memory",
     description="List and edit AGENTS memory files",
     handler=_handle,
-    aliases=("mem",),
+    aliases=(),
 )
 
 

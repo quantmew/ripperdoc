@@ -12,7 +12,7 @@ command = SlashCommand(
     name="exit",
     description="Exit Ripperdoc",
     handler=_handle,
-    aliases=("quit",),
+    aliases=(),
 )
 
 

@@ -283,15 +283,15 @@ def check_onboarding() -> bool:
 @click.version_option(version=__version__)
 @click.option("--cwd", type=click.Path(exists=True), help="Working directory")
 @click.option(
-    "--unsafe",
+    "--yolo",
     is_flag=True,
-    help="Disable safe mode (skip permission prompts for tools)",
+    help="YOLO mode: skip all permission prompts for tools",
 )
 @click.option("--verbose", is_flag=True, help="Verbose output")
 @click.option("-p", "--prompt", type=str, help="Direct prompt (non-interactive)")
 @click.pass_context
 def cli(
-    ctx: click.Context, cwd: Optional[str], unsafe: bool, verbose: bool, prompt: Optional[str]
+    ctx: click.Context, cwd: Optional[str], yolo: bool, verbose: bool, prompt: Optional[str]
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
@@ -329,7 +329,7 @@ def cli(
     # Initialize project configuration for the current working directory
     get_project_config(project_path)
 
-    safe_mode = not unsafe
+    safe_mode = not yolo
     logger.debug(
         "[cli] Configuration initialized",
         extra={"session_id": session_id, "safe_mode": safe_mode, "verbose": verbose},

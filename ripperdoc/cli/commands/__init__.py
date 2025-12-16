@@ -17,6 +17,7 @@ from .help_cmd import command as help_command
 from .memory_cmd import command as memory_command
 from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
+from .permissions_cmd import command as permissions_command
 from .resume_cmd import command as resume_command
 from .tasks_cmd import command as tasks_command
 from .status_cmd import command as status_command
@@ -44,6 +45,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     status_command,
     doctor_command,
     memory_command,
+    permissions_command,
     tasks_command,
     todos_command,
     mcp_command,
