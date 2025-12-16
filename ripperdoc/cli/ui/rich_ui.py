@@ -24,8 +24,6 @@ from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.input import create_input
-from prompt_toolkit.keys import Keys
 
 from ripperdoc import __version__
 from ripperdoc.core.config import get_global_config, provider_protocol
@@ -932,12 +930,8 @@ class RichUI:
 
             def pause_ui() -> None:
                 spinner.stop()
-                # Pause ESC listener to restore normal terminal mode for user input
-                self._esc_listener_active = False
 
             def resume_ui() -> None:
-                # Resume ESC listener
-                self._esc_listener_active = True
                 spinner.start()
                 spinner.update("Thinking...")
 
@@ -1056,56 +1050,33 @@ class RichUI:
     async def _listen_for_interrupt_key(self) -> bool:
         """Listen for interrupt keys (ESC/Ctrl+C) during query execution.
 
-        Uses brief raw terminal mode polls for immediate key detection while
-        allowing normal terminal operation between polls.
+        Uses raw terminal mode for immediate key detection without waiting
+        for escape sequences to complete.
         """
         import sys
         import select
         import termios
         import tty
 
-        while self._esc_listener_active:
-            await asyncio.sleep(0.02)
-
-            # Skip if listener was paused (e.g., for permission dialogs)
-            if not self._esc_listener_active:
-                break
-
-            # Briefly enter raw mode to check for keys
-            try:
-                fd = sys.stdin.fileno()
-                old_settings = termios.tcgetattr(fd)
-            except (OSError, termios.error, ValueError):
-                continue
-
-            try:
-                tty.setraw(fd)
-                # Non-blocking check
-                if select.select([sys.stdin], [], [], 0)[0]:
-                    char = sys.stdin.read(1)
-                    if char in self._INTERRUPT_KEYS:
-                        return True
-            except (OSError, ValueError):
-                pass
-            finally:
-                # Always restore terminal settings immediately
-                with contextlib.suppress(OSError, termios.error, ValueError):
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-        return False
-
-    async def _listen_for_interrupt_key_fallback(self) -> bool:
-        """Fallback interrupt listener using prompt_toolkit."""
         try:
-            inp = create_input()
-            with inp.raw_mode(), inp.attach(lambda: None):
-                while self._esc_listener_active:
-                    await asyncio.sleep(0.02)
-                    for key in inp.read_keys():
-                        if key.key in (Keys.Escape, Keys.ControlC):
-                            return True
-        except (OSError, RuntimeError, ValueError):
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+        except (OSError, termios.error, ValueError):
+            return False
+
+        try:
+            tty.setraw(fd)
+            while self._esc_listener_active:
+                await asyncio.sleep(0.02)
+                if select.select([sys.stdin], [], [], 0)[0]:
+                    if sys.stdin.read(1) in self._INTERRUPT_KEYS:
+                        return True
+        except (OSError, ValueError):
             pass
+        finally:
+            with contextlib.suppress(OSError, termios.error, ValueError):
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
         return False
 
     async def _cancel_task(self, task: asyncio.Task) -> None:
