@@ -9,6 +9,7 @@ import inspect
 import os
 import time
 from asyncio import CancelledError
+from dataclasses import dataclass, field
 from typing import (
     Any,
     AsyncGenerator,
@@ -572,6 +573,33 @@ async def query_llm(
             max_thinking_tokens=max_thinking_tokens,
         )
 
+        # Check if provider returned an error response
+        if provider_response.is_error:
+            logger.warning(
+                "[query_llm] Provider returned error response",
+                extra={
+                    "model": model_profile.model,
+                    "error_code": provider_response.error_code,
+                    "error_message": provider_response.error_message,
+                },
+            )
+            metadata: Dict[str, Any] = {
+                "api_error": True,
+                "error_code": provider_response.error_code,
+                "error_message": provider_response.error_message,
+            }
+            # Add context length info if applicable
+            if provider_response.error_code == "context_length_exceeded":
+                metadata["context_length_exceeded"] = True
+
+            error_msg = create_assistant_message(
+                content=provider_response.content_blocks,
+                duration_ms=provider_response.duration_ms,
+                metadata=metadata,
+            )
+            error_msg.is_api_error_message = True
+            return error_msg
+
         return create_assistant_message(
             content=provider_response.content_blocks,
             cost_usd=provider_response.cost_usd,
@@ -623,49 +651,62 @@ async def query_llm(
         return error_msg
 
 
-async def query(
+MAX_QUERY_ITERATIONS = int(os.getenv("RIPPERDOC_MAX_QUERY_ITERATIONS", "1024"))
+
+
+@dataclass
+class IterationResult:
+    """Result of a single query iteration.
+
+    This is used as an "out parameter" to communicate results from
+    _run_query_iteration back to the main query loop.
+    """
+
+    assistant_message: Optional[AssistantMessage] = None
+    tool_results: List[UserMessage] = field(default_factory=list)
+    should_stop: bool = False  # True means exit the query loop entirely
+
+
+async def _run_query_iteration(
     messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
     system_prompt: str,
     context: Dict[str, str],
     query_context: QueryContext,
-    can_use_tool_fn: Optional[ToolPermissionCallable] = None,
+    can_use_tool_fn: Optional[ToolPermissionCallable],
+    iteration: int,
+    result: IterationResult,
 ) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
-    """Execute a query with tool support.
+    """Run a single iteration of the query loop.
 
-    This is the main query loop that:
-    1. Sends messages to the AI
-    2. Handles tool use responses
-    3. Executes tools
-    4. Recursively continues the conversation
+    This function handles one round of:
+    1. Calling the LLM
+    2. Streaming progress
+    3. Processing tool calls (if any)
 
     Args:
-        messages: Conversation history
+        messages: Current conversation history
         system_prompt: Base system prompt
         context: Additional context dictionary
         query_context: Query configuration
         can_use_tool_fn: Optional function to check tool permissions
+        iteration: Current iteration number (for logging)
+        result: IterationResult object to store results
 
     Yields:
-        Messages (user, assistant, progress) as they are generated
+        Messages (progress, assistant, tool results) as they are generated
     """
-    logger.info(
-        "[query] Starting query loop",
-        extra={
-            "message_count": len(messages),
-            "tool_count": len(query_context.tools),
-            "safe_mode": query_context.safe_mode,
-            "model_pointer": query_context.model,
-        },
-    )
-    # Work on a copy so external mutations (e.g., UI appending messages while consuming)
-    # do not interfere with recursion or normalization.
-    messages = list(messages)
+    logger.debug(f"[query] Iteration {iteration}/{MAX_QUERY_ITERATIONS}")
+
+    # Check for file changes at the start of each iteration
     change_notices = detect_changed_files(query_context.file_state_cache)
     if change_notices:
         messages.append(create_user_message(_format_changed_file_notice(change_notices)))
+
     model_profile = resolve_model_profile(query_context.model)
     tool_mode = determine_tool_mode(model_profile)
-    tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else query_context.all_tools()
+    tools_for_model: List[Tool[Any, Any]] = (
+        [] if tool_mode == "text" else query_context.all_tools()
+    )
 
     full_system_prompt = build_full_system_prompt(
         system_prompt, context, tool_mode, query_context.all_tools()
@@ -679,6 +720,7 @@ async def query(
         },
     )
 
+    # Stream LLM response
     progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue()
 
     async def _stream_progress(chunk: str) -> None:
@@ -714,6 +756,7 @@ async def query(
 
     assistant_message: Optional[AssistantMessage] = None
 
+    # Wait for LLM response while yielding progress
     while True:
         if query_context.abort_controller.is_set():
             assistant_task.cancel()
@@ -722,6 +765,7 @@ async def query(
             except CancelledError:
                 pass
             yield create_assistant_message(INTERRUPT_MESSAGE)
+            result.should_stop = True
             return
         if assistant_task.done():
             assistant_message = await assistant_task
@@ -742,20 +786,24 @@ async def query(
         if progress:
             yield progress
 
+    # Drain remaining progress messages
     while not progress_queue.empty():
         residual = progress_queue.get_nowait()
         if residual:
             yield residual
 
     assert assistant_message is not None
+    result.assistant_message = assistant_message
 
     # Check for abort
     if query_context.abort_controller.is_set():
         yield create_assistant_message(INTERRUPT_MESSAGE)
+        result.should_stop = True
         return
 
     yield assistant_message
 
+    # Extract and process tool calls
     tool_use_blocks: List[MessageContent] = extract_tool_use_blocks(assistant_message)
     text_blocks = (
         len(assistant_message.message.content)
@@ -769,13 +817,16 @@ async def query(
 
     if not tool_use_blocks:
         logger.debug("[query] No tool_use blocks; returning response to user.")
+        result.should_stop = True
         return
 
+    # Process tool calls
     logger.debug(f"[query] Executing {len(tool_use_blocks)} tool_use block(s).")
     tool_results: List[UserMessage] = []
     permission_denied = False
     sibling_ids = set(
-        getattr(t, "tool_use_id", None) or getattr(t, "id", None) or "" for t in tool_use_blocks
+        getattr(t, "tool_use_id", None) or getattr(t, "id", None) or ""
+        for t in tool_use_blocks
     )
     prepared_calls: List[Dict[str, Any]] = []
 
@@ -783,12 +834,18 @@ async def query(
         tool_name = tool_use.name
         if not tool_name:
             continue
-        tool_use_id = getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
+        tool_use_id = (
+            getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
+        )
         tool_input = getattr(tool_use, "input", {}) or {}
 
-        tool, missing_msg = _resolve_tool(query_context.tool_registry, tool_name, tool_use_id)
+        tool, missing_msg = _resolve_tool(
+            query_context.tool_registry, tool_name, tool_use_id
+        )
         if missing_msg:
-            logger.warning(f"[query] Tool '{tool_name}' not found for tool_use_id={tool_use_id}")
+            logger.warning(
+                f"[query] Tool '{tool_name}' not found for tool_use_id={tool_use_id}"
+            )
             tool_results.append(missing_msg)
             yield missing_msg
             continue
@@ -815,7 +872,8 @@ async def query(
             validation = await tool.validate_input(parsed_input, tool_context)
             if not validation.result:
                 logger.debug(
-                    f"[query] Validation failed for tool_use_id={tool_use_id}: {validation.message}"
+                    f"[query] Validation failed for tool_use_id={tool_use_id}: "
+                    f"{validation.message}"
                 )
                 result_msg = tool_result_message(
                     tool_use_id,
@@ -832,9 +890,12 @@ async def query(
                 )
                 if not allowed:
                     logger.debug(
-                        f"[query] Permission denied for tool_use_id={tool_use_id}: {denial_message}"
+                        f"[query] Permission denied for tool_use_id={tool_use_id}: "
+                        f"{denial_message}"
                     )
-                    denial_text = denial_message or f"User aborted the tool invocation: {tool_name}"
+                    denial_text = (
+                        denial_message or f"User aborted the tool invocation: {tool_name}"
+                    )
                     denial_msg = tool_result_message(tool_use_id, denial_text, is_error=True)
                     tool_results.append(denial_msg)
                     yield denial_msg
@@ -867,10 +928,20 @@ async def query(
             continue
         except CancelledError:
             raise  # Don't suppress task cancellation
-        except (RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as e:
+        except (
+            RuntimeError,
+            ValueError,
+            TypeError,
+            OSError,
+            IOError,
+            AttributeError,
+            KeyError,
+        ) as e:
             logger.warning(
                 "Error executing tool '%s': %s: %s",
-                tool_name, type(e).__name__, e,
+                tool_name,
+                type(e).__name__,
+                e,
                 extra={"tool": tool_name, "tool_use_id": tool_use_id},
             )
             error_msg = tool_result_message(
@@ -883,6 +954,8 @@ async def query(
             break
 
     if permission_denied:
+        result.tool_results = tool_results
+        result.should_stop = True
         return
 
     if prepared_calls:
@@ -894,16 +967,81 @@ async def query(
     # Check for abort after tools
     if query_context.abort_controller.is_set():
         yield create_assistant_message(INTERRUPT_MESSAGE_FOR_TOOL_USE)
+        result.tool_results = tool_results
+        result.should_stop = True
         return
 
-    if permission_denied:
-        return
+    result.tool_results = tool_results
+    # should_stop remains False, indicating the loop should continue
 
-    new_messages = messages + [assistant_message] + tool_results
-    logger.debug(
-        f"[query] Recursing with {len(new_messages)} messages after tools; "
-        f"tool_results_count={len(tool_results)}"
+
+async def query(
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    system_prompt: str,
+    context: Dict[str, str],
+    query_context: QueryContext,
+    can_use_tool_fn: Optional[ToolPermissionCallable] = None,
+) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
+    """Execute a query with tool support.
+
+    This is the main query loop that:
+    1. Sends messages to the AI
+    2. Handles tool use responses
+    3. Executes tools
+    4. Continues the conversation in a loop until no more tool calls
+
+    Args:
+        messages: Conversation history
+        system_prompt: Base system prompt
+        context: Additional context dictionary
+        query_context: Query configuration
+        can_use_tool_fn: Optional function to check tool permissions
+
+    Yields:
+        Messages (user, assistant, progress) as they are generated
+    """
+    logger.info(
+        "[query] Starting query loop",
+        extra={
+            "message_count": len(messages),
+            "tool_count": len(query_context.tools),
+            "safe_mode": query_context.safe_mode,
+            "model_pointer": query_context.model,
+        },
     )
+    # Work on a copy so external mutations (e.g., UI appending messages while consuming)
+    # do not interfere with the loop or normalization.
+    messages = list(messages)
 
-    async for msg in query(new_messages, system_prompt, context, query_context, can_use_tool_fn):
-        yield msg
+    for iteration in range(1, MAX_QUERY_ITERATIONS + 1):
+        result = IterationResult()
+
+        async for msg in _run_query_iteration(
+            messages,
+            system_prompt,
+            context,
+            query_context,
+            can_use_tool_fn,
+            iteration,
+            result,
+        ):
+            yield msg
+
+        if result.should_stop:
+            return
+
+        # Update messages for next iteration
+        messages = messages + [result.assistant_message] + result.tool_results
+        logger.debug(
+            f"[query] Continuing loop with {len(messages)} messages after tools; "
+            f"tool_results_count={len(result.tool_results)}"
+        )
+
+    # Reached max iterations
+    logger.warning(
+        f"[query] Reached maximum iterations ({MAX_QUERY_ITERATIONS}), stopping query loop"
+    )
+    yield create_assistant_message(
+        f"Reached maximum query iterations ({MAX_QUERY_ITERATIONS}). "
+        "Please continue the conversation to proceed."
+    )

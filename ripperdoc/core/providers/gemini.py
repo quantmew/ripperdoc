@@ -34,6 +34,49 @@ GEMINI_MODELS_ENDPOINT_ERROR = "Gemini client is missing 'models' endpoint"
 GEMINI_GENERATE_CONTENT_ERROR = "Gemini client is missing generate_content() method"
 
 
+def _classify_gemini_error(exc: Exception) -> tuple[str, str]:
+    """Classify a Gemini exception into error code and user-friendly message."""
+    exc_type = type(exc).__name__
+    exc_msg = str(exc)
+
+    # Try to import Google's exception types for more specific handling
+    try:
+        from google.api_core import exceptions as google_exceptions  # type: ignore
+
+        if isinstance(exc, google_exceptions.Unauthenticated):
+            return "authentication_error", f"Authentication failed: {exc_msg}"
+        if isinstance(exc, google_exceptions.PermissionDenied):
+            return "permission_denied", f"Permission denied: {exc_msg}"
+        if isinstance(exc, google_exceptions.NotFound):
+            return "model_not_found", f"Model not found: {exc_msg}"
+        if isinstance(exc, google_exceptions.InvalidArgument):
+            if "context" in exc_msg.lower() or "token" in exc_msg.lower():
+                return "context_length_exceeded", f"Context length exceeded: {exc_msg}"
+            return "bad_request", f"Invalid request: {exc_msg}"
+        if isinstance(exc, google_exceptions.ResourceExhausted):
+            return "rate_limit", f"Rate limit exceeded: {exc_msg}"
+        if isinstance(exc, google_exceptions.ServiceUnavailable):
+            return "service_unavailable", f"Service unavailable: {exc_msg}"
+        if isinstance(exc, google_exceptions.GoogleAPICallError):
+            return "api_error", f"API error: {exc_msg}"
+    except ImportError:
+        pass
+
+    # Fallback for generic exceptions
+    if isinstance(exc, asyncio.TimeoutError):
+        return "timeout", f"Request timed out: {exc_msg}"
+    if isinstance(exc, ConnectionError):
+        return "connection_error", f"Connection error: {exc_msg}"
+    if "quota" in exc_msg.lower() or "limit" in exc_msg.lower():
+        return "rate_limit", f"Rate limit exceeded: {exc_msg}"
+    if "auth" in exc_msg.lower() or "key" in exc_msg.lower():
+        return "authentication_error", f"Authentication error: {exc_msg}"
+    if "not found" in exc_msg.lower():
+        return "model_not_found", f"Model not found: {exc_msg}"
+
+    return "unknown_error", f"Unexpected error ({exc_type}): {exc_msg}"
+
+
 def _extract_usage_metadata(payload: Any) -> Dict[str, int]:
     """Best-effort token extraction from Gemini responses."""
     usage = getattr(payload, "usage_metadata", None) or getattr(payload, "usageMetadata", None)
@@ -344,18 +387,24 @@ class GeminiClient(ProviderClient):
 
         try:
             client = await self._client(model_profile)
-        except (RuntimeError, ImportError, ModuleNotFoundError, OSError, ValueError, TypeError) as exc:
-            msg = str(exc)
-            logger.warning(
-                "[gemini_client] Initialization failed: %s: %s",
-                type(exc).__name__, exc,
-                extra={"error": msg},
+        except asyncio.CancelledError:
+            raise  # Don't suppress task cancellation
+        except Exception as exc:
+            duration_ms = (time.time() - start_time) * 1000
+            error_code, error_message = _classify_gemini_error(exc)
+            logger.error(
+                "[gemini_client] Initialization failed",
+                extra={
+                    "model": model_profile.model,
+                    "error_code": error_code,
+                    "error_message": error_message,
+                    "duration_ms": round(duration_ms, 2),
+                },
             )
-            return ProviderResponse(
-                content_blocks=[{"type": "text", "text": msg}],
-                usage_tokens={},
-                cost_usd=0.0,
-                duration_ms=(time.time() - start_time) * 1000,
+            return ProviderResponse.create_error(
+                error_code=error_code,
+                error_message=error_message,
+                duration_ms=duration_ms,
             )
 
         declarations: List[Dict[str, Any]] = []
@@ -500,17 +549,22 @@ class GeminiClient(ProviderClient):
                 usage_tokens = _extract_usage_metadata(response)
         except asyncio.CancelledError:
             raise  # Don't suppress task cancellation
-        except (RuntimeError, ValueError, TypeError, OSError, ConnectionError, TimeoutError) as exc:
-            logger.warning(
-                "[gemini_client] Error during call: %s: %s",
-                type(exc).__name__, exc,
-                extra={"error": str(exc)},
+        except Exception as exc:
+            duration_ms = (time.time() - start_time) * 1000
+            error_code, error_message = _classify_gemini_error(exc)
+            logger.error(
+                "[gemini_client] API call failed",
+                extra={
+                    "model": model_profile.model,
+                    "error_code": error_code,
+                    "error_message": error_message,
+                    "duration_ms": round(duration_ms, 2),
+                },
             )
-            return ProviderResponse(
-                content_blocks=[{"type": "text", "text": f"Gemini call failed: {exc}"}],
-                usage_tokens={},
-                cost_usd=0.0,
-                duration_ms=(time.time() - start_time) * 1000,
+            return ProviderResponse.create_error(
+                error_code=error_code,
+                error_message=error_message,
+                duration_ms=duration_ms,
             )
 
         content_blocks: List[Dict[str, Any]] = []

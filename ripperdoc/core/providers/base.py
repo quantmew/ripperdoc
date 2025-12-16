@@ -36,6 +36,28 @@ class ProviderResponse:
     cost_usd: float
     duration_ms: float
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Error handling fields
+    is_error: bool = False
+    error_code: Optional[str] = None  # e.g., "permission_denied", "context_length_exceeded"
+    error_message: Optional[str] = None
+
+    @classmethod
+    def create_error(
+        cls,
+        error_code: str,
+        error_message: str,
+        duration_ms: float = 0.0,
+    ) -> "ProviderResponse":
+        """Create an error response with a text block containing the error message."""
+        return cls(
+            content_blocks=[{"type": "text", "text": f"[API Error] {error_message}"}],
+            usage_tokens={},
+            cost_usd=0.0,
+            duration_ms=duration_ms,
+            is_error=True,
+            error_code=error_code,
+            error_message=error_message,
+        )
 
 
 class ProviderClient(ABC):

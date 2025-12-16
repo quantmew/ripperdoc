@@ -13,11 +13,6 @@ Features:
 Quick Start:
     pip install -e .
     ripperdoc -p "your prompt here"
-
-For more information:
-    - README.md: Project overview
-    - QUICKSTART.md: Quick start guide
-    - DEVELOPMENT.md: Development guide
 """
 
 from ripperdoc import __version__

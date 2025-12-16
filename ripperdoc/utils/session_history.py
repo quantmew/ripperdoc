@@ -127,6 +127,7 @@ class SessionHistory:
         payload = message.model_dump(mode="json")
         entry = {
             "logged_at": _now_iso(),
+            "project_path": str(self.project_path.resolve()),
             "payload": payload,
         }
         try:
@@ -151,6 +152,7 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
     if not directory.exists():
         return []
 
+    current_project = str(project_path.resolve())
     summaries: List[SessionSummary] = []
     for jsonl_path in directory.glob("*.jsonl"):
         try:
@@ -162,6 +164,19 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
                 type(exc).__name__, exc,
                 extra={"path": str(jsonl_path)},
             )
+            continue
+
+        # Check if this session belongs to the current project
+        # If any message has a project_path field, use it to verify
+        session_project_path = None
+        for entry in messages:
+            entry_path = entry.get("project_path")
+            if entry_path:
+                session_project_path = entry_path
+                break
+
+        # Skip sessions that belong to a different project
+        if session_project_path and session_project_path != current_project:
             continue
 
         payloads = [entry.get("payload") or {} for entry in messages]
