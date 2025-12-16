@@ -310,9 +310,11 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         try:
             if existing:
                 original_content = file_path.read_text(encoding="utf-8")
-        except Exception as exc:  # pragma: no cover - unlikely permission issue
-            logger.exception(
-                "[multi_edit_tool] Error reading file before edits",
+        except (OSError, IOError, PermissionError) as exc:
+            # pragma: no cover - unlikely permission issue
+            logger.warning(
+                "[multi_edit_tool] Error reading file before edits: %s: %s",
+                type(exc).__name__, exc,
                 extra={"file_path": str(file_path)},
             )
             output = MultiEditToolOutput(
@@ -367,14 +369,16 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                     updated_content,
                     getattr(context, "file_state_cache", {}),
                 )
-            except Exception:
-                logger.exception(
-                    "[multi_edit_tool] Failed to record file snapshot",
+            except (OSError, IOError, RuntimeError) as exc:
+                logger.warning(
+                    "[multi_edit_tool] Failed to record file snapshot: %s: %s",
+                    type(exc).__name__, exc,
                     extra={"file_path": str(file_path)},
                 )
-        except Exception as exc:
-            logger.exception(
-                "[multi_edit_tool] Error writing edited file",
+        except (OSError, IOError, PermissionError, UnicodeDecodeError) as exc:
+            logger.warning(
+                "[multi_edit_tool] Error writing edited file: %s: %s",
+                type(exc).__name__, exc,
                 extra={"file_path": str(file_path)},
             )
             output = MultiEditToolOutput(

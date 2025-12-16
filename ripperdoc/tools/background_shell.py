@@ -53,7 +53,7 @@ def _safe_log_exception(message: str, **extra: Any) -> None:
     """Log an exception but never let logging failures bubble up."""
     try:
         logger.exception(message, extra=extra)
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         pass
 
 
@@ -114,7 +114,9 @@ async def _pump_stream(stream: asyncio.StreamReader, sink: List[str]) -> None:
             text = chunk.decode("utf-8", errors="replace")
             with _tasks_lock:
                 sink.append(text)
-    except Exception as exc:
+    except (OSError, RuntimeError, asyncio.CancelledError) as exc:
+        if isinstance(exc, asyncio.CancelledError):
+            return  # Normal cancellation
         # Best effort; ignore stream read errors to avoid leaking tasks.
         logger.debug(
             f"Stream pump error for background task: {exc}",
@@ -157,9 +159,10 @@ async def _monitor_task(task: BackgroundTask) -> None:
             task.exit_code = -1
     except asyncio.CancelledError:
         return
-    except Exception:
-        logger.exception(
-            "Error monitoring background task",
+    except (OSError, RuntimeError, ProcessLookupError) as exc:
+        logger.warning(
+            "Error monitoring background task: %s: %s",
+            type(exc).__name__, exc,
             extra={"task_id": task.id, "command": task.command},
         )
         with _tasks_lock:
@@ -329,12 +332,13 @@ async def _shutdown_loop(loop: asyncio.AbstractEventLoop) -> None:
                 with contextlib.suppress(asyncio.TimeoutError, ProcessLookupError):
                     await asyncio.wait_for(task.process.wait(), timeout=0.5)
             task.exit_code = task.process.returncode or -1
-        except Exception:
-            _safe_log_exception(
-                "Error shutting down background task",
-                task_id=task.id,
-                command=task.command,
-            )
+        except (OSError, RuntimeError, asyncio.CancelledError) as exc:
+            if not isinstance(exc, asyncio.CancelledError):
+                _safe_log_exception(
+                    "Error shutting down background task",
+                    task_id=task.id,
+                    command=task.command,
+                )
         finally:
             await _finalize_reader_tasks(task.reader_tasks)
             task.done_event.set()
@@ -368,11 +372,11 @@ def shutdown_background_shell() -> None:
             try:
                 fut = asyncio.run_coroutine_threadsafe(_shutdown_loop(loop), loop)
                 fut.result(timeout=3)
-            except Exception:
+            except (RuntimeError, TimeoutError, concurrent.futures.TimeoutError):
                 logger.debug("Failed to cleanly shutdown background loop", exc_info=True)
             try:
                 loop.call_soon_threadsafe(loop.stop)
-            except Exception:
+            except (RuntimeError, OSError):
                 logger.debug("Failed to stop background loop", exc_info=True)
         else:
             loop.run_until_complete(_shutdown_loop(loop))

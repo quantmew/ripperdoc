@@ -48,9 +48,11 @@ def _resolve_path(raw_path: str, cwd: str) -> Path:
         candidate = Path(cwd) / candidate
     try:
         return candidate.resolve()
-    except Exception:
-        logger.exception(
-            "[path_validation] Failed to resolve path", extra={"raw_path": raw_path, "cwd": cwd}
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "[path_validation] Failed to resolve path: %s: %s",
+            type(exc).__name__, exc,
+            extra={"raw_path": raw_path, "cwd": cwd},
         )
         return candidate
 

@@ -32,7 +32,7 @@ DEFENSIVE_SECURITY_GUIDELINE = (
     "IMPORTANT: Assist with defensive security tasks only. Refuse to create, modify, or improve code that may be used maliciously. "
     "Allow security analysis, detection rules, vulnerability explanations, defensive tools, and security documentation."
 )
-FEEDBACK_URL = "https://github.com/jstzwj/Ripperdoc/issues"
+FEEDBACK_URL = "https://github.com/quantmew/Ripperdoc/issues"
 
 
 def _detect_git_repo(cwd: Path) -> bool:
@@ -46,8 +46,12 @@ def _detect_git_repo(cwd: Path) -> bool:
             check=False,
         )
         return result.returncode == 0 and result.stdout.strip().lower() == "true"
-    except Exception:
-        logger.exception("[system_prompt] Failed to detect git repository", extra={"cwd": str(cwd)})
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning(
+            "[system_prompt] Failed to detect git repository: %s: %s",
+            type(exc).__name__, exc,
+            extra={"cwd": str(cwd)},
+        )
         return False
 
 
@@ -386,8 +390,11 @@ def build_system_prompt(
 
                     Provide detailed prompts so the agent can work autonomously and return a concise report."""
                 ).strip()
-        except Exception as exc:
-            logger.exception("Failed to load agent definitions", extra={"error": str(exc)})
+        except (OSError, ValueError, RuntimeError) as exc:
+            logger.warning(
+                "Failed to load agent definitions: %s: %s",
+                type(exc).__name__, exc,
+            )
             agent_section = (
                 "# Subagents\nTask tool available, but agent definitions could not be loaded."
             )

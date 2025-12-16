@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import inspect
 import os
@@ -184,7 +185,7 @@ async def _async_build_tool_declarations(tools: List[Tool[Any, Any]]) -> List[Di
     declarations: List[Dict[str, Any]] = []
     try:
         from google.genai import types as genai_types  # type: ignore
-    except Exception:  # pragma: no cover - fallback when SDK not installed
+    except (ImportError, ModuleNotFoundError):  # pragma: no cover - fallback when SDK not installed
         genai_types = None  # type: ignore[assignment]
 
     for tool in tools:
@@ -225,7 +226,7 @@ def _convert_messages_to_genai_contents(
     # Lazy import to avoid hard dependency in tests.
     try:
         from google.genai import types as genai_types  # type: ignore
-    except Exception:  # pragma: no cover - fallback when SDK not installed
+    except (ImportError, ModuleNotFoundError):  # pragma: no cover - fallback when SDK not installed
         genai_types = None  # type: ignore[assignment]
 
     def _mk_part_from_text(text: str) -> Any:
@@ -310,7 +311,7 @@ class GeminiClient(ProviderClient):
 
         try:
             from google import genai  # type: ignore
-        except Exception as exc:  # pragma: no cover - import guard
+        except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - import guard
             raise RuntimeError(GEMINI_SDK_IMPORT_ERROR) from exc
 
         client_kwargs: Dict[str, Any] = {}
@@ -343,9 +344,13 @@ class GeminiClient(ProviderClient):
 
         try:
             client = await self._client(model_profile)
-        except Exception as exc:
+        except (RuntimeError, ImportError, ModuleNotFoundError, OSError, ValueError, TypeError) as exc:
             msg = str(exc)
-            logger.warning("[gemini_client] Initialization failed", extra={"error": msg})
+            logger.warning(
+                "[gemini_client] Initialization failed: %s: %s",
+                type(exc).__name__, exc,
+                extra={"error": msg},
+            )
             return ProviderResponse(
                 content_blocks=[{"type": "text", "text": msg}],
                 usage_tokens={},
@@ -368,7 +373,7 @@ class GeminiClient(ProviderClient):
                 from google.genai import types as genai_types  # type: ignore
 
                 config["thinking_config"] = genai_types.ThinkingConfig(**thinking_config)
-            except Exception:  # pragma: no cover - fallback when SDK not installed
+            except (ImportError, ModuleNotFoundError, TypeError, ValueError):  # pragma: no cover - fallback when SDK not installed
                 config["thinking_config"] = thinking_config
         if declarations:
             config["tools"] = [{"function_declarations": declarations}]
@@ -466,8 +471,11 @@ class GeminiClient(ProviderClient):
                             if text_chunk:
                                 try:
                                     await progress_callback(text_chunk)
-                                except Exception:
-                                    logger.exception("[gemini_client] Stream callback failed")
+                                except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
+                                    logger.warning(
+                                        "[gemini_client] Stream callback failed: %s: %s",
+                                        type(cb_exc).__name__, cb_exc,
+                                    )
                         if text_chunk:
                             collected_text.append(text_chunk)
                         reasoning_parts.extend(_collect_thoughts_from_parts(parts))
@@ -490,8 +498,14 @@ class GeminiClient(ProviderClient):
                     # Fallback: try to read text directly
                     collected_text.append(getattr(response, "text", "") or "")
                 usage_tokens = _extract_usage_metadata(response)
-        except Exception as exc:
-            logger.exception("[gemini_client] Error during call", extra={"error": str(exc)})
+        except asyncio.CancelledError:
+            raise  # Don't suppress task cancellation
+        except (RuntimeError, ValueError, TypeError, OSError, ConnectionError, TimeoutError) as exc:
+            logger.warning(
+                "[gemini_client] Error during call: %s: %s",
+                type(exc).__name__, exc,
+                extra={"error": str(exc)},
+            )
             return ProviderResponse(
                 content_blocks=[{"type": "text", "text": f"Gemini call failed: {exc}"}],
                 usage_tokens={},

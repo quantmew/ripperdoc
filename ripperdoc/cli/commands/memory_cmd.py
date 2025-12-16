@@ -26,14 +26,14 @@ def _shorten_path(path: Path, project_path: Path) -> str:
     """Return a short, user-friendly path."""
     try:
         return str(path.resolve().relative_to(project_path.resolve()))
-    except Exception:
+    except (ValueError, OSError):
         pass
 
     home = Path.home()
     try:
         rel_home = path.resolve().relative_to(home)
         return f"~/{rel_home}"
-    except Exception:
+    except (ValueError, OSError):
         return str(path)
 
 
@@ -77,7 +77,7 @@ def _ensure_gitignore_entry(project_path: Path, entry: str) -> bool:
                 f.write("\n")
             f.write(f"{entry}\n")
         return True
-    except Exception:
+    except (OSError, IOError):
         return False
 
 
@@ -116,7 +116,7 @@ def _open_in_editor(path: Path, console: Any) -> bool:
     except FileNotFoundError:
         console.print(f"[red]Editor command not found: {escape(editor_cmd[0])}[/red]")
         return False
-    except Exception as exc:  # pragma: no cover - best-effort logging
+    except (OSError, subprocess.SubprocessError) as exc:  # pragma: no cover - best-effort logging
         console.print(f"[red]Failed to launch editor: {escape(str(exc))}[/red]")
         return False
 

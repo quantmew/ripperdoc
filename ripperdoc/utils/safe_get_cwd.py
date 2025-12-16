@@ -20,8 +20,11 @@ def safe_get_cwd() -> str:
     """Return the current working directory, falling back to the original on error."""
     try:
         return str(Path(os.getcwd()).resolve())
-    except Exception:
-        logger.exception("[safe_get_cwd] Failed to resolve cwd")
+    except (OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "[safe_get_cwd] Failed to resolve cwd: %s: %s",
+            type(exc).__name__, exc,
+        )
         return get_original_cwd()
 
 

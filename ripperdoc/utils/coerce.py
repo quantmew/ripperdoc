@@ -30,5 +30,5 @@ def parse_optional_int(value: object) -> Optional[int]:
         if isinstance(value, bool):
             return int(value)
         return int(str(value).strip())
-    except Exception:
+    except (ValueError, TypeError):
         return None

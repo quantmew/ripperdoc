@@ -203,8 +203,12 @@ class ConfigManager:
                             "profile_count": len(self._global_config.model_profiles),
                         },
                     )
-                except Exception as e:
-                    logger.exception("Error loading global config", extra={"error": str(e)})
+                except (json.JSONDecodeError, OSError, IOError, UnicodeDecodeError, ValueError, TypeError) as e:
+                    logger.warning(
+                        "Error loading global config: %s: %s",
+                        type(e).__name__, e,
+                        extra={"error": str(e)},
+                    )
                     self._global_config = GlobalConfig()
             else:
                 self._global_config = GlobalConfig()
@@ -253,9 +257,10 @@ class ConfigManager:
                             "allowed_tools": len(self._project_config.allowed_tools),
                         },
                     )
-                except Exception as e:
-                    logger.exception(
-                        "Error loading project config",
+                except (json.JSONDecodeError, OSError, IOError, UnicodeDecodeError, ValueError, TypeError) as e:
+                    logger.warning(
+                        "Error loading project config: %s: %s",
+                        type(e).__name__, e,
                         extra={"error": str(e), "path": str(config_path)},
                     )
                     self._project_config = ProjectConfig()

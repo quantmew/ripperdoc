@@ -189,10 +189,11 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
                 description = await build_tool_description(
                     tool, include_examples=include_examples, max_examples=2
                 )
-            except Exception:
+            except (OSError, RuntimeError, ValueError, TypeError, AttributeError, KeyError) as exc:
                 description = ""
-                logger.exception(
-                    "[tool_search] Failed to build tool description",
+                logger.warning(
+                    "[tool_search] Failed to build tool description: %s: %s",
+                    type(exc).__name__, exc,
                     extra={"tool_name": getattr(tool, "name", None)},
                 )
             doc_text = " ".join([name, tool.user_facing_name(), description])

@@ -90,8 +90,11 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
         args = getattr(block, "input", None) or {}
         try:
             args_str = json.dumps(args)
-        except Exception:
-            logger.exception("[_content_block_to_openai] Failed to serialize tool arguments")
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "[_content_block_to_openai] Failed to serialize tool arguments: %s: %s",
+                type(exc).__name__, exc,
+            )
             args_str = "{}"
         tool_call_id = (
             getattr(block, "id", None) or getattr(block, "tool_use_id", "") or str(uuid4())
@@ -204,9 +207,12 @@ def create_user_message(
         try:
             if hasattr(tool_use_result, "model_dump"):
                 tool_use_result = tool_use_result.model_dump()
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as exc:
             # Fallback: keep as-is if conversion fails
-            logger.exception("[create_user_message] Failed to normalize tool_use_result")
+            logger.warning(
+                "[create_user_message] Failed to normalize tool_use_result: %s: %s",
+                type(exc).__name__, exc,
+            )
 
     message = Message(role=MessageRole.USER, content=message_content)
 
@@ -296,7 +302,7 @@ def normalize_messages_for_api(
             try:
                 meta = getattr(message_obj, "metadata", {}) or {}
                 meta_dict = dict(meta) if isinstance(meta, dict) else {}
-            except Exception:
+            except (TypeError, ValueError):
                 meta_dict = {}
             reasoning_val = getattr(message_obj, "reasoning", None)
             if reasoning_val is not None and "reasoning" not in meta_dict:
@@ -347,7 +353,7 @@ def normalize_messages_for_api(
                 if input_data not in (None, {}):
                     try:
                         input_preview = json.dumps(input_data)
-                    except Exception:
+                    except (TypeError, ValueError):
                         input_preview = str(input_data)
                 tool_id = _block_attr(blk, "tool_use_id") or _block_attr(blk, "id")
                 desc = "Tool call"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 import tempfile
@@ -25,7 +26,6 @@ from ripperdoc.utils.mcp import (
     find_mcp_resource,
     format_mcp_instructions,
     load_mcp_servers_async,
-    shutdown_mcp_runtime,
 )
 from ripperdoc.utils.token_estimation import estimate_tokens
 
@@ -34,9 +34,9 @@ logger = get_logger()
 
 try:
     import mcp.types as mcp_types  # type: ignore
-except Exception:  # pragma: no cover - SDK may be missing at runtime
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - SDK may be missing at runtime
     mcp_types = None  # type: ignore[assignment]
-    logger.exception("[mcp_tools] MCP SDK unavailable during import")
+    logger.debug("[mcp_tools] MCP SDK unavailable during import")
 
 DEFAULT_MAX_MCP_OUTPUT_TOKENS = 25_000
 MIN_MCP_OUTPUT_TOKENS = 1_000
@@ -265,8 +265,11 @@ class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResou
             return "No MCP resources found."
         try:
             return json.dumps(output.resources, indent=2, ensure_ascii=False)
-        except Exception:
-            logger.exception("[mcp_tools] Failed to serialize MCP resources for assistant output")
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "[mcp_tools] Failed to serialize MCP resources for assistant output: %s: %s",
+                type(exc).__name__, exc,
+            )
             return str(output.resources)
 
     def render_tool_use_message(
@@ -307,10 +310,12 @@ class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResou
                         )
                         for res in response.resources
                     ]
-                except Exception as exc:  # pragma: no cover - runtime errors
-                    logger.exception(
-                        "Failed to fetch resources from MCP server",
-                        extra={"server": server.name, "error": str(exc)},
+                except (OSError, RuntimeError, ConnectionError, ValueError) as exc:
+                    # pragma: no cover - runtime errors
+                    logger.warning(
+                        "Failed to fetch resources from MCP server: %s: %s",
+                        type(exc).__name__, exc,
+                        extra={"server": server.name},
                     )
                     fetched = []
 
@@ -474,9 +479,10 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
                             base64_data = blob_data
                             try:
                                 raw_bytes = base64.b64decode(blob_data)
-                            except Exception:
-                                logger.exception(
-                                    "[mcp_tools] Failed to decode base64 blob content",
+                            except (ValueError, binascii.Error) as exc:
+                                logger.warning(
+                                    "[mcp_tools] Failed to decode base64 blob content: %s: %s",
+                                    type(exc).__name__, exc,
                                     extra={"server": input_data.server, "uri": input_data.uri},
                                 )
                                 raw_bytes = None
@@ -505,10 +511,12 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
                         )
                 text_parts = [p.text for p in parts if p.text]
                 content_text = "\n".join([p for p in text_parts if p]) or None
-            except Exception as exc:  # pragma: no cover - runtime errors
-                logger.exception(
-                    "Error reading MCP resource",
-                    extra={"server": input_data.server, "uri": input_data.uri, "error": str(exc)},
+            except (OSError, RuntimeError, ConnectionError, ValueError, KeyError) as exc:
+                # pragma: no cover - runtime errors
+                logger.warning(
+                    "Error reading MCP resource: %s: %s",
+                    type(exc).__name__, exc,
+                    extra={"server": input_data.server, "uri": input_data.uri},
                 )
                 content_text = f"Error reading MCP resource: {exc}"
         else:

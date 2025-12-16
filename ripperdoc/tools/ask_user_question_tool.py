@@ -225,9 +225,10 @@ async def prompt_user_for_answer(
             return None
         except EOFError:
             return None
-        except Exception as e:
-            logger.exception(
-                "[ask_user_question_tool] Error during prompt", extra={"error": str(e)}
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.warning(
+                "[ask_user_question_tool] Error during prompt: %s: %s",
+                type(e).__name__, e,
             )
             return None
 
@@ -356,7 +357,7 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
         if context.pause_ui:
             try:
                 context.pause_ui()
-            except Exception:
+            except (RuntimeError, ValueError, OSError):
                 logger.debug("[ask_user_question_tool] Failed to pause UI")
 
         try:
@@ -406,10 +407,10 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
                 result_for_assistant=self.render_result_for_assistant(output),
             )
 
-        except Exception as exc:
-            logger.exception(
-                "[ask_user_question_tool] Error collecting answers",
-                extra={"error": str(exc)},
+        except (OSError, RuntimeError, ValueError, KeyError) as exc:
+            logger.warning(
+                "[ask_user_question_tool] Error collecting answers: %s: %s",
+                type(exc).__name__, exc,
             )
             output = AskUserQuestionToolOutput(
                 questions=questions,
@@ -426,5 +427,5 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
             if context.resume_ui:
                 try:
                     context.resume_ui()
-                except Exception:
+                except (RuntimeError, ValueError, OSError):
                     logger.debug("[ask_user_question_tool] Failed to resume UI")

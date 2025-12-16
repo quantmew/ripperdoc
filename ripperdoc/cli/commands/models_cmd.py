@@ -182,10 +182,11 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
                 overwrite=overwrite,
                 set_as_main=set_as_main,
             )
-        except Exception as exc:
+        except (OSError, IOError, ValueError, TypeError, PermissionError) as exc:
             console.print(f"[red]Failed to save model: {escape(str(exc))}[/red]")
-            logger.exception(
-                "[models_cmd] Failed to save model profile",
+            logger.warning(
+                "[models_cmd] Failed to save model profile: %s: %s",
+                type(exc).__name__, exc,
                 extra={"profile": profile_name, "session_id": getattr(ui, "session_id", None)},
             )
             return True
@@ -290,10 +291,11 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
                 overwrite=True,
                 set_as_main=False,
             )
-        except Exception as exc:
+        except (OSError, IOError, ValueError, TypeError, PermissionError) as exc:
             console.print(f"[red]Failed to update model: {escape(str(exc))}[/red]")
-            logger.exception(
-                "[models_cmd] Failed to update model profile",
+            logger.warning(
+                "[models_cmd] Failed to update model profile: %s: %s",
+                type(exc).__name__, exc,
                 extra={"profile": profile_name, "session_id": getattr(ui, "session_id", None)},
             )
             return True
@@ -312,11 +314,12 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print(f"[green]✓ Deleted model '{escape(target)}'[/green]")
         except KeyError as exc:
             console.print(f"[yellow]{escape(str(exc))}[/yellow]")
-        except Exception as exc:
+        except (OSError, IOError, PermissionError) as exc:
             console.print(f"[red]Failed to delete model: {escape(str(exc))}[/red]")
             print_models_usage()
-            logger.exception(
-                "[models_cmd] Failed to delete model profile",
+            logger.warning(
+                "[models_cmd] Failed to delete model profile: %s: %s",
+                type(exc).__name__, exc,
                 extra={"profile": target, "session_id": getattr(ui, "session_id", None)},
             )
         return True
@@ -356,11 +359,12 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         try:
             set_model_pointer(pointer, target)
             console.print(f"[green]✓ Pointer '{escape(pointer)}' set to '{escape(target)}'[/green]")
-        except Exception as exc:
+        except (ValueError, KeyError, OSError, IOError, PermissionError) as exc:
             console.print(f"[red]{escape(str(exc))}[/red]")
             print_models_usage()
-            logger.exception(
-                "[models_cmd] Failed to set model pointer",
+            logger.warning(
+                "[models_cmd] Failed to set model pointer: %s: %s",
+                type(exc).__name__, exc,
                 extra={"pointer": pointer, "profile": target, "session_id": getattr(ui, "session_id", None)},
             )
         return True

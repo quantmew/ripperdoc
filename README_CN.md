@@ -36,7 +36,7 @@ pip install git+https://github.com/quantmew/ripperdoc.git
 ```bash
 # 克隆仓库
 git clone <repository-url>
-cd Ripperdoc
+cd ripperdoc
 
 # 从源码安装
 pip install -e .

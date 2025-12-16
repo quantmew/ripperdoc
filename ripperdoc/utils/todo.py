@@ -83,8 +83,12 @@ def load_todos(project_root: Optional[Path] = None) -> List[TodoItem]:
 
     try:
         raw = json.loads(path.read_text())
-    except Exception:
-        logger.exception("Failed to load todos from disk", extra={"path": str(path)})
+    except (json.JSONDecodeError, OSError, IOError, UnicodeDecodeError) as exc:
+        logger.warning(
+            "Failed to load todos from disk: %s: %s",
+            type(exc).__name__, exc,
+            extra={"path": str(path)},
+        )
         return []
 
     todos: List[TodoItem] = []

@@ -25,11 +25,11 @@ try:
     from mcp.client.streamable_http import streamablehttp_client  # type: ignore[import-not-found]
 
     MCP_AVAILABLE = True
-except Exception:  # pragma: no cover - handled gracefully at runtime
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - handled gracefully at runtime
     MCP_AVAILABLE = False
     ClientSession = object  # type: ignore
     mcp_types = None  # type: ignore
-    logger.exception("[mcp] MCP SDK not available at import time")
+    logger.debug("[mcp] MCP SDK not available at import time")
 
 
 @dataclass
@@ -89,10 +89,11 @@ def _ensure_str_dict(raw: object) -> Dict[str, str]:
     for key, value in raw.items():
         try:
             result[str(key)] = str(value)
-        except Exception:
-            logger.exception(
-                "[mcp] Failed to coerce env/header value to string",
-                extra={"key": key, "value": value},
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "[mcp] Failed to coerce env/header value to string: %s: %s",
+                type(exc).__name__, exc,
+                extra={"key": key},
             )
             continue
     return result
@@ -364,10 +365,11 @@ class McpRuntime:
                     "capabilities": list(info.capabilities.keys()),
                 },
             )
-        except Exception as exc:  # pragma: no cover - network/process errors
-            logger.exception(
-                "Failed to connect to MCP server",
-                extra={"server": config.name, "error": str(exc)},
+        except (OSError, RuntimeError, ConnectionError, ValueError, TimeoutError) as exc:  # pragma: no cover - network/process errors
+            logger.warning(
+                "Failed to connect to MCP server: %s: %s",
+                type(exc).__name__, exc,
+                extra={"server": config.name},
             )
             info.status = "failed"
             info.error = str(exc)
@@ -384,7 +386,7 @@ class McpRuntime:
         )
         try:
             await self._exit_stack.aclose()
-        except* BaseException as exc:  # pragma: no cover - defensive shutdown
+        except BaseException as exc:  # pragma: no cover - defensive shutdown
             # Swallow noisy ExceptionGroups from stdio_client cancel scopes during exit.
             logger.debug(
                 "[mcp] Suppressed MCP shutdown error",
@@ -452,7 +454,7 @@ async def shutdown_mcp_runtime() -> None:
         return
     try:
         await runtime.aclose()
-    except* BaseException as exc:  # pragma: no cover - defensive for ExceptionGroup
+    except BaseException as exc:  # pragma: no cover - defensive for ExceptionGroup
         logger.debug("[mcp] Suppressed MCP runtime shutdown error", extra={"error": str(exc)})
     _runtime_var.set(None)
     global _global_runtime

@@ -233,9 +233,11 @@ async def call_with_timeout_and_retries(
                 },
             )
             await asyncio.sleep(delay_seconds)
-        except Exception:
+        except asyncio.CancelledError:
+            raise  # Don't suppress task cancellation
+        except (RuntimeError, ValueError, TypeError, OSError, ConnectionError) as exc:
             # Non-timeout errors are not retried; surface immediately.
-            raise
+            raise exc
     if last_error:
         raise RuntimeError(f"Request timed out after {attempts} attempts") from last_error
     raise RuntimeError("Unexpected error executing request with retries")

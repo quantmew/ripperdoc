@@ -6,6 +6,7 @@ Allows the AI to search for patterns in files.
 import asyncio
 import re
 import shutil
+import subprocess
 from typing import AsyncGenerator, Optional, List, Tuple
 from pydantic import BaseModel, Field
 
@@ -354,9 +355,10 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
-        except Exception as e:
-            logger.exception(
-                "[grep_tool] Error executing grep",
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as e:
+            logger.warning(
+                "[grep_tool] Error executing grep: %s: %s",
+                type(e).__name__, e,
                 extra={"pattern": input_data.pattern, "path": input_data.path},
             )
             error_output = GrepToolOutput(

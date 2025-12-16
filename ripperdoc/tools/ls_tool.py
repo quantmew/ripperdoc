@@ -119,7 +119,7 @@ def _resolve_directory_path(raw_path: str) -> Path:
         candidate = base_path / candidate
     try:
         return candidate.resolve()
-    except Exception:
+    except (OSError, RuntimeError):
         return candidate
 
 
@@ -166,15 +166,15 @@ def _relative_path_for_display(path: Path, base_path: Path) -> str:
     resolved_path = path
     try:
         resolved_path = path.resolve()
-    except Exception:
+    except (OSError, RuntimeError):
         pass
 
     try:
         rel_path = resolved_path.relative_to(base_path.resolve()).as_posix()
-    except Exception:
+    except (OSError, ValueError, RuntimeError):
         try:
             rel_path = os.path.relpath(resolved_path, base_path)
-        except Exception:
+        except (OSError, ValueError):
             rel_path = resolved_path.as_posix()
         rel_path = rel_path.replace(os.sep, "/")
 
@@ -345,7 +345,7 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
     ) -> ValidationResult:
         try:
             root_path = _resolve_directory_path(input_data.path)
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             return ValidationResult(
                 result=False, message=f"Unable to resolve path: {input_data.path}"
             )
@@ -397,7 +397,7 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
             relative_path = (
                 _relative_path_for_display(resolved_path, base_path) or resolved_path.as_posix()
             )
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             relative_path = str(resolved_path)
 
         return relative_path

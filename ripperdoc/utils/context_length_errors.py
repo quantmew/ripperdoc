@@ -239,7 +239,7 @@ def _collect_strings(error: Any) -> List[str]:
     _walk(error)
     try:
         _add_text(str(error))
-    except Exception:
+    except (TypeError, ValueError):
         pass
 
     return texts
@@ -248,5 +248,5 @@ def _collect_strings(error: Any) -> List[str]:
 def _safe_getattr(obj: Any, attr: str) -> Any:
     try:
         return getattr(obj, attr, None)
-    except Exception:
+    except (TypeError, AttributeError):
         return None

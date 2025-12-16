@@ -169,9 +169,10 @@ def _stringify_content(content: Union[str, List[MessageContent], None]) -> str:
             if block_type == "tool_use" and part.get("input") is not None:
                 try:
                     parts.append(json.dumps(part.get("input"), ensure_ascii=False))
-                except Exception:
-                    logger.exception(
-                        "[message_compaction] Failed to serialize tool_use input for token estimate"
+                except (TypeError, ValueError) as exc:
+                    logger.warning(
+                        "[message_compaction] Failed to serialize tool_use input for token estimate: %s: %s",
+                        type(exc).__name__, exc,
                     )
                     parts.append(str(part.get("input")))
 
@@ -225,10 +226,11 @@ def _estimate_tool_schema_tokens(tools: Sequence[Any]) -> int:
             schema = tool.input_schema.model_json_schema()
             schema_text = json.dumps(schema, sort_keys=True)
             total += estimate_tokens_from_text(schema_text)
-        except Exception as exc:
-            logger.exception(
-                "Failed to estimate tokens for tool schema",
-                extra={"tool": getattr(tool, "name", None), "error": str(exc)},
+        except (AttributeError, TypeError, KeyError, ValueError) as exc:
+            logger.warning(
+                "Failed to estimate tokens for tool schema: %s: %s",
+                type(exc).__name__, exc,
+                extra={"tool": getattr(tool, "name", None)},
             )
             continue
     return total
@@ -399,8 +401,8 @@ def find_latest_assistant_usage_tokens(
                     tokens += int(value)
             if tokens > 0:
                 return tokens
-        except Exception:
-            logger.debug("[message_compaction] Failed to parse usage tokens", exc_info=True)
+        except (TypeError, ValueError, AttributeError):
+            logger.debug("[message_compaction] Failed to parse usage tokens")
             continue
     return 0
 
@@ -436,8 +438,11 @@ def _run_cleanup_callbacks() -> None:
     for callback in callbacks:
         try:
             callback()
-        except Exception as exc:
-            logger.debug(f"[message_compaction] Cleanup callback failed: {exc}", exc_info=True)
+        except (RuntimeError, TypeError, ValueError, AttributeError) as exc:
+            logger.debug(
+                "[message_compaction] Cleanup callback failed: %s: %s",
+                type(exc).__name__, exc,
+            )
 
 
 def _normalize_tool_use_id(block: Any) -> str:

@@ -123,7 +123,7 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
             except ValueError:
                 relative_path = None
 
-            if verbose or not relative_path or str(relative_path) == ".":
+            if _verbose or not relative_path or str(relative_path) == ".":
                 rendered_path = str(absolute_path)
             else:
                 rendered_path = str(relative_path)
@@ -166,9 +166,10 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
-        except Exception as e:
-            logger.exception(
-                "[glob_tool] Error executing glob",
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.warning(
+                "[glob_tool] Error executing glob: %s: %s",
+                type(e).__name__, e,
                 extra={"pattern": input_data.pattern, "path": input_data.path},
             )
             error_output = GlobToolOutput(matches=[], pattern=input_data.pattern, count=0)

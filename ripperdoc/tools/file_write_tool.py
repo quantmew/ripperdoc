@@ -132,9 +132,10 @@ NEVER write new files unless explicitly required by the user."""
                     input_data.content,
                     getattr(context, "file_state_cache", {}),
                 )
-            except Exception:
-                logger.exception(
-                    "[file_write_tool] Failed to record file snapshot",
+            except (OSError, IOError, RuntimeError) as exc:
+                logger.warning(
+                    "[file_write_tool] Failed to record file snapshot: %s: %s",
+                    type(exc).__name__, exc,
                     extra={"file_path": input_data.file_path},
                 )
 
@@ -149,10 +150,11 @@ NEVER write new files unless explicitly required by the user."""
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
-        except Exception as e:
-            logger.exception(
-                "[file_write_tool] Error writing file",
-                extra={"file_path": input_data.file_path, "error": str(e)},
+        except (OSError, IOError, PermissionError, UnicodeEncodeError) as e:
+            logger.warning(
+                "[file_write_tool] Error writing file: %s: %s",
+                type(e).__name__, e,
+                extra={"file_path": input_data.file_path},
             )
             error_output = FileWriteToolOutput(
                 file_path=input_data.file_path,

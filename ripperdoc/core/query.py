@@ -120,10 +120,10 @@ async def _check_tool_permissions(
             return response.strip().lower() in ("y", "yes"), None
 
         return True, None
-    except Exception:
-        logger.exception(
-            f"Error checking permissions for tool '{tool.name}'",
-            extra={"tool": getattr(tool, "name", None)},
+    except (TypeError, AttributeError, ValueError) as exc:
+        logger.warning(
+            f"Error checking permissions for tool '{tool.name}': {type(exc).__name__}: {exc}",
+            extra={"tool": getattr(tool, "name", None), "error_type": type(exc).__name__},
         )
         return False, None
 
@@ -172,9 +172,12 @@ async def _run_tool_use_generator(
                     f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
                     f"result_len={len(result_content)}"
                 )
-    except Exception as exc:
-        logger.exception(
-            f"Error executing tool '{tool_name}'",
+    except CancelledError:
+        raise  # Don't suppress task cancellation
+    except (RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as exc:
+        logger.warning(
+            "Error executing tool '%s': %s: %s",
+            tool_name, type(exc).__name__, exc,
             extra={"tool": tool_name, "tool_use_id": tool_use_id},
         )
         yield tool_result_message(tool_use_id, f"Error executing tool: {str(exc)}", is_error=True)
@@ -256,8 +259,15 @@ async def _run_concurrent_tool_uses(
         try:
             async for message in gen:
                 await queue.put(message)
-        except Exception:
-            logger.exception("[query] Unexpected error while consuming tool generator")
+        except asyncio.CancelledError:
+            raise  # Don't suppress cancellation
+        except (StopAsyncIteration, GeneratorExit):
+            pass  # Normal generator termination
+        except (RuntimeError, ValueError, TypeError) as exc:
+            logger.warning(
+                "[query] Error while consuming tool generator: %s: %s",
+                type(exc).__name__, exc,
+            )
         finally:
             await queue.put(None)
 
@@ -306,9 +316,10 @@ class ToolRegistry:
             self._order.append(name)
             try:
                 deferred = tool.defer_loading()
-            except Exception:
-                logger.exception(
-                    "[tool_registry] Tool.defer_loading failed",
+            except (TypeError, AttributeError) as exc:
+                logger.warning(
+                    "[tool_registry] Tool.defer_loading failed: %s: %s",
+                    type(exc).__name__, exc,
                     extra={"tool": getattr(tool, "name", None)},
                 )
                 deferred = False
@@ -392,8 +403,11 @@ def _apply_skill_context_updates(
                 query_context.tool_registry.activate_tools(
                     [tool for tool in allowed_tools if isinstance(tool, str) and tool.strip()]
                 )
-            except Exception:
-                logger.exception("[query] Failed to activate tools listed in skill output")
+            except (KeyError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "[query] Failed to activate tools listed in skill output: %s: %s",
+                    type(exc).__name__, exc,
+                )
 
         model_hint = data.get("model")
         if isinstance(model_hint, str) and model_hint.strip():
@@ -565,10 +579,13 @@ async def query_llm(
             metadata=provider_response.metadata,
         )
 
-    except Exception as e:
+    except CancelledError:
+        raise  # Don't suppress task cancellation
+    except (RuntimeError, ValueError, TypeError, OSError, ConnectionError, TimeoutError) as e:
         # Return error message
-        logger.exception(
-            "Error querying AI model",
+        logger.warning(
+            "Error querying AI model: %s: %s",
+            type(e).__name__, e,
             extra={
                 "model": getattr(model_profile, "model", None),
                 "model_pointer": model,
@@ -675,8 +692,10 @@ async def query(
                     content=chunk,
                 )
             )
-        except Exception:
-            logger.exception("[query] Failed to enqueue stream progress chunk")
+        except asyncio.QueueFull:
+            logger.warning("[query] Progress queue full, dropping chunk")
+        except (RuntimeError, ValueError) as exc:
+            logger.warning("[query] Failed to enqueue stream progress chunk: %s", exc)
 
     assistant_task = asyncio.create_task(
         query_llm(
@@ -846,9 +865,12 @@ async def query(
             tool_results.append(error_msg)
             yield error_msg
             continue
-        except Exception as e:
-            logger.exception(
-                f"Error executing tool '{tool_name}'",
+        except CancelledError:
+            raise  # Don't suppress task cancellation
+        except (RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as e:
+            logger.warning(
+                "Error executing tool '%s': %s: %s",
+                tool_name, type(e).__name__, e,
                 extra={"tool": tool_name, "tool_use_id": tool_use_id},
             )
             error_msg = tool_result_message(

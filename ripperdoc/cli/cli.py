@@ -158,10 +158,14 @@ async def run_query(
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted by user[/yellow]")
-        except Exception as e:
+        except asyncio.CancelledError:
+            console.print("\n[yellow]Operation cancelled[/yellow]")
+        except (RuntimeError, ValueError, TypeError, OSError, IOError, ConnectionError) as e:
             console.print(f"[red]Error: {escape(str(e))}[/red]")
-            logger.exception(
-                "[cli] Unhandled error while running prompt", extra={"session_id": session_id}
+            logger.warning(
+                "[cli] Unhandled error while running prompt: %s: %s",
+                type(e).__name__, e,
+                extra={"session_id": session_id},
             )
             if verbose:
                 import traceback
@@ -386,9 +390,14 @@ def main() -> None:
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")
         sys.exit(130)
-    except Exception as e:
+    except SystemExit:
+        raise
+    except (RuntimeError, ValueError, TypeError, OSError, IOError, ConnectionError, click.ClickException) as e:
         console.print(f"[red]Fatal error: {escape(str(e))}[/red]")
-        logger.exception("[cli] Fatal error in main CLI entrypoint")
+        logger.warning(
+            "[cli] Fatal error in main CLI entrypoint: %s: %s",
+            type(e).__name__, e,
+        )
         sys.exit(1)
 
 

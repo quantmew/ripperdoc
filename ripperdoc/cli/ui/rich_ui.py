@@ -254,9 +254,10 @@ class RichUI:
         # Keep MCP runtime alive for the whole UI session. Create it on the UI loop up front.
         try:
             self._run_async(ensure_mcp_runtime(self.project_path))
-        except Exception:
-            logger.exception(
-                "[ui] Failed to initialize MCP runtime at startup",
+        except (OSError, RuntimeError, ConnectionError) as exc:
+            logger.warning(
+                "[ui] Failed to initialize MCP runtime at startup: %s: %s",
+                type(exc).__name__, exc,
                 extra={"session_id": self.session_id},
             )
 
@@ -283,10 +284,11 @@ class RichUI:
         """Best-effort persistence of a message to the session log."""
         try:
             self._session_history.append(message)
-        except Exception:
+        except (OSError, IOError, json.JSONDecodeError) as exc:
             # Logging failures should never interrupt the UI flow
-            logger.exception(
-                "[ui] Failed to append message to session history",
+            logger.warning(
+                "[ui] Failed to append message to session history: %s: %s",
+                type(exc).__name__, exc,
                 extra={"session_id": self.session_id},
             )
 
@@ -297,9 +299,10 @@ class RichUI:
         session = self.get_prompt_session()
         try:
             session.history.append_string(text)
-        except Exception:
-            logger.exception(
-                "[ui] Failed to append prompt history",
+        except (AttributeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "[ui] Failed to append prompt history: %s: %s",
+                type(exc).__name__, exc,
                 extra={"session_id": self.session_id},
             )
 
@@ -588,7 +591,7 @@ class RichUI:
         else:
             try:
                 preview = json.dumps(reasoning, ensure_ascii=False)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 preview = str(reasoning)
         preview = preview.strip()
         if len(preview) > 4000:
@@ -940,11 +943,28 @@ class RichUI:
                 try:
                     if base_permission_checker is not None:
                         result = await base_permission_checker(tool, parsed_input)
-                        return result.result if hasattr(result, "result") else True
+                        allowed = result.result if hasattr(result, "result") else True
+                        logger.debug(
+                            "[ui] Permission check result",
+                            extra={
+                                "tool": getattr(tool, "name", None),
+                                "allowed": allowed,
+                                "session_id": self.session_id,
+                            },
+                        )
+                        return allowed
                     return True
                 finally:
-                    spinner.start()
-                    spinner.update("Thinking...")
+                    # Wrap spinner restart in try-except to prevent exceptions
+                    # from discarding the permission result
+                    try:
+                        spinner.start()
+                        spinner.update("Thinking...")
+                    except (RuntimeError, ValueError, OSError) as exc:
+                        logger.debug(
+                            "[ui] Failed to restart spinner after permission check: %s: %s",
+                            type(exc).__name__, exc,
+                        )
 
             # Process query stream
             tool_registry: Dict[str, Dict[str, Any]] = {}
@@ -976,18 +996,24 @@ class RichUI:
                     self._log_message(message)
                     messages.append(message)  # type: ignore[arg-type]
 
-            except Exception as e:
-                logger.exception(
-                    "[ui] Unhandled error while processing streamed query response",
+            except asyncio.CancelledError:
+                # Re-raise cancellation to allow proper cleanup
+                raise
+            except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as e:
+                logger.warning(
+                    "[ui] Error while processing streamed query response: %s: %s",
+                    type(e).__name__, e,
                     extra={"session_id": self.session_id},
                 )
                 self.display_message("System", f"Error: {str(e)}", is_tool=True)
             finally:
                 try:
                     spinner.stop()
-                except Exception:
-                    logger.exception(
-                        "[ui] Failed to stop spinner", extra={"session_id": self.session_id}
+                except (RuntimeError, ValueError, OSError) as exc:
+                    logger.warning(
+                        "[ui] Failed to stop spinner: %s: %s",
+                        type(exc).__name__, exc,
+                        extra={"session_id": self.session_id},
                     )
 
                 self.conversation_messages = messages
@@ -1000,9 +1026,13 @@ class RichUI:
                     },
                 )
 
-        except Exception as exc:
-            logger.exception(
-                "[ui] Unhandled error during query processing",
+        except asyncio.CancelledError:
+            # Re-raise cancellation to allow proper cleanup
+            raise
+        except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+            logger.warning(
+                "[ui] Error during query processing: %s: %s",
+                type(exc).__name__, exc,
                 extra={"session_id": self.session_id},
             )
             self.display_message("System", f"Error: {str(exc)}", is_tool=True)
@@ -1140,10 +1170,12 @@ class RichUI:
                 except EOFError:
                     console.print("\n[yellow]Goodbye![/yellow]")
                     break
-                except Exception as e:
+                except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as e:
                     console.print(f"[red]Error: {escape(str(e))}[/]")
-                    logger.exception(
-                        "[ui] Error in interactive loop", extra={"session_id": self.session_id}
+                    logger.warning(
+                        "[ui] Error in interactive loop: %s: %s",
+                        type(e).__name__, e,
+                        extra={"session_id": self.session_id},
                     )
                     if self.verbose:
                         import traceback
@@ -1172,10 +1204,12 @@ class RichUI:
             try:
                 try:
                     self._run_async(shutdown_mcp_runtime())
-                except Exception as exc:  # pragma: no cover - defensive shutdown
+                except (OSError, RuntimeError, ConnectionError, asyncio.CancelledError) as exc:
+                    # pragma: no cover - defensive shutdown
                     logger.warning(
-                        "[ui] Failed to shut down MCP runtime cleanly",
-                        extra={"error": str(exc), "session_id": self.session_id},
+                        "[ui] Failed to shut down MCP runtime cleanly: %s: %s",
+                        type(exc).__name__, exc,
+                        extra={"session_id": self.session_id},
                     )
             finally:
                 if not self._loop.is_closed():
@@ -1190,13 +1224,13 @@ class RichUI:
                             self._loop.run_until_complete(
                                 asyncio.gather(*pending, return_exceptions=True)
                             )
-                        except Exception:
+                        except (RuntimeError, asyncio.CancelledError):
                             pass  # Ignore errors during task cancellation
 
                     # Shutdown async generators (suppress expected errors)
                     try:
                         self._loop.run_until_complete(self._loop.shutdown_asyncgens())
-                    except Exception:
+                    except (RuntimeError, asyncio.CancelledError):
                         # Expected during forced shutdown - async generators may already be running
                         pass
 
@@ -1226,10 +1260,12 @@ class RichUI:
             summary_text = await self._summarize_conversation(
                 messages_for_summary, custom_instructions
             )
-        except Exception as e:
+        except (OSError, RuntimeError, ConnectionError, ValueError, KeyError) as e:
             console.print(f"[red]Error during compaction: {escape(str(e))}[/red]")
-            logger.exception(
-                "[ui] Error during manual compaction", extra={"session_id": self.session_id}
+            logger.warning(
+                "[ui] Error during manual compaction: %s: %s",
+                type(e).__name__, e,
+                extra={"session_id": self.session_id},
             )
             return
         finally:

@@ -153,9 +153,10 @@ and limit to read only a portion of the file."""
                     offset=offset,
                     limit=limit,
                 )
-            except Exception:
-                logger.exception(
-                    "[file_read_tool] Failed to record file snapshot",
+            except (OSError, IOError, RuntimeError) as exc:
+                logger.warning(
+                    "[file_read_tool] Failed to record file snapshot: %s: %s",
+                    type(exc).__name__, exc,
                     extra={"file_path": input_data.file_path},
                 )
 
@@ -171,10 +172,11 @@ and limit to read only a portion of the file."""
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
-        except Exception as e:
-            logger.exception(
-                "[file_read_tool] Error reading file",
-                extra={"file_path": input_data.file_path, "error": str(e)},
+        except (OSError, IOError, UnicodeDecodeError, ValueError) as e:
+            logger.warning(
+                "[file_read_tool] Error reading file: %s: %s",
+                type(e).__name__, e,
+                extra={"file_path": input_data.file_path},
             )
             # Create an error output
             error_output = FileReadToolOutput(

@@ -118,14 +118,15 @@ def _handle(ui: Any, _: str) -> bool:
                 try:
                     schema = tool.input_schema.model_json_schema()
                     token_est = estimate_tokens(json.dumps(schema, sort_keys=True))
-                except Exception:
+                except (AttributeError, TypeError, ValueError):
                     token_est = 0
                 lines.append(f"     └ {display}: {format_tokens(token_est)} tokens")
             if len(mcp_tools) > 20:
                 lines.append(f"     └ ... (+{len(mcp_tools) - 20} more)")
-    except Exception:
-        logger.exception(
-            "[context_cmd] Failed to summarize MCP tools",
+    except (OSError, RuntimeError, AttributeError, TypeError) as exc:
+        logger.warning(
+            "[context_cmd] Failed to summarize MCP tools: %s: %s",
+            type(exc).__name__, exc,
             extra={"session_id": getattr(ui, "session_id", None)},
         )
     for line in lines:

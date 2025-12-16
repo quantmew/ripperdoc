@@ -55,7 +55,7 @@ class StructuredFormatter(logging.Formatter):
         if extras:
             try:
                 serialized = json.dumps(extras, sort_keys=True, ensure_ascii=True, default=str)
-            except Exception:
+            except (TypeError, ValueError):
                 serialized = str(extras)
             return f"{message} | {serialized}"
         return message
@@ -97,9 +97,9 @@ class RipperdocLogger:
         if self._file_handler:
             try:
                 self.logger.removeHandler(self._file_handler)
-            except Exception:
+            except (ValueError, RuntimeError):
                 # Swallow errors while rotating handlers; console logging should continue.
-                self.logger.exception("[logging] Failed to remove existing file handler")
+                pass
 
         # Use UTF-8 to avoid Windows code page encoding errors when logs contain non-ASCII text.
         file_handler = logging.FileHandler(log_file, encoding="utf-8")

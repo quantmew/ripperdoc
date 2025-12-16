@@ -45,9 +45,10 @@ def _is_path_under_directory(path: Path, directory: Path) -> bool:
     try:
         path.resolve().relative_to(directory.resolve())
         return True
-    except Exception:
-        logger.exception(
-            "[memory] Failed to compare path containment",
+    except (ValueError, OSError) as exc:
+        logger.warning(
+            "[memory] Failed to compare path containment: %s: %s",
+            type(exc).__name__, exc,
             extra={"path": str(path), "directory": str(directory)},
         )
         return False
@@ -122,9 +123,11 @@ def _collect_files(
     resolved_path = file_path.expanduser()
     try:
         resolved_path = resolved_path.resolve()
-    except Exception:
-        logger.exception(
-            "[memory] Failed to resolve memory file path", extra={"path": str(resolved_path)}
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "[memory] Failed to resolve memory file path: %s: %s",
+            type(exc).__name__, exc,
+            extra={"path": str(resolved_path)},
         )
 
     resolved_key = str(resolved_path)

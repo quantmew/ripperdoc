@@ -246,10 +246,10 @@ def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
                 if hasattr(finfo, "is_required"):
                     try:
                         is_req = bool(finfo.is_required())
-                    except Exception:
+                    except (TypeError, AttributeError):
                         is_req = False
                 required_fields.append(f"{fname}{' (required)' if is_req else ''}")
-        except Exception:
+        except (AttributeError, TypeError):
             required_fields = []
 
         required_str = ", ".join(required_fields) if required_fields else "see input schema"

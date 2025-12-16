@@ -41,7 +41,7 @@ def _safe_tool_name(factory: Any, fallback: str) -> str:
     try:
         name = getattr(factory(), "name", None)
         return str(name) if name else fallback
-    except Exception:
+    except (TypeError, ValueError, RuntimeError, AttributeError):
         return fallback
 
 
@@ -278,8 +278,12 @@ def _split_frontmatter(raw_text: str) -> Tuple[Dict[str, Any], str]:
                 body = "\n".join(lines[idx + 1 :])
                 try:
                     frontmatter = yaml.safe_load(frontmatter_text) or {}
-                except Exception as exc:  # pragma: no cover - defensive
-                    logger.exception("Invalid frontmatter in agent file", extra={"error": str(exc)})
+                except (yaml.YAMLError, ValueError, TypeError) as exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        "Invalid frontmatter in agent file: %s: %s",
+                        type(exc).__name__, exc,
+                        extra={"error": str(exc)},
+                    )
                     return {"__error__": f"Invalid frontmatter: {exc}"}, body
                 return frontmatter, body
     return {}, raw_text
@@ -305,8 +309,12 @@ def _parse_agent_file(
     """Parse a single agent file."""
     try:
         text = path.read_text(encoding="utf-8")
-    except Exception as exc:
-        logger.exception("Failed to read agent file", extra={"error": str(exc), "path": str(path)})
+    except (OSError, IOError, UnicodeDecodeError) as exc:
+        logger.warning(
+            "Failed to read agent file: %s: %s",
+            type(exc).__name__, exc,
+            extra={"error": str(exc), "path": str(path)},
+        )
         return None, f"Failed to read agent file {path}: {exc}"
 
     frontmatter, body = _split_frontmatter(text)

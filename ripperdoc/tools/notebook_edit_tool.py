@@ -166,8 +166,12 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
         try:
             raw = path.read_text(encoding="utf-8")
             nb_json = json.loads(raw)
-        except Exception:
-            logger.exception("Failed to parse notebook", extra={"path": str(path)})
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning(
+                "Failed to parse notebook: %s: %s",
+                type(exc).__name__, exc,
+                extra={"path": str(path)},
+            )
             return ValidationResult(
                 result=False, message="Notebook is not valid JSON.", error_code=6
             )
@@ -279,9 +283,10 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
                     json.dumps(nb_json, indent=1),
                     getattr(context, "file_state_cache", {}),
                 )
-            except Exception:
-                logger.exception(
-                    "[notebook_edit_tool] Failed to record file snapshot",
+            except (OSError, IOError, RuntimeError) as exc:
+                logger.warning(
+                    "[notebook_edit_tool] Failed to record file snapshot: %s: %s",
+                    type(exc).__name__, exc,
                     extra={"file_path": input_data.notebook_path},
                 )
 
@@ -296,10 +301,12 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             yield ToolResult(
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
-        except Exception as exc:  # pragma: no cover - error path
-            logger.exception(
-                "Error editing notebook",
-                extra={"path": input_data.notebook_path, "error": str(exc)},
+        except (OSError, json.JSONDecodeError, ValueError, KeyError) as exc:
+            # pragma: no cover - error path
+            logger.warning(
+                "Error editing notebook: %s: %s",
+                type(exc).__name__, exc,
+                extra={"path": input_data.notebook_path},
             )
             output = NotebookEditOutput(
                 new_source=new_source,

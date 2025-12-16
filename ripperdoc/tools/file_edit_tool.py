@@ -192,9 +192,10 @@ match exactly (including whitespace and indentation)."""
                     new_content,
                     getattr(context, "file_state_cache", {}),
                 )
-            except Exception:
-                logger.exception(
-                    "[file_edit_tool] Failed to record file snapshot",
+            except (OSError, IOError, RuntimeError) as exc:
+                logger.warning(
+                    "[file_edit_tool] Failed to record file snapshot: %s: %s",
+                    type(exc).__name__, exc,
                     extra={"file_path": input_data.file_path},
                 )
 
@@ -283,10 +284,11 @@ match exactly (including whitespace and indentation)."""
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
-        except Exception as e:
-            logger.exception(
-                "[file_edit_tool] Error editing file",
-                extra={"file_path": input_data.file_path, "error": str(e)},
+        except (OSError, IOError, PermissionError, UnicodeDecodeError, ValueError) as e:
+            logger.warning(
+                "[file_edit_tool] Error editing file: %s: %s",
+                type(e).__name__, e,
+                extra={"file_path": input_data.file_path},
             )
             error_output = FileEditToolOutput(
                 file_path=input_data.file_path,

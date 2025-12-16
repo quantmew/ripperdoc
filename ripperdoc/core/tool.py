@@ -208,9 +208,10 @@ async def build_tool_description(
 
         if parts:
             return f"{description_text}\n\nInput examples:\n" + "\n\n".join(parts)
-    except Exception:
-        logger.exception(
-            "[tool] Failed to build input example section",
+    except (TypeError, ValueError, AttributeError, KeyError) as exc:
+        logger.warning(
+            "[tool] Failed to build input example section: %s: %s",
+            type(exc).__name__, exc,
             extra={"tool": getattr(tool, "name", None)},
         )
         return description_text
@@ -227,9 +228,10 @@ def tool_input_examples(tool: Tool[Any, Any], limit: int = 5) -> List[Dict[str, 
     for example in examples[:limit]:
         try:
             results.append(example.example)
-        except Exception:
-            logger.exception(
-                "[tool] Failed to format tool input example",
+        except (TypeError, ValueError, AttributeError) as exc:
+            logger.warning(
+                "[tool] Failed to format tool input example: %s: %s",
+                type(exc).__name__, exc,
                 extra={"tool": getattr(tool, "name", None)},
             )
             continue

@@ -17,11 +17,11 @@ def safe_parse_json(json_text: Optional[str], log_error: bool = True) -> Optiona
         return None
     try:
         return json.loads(json_text)
-    except Exception as exc:
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
         if log_error:
             logger.debug(
-                "[json_utils] Failed to parse JSON",
-                extra={"error": str(exc), "length": len(json_text)},
-                exc_info=True,
+                "[json_utils] Failed to parse JSON: %s: %s",
+                type(exc).__name__, exc,
+                extra={"length": len(json_text)},
             )
         return None

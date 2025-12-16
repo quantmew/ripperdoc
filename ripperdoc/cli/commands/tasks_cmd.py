@@ -105,10 +105,11 @@ def _list_tasks(ui: Any) -> bool:
     for task_id in sorted(task_ids):
         try:
             status = get_background_status(task_id, consume=False)
-        except Exception as exc:
+        except (KeyError, ValueError, RuntimeError, OSError) as exc:
             table.add_row(escape(task_id), "[red]error[/]", escape(str(exc)), "-")
-            logger.exception(
-                "[tasks_cmd] Failed to read background task status",
+            logger.warning(
+                "[tasks_cmd] Failed to read background task status: %s: %s",
+                type(exc).__name__, exc,
                 extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
             )
             continue
@@ -143,10 +144,11 @@ def _kill_task(ui: Any, task_id: str) -> bool:
     except KeyError:
         console.print(f"[red]No task found with id '{escape(task_id)}'.[/red]")
         return True
-    except Exception as exc:
+    except (ValueError, RuntimeError, OSError) as exc:
         console.print(f"[red]Failed to read task '{escape(task_id)}': {escape(str(exc))}[/red]")
-        logger.exception(
-            "[tasks_cmd] Failed to read task before kill",
+        logger.warning(
+            "[tasks_cmd] Failed to read task before kill: %s: %s",
+            type(exc).__name__, exc,
             extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
         )
         return True
@@ -164,10 +166,13 @@ def _kill_task(ui: Any, task_id: str) -> bool:
             killed = runner(kill_background_task(task_id))
         else:
             killed = asyncio.run(kill_background_task(task_id))
-    except Exception as exc:
+    except (OSError, RuntimeError, asyncio.CancelledError) as exc:
+        if isinstance(exc, asyncio.CancelledError):
+            raise
         console.print(f"[red]Error stopping task {escape(task_id)}: {escape(str(exc))}[/red]")
-        logger.exception(
-            "[tasks_cmd] Error stopping background task",
+        logger.warning(
+            "[tasks_cmd] Error stopping background task: %s: %s",
+            type(exc).__name__, exc,
             extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
         )
         return True
@@ -188,10 +193,11 @@ def _show_task(ui: Any, task_id: str) -> bool:
     except KeyError:
         console.print(f"[red]No task found with id '{escape(task_id)}'.[/red]")
         return True
-    except Exception as exc:
+    except (ValueError, RuntimeError, OSError) as exc:
         console.print(f"[red]Failed to read task '{escape(task_id)}': {escape(str(exc))}[/red]")
-        logger.exception(
-            "[tasks_cmd] Failed to read task for detail view",
+        logger.warning(
+            "[tasks_cmd] Failed to read task for detail view: %s: %s",
+            type(exc).__name__, exc,
             extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
         )
         return True

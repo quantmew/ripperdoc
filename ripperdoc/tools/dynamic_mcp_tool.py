@@ -71,8 +71,11 @@ def _annotation_flag(tool_info: Any, key: str) -> bool:
     if hasattr(annotations, "get"):
         try:
             return bool(annotations.get(key, False))
-        except Exception:
-            logger.debug("[mcp_tools] Failed to read annotation flag", exc_info=True)
+        except (AttributeError, TypeError, KeyError) as exc:
+            logger.debug(
+                "[mcp_tools] Failed to read annotation flag: %s: %s",
+                type(exc).__name__, exc,
+            )
             return False
     return False
 
@@ -318,7 +321,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                 data=annotated_output,
                 result_for_assistant=final_text,
             )
-        except Exception as exc:  # pragma: no cover - runtime errors
+        except (OSError, RuntimeError, ConnectionError, ValueError, KeyError, TypeError) as exc:  # pragma: no cover - runtime errors
             output = McpToolCallOutput(
                 server=self.server_name,
                 tool=self.tool_info.name,
@@ -328,12 +331,12 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                 structured_content=None,
                 is_error=True,
             )
-            logger.exception(
-                "Error calling MCP tool",
+            logger.warning(
+                "Error calling MCP tool: %s: %s",
+                type(exc).__name__, exc,
                 extra={
                     "server": self.server_name,
                     "tool": self.tool_info.name,
-                    "error": str(exc),
                 },
             )
             yield ToolResult(
@@ -378,10 +381,10 @@ def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[Dyn
 
     try:
         return asyncio.run(_load_and_keep())
-    except Exception as exc:  # pragma: no cover - SDK/runtime failures
-        logger.exception(
-            "Failed to initialize MCP runtime for dynamic tools (sync)",
-            extra={"error": str(exc)},
+    except (OSError, RuntimeError, ConnectionError, ValueError) as exc:  # pragma: no cover - SDK/runtime failures
+        logger.warning(
+            "Failed to initialize MCP runtime for dynamic tools (sync): %s: %s",
+            type(exc).__name__, exc,
         )
         return []
 
@@ -390,10 +393,10 @@ async def load_dynamic_mcp_tools_async(project_path: Optional[Path] = None) -> L
     """Async loader for MCP tools when already in an event loop."""
     try:
         runtime = await ensure_mcp_runtime(project_path)
-    except Exception as exc:  # pragma: no cover - SDK/runtime failures
-        logger.exception(
-            "Failed to initialize MCP runtime for dynamic tools (async)",
-            extra={"error": str(exc)},
+    except (OSError, RuntimeError, ConnectionError, ValueError) as exc:  # pragma: no cover - SDK/runtime failures
+        logger.warning(
+            "Failed to initialize MCP runtime for dynamic tools (async): %s: %s",
+            type(exc).__name__, exc,
         )
         return []
     return _build_dynamic_mcp_tools(runtime)

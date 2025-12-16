@@ -14,7 +14,7 @@ try:  # pragma: no cover - optional dependency
     import tiktoken  # type: ignore
 
     _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
-except Exception:  # pragma: no cover - runtime fallback
+except (ImportError, ModuleNotFoundError, OSError, RuntimeError):  # pragma: no cover - runtime fallback
     pass
 
 
@@ -25,7 +25,7 @@ def estimate_tokens(text: str) -> int:
     if _TIKTOKEN_ENCODING:
         try:
             return len(_TIKTOKEN_ENCODING.encode(text))
-        except Exception:
+        except (UnicodeDecodeError, ValueError, RuntimeError):
             logger.debug("[token_estimation] tiktoken encode failed; falling back to heuristic")
     # Heuristic: ~4 characters per token
     return max(1, math.ceil(len(text) / 4))

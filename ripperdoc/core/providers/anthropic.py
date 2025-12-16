@@ -98,8 +98,11 @@ class AnthropicClient(ProviderClient):
                             if progress_callback:
                                 try:
                                     await progress_callback(text)
-                                except Exception:
-                                    logger.exception("[anthropic_client] Stream callback failed")
+                                except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
+                                    logger.warning(
+                                        "[anthropic_client] Stream callback failed: %s: %s",
+                                        type(cb_exc).__name__, cb_exc,
+                                    )
                     getter = getattr(stream_resp, "get_final_response", None) or getattr(
                         stream_resp, "get_final_message", None
                     )

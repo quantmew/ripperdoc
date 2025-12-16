@@ -139,7 +139,7 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         if context.on_exit_plan_mode:
             try:
                 context.on_exit_plan_mode()
-            except Exception:
+            except (RuntimeError, ValueError, TypeError):
                 logger.debug("[exit_plan_mode_tool] Failed to call on_exit_plan_mode")
 
         is_agent = bool(context.agent_id)

@@ -214,8 +214,11 @@ class OpenAIClient(ProviderClient):
                         if progress_callback:
                             try:
                                 await progress_callback(text_delta)
-                            except Exception:
-                                logger.exception("[openai_client] Stream callback failed")
+                            except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
+                                logger.warning(
+                                    "[openai_client] Stream callback failed: %s: %s",
+                                    type(cb_exc).__name__, cb_exc,
+                                )
 
                     # Tool call deltas for native tool mode
                     if not can_stream_tools:
@@ -241,16 +244,22 @@ class OpenAIClient(ProviderClient):
                                 if progress_callback:
                                     try:
                                         await progress_callback(args_delta)
-                                    except Exception:
-                                        logger.exception("[openai_client] Stream callback failed")
+                                    except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
+                                        logger.warning(
+                                            "[openai_client] Stream callback failed: %s: %s",
+                                            type(cb_exc).__name__, cb_exc,
+                                        )
 
                         if idx not in announced_tool_indexes and state.get("name"):
                             announced_tool_indexes.add(idx)
                             if progress_callback:
                                 try:
                                     await progress_callback(f"[tool:{state['name']}]")
-                                except Exception:
-                                    logger.exception("[openai_client] Stream callback failed")
+                                except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
+                                    logger.warning(
+                                        "[openai_client] Stream callback failed: %s: %s",
+                                        type(cb_exc).__name__, cb_exc,
+                                    )
 
                         streamed_tool_calls[idx] = state
 

@@ -154,7 +154,8 @@ build projects, run tests, and interact with the file system."""
         sandbox_available = is_sandbox_available()
         try:
             current_shell = find_suitable_shell()
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except (OSError, FileNotFoundError, RuntimeError) as exc:
+            # pragma: no cover - defensive guard
             current_shell = f"Unavailable ({exc})"
 
         shell_info = (
@@ -525,10 +526,11 @@ build projects, run tests, and interact with the file system."""
         try:
             wrapper = create_sandbox_wrapper(command)
             return wrapper.final_command, None, wrapper.cleanup
-        except Exception as exc:
-            logger.exception(
-                "[bash_tool] Failed to enable sandbox",
-                extra={"command": command, "error": str(exc)},
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "[bash_tool] Failed to enable sandbox: %s: %s",
+                type(exc).__name__, exc,
+                extra={"command": command},
             )
             return None, self._create_error_output(
                 command, f"Failed to enable sandbox: {exc}", True
@@ -552,9 +554,11 @@ build projects, run tests, and interact with the file system."""
         """
         try:
             from ripperdoc.tools.background_shell import start_background_command
-        except Exception as e:  # pragma: no cover - defensive import
-            logger.exception(
-                "[bash_tool] Failed to import background shell runner",
+        except (ImportError, ModuleNotFoundError) as e:
+            # pragma: no cover - defensive import
+            logger.warning(
+                "[bash_tool] Failed to import background shell runner: %s: %s",
+                type(e).__name__, e,
                 extra={"command": effective_command},
             )
             return self._create_error_output(
@@ -773,7 +777,8 @@ build projects, run tests, and interact with the file system."""
         # Resolve shell
         try:
             resolved_shell = input_data.shell_executable or find_suitable_shell()
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except (OSError, FileNotFoundError, RuntimeError) as exc:
+            # pragma: no cover - defensive guard
             yield ToolResult(
                 data=self._create_error_output(
                     effective_command, f"Failed to select shell: {exc}", bool(input_data.sandbox)
@@ -947,10 +952,13 @@ build projects, run tests, and interact with the file system."""
                 data=output, result_for_assistant=self.render_result_for_assistant(output)
             )
 
-        except Exception as e:
-            logger.exception(
-                "[bash_tool] Error executing command",
-                extra={"command": effective_command, "error": str(e)},
+        except (OSError, RuntimeError, ValueError, asyncio.CancelledError) as e:
+            if isinstance(e, asyncio.CancelledError):
+                raise  # Re-raise cancellation
+            logger.warning(
+                "[bash_tool] Error executing command: %s: %s",
+                type(e).__name__, e,
+                extra={"command": effective_command},
             )
             error_output = self._create_error_output(
                 effective_command, f"Error executing command: {str(e)}", sandbox_requested

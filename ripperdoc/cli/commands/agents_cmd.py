@@ -111,11 +111,12 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print(
                 f"[green]✓ Agent '{escape(agent_name)}' created at {escape(str(path))}[/green]"
             )
-        except Exception as exc:
+        except (OSError, IOError, PermissionError, ValueError) as exc:
             console.print(f"[red]Failed to create agent: {escape(str(exc))}[/red]")
             print_agents_usage()
-            logger.exception(
-                "[agents_cmd] Failed to create agent",
+            logger.warning(
+                "[agents_cmd] Failed to create agent: %s: %s",
+                type(exc).__name__, exc,
                 extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
             )
         return True
@@ -142,11 +143,12 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             )
         except FileNotFoundError as exc:
             console.print(f"[yellow]{escape(str(exc))}[/yellow]")
-        except Exception as exc:
+        except (OSError, IOError, PermissionError, ValueError) as exc:
             console.print(f"[red]Failed to delete agent: {escape(str(exc))}[/red]")
             print_agents_usage()
-            logger.exception(
-                "[agents_cmd] Failed to delete agent",
+            logger.warning(
+                "[agents_cmd] Failed to delete agent: %s: %s",
+                type(exc).__name__, exc,
                 extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
             )
         return True
@@ -219,11 +221,12 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print(
                 f"[green]✓ Agent '{escape(agent_name)}' updated at {escape(str(path))}[/green]"
             )
-        except Exception as exc:
+        except (OSError, IOError, PermissionError, ValueError) as exc:
             console.print(f"[red]Failed to update agent: {escape(str(exc))}[/red]")
             print_agents_usage()
-            logger.exception(
-                "[agents_cmd] Failed to update agent",
+            logger.warning(
+                "[agents_cmd] Failed to update agent: %s: %s",
+                type(exc).__name__, exc,
                 extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
             )
         return True

@@ -48,19 +48,19 @@ def permission_key(tool: Tool[Any, Any], parsed_input: Any) -> str:
     if hasattr(parsed_input, "file_path"):
         try:
             return f"{tool.name}::path::{Path(getattr(parsed_input, 'file_path')).resolve()}"
-        except Exception:
-            logger.exception(
+        except (OSError, RuntimeError) as exc:
+            logger.warning(
                 "[permissions] Failed to resolve file_path for permission key",
-                extra={"tool": getattr(tool, "name", None)},
+                extra={"tool": getattr(tool, "name", None), "error": str(exc)},
             )
             return f"{tool.name}::path::{getattr(parsed_input, 'file_path')}"
     if hasattr(parsed_input, "path"):
         try:
             return f"{tool.name}::path::{Path(getattr(parsed_input, 'path')).resolve()}"
-        except Exception:
-            logger.exception(
+        except (OSError, RuntimeError) as exc:
+            logger.warning(
                 "[permissions] Failed to resolve path for permission key",
-                extra={"tool": getattr(tool, "name", None)},
+                extra={"tool": getattr(tool, "name", None), "error": str(exc)},
             )
             return f"{tool.name}::path::{getattr(parsed_input, 'path')}"
     return tool.name
@@ -126,14 +126,15 @@ def make_permission_checker(
         try:
             if hasattr(tool, "needs_permissions") and not tool.needs_permissions(parsed_input):
                 return PermissionResult(result=True)
-        except Exception:
-            logger.exception(
+        except (TypeError, AttributeError, ValueError) as exc:
+            # Tool implementation error - log and deny for safety
+            logger.warning(
                 "[permissions] Tool needs_permissions check failed",
-                extra={"tool": getattr(tool, "name", None)},
+                extra={"tool": getattr(tool, "name", None), "error": str(exc), "error_type": type(exc).__name__},
             )
             return PermissionResult(
                 result=False,
-                message="Permission check failed for this tool invocation.",
+                message=f"Permission check failed: {type(exc).__name__}: {exc}",
             )
 
         allowed_tools = set(config.allowed_tools or [])
@@ -167,14 +168,15 @@ def make_permission_checker(
                 # Allow tools to return a plain dict shaped like PermissionDecision.
                 if isinstance(decision, dict) and "behavior" in decision:
                     decision = PermissionDecision(**decision)
-            except Exception:
-                logger.exception(
+            except (TypeError, AttributeError, ValueError, KeyError) as exc:
+                # Tool implementation error - fall back to asking user
+                logger.warning(
                     "[permissions] Tool check_permissions failed",
-                    extra={"tool": getattr(tool, "name", None)},
+                    extra={"tool": getattr(tool, "name", None), "error": str(exc), "error_type": type(exc).__name__},
                 )
                 decision = PermissionDecision(
                     behavior="ask",
-                    message="Error checking permissions for this tool.",
+                    message=f"Error checking permissions: {type(exc).__name__}",
                     rule_suggestions=None,
                 )
 
@@ -219,6 +221,10 @@ def make_permission_checker(
         ]
 
         answer = (await _prompt_user(prompt, options=options)).strip().lower()
+        logger.debug(
+            "[permissions] User answer for permission prompt",
+            extra={"answer": answer, "tool": getattr(tool, "name", None)},
+        )
         rule_suggestions = _rule_strings(decision.rule_suggestions) or [
             permission_key(tool, parsed_input)
         ]

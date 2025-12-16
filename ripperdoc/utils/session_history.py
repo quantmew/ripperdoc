@@ -101,15 +101,16 @@ class SessionHistory:
                         msg_uuid = payload.get("uuid")
                         if isinstance(msg_uuid, str):
                             self._seen_ids.add(msg_uuid)
-                    except Exception as exc:
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                         logger.debug(
-                            f"Failed to parse session history line: {exc}",
-                            exc_info=True,
+                            "[session_history] Failed to parse session history line: %s: %s",
+                            type(exc).__name__, exc,
                         )
                         continue
-        except Exception:
-            logger.exception(
-                "Failed to load seen IDs from session",
+        except (OSError, IOError) as exc:
+            logger.warning(
+                "Failed to load seen IDs from session: %s: %s",
+                type(exc).__name__, exc,
                 extra={"session_id": self.session_id, "path": str(self.path)},
             )
             return
@@ -134,10 +135,11 @@ class SessionHistory:
                 fh.write("\n")
             if isinstance(msg_uuid, str):
                 self._seen_ids.add(msg_uuid)
-        except Exception:
+        except (OSError, IOError) as exc:
             # Avoid crashing the UI if logging fails
-            logger.exception(
-                "Failed to append message to session log",
+            logger.warning(
+                "Failed to append message to session log: %s: %s",
+                type(exc).__name__, exc,
                 extra={"session_id": self.session_id, "path": str(self.path)},
             )
             return
@@ -154,10 +156,11 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
         try:
             with jsonl_path.open("r", encoding="utf-8") as fh:
                 messages = [json.loads(line) for line in fh if line.strip()]
-        except Exception as exc:
-            logger.exception(
-                "Failed to load session summary",
-                extra={"path": str(jsonl_path), "error": str(exc)},
+        except (OSError, IOError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "Failed to load session summary: %s: %s",
+                type(exc).__name__, exc,
+                extra={"path": str(jsonl_path)},
             )
             continue
 
@@ -217,15 +220,16 @@ def load_session_messages(project_path: Path, session_id: str) -> List[Conversat
                     msg = _deserialize_message(payload)
                     if msg is not None and getattr(msg, "type", None) != "progress":
                         messages.append(msg)
-                except Exception as exc:
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                     logger.debug(
-                        f"Failed to deserialize message in session {session_id}: {exc}",
-                        exc_info=True,
+                        "[session_history] Failed to deserialize message in session %s: %s: %s",
+                        session_id, type(exc).__name__, exc,
                     )
                     continue
-    except Exception:
-        logger.exception(
-            "Failed to load session messages",
+    except (OSError, IOError) as exc:
+        logger.warning(
+            "Failed to load session messages: %s: %s",
+            type(exc).__name__, exc,
             extra={"session_id": session_id, "path": str(path)},
         )
         return []
