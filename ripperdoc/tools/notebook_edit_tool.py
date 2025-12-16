@@ -4,6 +4,7 @@ Allows performing insert/replace/delete operations on Jupyter notebook cells.
 """
 
 import json
+import os
 import random
 import string
 from pathlib import Path
@@ -137,30 +138,64 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
         self, input_data: NotebookEditInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
         path = _resolve_path(input_data.notebook_path)
+        resolved_path = str(path.resolve())
 
         if not path.exists():
-            return ValidationResult(result=False, message="Notebook file does not exist.")
+            return ValidationResult(
+                result=False,
+                message="Notebook file does not exist.",
+                error_code=1,
+            )
         if path.suffix != ".ipynb":
             return ValidationResult(
                 result=False,
                 message="File must be a Jupyter notebook (.ipynb file). Use Edit for other file types.",
+                error_code=2,
             )
 
         mode = (input_data.edit_mode or "replace").lower()
         if mode not in {"replace", "insert", "delete"}:
             return ValidationResult(
-                result=False, message="edit_mode must be replace, insert, or delete."
+                result=False,
+                message="edit_mode must be replace, insert, or delete.",
+                error_code=3,
             )
         if mode == "insert" and not input_data.cell_type:
             return ValidationResult(
                 result=False,
                 message="cell_type is required when using edit_mode=insert.",
+                error_code=4,
             )
         if mode != "insert" and not input_data.cell_id:
             return ValidationResult(
                 result=False,
                 message="cell_id must be specified when using edit_mode=replace or delete.",
+                error_code=5,
             )
+
+        # Check if file has been read before editing
+        file_state_cache = getattr(context, "file_state_cache", {}) if context else {}
+        file_snapshot = file_state_cache.get(resolved_path)
+
+        if not file_snapshot:
+            return ValidationResult(
+                result=False,
+                message="Notebook has not been read yet. Read it first before editing.",
+                error_code=6,
+            )
+
+        # Check if file has been modified since it was read
+        try:
+            current_mtime = os.path.getmtime(resolved_path)
+            if current_mtime > file_snapshot.timestamp:
+                return ValidationResult(
+                    result=False,
+                    message="Notebook has been modified since read, either by the user or by a linter. "
+                    "Read it again before attempting to edit it.",
+                    error_code=7,
+                )
+        except OSError:
+            pass  # File mtime check failed, proceed anyway
 
         # Validate notebook structure and target cell.
         try:
@@ -173,7 +208,9 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
                 extra={"path": str(path)},
             )
             return ValidationResult(
-                result=False, message="Notebook is not valid JSON.", error_code=6
+                result=False,
+                message="Notebook is not valid JSON.",
+                error_code=8,
             )
 
         cells = nb_json.get("cells", [])
@@ -184,7 +221,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             return ValidationResult(
                 result=False,
                 message=f"Cell '{input_data.cell_id}' not found in notebook.",
-                error_code=7,
+                error_code=9,
             )
 
         return ValidationResult(result=True)

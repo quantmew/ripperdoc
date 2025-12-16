@@ -4,6 +4,7 @@ Allows performing multiple exact string replacements in a single file atomically
 """
 
 import difflib
+import os
 from pathlib import Path
 from typing import AsyncGenerator, Optional, List
 from textwrap import dedent
@@ -168,6 +169,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         path = Path(input_data.file_path).expanduser()
         if not path.is_absolute():
             path = Path.cwd() / path
+        resolved_path = str(path.resolve())
 
         # Ensure edits differ.
         for edit in input_data.edits:
@@ -175,6 +177,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                 return ValidationResult(
                     result=False,
                     message="old_string and new_string must be different",
+                    error_code=1,
                 )
 
         # If the file exists, ensure it is not a directory.
@@ -182,7 +185,40 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             return ValidationResult(
                 result=False,
                 message=f"Path is a directory, not a file: {path}",
+                error_code=2,
             )
+
+        # Check if this is a file creation (first edit has empty old_string)
+        is_creation = (
+            not path.exists()
+            and len(input_data.edits) > 0
+            and input_data.edits[0].old_string == ""
+        )
+
+        # If file exists, check if it has been read before editing
+        if path.exists() and not is_creation:
+            file_state_cache = getattr(context, "file_state_cache", {}) if context else {}
+            file_snapshot = file_state_cache.get(resolved_path)
+
+            if not file_snapshot:
+                return ValidationResult(
+                    result=False,
+                    message="File has not been read yet. Read it first before editing.",
+                    error_code=3,
+                )
+
+            # Check if file has been modified since it was read
+            try:
+                current_mtime = os.path.getmtime(resolved_path)
+                if current_mtime > file_snapshot.timestamp:
+                    return ValidationResult(
+                        result=False,
+                        message="File has been modified since read, either by the user or by a linter. "
+                        "Read it again before attempting to edit it.",
+                        error_code=4,
+                    )
+            except OSError:
+                pass  # File mtime check failed, proceed anyway
 
         return ValidationResult(result=True)
 

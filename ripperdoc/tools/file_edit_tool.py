@@ -108,19 +108,52 @@ match exactly (including whitespace and indentation)."""
     ) -> ValidationResult:
         # Check if file exists
         if not os.path.exists(input_data.file_path):
-            return ValidationResult(result=False, message=f"File not found: {input_data.file_path}")
+            return ValidationResult(
+                result=False,
+                message=f"File not found: {input_data.file_path}",
+                error_code=1,
+            )
 
         # Check if it's a file
         if not os.path.isfile(input_data.file_path):
             return ValidationResult(
-                result=False, message=f"Path is not a file: {input_data.file_path}"
+                result=False,
+                message=f"Path is not a file: {input_data.file_path}",
+                error_code=2,
             )
 
         # Check that old_string and new_string are different
         if input_data.old_string == input_data.new_string:
             return ValidationResult(
-                result=False, message="old_string and new_string must be different"
+                result=False,
+                message="old_string and new_string must be different",
+                error_code=3,
             )
+
+        # Check if file has been read before editing
+        file_state_cache = getattr(context, "file_state_cache", {}) if context else {}
+        file_path = os.path.abspath(input_data.file_path)
+        file_snapshot = file_state_cache.get(file_path)
+
+        if not file_snapshot:
+            return ValidationResult(
+                result=False,
+                message="File has not been read yet. Read it first before editing.",
+                error_code=4,
+            )
+
+        # Check if file has been modified since it was read
+        try:
+            current_mtime = os.path.getmtime(file_path)
+            if current_mtime > file_snapshot.timestamp:
+                return ValidationResult(
+                    result=False,
+                    message="File has been modified since read, either by the user or by a linter. "
+                    "Read it again before attempting to edit it.",
+                    error_code=5,
+                )
+        except OSError:
+            pass  # File mtime check failed, proceed anyway
 
         return ValidationResult(result=True)
 

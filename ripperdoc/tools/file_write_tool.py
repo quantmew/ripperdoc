@@ -92,17 +92,44 @@ NEVER write new files unless explicitly required by the user."""
     async def validate_input(
         self, input_data: FileWriteToolInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
-        # Check if file already exists (warning)
-        if os.path.exists(input_data.file_path):
-            # In safe mode, this should be handled by permissions
-            pass
-
         # Check if parent directory exists
         parent = Path(input_data.file_path).parent
         if not parent.exists():
             return ValidationResult(
-                result=False, message=f"Parent directory does not exist: {parent}"
+                result=False,
+                message=f"Parent directory does not exist: {parent}",
+                error_code=1,
             )
+
+        file_path = os.path.abspath(input_data.file_path)
+
+        # If file doesn't exist, it's a new file - allow without reading first
+        if not os.path.exists(file_path):
+            return ValidationResult(result=True)
+
+        # File exists - check if it has been read before writing
+        file_state_cache = getattr(context, "file_state_cache", {}) if context else {}
+        file_snapshot = file_state_cache.get(file_path)
+
+        if not file_snapshot:
+            return ValidationResult(
+                result=False,
+                message="File has not been read yet. Read it first before writing to it.",
+                error_code=2,
+            )
+
+        # Check if file has been modified since it was read
+        try:
+            current_mtime = os.path.getmtime(file_path)
+            if current_mtime > file_snapshot.timestamp:
+                return ValidationResult(
+                    result=False,
+                    message="File has been modified since read, either by the user or by a linter. "
+                    "Read it again before attempting to write it.",
+                    error_code=3,
+                )
+        except OSError:
+            pass  # File mtime check failed, proceed anyway
 
         return ValidationResult(result=True)
 
