@@ -12,6 +12,7 @@ command = SlashCommand(
     name="clear",
     description="Clear conversation history",
     handler=_handle,
+    aliases=("new",)
 )
 
 

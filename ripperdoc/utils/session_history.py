@@ -29,7 +29,7 @@ class SessionSummary:
     message_count: int
     created_at: datetime
     updated_at: datetime
-    first_prompt: str
+    last_prompt: str
 
 
 def _sessions_root() -> Path:
@@ -198,10 +198,20 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
             if isinstance(updated_raw, str)
             else datetime.fromtimestamp(jsonl_path.stat().st_mtime)
         )
-        first_prompt = ""
-        for payload in conversation_payloads:
-            first_prompt = _extract_prompt(payload)
-            if first_prompt:
+        # Extract last user prompt with more than 10 characters
+        # If not found, fall back to any user prompt
+        last_prompt = ""
+        fallback_prompt = ""
+        for payload in reversed(conversation_payloads):
+            if payload.get("type") != "user":
+                continue
+            prompt = _extract_prompt(payload)
+            if not prompt:
+                continue
+            if not fallback_prompt:
+                fallback_prompt = prompt
+            if len(prompt) > 10:
+                last_prompt = prompt
                 break
         summaries.append(
             SessionSummary(
@@ -210,7 +220,7 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
                 message_count=len(conversation_payloads),
                 created_at=created_at,
                 updated_at=updated_at,
-                first_prompt=first_prompt or "(no prompt)",
+                last_prompt=last_prompt or fallback_prompt or "(no prompt)",
             )
         )
 
