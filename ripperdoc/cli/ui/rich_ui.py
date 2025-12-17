@@ -6,6 +6,7 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 import asyncio
 import contextlib
 import json
+import os
 import sys
 import uuid
 import re
@@ -20,10 +21,11 @@ from rich import box
 from rich.markup import escape
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.completion import Completer, Completion, merge_completers
 from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.document import Document
 
 from ripperdoc import __version__
 from ripperdoc.core.config import get_global_config, provider_protocol
@@ -69,6 +71,8 @@ from ripperdoc.utils.messages import (
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.cli.ui.tool_renderers import ToolResultRendererRegistry
+from ripperdoc.utils.path_ignore import build_ignore_filter
+from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
 
 
 # Type alias for conversation messages
@@ -257,6 +261,15 @@ class RichUI:
         self._session_history = SessionHistory(self.project_path, self.session_id)
         self._permission_checker = (
             make_permission_checker(self.project_path, safe_mode) if safe_mode else None
+        )
+        # Build ignore filter for file completion
+        from ripperdoc.utils.path_ignore import get_project_ignore_patterns
+        project_patterns = get_project_ignore_patterns()
+        self._ignore_filter = build_ignore_filter(
+            self.project_path,
+            project_patterns=project_patterns,
+            include_defaults=True,
+            include_gitignore=True,
         )
         # Keep MCP runtime alive for the whole UI session. Create it on the UI loop up front.
         try:
@@ -1244,8 +1257,13 @@ class RichUI:
                             display_meta=cmd.description,
                         )
 
+        # Merge both completers
+        slash_completer = SlashCommandCompleter(self._command_completions)
+        file_completer = FileMentionCompleter(self.project_path, self._ignore_filter)
+        combined_completer = merge_completers([slash_completer, file_completer])
+
         self._prompt_session = PromptSession(
-            completer=SlashCommandCompleter(self._command_completions),
+            completer=combined_completer,
             complete_style=CompleteStyle.COLUMN,
             complete_while_typing=True,
             history=InMemoryHistory(),
@@ -1262,7 +1280,7 @@ class RichUI:
         # Display status
         console.print(create_status_bar())
         console.print()
-        console.print("[dim]Tip: type '/' then press Tab to see available commands. Press ESC to interrupt a running query.[/dim]\n")
+        console.print("[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. Press ESC to interrupt a running query.[/dim]\n")
 
         session = self.get_prompt_session()
         logger.info(
@@ -1503,8 +1521,7 @@ class RichUI:
         """Show common keyboard shortcuts and prefixes."""
         pairs = [
             ("? for shortcuts", "! for bash mode"),
-            ("/ for commands", "shift + tab to auto-accept edits"),
-            # "@ for file paths", "ctrl + o for verbose output"),
+            ("/ for commands", "@ for file mention"),
             # "# to memorize", "ctrl + v to paste images"),
             # "& for background", "ctrl + t to show todos"),
             # "double tap esc to clear input", "tab to toggle thinking"),
