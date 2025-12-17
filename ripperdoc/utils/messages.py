@@ -381,20 +381,30 @@ def normalize_messages_for_api(
     # Precompute tool_result positions so we can drop dangling tool_calls that
     # lack a following tool response (which OpenAI rejects).
     tool_result_positions: Dict[str, int] = {}
+    # Precompute tool_use positions so we can drop dangling tool_results that
+    # lack a preceding tool_call (which OpenAI also rejects).
+    tool_use_positions: Dict[str, int] = {}
     skipped_tool_uses_no_result = 0
     skipped_tool_uses_no_id = 0
+    skipped_tool_results_no_call = 0
     if protocol == "openai":
         for idx, msg in enumerate(messages):
-            if _msg_type(msg) != "user":
-                continue
+            msg_type = _msg_type(msg)
             content = _msg_content(msg)
             if not isinstance(content, list):
                 continue
-            for block in content:
-                if getattr(block, "type", None) == "tool_result":
-                    tool_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
-                    if tool_id and tool_id not in tool_result_positions:
-                        tool_result_positions[tool_id] = idx
+            if msg_type == "user":
+                for block in content:
+                    if getattr(block, "type", None) == "tool_result":
+                        tool_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
+                        if tool_id and tool_id not in tool_result_positions:
+                            tool_result_positions[tool_id] = idx
+            elif msg_type == "assistant":
+                for block in content:
+                    if getattr(block, "type", None) == "tool_use":
+                        tool_id = getattr(block, "id", None) or getattr(block, "tool_use_id", None)
+                        if tool_id and tool_id not in tool_use_positions:
+                            tool_use_positions[tool_id] = idx
 
     for msg_index, msg in enumerate(messages):
         msg_type = _msg_type(msg)
@@ -412,8 +422,18 @@ def normalize_messages_for_api(
                     # Map each block to an OpenAI-style message
                     openai_msgs: List[Dict[str, Any]] = []
                     for block in user_content:
-                        if getattr(block, "type", None) == "tool_result":
+                        block_type = getattr(block, "type", None)
+                        if block_type == "tool_result":
                             tool_results_seen += 1
+                            # Skip tool_result blocks that lack a preceding tool_use
+                            tool_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
+                            if not tool_id:
+                                skipped_tool_results_no_call += 1
+                                continue
+                            call_pos = tool_use_positions.get(tool_id)
+                            if call_pos is None or call_pos >= msg_index:
+                                skipped_tool_results_no_call += 1
+                                continue
                         mapped = _content_block_to_openai(block)
                         if mapped:
                             openai_msgs.append(mapped)
@@ -498,8 +518,10 @@ def normalize_messages_for_api(
         f"input_msgs={len(messages)} normalized={len(normalized)} "
         f"tool_results_seen={tool_results_seen} tool_uses_seen={tool_uses_seen} "
         f"tool_result_positions={len(tool_result_positions)} "
+        f"tool_use_positions={len(tool_use_positions)} "
         f"skipped_tool_uses_no_result={skipped_tool_uses_no_result} "
-        f"skipped_tool_uses_no_id={skipped_tool_uses_no_id}"
+        f"skipped_tool_uses_no_id={skipped_tool_uses_no_id} "
+        f"skipped_tool_results_no_call={skipped_tool_results_no_call}"
     )
     return normalized
 

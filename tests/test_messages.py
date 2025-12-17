@@ -160,3 +160,38 @@ def test_normalize_messages_preserves_thinking_block():
     assert normalized and normalized[0].get("content")
     kinds = [blk.get("type") for blk in normalized[0]["content"]]
     assert kinds[:2] == ["thinking", "redacted_thinking"]
+
+
+def test_normalize_messages_openai_skips_orphan_tool_results():
+    """OpenAI protocol should skip tool_results without a preceding tool_use.
+
+    This is critical for /compact functionality - after compaction, recent_tail
+    may contain tool_result messages whose corresponding tool_use was in the
+    compacted portion. OpenAI rejects these orphan tool_results with:
+    "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
+    """
+    # Simulate a post-compaction scenario: only a tool_result without the tool_use
+    orphan_result = create_user_message(
+        [{"type": "tool_result", "tool_use_id": "orphan_call", "text": "some result"}]
+    )
+    normalized = normalize_messages_for_api([orphan_result], protocol="openai")
+
+    # The orphan tool_result should be filtered out, leaving no messages
+    tool_messages = [msg for msg in normalized if msg.get("role") == "tool"]
+    assert len(tool_messages) == 0, "Orphan tool_results should be skipped for OpenAI"
+
+
+def test_normalize_messages_openai_keeps_paired_tool_results():
+    """OpenAI protocol should keep tool_results that have a preceding tool_use."""
+    assistant = create_assistant_message(
+        [{"type": "tool_use", "id": "valid_call", "name": "demo", "input": {}}]
+    )
+    user = create_user_message(
+        [{"type": "tool_result", "tool_use_id": "valid_call", "text": "result"}]
+    )
+
+    normalized = normalize_messages_for_api([assistant, user], protocol="openai")
+
+    tool_messages = [msg for msg in normalized if msg.get("role") == "tool"]
+    assert len(tool_messages) == 1, "Paired tool_results should be kept"
+    assert tool_messages[0]["tool_call_id"] == "valid_call"

@@ -14,10 +14,7 @@ from typing import List, Dict, Any, Optional, Union, Iterable
 from pathlib import Path
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.markdown import Markdown
-from rich.text import Text
-from rich import box
 from rich.markup import escape
 
 from prompt_toolkit import PromptSession
@@ -27,7 +24,6 @@ from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.document import Document
 
-from ripperdoc import __version__
 from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
@@ -38,13 +34,20 @@ from ripperdoc.cli.commands import (
     list_slash_commands,
     slash_command_completions,
 )
-from ripperdoc.cli.ui.helpers import get_profile_for_pointer
+from ripperdoc.cli.ui.helpers import get_profile_for_pointer, THINKING_WORDS
 from ripperdoc.core.permissions import make_permission_checker
 from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
+from ripperdoc.cli.ui.panels import create_welcome_panel, create_status_bar, print_shortcuts
+from ripperdoc.cli.ui.message_display import MessageDisplay, parse_bash_output_sections
+from ripperdoc.cli.ui.interrupt_handler import InterruptHandler
+from ripperdoc.utils.conversation_compaction import (
+    ConversationCompactor,
+    extract_tool_ids_from_message,
+    get_complete_tool_pairs_tail,
+)
 from ripperdoc.utils.message_compaction import (
-    compact_messages,
     estimate_conversation_tokens,
     estimate_used_tokens,
     get_context_usage_status,
@@ -61,7 +64,6 @@ from ripperdoc.utils.mcp import (
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.session_history import SessionHistory
 from ripperdoc.utils.memory import build_memory_instructions
-from ripperdoc.core.query import query_llm
 from ripperdoc.utils.messages import (
     UserMessage,
     AssistantMessage,
@@ -70,7 +72,6 @@ from ripperdoc.utils.messages import (
     create_assistant_message,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
-from ripperdoc.cli.ui.tool_renderers import ToolResultRendererRegistry
 from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
 
@@ -78,137 +79,13 @@ from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
 # Type alias for conversation messages
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
-THINKING_WORDS: list[str] = [
-    "Accomplishing",
-    "Actioning",
-    "Actualizing",
-    "Baking",
-    "Booping",
-    "Brewing",
-    "Calculating",
-    "Cerebrating",
-    "Channelling",
-    "Churning",
-    "Coalescing",
-    "Cogitating",
-    "Computing",
-    "Combobulating",
-    "Concocting",
-    "Conjuring",
-    "Considering",
-    "Contemplating",
-    "Cooking",
-    "Crafting",
-    "Creating",
-    "Crunching",
-    "Deciphering",
-    "Deliberating",
-    "Determining",
-    "Discombobulating",
-    "Divining",
-    "Doing",
-    "Effecting",
-    "Elucidating",
-    "Enchanting",
-    "Envisioning",
-    "Finagling",
-    "Flibbertigibbeting",
-    "Forging",
-    "Forming",
-    "Frolicking",
-    "Generating",
-    "Germinating",
-    "Hatching",
-    "Herding",
-    "Honking",
-    "Ideating",
-    "Imagining",
-    "Incubating",
-    "Inferring",
-    "Manifesting",
-    "Marinating",
-    "Meandering",
-    "Moseying",
-    "Mulling",
-    "Mustering",
-    "Musing",
-    "Noodling",
-    "Percolating",
-    "Perusing",
-    "Philosophising",
-    "Pontificating",
-    "Pondering",
-    "Processing",
-    "Puttering",
-    "Puzzling",
-    "Reticulating",
-    "Ruminating",
-    "Scheming",
-    "Schlepping",
-    "Shimmying",
-    "Simmering",
-    "Smooshing",
-    "Spelunking",
-    "Spinning",
-    "Stewing",
-    "Sussing",
-    "Synthesizing",
-    "Thinking",
-    "Tinkering",
-    "Transmuting",
-    "Unfurling",
-    "Unravelling",
-    "Vibing",
-    "Wandering",
-    "Whirring",
-    "Wibbling",
-    "Wizarding",
-    "Working",
-    "Wrangling",
-]
-
 console = Console()
 logger = get_logger()
 
-# Keep a small window of recent messages alongside the summary after /compact so
-# the model retains immediate context.
-RECENT_MESSAGES_AFTER_COMPACT = 8
 
-
-def create_welcome_panel() -> Panel:
-    """Create a welcome panel."""
-
-    welcome_content = """
-[bold cyan]Welcome to Ripperdoc![/bold cyan]
-
-Ripperdoc is an AI-powered coding assistant that helps with software development tasks.
-You can read files, edit code, run commands, and help with various programming tasks.
-
-[dim]Type your questions below. Press Ctrl+C to exit.[/dim]
-"""
-
-    return Panel(
-        welcome_content,
-        title=f"Ripperdoc v{__version__}",
-        border_style="cyan",
-        box=box.ROUNDED,
-        padding=(1, 2),
-    )
-
-
-def create_status_bar() -> Text:
-    """Create a status bar with current information."""
-    profile = get_profile_for_pointer("main")
-    model_name = profile.model if profile else "Not configured"
-
-    status_text = Text()
-    status_text.append("Ripperdoc", style="bold cyan")
-    status_text.append(" • ")
-    status_text.append(model_name, style="dim")
-    status_text.append(" • ")
-    status_text.append("Ready", style="green")
-
-    return status_text
+# Legacy aliases for backward compatibility with tests
+_extract_tool_ids_from_message = extract_tool_ids_from_message
+_get_complete_tool_pairs_tail = get_complete_tool_pairs_tail
 
 
 class RichUI:
@@ -231,12 +108,6 @@ class RichUI:
         self.query_context: Optional[QueryContext] = None
         self._current_tool: Optional[str] = None
         self._should_exit: bool = False
-        self._query_interrupted: bool = False  # Track if query was interrupted by ESC
-        self._esc_listener_active: bool = False  # Track if ESC listener is active
-        self._esc_listener_paused: bool = False  # Pause ESC listener during blocking prompts
-        self._stdin_fd: Optional[int] = None  # Track stdin for raw mode restoration
-        self._stdin_old_settings: Optional[list] = None  # Original terminal settings
-        self._stdin_in_raw_mode: bool = False  # Whether we currently own raw mode
         self.command_list = list_slash_commands()
         self._command_completions = slash_command_completions()
         self._prompt_session: Optional[PromptSession] = None
@@ -271,6 +142,12 @@ class RichUI:
             include_defaults=True,
             include_gitignore=True,
         )
+
+        # Initialize component handlers
+        self._message_display = MessageDisplay(self.console, self.verbose)
+        self._interrupt_handler = InterruptHandler()
+        self._interrupt_handler.set_abort_callback(self._trigger_abort)
+
         # Keep MCP runtime alive for the whole UI session. Create it on the UI loop up front.
         try:
             self._run_async(ensure_mcp_runtime(self.project_path))
@@ -280,6 +157,22 @@ class RichUI:
                 type(exc).__name__, exc,
                 extra={"session_id": self.session_id},
             )
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Properties for backward compatibility with interrupt handler
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    @property
+    def _query_interrupted(self) -> bool:
+        return self._interrupt_handler.was_interrupted
+
+    @property
+    def _esc_listener_paused(self) -> bool:
+        return self._interrupt_handler._esc_listener_paused
+
+    @_esc_listener_paused.setter
+    def _esc_listener_paused(self, value: bool) -> None:
+        self._interrupt_handler._esc_listener_paused = value
 
     def _context_usage_lines(
         self, breakdown: Any, model_label: str, auto_compact_enabled: bool
@@ -372,287 +265,55 @@ class RichUI:
     ) -> None:
         """Display a message in the conversation."""
         if not is_tool:
-            self._print_human_or_assistant(sender, content)
+            self._message_display.print_human_or_assistant(sender, content)
             return
 
         if tool_type == "call":
-            self._print_tool_call(sender, content, tool_args)
+            self._message_display.print_tool_call(sender, content, tool_args)
             return
 
         if tool_type == "result":
-            self._print_tool_result(sender, content, tool_data, tool_error)
+            self._message_display.print_tool_result(
+                sender, content, tool_data, tool_error, parse_bash_output_sections
+            )
             return
 
-        self._print_generic_tool(sender, content)
+        self._message_display.print_generic_tool(sender, content)
 
+    # Delegate to MessageDisplay for backward compatibility
     def _format_tool_args(self, tool_name: str, tool_args: Optional[dict]) -> list[str]:
-        """Render tool arguments into concise display-friendly parts."""
-        if not tool_args:
-            return []
-
-        args_parts: list[str] = []
-
-        def _format_arg(arg_key: str, arg_value: Any) -> str:
-            if arg_key == "todos" and isinstance(arg_value, list):
-                counts = {"pending": 0, "in_progress": 0, "completed": 0}
-                for item in arg_value:
-                    status = ""
-                    if isinstance(item, dict):
-                        status = item.get("status", "")
-                    elif hasattr(item, "get"):
-                        status = item.get("status", "")
-                    elif hasattr(item, "status"):
-                        status = getattr(item, "status")
-                    if status in counts:
-                        counts[status] += 1
-                total = len(arg_value)
-                return f"{arg_key}: {total} items"
-            if isinstance(arg_value, (list, dict)):
-                return f"{arg_key}: {len(arg_value)} items"
-            if isinstance(arg_value, str) and len(arg_value) > 50:
-                return f'{arg_key}: "{arg_value[:50]}..."'
-            return f"{arg_key}: {arg_value}"
-
-        if tool_name == "Bash":
-            command_value = tool_args.get("command")
-            if command_value is not None:
-                args_parts.append(_format_arg("command", command_value))
-
-            background_value = tool_args.get("run_in_background", tool_args.get("runInBackground"))
-            background_value = bool(background_value) if background_value is not None else False
-            args_parts.append(f"background: {background_value}")
-
-            sandbox_value = tool_args.get("sandbox")
-            sandbox_value = bool(sandbox_value) if sandbox_value is not None else False
-            args_parts.append(f"sandbox: {sandbox_value}")
-
-            for key, value in tool_args.items():
-                if key in {"command", "run_in_background", "runInBackground", "sandbox"}:
-                    continue
-                args_parts.append(_format_arg(key, value))
-            return args_parts
-
-        # Special handling for Edit and MultiEdit tools - don't show old_string
-        if tool_name in ["Edit", "MultiEdit"]:
-            for key, value in tool_args.items():
-                if key == "new_string":
-                    continue  # Skip new_string for Edit/MultiEdit tools
-                if key == "old_string":
-                    continue  # Skip old_string for Edit/MultiEdit tools
-                # For MultiEdit, also handle edits array
-                if key == "edits" and isinstance(value, list):
-                    args_parts.append(f"edits: {len(value)} operations")
-                    continue
-                args_parts.append(_format_arg(key, value))
-            return args_parts
-
-        for key, value in tool_args.items():
-            args_parts.append(_format_arg(key, value))
-        return args_parts
+        return self._message_display.format_tool_args(tool_name, tool_args)
 
     def _print_tool_call(self, sender: str, content: str, tool_args: Optional[dict]) -> None:
-        """Render a tool invocation line."""
-        if sender == "Task":
-            subagent = ""
-            if isinstance(tool_args, dict):
-                subagent = tool_args.get("subagent_type") or tool_args.get("subagent") or ""
-            desc = ""
-            if isinstance(tool_args, dict):
-                raw_desc = tool_args.get("description") or tool_args.get("prompt") or ""
-                desc = raw_desc if len(str(raw_desc)) <= 120 else str(raw_desc)[:117] + "..."
-            label = f"-> Launching subagent: {subagent or 'unknown'}"
-            if desc:
-                label += f" — {desc}"
-            self.console.print(f"[cyan]{escape(label)}[/cyan]")
-            return
-
-        tool_name = sender if sender != "Ripperdoc" else content
-        tool_display = f"● {tool_name}("
-
-        args_parts = self._format_tool_args(tool_name, tool_args)
-        if args_parts:
-            tool_display += ", ".join(args_parts)
-        tool_display += ")"
-
-        self.console.print(f"[dim cyan]{escape(tool_display)}[/]")
+        self._message_display.print_tool_call(sender, content, tool_args)
 
     def _print_tool_result(
         self, sender: str, content: str, tool_data: Any, tool_error: bool = False
     ) -> None:
-        """Render a tool result summary using the renderer registry."""
-        # Check for failure states
-        failed = tool_error
-        if tool_data is not None:
-            if isinstance(tool_data, dict):
-                failed = failed or (tool_data.get("success") is False)
-            else:
-                success = getattr(tool_data, "success", None)
-                failed = failed or (success is False)
-            failed = failed or bool(self._get_tool_field(tool_data, "is_error"))
-
-        # Extract warning/token info
-        warning_text = None
-        token_estimate = None
-        if tool_data is not None:
-            warning_text = self._get_tool_field(tool_data, "warning")
-            token_estimate = self._get_tool_field(tool_data, "token_estimate")
-
-        # Handle failure case
-        if failed:
-            if content:
-                self.console.print(f"  ⎿  [red]{escape(content)}[/red]")
-            else:
-                self.console.print(f"  ⎿  [red]{escape(sender)} failed[/red]")
-            return
-
-        # Display warnings and token estimates
-        if warning_text:
-            self.console.print(f"  ⎿  [yellow]{escape(str(warning_text))}[/yellow]")
-            if token_estimate:
-                self.console.print(
-                    f"      [dim]Estimated tokens: {escape(str(token_estimate))}[/dim]"
-                )
-        elif token_estimate and self.verbose:
-            self.console.print(f"  ⎿  [dim]Estimated tokens: {escape(str(token_estimate))}[/dim]")
-
-        # Handle empty content
-        if not content:
-            self.console.print("  ⎿  [dim]Tool completed[/]")
-            return
-
-        # Use renderer registry for tool-specific rendering
-        registry = ToolResultRendererRegistry(
-            self.console, self.verbose, self._parse_bash_output_sections
+        self._message_display.print_tool_result(
+            sender, content, tool_data, tool_error, parse_bash_output_sections
         )
-        if registry.render(sender, content, tool_data):
-            return
-
-        # Fallback for unhandled tools
-        self.console.print("  ⎿  [dim]Tool completed[/]")
 
     def _print_generic_tool(self, sender: str, content: str) -> None:
-        """Fallback rendering for miscellaneous tool messages."""
-        if sender == "Task" and isinstance(content, str) and content.startswith("[subagent:"):
-            agent_label = content.split("]", 1)[0].replace("[subagent:", "").strip()
-            summary = content.split("]", 1)[1].strip() if "]" in content else ""
-            self.console.print(f"[green]↳ Subagent {escape(agent_label)} finished[/green]")
-            if summary:
-                self.console.print(f"    {summary}", markup=False)
-            return
-        self.console.print(f"[dim cyan][Tool] {escape(sender)}: {escape(content)}[/]")
+        self._message_display.print_generic_tool(sender, content)
 
     def _print_human_or_assistant(self, sender: str, content: str) -> None:
-        """Render messages from the user or assistant."""
-        if sender.lower() == "you":
-            self.console.print(f"[bold green]{escape(sender)}:[/] {escape(content)}")
-            return
-        self.console.print(Markdown(content))
-
-    def _get_tool_field(self, data: Any, key: str, default: Any = None) -> Any:
-        """Safely fetch a field from either an object or a dict."""
-        if isinstance(data, dict):
-            return data.get(key, default)
-        return getattr(data, key, default)
-
-    def _parse_bash_output_sections(self, content: str) -> tuple[List[str], List[str]]:
-        """Fallback parser to pull stdout/stderr sections from a text block."""
-        stdout_lines: List[str] = []
-        stderr_lines: List[str] = []
-        if not content:
-            return stdout_lines, stderr_lines
-
-        current: Optional[str] = None
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("stdout:"):
-                current = "stdout"
-                remainder = line.split("stdout:", 1)[1].strip()
-                if remainder:
-                    stdout_lines.append(remainder)
-                continue
-            if stripped.startswith("stderr:"):
-                current = "stderr"
-                remainder = line.split("stderr:", 1)[1].strip()
-                if remainder:
-                    stderr_lines.append(remainder)
-                continue
-            if stripped.startswith("exit code:"):
-                break
-            if current == "stdout":
-                stdout_lines.append(line)
-            elif current == "stderr":
-                stderr_lines.append(line)
-
-        return stdout_lines, stderr_lines
+        self._message_display.print_human_or_assistant(sender, content)
 
     def _stringify_message_content(self, content: Any) -> str:
-        """Extract readable text from a message content payload."""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: List[str] = []
-            for block in content:
-                text = getattr(block, "text", None)
-                if text is None:
-                    text = getattr(block, "thinking", None)
-                if not text and isinstance(block, dict):
-                    text = block.get("text") or block.get("thinking") or block.get("data")
-                if text:
-                    parts.append(str(text))
-            return "\n".join(parts)
-        return ""
+        return self._message_display.stringify_message_content(content)
 
     def _format_reasoning_preview(self, reasoning: Any) -> str:
-        """Best-effort stringify for reasoning/thinking traces."""
-        if reasoning is None:
-            return ""
-        if isinstance(reasoning, str):
-            preview = reasoning.strip()
-        else:
-            try:
-                preview = json.dumps(reasoning, ensure_ascii=False)
-            except (TypeError, ValueError, OverflowError):
-                preview = str(reasoning)
-        preview = preview.strip()
-        if len(preview) > 4000:
-            preview = preview[:4000] + "…"
-        return preview
+        return self._message_display.format_reasoning_preview(reasoning)
 
     def _print_reasoning(self, reasoning: Any) -> None:
-        """Display thinking traces in a dim style."""
-        preview = self._format_reasoning_preview(reasoning)
-        if not preview:
-            return
-        # Collapse excessive blank lines to keep the thinking block compact.
-        preview = re.sub(r"\n{2,}", "\n", preview)
-        self.console.print(f"[dim]🧠 Thinking: {escape(preview)}[/]")
+        self._message_display.print_reasoning(reasoning)
 
     def _render_transcript(self, messages: List[ConversationMessage]) -> str:
-        """Render a simple transcript for summarization."""
-        lines: List[str] = []
-        for msg in messages:
-            role = getattr(msg, "type", "") or getattr(msg, "role", "")
-            message_payload = getattr(msg, "message", None) or getattr(msg, "content", None)
-            if hasattr(message_payload, "content"):
-                message_payload = getattr(message_payload, "content")
-            text = self._stringify_message_content(message_payload)
-            if not text:
-                continue
-            label = "User" if role == "user" else "Assistant" if role == "assistant" else "Other"
-            lines.append(f"{label}: {text}")
-        return "\n".join(lines)
+        return self._message_display.render_transcript(messages)
 
     def _extract_assistant_text(self, assistant_message: Any) -> str:
-        """Extract plain text from an AssistantMessage."""
-        if isinstance(assistant_message.message.content, str):
-            return assistant_message.message.content
-        if isinstance(assistant_message.message.content, list):
-            parts: List[str] = []
-            for block in assistant_message.message.content:
-                if getattr(block, "type", None) == "text" and getattr(block, "text", None):
-                    parts.append(str(block.text))
-            return "\n".join(parts)
-        return ""
+        return self._message_display.extract_assistant_text(assistant_message)
 
     async def _prepare_query_context(self, user_input: str) -> tuple[str, Dict[str, str]]:
         """Load MCP servers, skills, and build system prompt.
@@ -1063,90 +724,12 @@ class RichUI:
     # ESC Key Interrupt Support
     # ─────────────────────────────────────────────────────────────────────────────
 
-    # Keys that trigger interrupt
-    _INTERRUPT_KEYS = {'\x1b', '\x03'}  # ESC, Ctrl+C
-
+    # Delegate to InterruptHandler
     def _pause_interrupt_listener(self) -> bool:
-        """Pause ESC listener and restore cooked terminal mode if we own raw mode."""
-        prev = self._esc_listener_paused
-        self._esc_listener_paused = True
-        try:
-            import termios
-        except ImportError:
-            return prev
-
-        if (
-            self._stdin_fd is not None
-            and self._stdin_old_settings is not None
-            and self._stdin_in_raw_mode
-        ):
-            with contextlib.suppress(OSError, termios.error, ValueError):
-                termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._stdin_old_settings)
-            self._stdin_in_raw_mode = False
-        return prev
+        return self._interrupt_handler.pause_listener()
 
     def _resume_interrupt_listener(self, previous_state: bool) -> None:
-        """Restore paused state to what it was before a blocking prompt."""
-        self._esc_listener_paused = previous_state
-
-    async def _listen_for_interrupt_key(self) -> bool:
-        """Listen for interrupt keys (ESC/Ctrl+C) during query execution.
-
-        Uses raw terminal mode for immediate key detection without waiting
-        for escape sequences to complete.
-        """
-        import sys
-        import select
-        import termios
-        import tty
-
-        try:
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-        except (OSError, termios.error, ValueError):
-            return False
-
-        self._stdin_fd = fd
-        self._stdin_old_settings = old_settings
-        raw_enabled = False
-        try:
-            while self._esc_listener_active:
-                if self._esc_listener_paused:
-                    if raw_enabled:
-                        with contextlib.suppress(OSError, termios.error, ValueError):
-                            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                        raw_enabled = False
-                        self._stdin_in_raw_mode = False
-                    await asyncio.sleep(0.05)
-                    continue
-
-                if not raw_enabled:
-                    tty.setraw(fd)
-                    raw_enabled = True
-                    self._stdin_in_raw_mode = True
-
-                await asyncio.sleep(0.02)
-                if select.select([sys.stdin], [], [], 0)[0]:
-                    if sys.stdin.read(1) in self._INTERRUPT_KEYS:
-                        return True
-        except (OSError, ValueError):
-            pass
-        finally:
-            self._stdin_in_raw_mode = False
-            with contextlib.suppress(OSError, termios.error, ValueError):
-                if raw_enabled:
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            self._stdin_fd = None
-            self._stdin_old_settings = None
-
-        return False
-
-    async def _cancel_task(self, task: asyncio.Task) -> None:
-        """Cancel a task and wait for it to finish."""
-        if not task.done():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        self._interrupt_handler.resume_listener(previous_state)
 
     def _trigger_abort(self) -> None:
         """Signal the query to abort."""
@@ -1154,42 +737,8 @@ class RichUI:
             self.query_context.abort_controller.set()
 
     async def _run_query_with_esc_interrupt(self, query_coro: Any) -> bool:
-        """Run a query with ESC key interrupt support.
-
-        Returns True if interrupted, False if completed normally.
-        """
-        self._query_interrupted = False
-        self._esc_listener_active = True
-
-        query_task = asyncio.create_task(query_coro)
-        interrupt_task = asyncio.create_task(self._listen_for_interrupt_key())
-
-        try:
-            done, _ = await asyncio.wait(
-                {query_task, interrupt_task},
-                return_when=asyncio.FIRST_COMPLETED
-            )
-
-            # Check if interrupted
-            if interrupt_task in done and interrupt_task.result():
-                self._query_interrupted = True
-                self._trigger_abort()
-                await self._cancel_task(query_task)
-                return True
-
-            # Query completed normally
-            if query_task in done:
-                await self._cancel_task(interrupt_task)
-                with contextlib.suppress(Exception):
-                    query_task.result()
-                return False
-
-            return False
-
-        finally:
-            self._esc_listener_active = False
-            await self._cancel_task(query_task)
-            await self._cancel_task(interrupt_task)
+        """Run a query with ESC key interrupt support."""
+        return await self._interrupt_handler.run_with_interrupt(query_coro)
 
     def _run_async(self, coro: Any) -> Any:
         """Run a coroutine on the persistent event loop."""
@@ -1416,123 +965,29 @@ class RichUI:
 
     async def _run_manual_compact(self, custom_instructions: str) -> None:
         """Manual compaction: clear bulky tool output and summarize conversation."""
-        if len(self.conversation_messages) < 2:
-            console.print("[yellow]Not enough conversation history to compact.[/yellow]")
-            return
-
         model_profile = get_profile_for_pointer("main")
         protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 
+        compactor = ConversationCompactor(
+            self.console,
+            self._render_transcript,
+            self._extract_assistant_text,
+        )
+
         original_messages = list(self.conversation_messages)
-        tokens_before = estimate_conversation_tokens(original_messages, protocol=protocol)
-
-        compaction = compact_messages(original_messages, protocol=protocol)
-        messages_for_summary = compaction.messages
-
-        spinner = Spinner(console, "Summarizing conversation...", spinner="dots")
-        summary_text = ""
-        try:
-            spinner.start()
-            summary_text = await self._summarize_conversation(
-                messages_for_summary, custom_instructions
-            )
-        except (OSError, RuntimeError, ConnectionError, ValueError, KeyError) as e:
-            console.print(f"[red]Error during compaction: {escape(str(e))}[/red]")
-            logger.warning(
-                "[ui] Error during manual compaction: %s: %s",
-                type(e).__name__, e,
-                extra={"session_id": self.session_id},
-            )
-            return
-        finally:
-            spinner.stop()
-
-        if not summary_text:
-            console.print("[red]Failed to summarize conversation for compaction.[/red]")
-            return
-
-        if summary_text.strip() == "":
-            console.print("[red]Summarization returned empty content; aborting compaction.[/red]")
-            return
-
-        self._saved_conversation = original_messages
-        summary_message = create_assistant_message(
-            f"Conversation summary (generated by /compact):\n{summary_text}"
-        )
-        non_progress_messages = [
-            m for m in messages_for_summary if getattr(m, "type", "") != "progress"
-        ]
-        recent_tail = (
-            non_progress_messages[-RECENT_MESSAGES_AFTER_COMPACT:]
-            if RECENT_MESSAGES_AFTER_COMPACT > 0
-            else []
-        )
-        new_conversation = [
-            create_user_message(
-                "Conversation compacted. Summary plus recent turns are kept; older tool output may "
-                "be cleared."
-            ),
-            summary_message,
-            *recent_tail,
-        ]
-        self.conversation_messages = new_conversation
-        tokens_after = estimate_conversation_tokens(new_conversation, protocol=protocol)
-        tokens_saved = max(0, tokens_before - tokens_after)
-        console.print(
-            f"[green]✓ Conversation compacted[/green] "
-            f"(saved ~{tokens_saved} tokens). Use /resume to restore full history."
+        result = await compactor.compact(
+            self.conversation_messages,
+            custom_instructions,
+            protocol=protocol,
         )
 
-    async def _summarize_conversation(
-        self,
-        messages: List[ConversationMessage],
-        custom_instructions: str,
-    ) -> str:
-        """Summarize the given conversation using the configured model."""
-        # Keep transcript bounded to recent turns to avoid blowing context.
-        recent_messages = messages[-40:]
-        transcript = self._render_transcript(recent_messages)
-        if not transcript.strip():
-            return ""
-
-        instructions = (
-            "You are a helpful assistant summarizing the prior conversation. "
-            "Produce a concise bullet-list summary covering key decisions, important context, "
-            "commands run, files touched, and pending TODOs. Include blockers or open questions. "
-            "Keep it brief."
-        )
-        if custom_instructions.strip():
-            instructions += f"\nCustom instructions: {custom_instructions.strip()}"
-
-        user_content = (
-            f"Summarize the following conversation between a user and an assistant:\n\n{transcript}"
-        )
-
-        assistant_response = await query_llm(
-            messages=[{"role": "user", "content": user_content}],  # type: ignore[list-item]
-            system_prompt=instructions,
-            tools=[],
-            max_thinking_tokens=0,
-            model="main",
-        )
-        return self._extract_assistant_text(assistant_response)
+        if result is not None:
+            self._saved_conversation = original_messages
+            self.conversation_messages = result
 
     def _print_shortcuts(self) -> None:
         """Show common keyboard shortcuts and prefixes."""
-        pairs = [
-            ("? for shortcuts", "! for bash mode"),
-            ("/ for commands", "@ for file mention"),
-            # "# to memorize", "ctrl + v to paste images"),
-            # "& for background", "ctrl + t to show todos"),
-            # "double tap esc to clear input", "tab to toggle thinking"),
-            # "ctrl + _ to undo", "ctrl + z to suspend"),
-            # "shift + enter for newline", ""),
-        ]
-        console.print("[dim]Shortcuts[/dim]")
-        for left, right in pairs:
-            left_text = f"  {left}".ljust(32)
-            right_text = f"{right}" if right else ""
-            console.print(f"{left_text}{right_text}")
+        print_shortcuts(self.console)
 
 
 def check_onboarding_rich() -> bool:
