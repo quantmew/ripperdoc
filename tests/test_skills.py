@@ -55,7 +55,7 @@ def test_load_all_skills_prefers_project_and_parses_fields(tmp_path: Path) -> No
         "worker",
         "Handles work",
         "Do the work well.",
-        extra_frontmatter="allowed-tools: View, Grep\nmodel: gpt-4o\nmax-thinking-tokens: 128",
+        extra_frontmatter="allowed-tools: Read, Grep\nmodel: gpt-4o\nmax-thinking-tokens: 128",
     )
 
     result = load_all_skills(project_path=project_dir, home=home_dir)
@@ -67,7 +67,7 @@ def test_load_all_skills_prefers_project_and_parses_fields(tmp_path: Path) -> No
     assert skills["shared-skill"].location == SkillLocation.PROJECT
 
     worker = skills["worker"]
-    assert worker.allowed_tools == ["View", "Grep"]
+    assert worker.allowed_tools == ["Read", "Grep"]
     assert worker.model == "gpt-4o"
     assert worker.max_thinking_tokens == 128
     assert worker.content.strip().startswith("Do the work")
@@ -90,7 +90,7 @@ async def test_skill_tool_loads_skill_content(tmp_path: Path) -> None:
         "helper",
         "Provides help",
         "Helper skill body.",
-        extra_frontmatter="allowed-tools: View",
+        extra_frontmatter="allowed-tools: Read",
     )
 
     tool = SkillTool(project_path=project_dir, home=home_dir)
@@ -111,7 +111,7 @@ async def test_skill_tool_loads_skill_content(tmp_path: Path) -> None:
 
     data = result.data
     assert getattr(data, "skill", None) == "helper"
-    assert getattr(data, "allowed_tools", []) == ["View"]
+    assert getattr(data, "allowed_tools", []) == ["Read"]
 
     missing_validation = await tool.validate_input(
         SkillToolInput(skill="missing"), ToolUseContext()
@@ -166,7 +166,7 @@ async def test_skill_tool_applies_context_hints(tmp_path: Path) -> None:
         "helper",
         "Provides help",
         "Helper skill body.",
-        extra_frontmatter="allowed-tools: View\nmodel: gpt-4o\nmax-thinking-tokens: 512",
+        extra_frontmatter="allowed-tools: Read\nmodel: gpt-4o\nmax-thinking-tokens: 512",
     )
 
     tool = SkillTool(project_path=project_dir, home=home_dir)

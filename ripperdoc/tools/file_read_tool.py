@@ -48,7 +48,7 @@ class FileReadTool(Tool[FileReadToolInput, FileReadToolOutput]):
 
     @property
     def name(self) -> str:
-        return "View"
+        return "Read"
 
     async def description(self) -> str:
         return """Read the contents of a file. You can optionally specify an offset

@@ -1,11 +1,11 @@
-"""Utilities for compacting conversation history when context grows too large."""
+"""Context compaction utilities"""
 
 from __future__ import annotations
 
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Union
 
 from ripperdoc.core.config import GlobalConfig, ModelProfile, get_global_config
 from ripperdoc.utils.log import get_logger
@@ -22,7 +22,7 @@ logger = get_logger()
 
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
-# Compaction thresholds.
+# Thresholds.
 MAX_TOKENS_SOFT = 20_000
 MAX_TOKENS_HARD = 40_000
 MAX_TOOL_USES_TO_PRESERVE = 3
@@ -30,39 +30,39 @@ IMAGE_TOKEN_COST = 2_000
 AUTO_COMPACT_BUFFER = 13_000
 WARNING_THRESHOLD = 20_000
 ERROR_THRESHOLD = 20_000
-COMPACT_PLACEHOLDER = "[Old tool result content cleared]"
+MICRO_PLACEHOLDER = "[Old tool result content cleared]"
+
+# Context sizing.
+DEFAULT_CONTEXT_TOKENS = 200_000
+MIN_CONTEXT_TOKENS = 20_000
+
+# Tools likely to generate large payloads.
 TOOL_COMMANDS: Set[str] = {
-    "Glob",
-    "Grep",
-    "View",
-    "FileEdit",
-    "MultiEdit",
-    "NotebookEdit",
-    "FileWrite",
-    "LS",
+    "Read",
     "Bash",
+    "Grep",
+    "Glob",
+    "LS",
+    "WebSearch",
+    "WebFetch",
     "BashOutput",
     "ListMcpServers",
     "ListMcpResources",
     "ReadMcpResource",
-    "WebSearch",
-    "WebFetch"
+    # "FileEdit",
+    # "MultiEdit",
+    # "NotebookEdit",
+    # "FileWrite",
 }
 
-# Defaults roughly match modern 200k context windows while still working for smaller models.
-DEFAULT_CONTEXT_TOKENS = 200_000
-MIN_CONTEXT_TOKENS = 20_000
-
-# Track tool results we've already compacted so we don't reprocess them.
+# State to avoid re-compacting the same tool results.
 _processed_tool_use_ids: Set[str] = set()
 _token_cache: Dict[str, int] = {}
-_cleanup_callbacks: List[Callable[[], None]] = []
-_is_compacting: bool = False
 
 
 @dataclass
 class ContextUsageStatus:
-    """Snapshot of the current context usage."""
+    """Snapshot of current context usage."""
 
     used_tokens: int
     max_context_tokens: int
@@ -75,7 +75,6 @@ class ContextUsageStatus:
 
     @property
     def total_tokens(self) -> int:
-        """Alias for backward compatibility."""
         return self.used_tokens
 
     @property
@@ -92,20 +91,8 @@ class ContextUsageStatus:
 
 
 @dataclass
-class CompactionResult:
-    """Result of a compaction run."""
-
-    messages: List[ConversationMessage]
-    tokens_before: int
-    tokens_after: int
-    tokens_saved: int
-    cleared_tool_ids: Set[str]
-    was_compacted: bool
-
-
-@dataclass
 class ContextBreakdown:
-    """Detailed breakdown of context usage for display."""
+    """Detailed breakdown for UI display."""
 
     max_context_tokens: int
     system_prompt_tokens: int
@@ -128,7 +115,6 @@ class ContextBreakdown:
 
     @property
     def effective_tokens(self) -> int:
-        """Tokens that count against the limit including any reserved buffer."""
         return min(self.max_context_tokens, self.reported_tokens + self.reserved_tokens)
 
     @property
@@ -147,8 +133,20 @@ class ContextBreakdown:
         return min(100.0, (tokens / self.max_context_tokens) * 100)
 
 
+@dataclass
+class MicroCompactionResult:
+    """Result of a micro-compaction pass."""
+
+    messages: List[ConversationMessage]
+    tokens_before: int
+    tokens_after: int
+    tokens_saved: int
+    tools_compacted: int
+    trigger_type: str
+    was_compacted: bool
+
+
 def _parse_truthy_env_value(value: Optional[str]) -> bool:
-    """Interpret common truthy environment variable values."""
     if value is None:
         return False
     normalized = value.strip().lower()
@@ -156,12 +154,10 @@ def _parse_truthy_env_value(value: Optional[str]) -> bool:
 
 
 def estimate_tokens_from_text(text: str) -> int:
-    """Estimate token count using shared token estimation helper."""
-    return estimate_tokens(text)
+    return estimate_tokens(text or "")
 
 
 def _stringify_content(content: Union[str, List[MessageContent], None]) -> str:
-    """Convert normalized content into plain text for estimation."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -169,39 +165,22 @@ def _stringify_content(content: Union[str, List[MessageContent], None]) -> str:
     parts: List[str] = []
     for part in content:
         if isinstance(part, dict):
-            block_type = part.get("type")
-            text_val = part.get("text")
+            text_val = part.get("text") or part.get("content") or ""
             if text_val:
                 parts.append(str(text_val))
-
-            # Capture nested text for tool_result content blocks
-            nested_content = part.get("content")
-            if isinstance(nested_content, list):
-                nested_text = _stringify_content(nested_content)
+            nested = part.get("content")
+            if isinstance(nested, list):
+                nested_text = _stringify_content(nested)
                 if nested_text:
                     parts.append(nested_text)
-
-            # Include tool payloads that otherwise don't have "text"
-            if block_type == "tool_use" and part.get("input") is not None:
-                try:
-                    parts.append(json.dumps(part.get("input"), ensure_ascii=False))
-                except (TypeError, ValueError) as exc:
-                    logger.warning(
-                        "[message_compaction] Failed to serialize tool_use input for token estimate: %s: %s",
-                        type(exc).__name__, exc,
-                    )
-                    parts.append(str(part.get("input")))
-
-            # OpenAI-style arguments blocks
             if part.get("arguments"):
                 parts.append(str(part.get("arguments")))
         elif hasattr(part, "text"):
-            text_val = getattr(part, "text", "")
+            text_val = getattr(part, "text", "") or ""
             if text_val:
-                parts.append(str(text_val))
+                parts.append(text_val)
         else:
             parts.append(str(part))
-    # Filter out empty strings to avoid over-counting separators
     return "\n".join([p for p in parts if p])
 
 
@@ -214,7 +193,6 @@ def estimate_conversation_tokens(
     for message in normalized:
         total += estimate_tokens_from_text(_stringify_content(message.get("content")))
 
-        # Account for OpenAI-style tool_calls payloads (arguments + name)
         tool_calls = message.get("tool_calls")
         if isinstance(tool_calls, list):
             for call in tool_calls:
@@ -235,7 +213,6 @@ def estimate_conversation_tokens(
 
 
 def _estimate_tool_schema_tokens(tools: Sequence[Any]) -> int:
-    """Estimate tokens consumed by tool schemas."""
     total = 0
     for tool in tools:
         try:
@@ -245,7 +222,8 @@ def _estimate_tool_schema_tokens(tools: Sequence[Any]) -> int:
         except (AttributeError, TypeError, KeyError, ValueError) as exc:
             logger.warning(
                 "Failed to estimate tokens for tool schema: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"tool": getattr(tool, "name", None)},
             )
             continue
@@ -268,51 +246,37 @@ def get_model_context_limit(
     if explicit_limit and explicit_limit > 0:
         return explicit_limit
 
-    if model_profile and getattr(model_profile, "context_window", None):
-        try:
-            configured = int(model_profile.context_window)  # type: ignore[arg-type]
-            if configured > 0:
-                return configured
-        except (TypeError, ValueError):
-            pass
+    try:
+        model = getattr(model_profile, "model", None) or ""
+    except Exception:
+        model = ""
 
-    if model_profile and model_profile.model:
-        name = model_profile.model.lower()
-        if "claude" in name:
-            # Claude 4.5 defaults and beta 1M thinking window.
-            if "4.5" in name or "sonnet" in name or "haiku" in name:
-                return 1_000_000 if "1m" in name or "beta" in name else 200_000
-            if "opus" in name or "4.1" in name:
-                return 200_000
-            return 200_000
-        if "gpt-4o" in name or "gpt-4.1" in name or "gpt-4-turbo" in name:
-            return 128_000
-        if "gpt-4" in name:
-            return 32_000
-        if "gpt-3.5" in name:
-            return 16_000
-        if "deepseek" in name:
-            return 128_000
-
+    # Fallback mapping; tuned for common providers.
+    model = model.lower()
+    if "1000k" in model or "1m" in model:
+        return 1_000_000
+    if "gpt-4o" in model or "gpt4o" in model:
+        return 128_000
+    if "gpt-4" in model:
+        return 32_000
+    if "deepseek" in model:
+        return 128_000
     return DEFAULT_CONTEXT_TOKENS
 
 
 def get_remaining_context_tokens(
     model_profile: Optional[ModelProfile], explicit_limit: Optional[int] = None
 ) -> int:
-    """Return the context window minus the model's configured output tokens."""
+    """Context window minus configured output tokens."""
     context_limit = max(get_model_context_limit(model_profile, explicit_limit), MIN_CONTEXT_TOKENS)
     try:
-        max_output_tokens = (
-            int(getattr(model_profile, "max_tokens", 0) or 0) if model_profile else 0
-        )
+        max_output_tokens = int(getattr(model_profile, "max_tokens", 0) or 0) if model_profile else 0
     except (TypeError, ValueError):
         max_output_tokens = 0
     return max(MIN_CONTEXT_TOKENS, context_limit - max(0, max_output_tokens))
 
 
 def resolve_auto_compact_enabled(config: GlobalConfig) -> bool:
-    """Return whether auto-compaction is enabled, honoring an env override."""
     env_override = os.getenv("RIPPERDOC_AUTO_COMPACT")
     if env_override is not None:
         normalized = env_override.strip().lower()
@@ -325,7 +289,7 @@ def get_context_usage_status(
     max_context_tokens: Optional[int],
     auto_compact_enabled: bool,
 ) -> ContextUsageStatus:
-    """Compute context usage thresholds using the compaction heuristics."""
+    """Compute usage thresholds."""
     context_limit = max(max_context_tokens or DEFAULT_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS)
     effective_limit = (
         max(MIN_CONTEXT_TOKENS, context_limit - AUTO_COMPACT_BUFFER)
@@ -334,9 +298,7 @@ def get_context_usage_status(
     )
 
     tokens_left = max(effective_limit - used_tokens, 0)
-    percent_left = (
-        0.0 if effective_limit <= 0 else min(100.0, (tokens_left / effective_limit) * 100)
-    )
+    percent_left = 0.0 if effective_limit <= 0 else min(100.0, (tokens_left / effective_limit) * 100)
     percent_used = 100.0 - percent_left
 
     warning_limit = max(0, effective_limit - WARNING_THRESHOLD)
@@ -387,9 +349,7 @@ def summarize_context_usage(
     )
 
 
-def find_latest_assistant_usage_tokens(
-    messages: Sequence[ConversationMessage],
-) -> int:
+def find_latest_assistant_usage_tokens(messages: Sequence[ConversationMessage]) -> int:
     """Best-effort extraction of usage tokens from the latest assistant message."""
     for message in reversed(messages):
         if getattr(message, "type", "") != "assistant":
@@ -429,36 +389,12 @@ def estimate_used_tokens(
     protocol: str = "anthropic",
     precomputed_total_tokens: Optional[int] = None,
 ) -> int:
-    """Return usage tokens if present; otherwise fall back to an estimated total."""
     usage_tokens = find_latest_assistant_usage_tokens(messages)
     if usage_tokens > 0:
         return usage_tokens
     if precomputed_total_tokens is not None:
         return precomputed_total_tokens
     return estimate_conversation_tokens(messages, protocol=protocol)
-
-
-def register_cleanup_callback(callback: Callable[[], None]) -> Callable[[], None]:
-    """Register a callback that will run after a compaction pass."""
-    _cleanup_callbacks.append(callback)
-
-    def _unregister() -> None:
-        nonlocal callback
-        _cleanup_callbacks[:] = [cb for cb in _cleanup_callbacks if cb is not callback]
-
-    return _unregister
-
-
-def _run_cleanup_callbacks() -> None:
-    callbacks = list(_cleanup_callbacks)
-    for callback in callbacks:
-        try:
-            callback()
-        except (RuntimeError, TypeError, ValueError, AttributeError) as exc:
-            logger.debug(
-                "[message_compaction] Cleanup callback failed: %s: %s",
-                type(exc).__name__, exc,
-            )
 
 
 def _normalize_tool_use_id(block: Any) -> str:
@@ -470,7 +406,7 @@ def _normalize_tool_use_id(block: Any) -> str:
 
 
 def _estimate_message_tokens(content_block: Any) -> int:
-    """Estimate tokens for a single content block."""
+    """Estimate tokens for a single content block (text/image only)."""
     if content_block is None:
         return 0
 
@@ -483,9 +419,7 @@ def _estimate_message_tokens(content_block: Any) -> int:
     if isinstance(content, list):
         total = 0
         for part in content:
-            part_type = getattr(part, "type", None) or (
-                part.get("type") if isinstance(part, dict) else None
-            )
+            part_type = getattr(part, "type", None) or (part.get("type") if isinstance(part, dict) else None)
             if part_type == "text":
                 text_val = getattr(part, "text", None) if hasattr(part, "text") else None
                 if text_val is None and isinstance(part, dict):
@@ -509,89 +443,40 @@ def _get_cached_token_count(cache_key: str, content_block: Any) -> int:
     return estimated
 
 
-def compact_messages(
+def micro_compact_messages(
     messages: Sequence[ConversationMessage],
-    max_tokens: Optional[int] = None,
     *,
+    max_tokens: Optional[int] = None,
+    context_limit: Optional[int] = None,
+    auto_compact_enabled: Optional[bool] = None,
     protocol: str = "anthropic",
-) -> CompactionResult:
-    """Compact tool results by replacing older outputs with placeholders.
-
-    The compaction process follows these steps:
-
-    【Step 1: Initialization and Environment Check】
-    - Estimate the total token count before compaction
-    - Check if micro-compaction is disabled via environment variable (DISABLE_MICROCOMPACT)
-    - Determine the effective maximum token threshold
-
-    【Step 2: Collect Compactable Tool Calls】
-    - Iterate through all messages to find tool calls from TOOL_COMMANDS
-    - Record each tool_use ID and the token count of its corresponding tool_result
-    - These tools typically produce large outputs (file contents, command outputs, etc.)
-
-    【Step 3: Decide Which Tool Results to Compact】
-    - Preserve the most recent N tool call results (MAX_TOOL_USES_TO_PRESERVE = 3)
-    - For older tool results, mark them for compaction if total tokens exceed threshold
-    - Compaction strategy: compact from oldest to newest until tokens fall below threshold
-
-    【Step 4: Verify Compaction Necessity】
-    - If max_tokens is not specified, check against auto-compaction policy
-    - Only compact when usage exceeds warning threshold AND savings are significant
-
-    【Step 5: Execute Compaction】
-    - Iterate through all messages and for tool_results marked for compaction:
-      - Replace their content with placeholder "[Old tool result content cleared]"
-    - Preserve message structure, only modify content
-
-    【Step 6: Cleanup and Return Results】
-    - Record compacted tool IDs to avoid reprocessing
-    - Run cleanup callback functions
-    - Return compaction result with compacted messages and statistics
-
-    Args:
-        messages: Original conversation message list
-        max_tokens: Optional maximum token threshold; triggers compaction when exceeded
-        protocol: API protocol type ("anthropic" or "openai"), affects token estimation
-
-    Returns:
-        CompactionResult: Contains compacted messages, token statistics, and cleared tool IDs
-    """
-    global _is_compacting
-    _is_compacting = False
-
-    # ============================================================
-    # Step 1: Initialization - Estimate token count before compaction
-    # ============================================================
+    trigger_type: str = "auto",
+) -> MicroCompactionResult:
+    """Micro-compaction: strip older tool_result payloads to keep context lean."""
     tokens_before = estimate_conversation_tokens(messages, protocol=protocol)
 
-    # Check if compaction is disabled via environment variable
     if _parse_truthy_env_value(os.getenv("DISABLE_MICROCOMPACT")):
-        return CompactionResult(
+        return MicroCompactionResult(
             messages=list(messages),
             tokens_before=tokens_before,
             tokens_after=tokens_before,
             tokens_saved=0,
-            cleared_tool_ids=set(),
+            tools_compacted=0,
+            trigger_type=trigger_type,
             was_compacted=False,
         )
 
-    # Check API context management flag (kept for upstream compatibility)
+    # Legacy flag kept for parity with upstream behavior.
     _parse_truthy_env_value(os.getenv("USE_API_CONTEXT_MANAGEMENT"))
 
-    # Determine effective maximum token threshold
     is_max_tokens_specified = max_tokens is not None
     try:
-        base_max_tokens = int(max_tokens) if max_tokens is not None else MAX_TOKENS_HARD
+        effective_max_tokens = int(max_tokens) if max_tokens is not None else MAX_TOKENS_HARD
     except (TypeError, ValueError):
-        base_max_tokens = MAX_TOKENS_HARD
-    effective_max_tokens = max(base_max_tokens, MIN_CONTEXT_TOKENS)
+        effective_max_tokens = MAX_TOKENS_HARD
 
-    # ============================================================
-    # Step 2: Collect compactable tool calls
-    # Iterate through messages to find tool_use and corresponding tool_result
-    # ============================================================
-    tool_use_ids_to_compact: List[str] = []  # Tool call IDs in order of appearance
-    token_counts_by_tool_use_id: Dict[str, int] = {}  # Token count per tool result
+    tool_use_ids_to_compact: List[str] = []
+    token_counts_by_tool_use_id: Dict[str, int] = {}
 
     for message in messages:
         msg_type = getattr(message, "type", "")
@@ -608,80 +493,57 @@ def compact_messages(
             if tool_name is None and isinstance(content_block, dict):
                 tool_name = content_block.get("name")
 
-            # If this is a tool_use from target tools, record its ID
             if block_type == "tool_use" and tool_name in TOOL_COMMANDS:
                 if tool_use_id and tool_use_id not in _processed_tool_use_ids:
                     tool_use_ids_to_compact.append(tool_use_id)
-
-            # If this is a corresponding tool_result, calculate its token count
             elif block_type == "tool_result" and tool_use_id in tool_use_ids_to_compact:
                 token_count = _get_cached_token_count(tool_use_id, content_block)
                 token_counts_by_tool_use_id[tool_use_id] = token_count
 
-    # ============================================================
-    # Step 3: Decide which tool results need compaction
-    # Preserve the most recent N, compact older ones as needed
-    # ============================================================
-
-    # Preserve the most recent MAX_TOOL_USES_TO_PRESERVE tool calls
     latest_tool_use_ids = (
-        tool_use_ids_to_compact[-MAX_TOOL_USES_TO_PRESERVE:]
-        if MAX_TOOL_USES_TO_PRESERVE > 0
-        else []
+        tool_use_ids_to_compact[-MAX_TOOL_USES_TO_PRESERVE:] if MAX_TOOL_USES_TO_PRESERVE > 0 else []
     )
     total_token_count = sum(token_counts_by_tool_use_id.values())
 
     total_tokens_removed = 0
     ids_to_remove: Set[str] = set()
 
-    # Iterate from oldest to newest, mark for compaction if tokens exceed threshold
     for tool_use_id in tool_use_ids_to_compact:
-        # Skip the most recent tool calls - always preserve them
         if tool_use_id in latest_tool_use_ids:
             continue
-        # If current token count still exceeds threshold, compact this tool result
         if total_token_count - total_tokens_removed > effective_max_tokens:
             ids_to_remove.add(tool_use_id)
             total_tokens_removed += token_counts_by_tool_use_id.get(tool_use_id, 0)
 
-    # ============================================================
-    # Step 4: Verify if compaction is actually needed
-    # If max_tokens not specified, check against auto-compaction policy
-    # ============================================================
     if not is_max_tokens_specified:
-        auto_compact_enabled = resolve_auto_compact_enabled(get_global_config())
+        resolved_auto_compact = (
+            auto_compact_enabled
+            if auto_compact_enabled is not None
+            else resolve_auto_compact_enabled(get_global_config())
+        )
         usage_tokens = estimate_used_tokens(
             messages, protocol=protocol, precomputed_total_tokens=tokens_before
         )
         status = get_context_usage_status(
-            usage_tokens,
-            max_context_tokens=max_tokens,
-            auto_compact_enabled=auto_compact_enabled,
+            usage_tokens, max_context_tokens=context_limit, auto_compact_enabled=resolved_auto_compact
         )
-        # Only compact when above warning threshold AND savings are significant
         if not status.is_above_warning_threshold or total_tokens_removed < MAX_TOKENS_SOFT:
             ids_to_remove.clear()
             total_tokens_removed = 0
 
     def _should_remove(tool_use_id: str) -> bool:
-        """Determine if this tool result should be compacted."""
         return tool_use_id in ids_to_remove or tool_use_id in _processed_tool_use_ids
 
-    # ============================================================
-    # Step 5: Execute compaction - Replace marked tool results with placeholders
-    # ============================================================
     compacted_messages: List[ConversationMessage] = []
 
     for message in messages:
         msg_type = getattr(message, "type", "")
         content = getattr(getattr(message, "message", None), "content", None)
 
-        # Non-user/assistant messages or non-list content - keep as is
         if msg_type not in {"user", "assistant"} or not isinstance(content, list):
             compacted_messages.append(message)
             continue
 
-        # Assistant messages: copy content list to avoid mutating original
         if msg_type == "assistant" and isinstance(message, AssistantMessage):
             compacted_messages.append(
                 AssistantMessage(
@@ -694,7 +556,6 @@ def compact_messages(
             )
             continue
 
-        # User messages: check and replace tool_results that need compaction
         filtered_content: List[MessageContent] = []
         modified = False
 
@@ -704,24 +565,18 @@ def compact_messages(
             )
             tool_use_id = _normalize_tool_use_id(content_item)
 
-            # If this tool_result needs compaction, replace content with placeholder
             if block_type == "tool_result" and _should_remove(tool_use_id):
                 modified = True
                 if hasattr(content_item, "model_copy"):
                     new_block = content_item.model_copy()
-                    new_block.text = COMPACT_PLACEHOLDER
+                    new_block.text = MICRO_PLACEHOLDER
                 else:
-                    block_dict = (
-                        dict(content_item)
-                        if isinstance(content_item, dict)
-                        else {"type": "tool_result"}
-                    )
-                    block_dict["text"] = COMPACT_PLACEHOLDER
+                    block_dict = dict(content_item) if isinstance(content_item, dict) else {"type": "tool_result"}
+                    block_dict["text"] = MICRO_PLACEHOLDER
                     block_dict["tool_use_id"] = tool_use_id
                     new_block = MessageContent(**block_dict)
                 filtered_content.append(new_block)
             else:
-                # Keep original content
                 if isinstance(content_item, MessageContent):
                     filtered_content.append(content_item)
                 elif isinstance(content_item, dict):
@@ -731,7 +586,6 @@ def compact_messages(
                         MessageContent(type=str(block_type or "text"), text=str(content_item))
                     )
 
-        # If user message was modified, create a new message object
         if modified and isinstance(message, UserMessage):
             compacted_messages.append(
                 UserMessage(
@@ -743,24 +597,15 @@ def compact_messages(
         else:
             compacted_messages.append(message)
 
-    # ============================================================
-    # Step 6: Cleanup and return results
-    # ============================================================
-
-    # Record processed tool IDs to avoid re-compacting next time
     for id_to_remove in ids_to_remove:
         _processed_tool_use_ids.add(id_to_remove)
 
-    # Estimate token count after compaction
     tokens_after = estimate_conversation_tokens(compacted_messages, protocol=protocol)
     tokens_saved = max(0, tokens_before - tokens_after)
 
-    # If compaction was performed, run cleanup callbacks and log
     if ids_to_remove:
-        _is_compacting = True
-        _run_cleanup_callbacks()
         logger.debug(
-            "[message_compaction] Compacted conversation",
+            "[message_compaction] Micro-compacted conversation",
             extra={
                 "tokens_before": tokens_before,
                 "tokens_after": tokens_after,
@@ -769,11 +614,18 @@ def compact_messages(
             },
         )
 
-    return CompactionResult(
+    return MicroCompactionResult(
         messages=compacted_messages,
         tokens_before=tokens_before,
         tokens_after=tokens_after,
         tokens_saved=tokens_saved,
-        cleared_tool_ids=ids_to_remove,
+        tools_compacted=len(ids_to_remove),
+        trigger_type="manual" if is_max_tokens_specified else trigger_type,
         was_compacted=bool(ids_to_remove),
     )
+
+
+def reset_micro_compaction_state() -> None:
+    """Clear caches and processed IDs (useful for tests)."""
+    _processed_tool_use_ids.clear()
+    _token_cache.clear()

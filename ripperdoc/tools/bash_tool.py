@@ -270,7 +270,7 @@ build projects, run tests, and interact with the file system."""
               - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
               - If the output exceeds {MAX_OUTPUT_CHARS} characters, output will be truncated before being returned to you.
               - You can use the `run_in_background` parameter to run the command in the background, which allows you to continue working while the command runs. You can monitor the output using the BashOutput tool as it becomes available. Never use `run_in_background` to run 'sleep' as it will return immediately. You do not need to use '&' at the end of the command when using this parameter.
-              - VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. Instead use the Grep, Glob, or Task tools to search. Prefer the View and LS tools instead of shell commands like `cat`, `head`, `tail`, or `ls` when reading files and directories.
+              - VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. Instead use the Grep, Glob, or Task tools to search. Prefer the Read and LS tools instead of shell commands like `cat`, `head`, `tail`, or `ls` when reading files and directories.
               - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings).
               - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the user explicitly requests it.
                 <good-example>

@@ -4,7 +4,6 @@ This module handles rendering conversation messages to the terminal, including:
 - Tool call and result formatting
 - Assistant/user message display
 - Reasoning block rendering
-- Transcript generation
 """
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -15,6 +14,7 @@ from rich.markup import escape
 
 from ripperdoc.cli.ui.tool_renderers import ToolResultRendererRegistry
 from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMessage
+from ripperdoc.utils.message_formatting import format_reasoning_preview
 
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
@@ -210,93 +210,11 @@ class MessageDisplay:
         """Default bash output parser."""
         return parse_bash_output_sections(content)
 
-    def stringify_message_content(self, content: Any) -> str:
-        """Convert message content to plain string for transcript rendering."""
-        if content is None:
-            return ""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: List[str] = []
-            for block in content:
-                block_type = getattr(block, "type", None)
-                if block_type == "text":
-                    text = getattr(block, "text", None)
-                    if text:
-                        parts.append(str(text))
-                elif block_type == "tool_use":
-                    name = getattr(block, "name", "tool")
-                    parts.append(f"[Called {name}]")
-                elif block_type == "tool_result":
-                    parts.append("[Tool result]")
-            return "\n".join(parts)
-        return str(content)
-
-    def format_reasoning_preview(self, reasoning: Any) -> str:
-        """Return a short preview of reasoning/thinking content."""
-        if reasoning is None:
-            return ""
-        if isinstance(reasoning, str):
-            text = reasoning
-        elif isinstance(reasoning, list):
-            parts = []
-            for block in reasoning:
-                if isinstance(block, dict):
-                    parts.append(block.get("thinking") or block.get("summary") or "")
-                elif hasattr(block, "thinking"):
-                    parts.append(getattr(block, "thinking", "") or "")
-            text = "\n".join(p for p in parts if p)
-        else:
-            text = str(reasoning)
-        lines = text.strip().splitlines()
-        if not lines:
-            return ""
-        preview = lines[0][:80]
-        if len(lines) > 1 or len(lines[0]) > 80:
-            preview += "..."
-        return preview
-
     def print_reasoning(self, reasoning: Any) -> None:
         """Display a collapsed preview of reasoning/thinking blocks."""
-        preview = self.format_reasoning_preview(reasoning)
+        preview = format_reasoning_preview(reasoning)
         if preview:
             self.console.print(f"[dim italic]Thinking: {escape(preview)}[/]")
-
-    def render_transcript(self, messages: List[ConversationMessage]) -> str:
-        """Render conversation messages into a plain-text transcript."""
-        lines: List[str] = []
-        for msg in messages:
-            msg_type = getattr(msg, "type", "")
-            if msg_type == "progress":
-                continue
-            role = "User" if msg_type == "user" else "Assistant"
-            content = getattr(getattr(msg, "message", None), "content", None)
-            text = self.stringify_message_content(content)
-            if text.strip():
-                lines.append(f"{role}: {text}")
-        return "\n\n".join(lines)
-
-    def extract_assistant_text(self, assistant_message: Any) -> str:
-        """Extract plain text from an assistant response object."""
-        # AssistantMessage has .message.content structure
-        message = getattr(assistant_message, "message", None)
-        if message is not None:
-            content = getattr(message, "content", None)
-        else:
-            # Fallback: maybe it's a raw object with .content directly
-            content = getattr(assistant_message, "content", None)
-
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: List[str] = []
-            for block in content:
-                if getattr(block, "type", None) == "text":
-                    text = getattr(block, "text", None)
-                    if text:
-                        parts.append(str(text))
-            return "\n".join(parts)
-        return ""
 
 
 def parse_bash_output_sections(content: str) -> Tuple[List[str], List[str]]:

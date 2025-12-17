@@ -49,10 +49,10 @@ class TodoResultRenderer(ToolResultRenderer):
 
 
 class ReadResultRenderer(ToolResultRenderer):
-    """Render Read/View tool results."""
+    """Render Read tool results."""
 
     def can_handle(self, sender: str) -> bool:
-        return "Read" in sender or "View" in sender
+        return "Read" in sender
 
     def render(self, content: str, _tool_data: Any) -> None:
         lines = content.split("\n")

@@ -43,7 +43,9 @@ from ripperdoc.cli.ui.panels import create_welcome_panel, create_status_bar, pri
 from ripperdoc.cli.ui.message_display import MessageDisplay, parse_bash_output_sections
 from ripperdoc.cli.ui.interrupt_handler import InterruptHandler
 from ripperdoc.utils.conversation_compaction import (
-    ConversationCompactor,
+    compact_conversation,
+    CompactionResult,
+    CompactionError,
     extract_tool_ids_from_message,
     get_complete_tool_pairs_tail,
 )
@@ -52,6 +54,7 @@ from ripperdoc.utils.message_compaction import (
     estimate_used_tokens,
     get_context_usage_status,
     get_remaining_context_tokens,
+    micro_compact_messages,
     resolve_auto_compact_enabled,
 )
 from ripperdoc.utils.token_estimation import estimate_tokens
@@ -74,6 +77,7 @@ from ripperdoc.utils.messages import (
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
+from ripperdoc.utils.message_formatting import stringify_message_content
 
 
 # Type alias for conversation messages
@@ -301,19 +305,10 @@ class RichUI:
         self._message_display.print_human_or_assistant(sender, content)
 
     def _stringify_message_content(self, content: Any) -> str:
-        return self._message_display.stringify_message_content(content)
-
-    def _format_reasoning_preview(self, reasoning: Any) -> str:
-        return self._message_display.format_reasoning_preview(reasoning)
+        return stringify_message_content(content)
 
     def _print_reasoning(self, reasoning: Any) -> None:
         self._message_display.print_reasoning(reasoning)
-
-    def _render_transcript(self, messages: List[ConversationMessage]) -> str:
-        return self._message_display.render_transcript(messages)
-
-    def _extract_assistant_text(self, assistant_message: Any) -> str:
-        return self._message_display.extract_assistant_text(assistant_message)
 
     async def _prepare_query_context(self, user_input: str) -> tuple[str, Dict[str, str]]:
         """Load MCP servers, skills, and build system prompt.
@@ -372,7 +367,7 @@ class RichUI:
 
         return system_prompt, context
 
-    def _check_and_compact_messages(
+    async def _check_and_compact_messages(
         self,
         messages: List[ConversationMessage],
         max_context_tokens: int,
@@ -384,6 +379,26 @@ class RichUI:
         Returns:
             Possibly compacted list of messages.
         """
+        micro = micro_compact_messages(
+            messages,
+            context_limit=max_context_tokens,
+            auto_compact_enabled=auto_compact_enabled,
+            protocol=protocol,
+        )
+        if micro.was_compacted:
+            messages = micro.messages  # type: ignore[assignment]
+            logger.info(
+                "[ui] Micro-compacted conversation",
+                extra={
+                    "session_id": self.session_id,
+                    "tokens_before": micro.tokens_before,
+                    "tokens_after": micro.tokens_after,
+                    "tokens_saved": micro.tokens_saved,
+                    "tools_compacted": micro.tools_compacted,
+                    "trigger": micro.trigger_type,
+                },
+            )
+
         used_tokens = estimate_used_tokens(messages, protocol=protocol)  # type: ignore[arg-type]
         usage_status = get_context_usage_status(
             used_tokens, max_context_tokens, auto_compact_enabled
@@ -412,25 +427,38 @@ class RichUI:
 
         if usage_status.should_auto_compact:
             original_messages = list(messages)
-            compaction = compact_messages(messages, protocol=protocol)  # type: ignore[arg-type]
-            if compaction.was_compacted:
+            spinner = Spinner(self.console, "Summarizing conversation...", spinner="dots")
+            try:
+                spinner.start()
+                result = await compact_conversation(
+                    messages, custom_instructions="", protocol=protocol
+                )
+            finally:
+                spinner.stop()
+
+            if isinstance(result, CompactionResult):
                 if self._saved_conversation is None:
                     self._saved_conversation = original_messages  # type: ignore[assignment]
                 console.print(
-                    f"[yellow]Auto-compacted conversation (saved ~{compaction.tokens_saved} tokens). "
-                    f"Estimated usage: {compaction.tokens_after}/{max_context_tokens} tokens.[/yellow]"
+                    f"[yellow]Auto-compacted conversation (saved ~{result.tokens_saved} tokens). "
+                    f"Estimated usage: {result.tokens_after}/{max_context_tokens} tokens.[/yellow]"
                 )
                 logger.info(
                     "[ui] Auto-compacted conversation",
                     extra={
                         "session_id": self.session_id,
-                        "tokens_before": compaction.tokens_before,
-                        "tokens_after": compaction.tokens_after,
-                        "tokens_saved": compaction.tokens_saved,
-                        "cleared_tool_ids": list(compaction.cleared_tool_ids),
+                        "tokens_before": result.tokens_before,
+                        "tokens_after": result.tokens_after,
+                        "tokens_saved": result.tokens_saved,
                     },
                 )
-                return compaction.messages  # type: ignore[return-value]
+                return result.messages  # type: ignore[return-value]
+            elif isinstance(result, CompactionError):
+                logger.warning(
+                    "[ui] Auto-compaction failed: %s",
+                    result.message,
+                    extra={"session_id": self.session_id},
+                )
 
         return messages
 
@@ -598,7 +626,7 @@ class RichUI:
             protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 
             # Check and potentially compact messages
-            messages = self._check_and_compact_messages(
+            messages = await self._check_and_compact_messages(
                 messages, max_context_tokens, auto_compact_enabled, protocol
             )
 
@@ -965,25 +993,42 @@ class RichUI:
 
     async def _run_manual_compact(self, custom_instructions: str) -> None:
         """Manual compaction: clear bulky tool output and summarize conversation."""
+        from rich.markup import escape
+
         model_profile = get_profile_for_pointer("main")
         protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
 
-        compactor = ConversationCompactor(
-            self.console,
-            self._render_transcript,
-            self._extract_assistant_text,
-        )
+        if len(self.conversation_messages) < 2:
+            self.console.print("[yellow]Not enough conversation history to compact.[/yellow]")
+            return
 
         original_messages = list(self.conversation_messages)
-        result = await compactor.compact(
-            self.conversation_messages,
-            custom_instructions,
-            protocol=protocol,
-        )
+        spinner = Spinner(self.console, "Summarizing conversation...", spinner="dots")
 
-        if result is not None:
+        try:
+            spinner.start()
+            result = await compact_conversation(
+                self.conversation_messages,
+                custom_instructions,
+                protocol=protocol,
+            )
+        except Exception as exc:
+            import traceback
+            self.console.print(f"[red]Error during compaction: {escape(str(exc))}[/red]")
+            self.console.print(f"[dim red]{traceback.format_exc()}[/dim red]")
+            return
+        finally:
+            spinner.stop()
+
+        if isinstance(result, CompactionResult):
             self._saved_conversation = original_messages
-            self.conversation_messages = result
+            self.conversation_messages = result.messages
+            self.console.print(
+                f"[green]✓ Conversation compacted[/green] "
+                f"(saved ~{result.tokens_saved} tokens). Use /resume to restore full history."
+            )
+        elif isinstance(result, CompactionError):
+            self.console.print(f"[red]{escape(result.message)}[/red]")
 
     def _print_shortcuts(self) -> None:
         """Show common keyboard shortcuts and prefixes."""

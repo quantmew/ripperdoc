@@ -47,7 +47,7 @@ def _safe_tool_name(factory: Any, fallback: str) -> str:
 
 GLOB_TOOL_NAME = _safe_tool_name(GlobTool, "Glob")
 GREP_TOOL_NAME = _safe_tool_name(GrepTool, "Grep")
-VIEW_TOOL_NAME = _safe_tool_name(FileReadTool, "View")
+VIEW_TOOL_NAME = _safe_tool_name(FileReadTool, "Read")
 FILE_EDIT_TOOL_NAME = _safe_tool_name(FileEditTool, "FileEdit")
 MULTI_EDIT_TOOL_NAME = _safe_tool_name(MultiEditTool, "MultiEdit")
 NOTEBOOK_EDIT_TOOL_NAME = _safe_tool_name(NotebookEditTool, "NotebookEdit")
@@ -216,7 +216,7 @@ def _built_in_agents() -> List[AgentDefinition]:
                 "Run after implementing non-trivial code changes to review for correctness, "
                 "testing gaps, security issues, and regressions."
             ),
-            tools=["View", "Glob", "Grep"],
+            tools=["Read", "Glob", "Grep"],
             system_prompt=CODE_REVIEW_AGENT_PROMPT,
             location=AgentLocation.BUILT_IN,
             color="yellow",
@@ -230,7 +230,7 @@ def _built_in_agents() -> List[AgentDefinition]:
                 'specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, '
                 'or "very thorough" for comprehensive analysis across multiple locations and naming conventions.'
             ),
-            tools=["View", "Glob", "Grep"],
+            tools=["Read", "Glob", "Grep"],
             system_prompt=EXPLORE_AGENT_PROMPT,
             location=AgentLocation.BUILT_IN,
             color="green",
@@ -243,7 +243,7 @@ def _built_in_agents() -> List[AgentDefinition]:
                 "you need to plan the implementation strategy for a task. Returns step-by-step "
                 "plans, identifies critical files, and considers architectural trade-offs."
             ),
-            tools=["View", "Glob", "Grep"],
+            tools=["Read", "Glob", "Grep"],
             system_prompt=PLAN_AGENT_PROMPT,
             location=AgentLocation.BUILT_IN,
             color="blue",

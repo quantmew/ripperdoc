@@ -25,7 +25,7 @@ logger = get_logger()
 
 
 DEFAULT_ACTION = "Edit"
-TOOL_NAME_READ = "View"
+TOOL_NAME_READ = "Read"
 NOTEBOOK_EDIT_TOOL_NAME = "NotebookEdit"
 
 MULTI_EDIT_DESCRIPTION = dedent(

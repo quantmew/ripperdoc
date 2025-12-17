@@ -14,18 +14,18 @@ async def _fake_runner(messages, system_prompt, context, query_context, permissi
 def test_tool_filtering_respects_allowed_names():
     async def _run():
         options = RipperdocOptions(
-            allowed_tools=["Bash", "View", "Task"],
+            allowed_tools=["Bash", "Read", "Task"],
             safe_mode=False,
         )
         client = RipperdocClient(options=options, query_runner=_fake_runner)
         await client.connect()
 
         names = {tool.name for tool in client.tools}
-        assert names == {"Bash", "View", "Task"}
+        assert names == {"Bash", "Read", "Task"}
 
         task_tool = next(tool for tool in client.tools if tool.name == "Task")
         base_names = {tool.name for tool in task_tool._available_tools_provider()}  # type: ignore[attr-defined]
-        assert base_names == {"Bash", "View"}
+        assert base_names == {"Bash", "Read"}
 
         await client.disconnect()
 

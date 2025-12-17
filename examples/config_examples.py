@@ -66,7 +66,7 @@ MULTI_MODEL = {
 
 # Example 3: Project-Specific Configuration
 PROJECT_CONFIG = {
-    "allowed_tools": ["Bash", "View", "Edit", "Glob", "Grep"],
+    "allowed_tools": ["Bash", "Read", "Edit", "Glob", "Grep"],
     "context": {
         "project_type": "Python Web Application",
         "framework": "FastAPI",

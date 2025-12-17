@@ -25,7 +25,7 @@ def test_claude_opus_and_haiku():
 
 
 def test_openai_and_deepseek_defaults():
-    profile_gpt4o = ModelProfile(provider=ProviderType.OPENAI_COMPATIBLE, model="gpt-4.1")
+    profile_gpt4o = ModelProfile(provider=ProviderType.OPENAI_COMPATIBLE, model="gpt-4o")
     profile_gpt4 = ModelProfile(provider=ProviderType.OPENAI_COMPATIBLE, model="gpt-4")
     profile_deepseek = ModelProfile(provider=ProviderType.OPENAI_COMPATIBLE, model="deepseek-chat")
 

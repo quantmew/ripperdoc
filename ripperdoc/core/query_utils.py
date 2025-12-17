@@ -276,7 +276,7 @@ def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
         {
             "type": "tool_use",
             "tool_use_id": "tool_id_000001",
-            "tool": "View",
+            "tool": "Read",
             "input": {"file_path": "README.md"},
         },
     ]

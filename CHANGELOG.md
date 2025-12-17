@@ -5,6 +5,27 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2025-12-18
+
+### Added
+- **@ symbol file mention completion** - Type `@` followed by Tab to autocomplete file paths with recursive search
+- **ESC key interrupt support** - Press ESC to interrupt running queries and commands
+- **UI modularization** - New modular UI components for better maintainability
+- **Conversation compaction** - Automatic conversation length management to handle context limits
+- **Session resume pagination** - Navigate through session history with paginated interface
+- **Improved command aliases** - Enhanced command shortcuts and usability
+
+### Changed
+- **UI refactoring** - Major UI codebase reorganization into modular components
+- **Enhanced interrupt handling** - Simplified ESC/Ctrl+C interrupt handling with single raw-mode loop
+- **Improved permission dialogs** - Better handling of ESC listener during permission checks
+- **Better conversation management** - Enhanced message compaction and conversation state handling
+
+### Fixed
+- **ESC key blocking** - Fixed ESC key listener blocking terminal during permission dialogs
+- **Pydantic validation** - Fixed file_state_cache validation for proper cache sharing
+- **Shell command permissions** - Improved user confirmation for sensitive directory operations
+
 ## [0.2.5] - 2025-12-17
 
 ### Added
@@ -63,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple command execution
 - Basic project navigation
 
+[0.2.6]: https://github.com/quantmew/Ripperdoc/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/quantmew/Ripperdoc/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/quantmew/Ripperdoc/compare/v0.2.0...v0.2.4
 [0.2.0]: https://github.com/quantmew/Ripperdoc/compare/v0.1.0...v0.2.0

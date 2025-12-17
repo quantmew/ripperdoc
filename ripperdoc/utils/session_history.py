@@ -132,7 +132,9 @@ class SessionHistory:
         }
         try:
             with self.path.open("a", encoding="utf-8") as fh:
-                json.dump(entry, fh)
+                # ensure_ascii=False 避免中文等字符被转义为 \uXXXX
+                # separators 去掉多余空格，减小体积
+                json.dump(entry, fh, ensure_ascii=False, separators=(",", ":"))
                 fh.write("\n")
             if isinstance(msg_uuid, str):
                 self._seen_ids.add(msg_uuid)

@@ -42,7 +42,7 @@ class ToolUseContext(BaseModel):
     permission_checker: Optional[Any] = None
     read_file_timestamps: Dict[str, float] = Field(default_factory=dict)
     # SkipValidation prevents Pydantic from copying the dict during validation,
-    # ensuring View/Read and Edit tools share the same cache instance
+    # ensuring Read and Edit tools share the same cache instance
     file_state_cache: Annotated[Dict[str, FileSnapshot], SkipValidation] = Field(default_factory=dict)
     tool_registry: Optional[Any] = None
     abort_signal: Optional[Any] = None
