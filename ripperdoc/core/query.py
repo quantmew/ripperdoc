@@ -624,12 +624,12 @@ async def query_llm(
         )
         duration_ms = (time.time() - start_time) * 1000
         context_error = detect_context_length_error(e)
-        metadata = None
+        error_metadata: Optional[Dict[str, Any]] = None
         content = f"Error querying AI model: {str(e)}"
 
         if context_error:
             content = f"The request exceeded the model's context window. {context_error.message}"
-            metadata = {
+            error_metadata = {
                 "context_length_exceeded": True,
                 "context_length_provider": context_error.provider,
                 "context_length_error_code": context_error.error_code,
@@ -645,7 +645,7 @@ async def query_llm(
             )
 
         error_msg = create_assistant_message(
-            content=content, duration_ms=duration_ms, metadata=metadata
+            content=content, duration_ms=duration_ms, metadata=error_metadata
         )
         error_msg.is_api_error_message = True
         return error_msg
@@ -1042,7 +1042,10 @@ async def query(
             return
 
         # Update messages for next iteration
-        messages = messages + [result.assistant_message] + result.tool_results
+        if result.assistant_message is not None:
+            messages = messages + [result.assistant_message] + result.tool_results  # type: ignore[operator]
+        else:
+            messages = messages + result.tool_results  # type: ignore[operator]
         logger.debug(
             f"[query] Continuing loop with {len(messages)} messages after tools; "
             f"tool_results_count={len(result.tool_results)}"

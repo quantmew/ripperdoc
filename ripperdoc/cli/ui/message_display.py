@@ -6,7 +6,7 @@ This module handles rendering conversation messages to the terminal, including:
 - Reasoning block rendering
 """
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 from rich.console import Console
 from rich.markdown import Markdown

@@ -325,7 +325,7 @@ async def summarize_conversation(
     user_content = f"{user_prompt}\n\nHere is the conversation to summarize:\n\n{transcript}"
 
     assistant_response = await query_llm(
-        messages=[{"role": "user", "content": user_content}],
+        messages=[create_user_message(user_content)],
         system_prompt=system_prompt,
         tools=[],
         max_thinking_tokens=0,
@@ -346,7 +346,7 @@ async def compact_conversation(
     protocol: str = "anthropic",
     tail_count: int = RECENT_MESSAGES_AFTER_COMPACT,
     attachment_provider: Optional[Callable[[], List[ConversationMessage]]] = None,
-) -> Union[CompactionResult, CompactionError]:
+) -> Union["CompactionResult", "CompactionError"]:
     """Compact a conversation by summarizing and rebuilding.
 
     This is a pure logic function with no UI dependencies.
@@ -462,7 +462,7 @@ class ConversationCompactor:
         custom_instructions: str,
         protocol: str = "anthropic",
         tail_count: int = RECENT_MESSAGES_AFTER_COMPACT,
-    ) -> Optional[CompactionResult]:
+    ) -> Optional["CompactionResult"]:  # type: ignore[valid-type]
         """Compact the conversation. Returns None on error."""
         result = await compact_conversation(
             messages=messages,

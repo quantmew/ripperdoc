@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
-from functools import lru_cache
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ripperdoc.utils.git_utils import (
     get_git_root,
@@ -361,7 +360,7 @@ class IgnoreFilter:
 
         return result
 
-    def test(self, path: str) -> Dict[str, any]:
+    def test(self, path: str) -> Dict[str, Any]:
         """Check if a path should be ignored and return details.
 
         Returns:
@@ -369,7 +368,7 @@ class IgnoreFilter:
         """
         path = path.replace("\\", "/").strip("/")
 
-        result = {"ignored": False, "rule": None}
+        result: Dict[str, Any] = {"ignored": False, "rule": None}
 
         for pattern, is_negation in self._patterns:
             if pattern.search(path):

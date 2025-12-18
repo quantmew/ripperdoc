@@ -20,7 +20,7 @@ INTERRUPT_KEYS: Set[str] = {'\x1b', '\x03'}  # ESC, Ctrl+C
 class InterruptHandler:
     """Handles keyboard interrupt detection during async operations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the interrupt handler."""
         self._query_interrupted: bool = False
         self._esc_listener_active: bool = False

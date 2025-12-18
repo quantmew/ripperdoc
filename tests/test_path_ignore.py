@@ -3,7 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from ripperdoc.utils.path_ignore import (
     DEFAULT_IGNORE_PATTERNS,

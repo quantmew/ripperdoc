@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Literal
+from typing import Any, Dict, List, Literal
 
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
 from ripperdoc.core.config import (
-    config_manager,
+    GlobalConfig,
+    ProjectConfig,
+    ProjectLocalConfig,
     get_global_config,
     get_project_config,
     get_project_local_config,
@@ -55,14 +57,14 @@ def _get_rules_for_scope(
 ) -> tuple[List[str], List[str]]:
     """Return (allow_rules, deny_rules) for a given scope."""
     if scope == "user":
-        config = get_global_config()
-        return list(config.user_allow_rules), list(config.user_deny_rules)
+        user_config: GlobalConfig = get_global_config()
+        return list(user_config.user_allow_rules), list(user_config.user_deny_rules)
     elif scope == "project":
-        config = get_project_config(project_path)
-        return list(config.bash_allow_rules), list(config.bash_deny_rules)
+        project_config: ProjectConfig = get_project_config(project_path)
+        return list(project_config.bash_allow_rules), list(project_config.bash_deny_rules)
     else:  # local
-        config = get_project_local_config(project_path)
-        return list(config.local_allow_rules), list(config.local_deny_rules)
+        local_config: ProjectLocalConfig = get_project_local_config(project_path)
+        return list(local_config.local_allow_rules), list(local_config.local_deny_rules)
 
 
 def _add_rule(
@@ -73,26 +75,26 @@ def _add_rule(
 ) -> bool:
     """Add a rule to the specified scope. Returns True if added, False if already exists."""
     if scope == "user":
-        config = get_global_config()
-        rules = config.user_allow_rules if rule_type == "allow" else config.user_deny_rules
+        user_config: GlobalConfig = get_global_config()
+        rules = user_config.user_allow_rules if rule_type == "allow" else user_config.user_deny_rules
         if rule in rules:
             return False
         rules.append(rule)
-        save_global_config(config)
+        save_global_config(user_config)
     elif scope == "project":
-        config = get_project_config(project_path)
-        rules = config.bash_allow_rules if rule_type == "allow" else config.bash_deny_rules
+        project_config: ProjectConfig = get_project_config(project_path)
+        rules = project_config.bash_allow_rules if rule_type == "allow" else project_config.bash_deny_rules
         if rule in rules:
             return False
         rules.append(rule)
-        save_project_config(config, project_path)
+        save_project_config(project_config, project_path)
     else:  # local
-        config = get_project_local_config(project_path)
-        rules = config.local_allow_rules if rule_type == "allow" else config.local_deny_rules
+        local_config: ProjectLocalConfig = get_project_local_config(project_path)
+        rules = local_config.local_allow_rules if rule_type == "allow" else local_config.local_deny_rules
         if rule in rules:
             return False
         rules.append(rule)
-        save_project_local_config(config, project_path)
+        save_project_local_config(local_config, project_path)
     return True
 
 
@@ -104,26 +106,26 @@ def _remove_rule(
 ) -> bool:
     """Remove a rule from the specified scope. Returns True if removed, False if not found."""
     if scope == "user":
-        config = get_global_config()
-        rules = config.user_allow_rules if rule_type == "allow" else config.user_deny_rules
+        user_config: GlobalConfig = get_global_config()
+        rules = user_config.user_allow_rules if rule_type == "allow" else user_config.user_deny_rules
         if rule not in rules:
             return False
         rules.remove(rule)
-        save_global_config(config)
+        save_global_config(user_config)
     elif scope == "project":
-        config = get_project_config(project_path)
-        rules = config.bash_allow_rules if rule_type == "allow" else config.bash_deny_rules
+        project_config: ProjectConfig = get_project_config(project_path)
+        rules = project_config.bash_allow_rules if rule_type == "allow" else project_config.bash_deny_rules
         if rule not in rules:
             return False
         rules.remove(rule)
-        save_project_config(config, project_path)
+        save_project_config(project_config, project_path)
     else:  # local
-        config = get_project_local_config(project_path)
-        rules = config.local_allow_rules if rule_type == "allow" else config.local_deny_rules
+        local_config: ProjectLocalConfig = get_project_local_config(project_path)
+        rules = local_config.local_allow_rules if rule_type == "allow" else local_config.local_deny_rules
         if rule not in rules:
             return False
         rules.remove(rule)
-        save_project_local_config(config, project_path)
+        save_project_local_config(local_config, project_path)
     return True
 
 
@@ -204,7 +206,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
 
     # Parse command
     action = args[0].lower()
-    scope_aliases = {
+    scope_aliases: Dict[str, ScopeType] = {
         "user": "user",
         "global": "user",
         "project": "project",
@@ -215,8 +217,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
 
     # Single scope display
     if action in scope_aliases:
-        scope = scope_aliases[action]
-        _render_scope_rules(ui.console, scope, project_path)  # type: ignore
+        display_scope: ScopeType = scope_aliases[action]
+        _render_scope_rules(ui.console, display_scope, project_path)
         return True
 
     # Add rule
@@ -231,14 +233,14 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             ui.console.print(f"[red]Unknown scope: {escape(scope_arg)}[/red]")
             ui.console.print("[dim]Available scopes: user, project, local[/dim]")
             return True
-        scope: ScopeType = scope_aliases[scope_arg]  # type: ignore
+        scope: ScopeType = scope_aliases[scope_arg]
 
         rule_type_arg = args[2].lower()
         if rule_type_arg not in ("allow", "deny"):
             ui.console.print(f"[red]Unknown rule type: {escape(rule_type_arg)}[/red]")
             ui.console.print("[dim]Available types: allow, deny[/dim]")
             return True
-        rule_type: Literal["allow", "deny"] = rule_type_arg  # type: ignore
+        rule_type: Literal["allow", "deny"] = rule_type_arg  # type: ignore[assignment]
 
         rule = " ".join(args[3:])
         if _add_rule(scope, rule_type, rule, project_path):
@@ -271,13 +273,13 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             ui.console.print(f"[red]Unknown rule type: {escape(rule_type_arg)}[/red]")
             ui.console.print("[dim]Available types: allow, deny[/dim]")
             return True
-        rule_type = rule_type_arg  # type: ignore
+        remove_rule_type: Literal["allow", "deny"] = rule_type_arg  # type: ignore[assignment]
 
         rule = " ".join(args[3:])
-        if _remove_rule(scope, rule_type, rule, project_path):
+        if _remove_rule(scope, remove_rule_type, rule, project_path):
             ui.console.print(
                 Panel(
-                    f"Removed [{'green' if rule_type == 'allow' else 'red'}]{rule_type}[/] rule from {scope}:\n{escape(rule)}",
+                    f"Removed [{'green' if remove_rule_type == 'allow' else 'red'}]{remove_rule_type}[/] rule from {scope}:\n{escape(rule)}",
                     title="/permissions",
                 )
             )

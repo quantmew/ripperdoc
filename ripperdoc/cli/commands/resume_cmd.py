@@ -61,7 +61,7 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
             nav_hints.append("'n' for next page")
         nav_hints.append("Enter to cancel")
 
-        prompt = f"\nSelect session index"
+        prompt = "\nSelect session index"
         if nav_hints:
             prompt += f" ({', '.join(nav_hints)})"
         prompt += ": "

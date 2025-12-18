@@ -4,25 +4,19 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 """
 
 import asyncio
-import contextlib
 import json
-import os
 import sys
 import uuid
-import re
 from typing import List, Dict, Any, Optional, Union, Iterable
 from pathlib import Path
 
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.markup import escape
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, merge_completers
 from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.history import InMemoryHistory
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.document import Document
 
 from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.default_tools import get_default_tools
@@ -34,7 +28,7 @@ from ripperdoc.cli.commands import (
     list_slash_commands,
     slash_command_completions,
 )
-from ripperdoc.cli.ui.helpers import get_profile_for_pointer, THINKING_WORDS
+from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permissions import make_permission_checker
 from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
@@ -72,7 +66,6 @@ from ripperdoc.utils.messages import (
     AssistantMessage,
     ProgressMessage,
     create_user_message,
-    create_assistant_message,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.path_ignore import build_ignore_filter
@@ -452,7 +445,7 @@ class RichUI:
                         "tokens_saved": result.tokens_saved,
                     },
                 )
-                return result.messages  # type: ignore[return-value]
+                return result.messages
             elif isinstance(result, CompactionError):
                 logger.warning(
                     "[ui] Auto-compaction failed: %s",

@@ -40,7 +40,7 @@ class FileMentionCompleter(Completer):
         """
         files = []
 
-        def _walk(current_dir: Path, depth: int):
+        def _walk(current_dir: Path, depth: int) -> None:
             if depth > max_depth:
                 return
 

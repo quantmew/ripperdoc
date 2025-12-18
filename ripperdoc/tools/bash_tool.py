@@ -652,7 +652,7 @@ build projects, run tests, and interact with the file system."""
             # Emit progress updates for newly received output chunks
             while not queue.empty():
                 label, text = queue.get_nowait()
-                yield ToolProgress(content=f"{label}: {text}")
+                yield ToolProgress(content=f"{label}: {text}")  # type: ignore[misc]
 
             # Report progress at intervals
             if now - last_progress_time >= PROGRESS_INTERVAL_SECONDS:
@@ -660,7 +660,7 @@ build projects, run tests, and interact with the file system."""
                 if combined_output:
                     preview = get_last_n_lines(combined_output, 5)
                     elapsed = format_duration((now - start_time) * 1000)
-                    yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")
+                    yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")  # type: ignore[misc]
                 last_progress_time = now
 
             # Check timeout
@@ -907,14 +907,14 @@ build projects, run tests, and interact with the file system."""
 
                 while not queue.empty():
                     label, text = queue.get_nowait()
-                    yield ToolProgress(content=f"{label}: {text}")
+                    yield ToolProgress(content=f"{label}: {text}")  # type: ignore[misc]
 
                 if now - last_progress_time >= PROGRESS_INTERVAL_SECONDS:
                     combined_output = "".join(stdout_lines + stderr_lines)
                     if combined_output:
                         preview = get_last_n_lines(combined_output, 5)
                         elapsed = format_duration((now - start) * 1000)
-                        yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")
+                        yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")  # type: ignore[misc]
                     last_progress_time = now
 
                 if deadline is not None and now >= deadline:

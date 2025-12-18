@@ -18,7 +18,7 @@ from ripperdoc.core.tool import (
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.file_watch import record_snapshot
-from ripperdoc.utils.path_ignore import check_path_for_tool, is_path_ignored
+from ripperdoc.utils.path_ignore import check_path_for_tool
 
 logger = get_logger()
 
