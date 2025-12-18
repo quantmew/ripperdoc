@@ -25,8 +25,12 @@ from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
 from ripperdoc.cli.commands import (
     get_slash_command,
+    get_custom_command,
     list_slash_commands,
+    list_custom_commands,
     slash_command_completions,
+    expand_command_content,
+    CustomCommandDefinition,
 )
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permissions import make_permission_checker
@@ -106,7 +110,7 @@ class RichUI:
         self._current_tool: Optional[str] = None
         self._should_exit: bool = False
         self.command_list = list_slash_commands()
-        self._command_completions = slash_command_completions()
+        self._custom_command_list = list_custom_commands()
         self._prompt_session: Optional[PromptSession] = None
         self.project_path = Path.cwd()
         # Track a stable session identifier for the current UI run.
@@ -782,8 +786,9 @@ class RichUI:
         """Public wrapper for running coroutines on the UI event loop."""
         return self._run_async(coro)
 
-    def handle_slash_command(self, user_input: str) -> bool:
-        """Handle slash commands. Returns True if the input was handled."""
+    def handle_slash_command(self, user_input: str) -> bool | str:
+        """Handle slash commands. Returns True if handled as built-in, False if not a command,
+        or a string if it's a custom command that should be sent to the AI."""
 
         if not user_input.startswith("/"):
             return False
@@ -795,12 +800,32 @@ class RichUI:
 
         command_name = parts[0].lower()
         trimmed_arg = " ".join(parts[1:]).strip()
-        command = get_slash_command(command_name)
-        if command is None:
-            self.console.print(f"[red]Unknown command: {escape(command_name)}[/red]")
-            return True
 
-        return command.handler(self, trimmed_arg)
+        # First, try built-in commands
+        command = get_slash_command(command_name)
+        if command is not None:
+            return command.handler(self, trimmed_arg)
+
+        # Then, try custom commands
+        custom_cmd = get_custom_command(command_name, self.project_path)
+        if custom_cmd is not None:
+            # Expand the custom command content
+            expanded_content = expand_command_content(
+                custom_cmd, trimmed_arg, self.project_path
+            )
+
+            # Show a hint that this is from a custom command
+            self.console.print(
+                f"[dim]Running custom command: /{command_name}[/dim]"
+            )
+            if custom_cmd.argument_hint and trimmed_arg:
+                self.console.print(f"[dim]Arguments: {trimmed_arg}[/dim]")
+
+            # Return the expanded content to be processed as a query
+            return expanded_content
+
+        self.console.print(f"[red]Unknown command: {escape(command_name)}[/red]")
+        return True
 
     def get_prompt_session(self) -> PromptSession:
         """Create (or return) the prompt session with command completion."""
@@ -808,27 +833,39 @@ class RichUI:
             return self._prompt_session
 
         class SlashCommandCompleter(Completer):
-            """Autocomplete for slash commands."""
+            """Autocomplete for slash commands including custom commands."""
 
-            def __init__(self, completions: List):
-                self.completions = completions
+            def __init__(self, project_path: Path):
+                self.project_path = project_path
 
             def get_completions(self, document: Any, complete_event: Any) -> Iterable[Completion]:
                 text = document.text_before_cursor
                 if not text.startswith("/"):
                     return
                 query = text[1:]
-                for name, cmd in self.completions:
+                # Get completions including custom commands
+                completions = slash_command_completions(self.project_path)
+                for name, cmd in completions:
                     if name.startswith(query):
+                        # Handle both SlashCommand and CustomCommandDefinition
+                        description = cmd.description
+                        # Add hint for custom commands
+                        if isinstance(cmd, CustomCommandDefinition):
+                            hint = cmd.argument_hint or ""
+                            display = f"{name} {hint}".strip() if hint else name
+                            display_meta = f"[custom] {description}"
+                        else:
+                            display = name
+                            display_meta = description
                         yield Completion(
                             name,
                             start_position=-len(query),
-                            display=name,
-                            display_meta=cmd.description,
+                            display=display,
+                            display_meta=display_meta,
                         )
 
         # Merge both completers
-        slash_completer = SlashCommandCompleter(self._command_completions)
+        slash_completer = SlashCommandCompleter(self.project_path)
         file_completer = FileMentionCompleter(self.project_path, self._ignore_filter)
         combined_completer = merge_completers([slash_completer, file_completer])
 
@@ -881,7 +918,11 @@ class RichUI:
                         handled = self.handle_slash_command(user_input)
                         if self._should_exit:
                             break
-                        if handled:
+                        # If handled is a string, it's expanded custom command content
+                        if isinstance(handled, str):
+                            # Process the expanded custom command as a query
+                            user_input = handled
+                        elif handled:
                             console.print()  # spacing
                             continue
 
