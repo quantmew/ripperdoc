@@ -12,6 +12,7 @@ from rich.text import Text
 from rich import box
 
 from ripperdoc import __version__
+from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 
 
 def create_welcome_panel() -> Panel:
@@ -35,16 +36,18 @@ You can read files, edit code, run commands, and help with various programming t
 
 
 def create_status_bar() -> Text:
-    """Create a status bar text for display."""
-    text = Text()
-    text.append("Type ", style="dim")
-    text.append("/help", style="cyan")
-    text.append(" for commands | ", style="dim")
-    text.append("ESC", style="cyan")
-    text.append(" to interrupt | ", style="dim")
-    text.append("Ctrl+C", style="cyan")
-    text.append(" to exit", style="dim")
-    return text
+    """Create a status bar with current model information."""
+    profile = get_profile_for_pointer("main")
+    model_name = profile.model if profile else "Not configured"
+
+    status_text = Text()
+    status_text.append("Ripperdoc", style="bold cyan")
+    status_text.append(" • ")
+    status_text.append(model_name, style="dim")
+    status_text.append(" • ")
+    status_text.append("Ready", style="green")
+
+    return status_text
 
 
 def print_shortcuts(console: Console) -> None:

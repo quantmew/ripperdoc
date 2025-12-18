@@ -642,3 +642,13 @@ Increase the timeout in configuration:
 ### View configured hooks
 
 Use the `/hooks` command in Ripperdoc to see all configured hooks.
+
+### Manage hooks from the CLI
+
+Use the guided editors to create and maintain hooks without hand-editing JSON:
+
+- `/hooks add [scope]` walks through scope selection (local/project/global), event, matcher, command or prompt text, and timeout. Defaults to `.ripperdoc/hooks.local.json`.
+- `/hooks edit [scope]` lets you pick an existing hook and update its fields.
+- `/hooks delete [scope]` removes a hook entry and cleans up empty matchers.
+
+Scopes match the files described in [Configuration](#configuration); omit the scope to be prompted.
