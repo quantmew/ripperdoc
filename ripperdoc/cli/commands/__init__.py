@@ -15,6 +15,7 @@ from .context_cmd import command as context_command
 from .doctor_cmd import command as doctor_command
 from .exit_cmd import command as exit_command
 from .help_cmd import command as help_command
+from .hooks_cmd import command as hooks_command
 from .memory_cmd import command as memory_command
 from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
@@ -57,6 +58,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     tasks_command,
     todos_command,
     mcp_command,
+    hooks_command,
     cost_command,
     context_command,
     compact_command,

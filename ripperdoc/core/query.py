@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from ripperdoc.core.config import provider_protocol
 from ripperdoc.core.providers import ProviderClient, get_provider_client
 from ripperdoc.core.permissions import PermissionResult
+from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.query_utils import (
     build_full_system_prompt,
     determine_tool_mode,
@@ -154,6 +155,52 @@ async def _run_tool_use_generator(
     tool_context: ToolUseContext,
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Execute a single tool_use and yield progress/results."""
+    # Get tool input as dict for hooks
+    tool_input_dict = (
+        parsed_input.model_dump()
+        if hasattr(parsed_input, "model_dump")
+        else dict(parsed_input) if isinstance(parsed_input, dict) else {}
+    )
+
+    # Run PreToolUse hooks
+    pre_result = await hook_manager.run_pre_tool_use_async(
+        tool_name, tool_input_dict, tool_use_id=tool_use_id
+    )
+    if pre_result.should_block:
+        block_reason = pre_result.block_reason or f"Blocked by hook: {tool_name}"
+        logger.info(
+            f"[query] Tool {tool_name} blocked by PreToolUse hook",
+            extra={"tool_use_id": tool_use_id, "reason": block_reason},
+        )
+        yield tool_result_message(tool_use_id, f"Hook blocked: {block_reason}", is_error=True)
+        return
+
+    # Handle updated input from hooks
+    if pre_result.updated_input:
+        logger.debug(
+            f"[query] PreToolUse hook modified input for {tool_name}",
+            extra={"tool_use_id": tool_use_id},
+        )
+        # Re-parse the input with the updated values
+        try:
+            parsed_input = tool.input_schema(**pre_result.updated_input)
+            tool_input_dict = pre_result.updated_input
+        except (ValueError, TypeError) as exc:
+            logger.warning(
+                f"[query] Failed to apply updated input from hook: {exc}",
+                extra={"tool_use_id": tool_use_id},
+            )
+
+    # Add hook context if provided
+    if pre_result.additional_context:
+        logger.debug(
+            f"[query] PreToolUse hook added context for {tool_name}",
+            extra={"context": pre_result.additional_context[:100]},
+        )
+
+    tool_output = None
+    tool_error = None
+
     try:
         async for output in tool.call(parsed_input, tool_context):
             if isinstance(output, ToolProgress):
@@ -164,6 +211,7 @@ async def _run_tool_use_generator(
                 )
                 logger.debug(f"[query] Progress from tool_use_id={tool_use_id}: {output.content}")
             elif isinstance(output, ToolResult):
+                tool_output = output.data
                 result_content = output.result_for_assistant or str(output.data)
                 result_msg = tool_result_message(
                     tool_use_id, result_content, tool_use_result=output.data
@@ -176,12 +224,18 @@ async def _run_tool_use_generator(
     except CancelledError:
         raise  # Don't suppress task cancellation
     except (RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as exc:
+        tool_error = str(exc)
         logger.warning(
             "Error executing tool '%s': %s: %s",
             tool_name, type(exc).__name__, exc,
             extra={"tool": tool_name, "tool_use_id": tool_use_id},
         )
         yield tool_result_message(tool_use_id, f"Error executing tool: {str(exc)}", is_error=True)
+
+    # Run PostToolUse hooks
+    await hook_manager.run_post_tool_use_async(
+        tool_name, tool_input_dict, tool_response=tool_output, tool_use_id=tool_use_id
+    )
 
 
 def _group_tool_calls_by_concurrency(prepared_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

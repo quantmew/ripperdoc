@@ -23,6 +23,7 @@ from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
+from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.cli.commands import (
     get_slash_command,
     get_custom_command,
@@ -158,6 +159,17 @@ class RichUI:
                 type(exc).__name__, exc,
                 extra={"session_id": self.session_id},
             )
+
+        # Initialize hook manager with project context
+        hook_manager.set_project_dir(self.project_path)
+        hook_manager.set_session_id(self.session_id)
+        logger.debug(
+            "[ui] Initialized hook manager",
+            extra={
+                "session_id": self.session_id,
+                "project_path": str(self.project_path),
+            },
+        )
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Properties for backward compatibility with interrupt handler

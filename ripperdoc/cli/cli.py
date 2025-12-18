@@ -22,6 +22,7 @@ from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
+from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.utils.messages import create_user_message
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.core.permissions import make_permission_checker
@@ -69,6 +70,10 @@ async def run_query(
 
     project_path = Path.cwd()
     can_use_tool = make_permission_checker(project_path, safe_mode) if safe_mode else None
+
+    # Initialize hook manager
+    hook_manager.set_project_dir(project_path)
+    hook_manager.set_session_id(session_id)
 
     # Create initial user message
     from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMessage
