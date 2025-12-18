@@ -1,6 +1,25 @@
-# Ripperdoc - AI 驱动的终端助手
+<div align="center">
 
-Ripperdoc 是一个 AI 驱动的终端助手，专为编码任务设计，提供交互式界面用于 AI 辅助开发、文件管理和命令执行。
+# Ripperdoc
+
+_开源、可扩展的 AI 编程代理，在终端中运行_
+
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0">
+    <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg">
+  </a>
+  <a href="https://www.python.org/downloads/">
+    <img src="https://img.shields.io/badge/python-3.10+-blue.svg">
+  </a>
+  <a href="https://github.com/quantmew/ripperdoc/stargazers">
+    <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
+  </a>
+</p>
+</div>
+
+Ripperdoc 是你的本地 AI 编程助手，类似于 [Claude Code](https://claude.com/claude-code)、[Codex](https://github.com/openai/codex)、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Aider](https://github.com/paul-gauthier/aider) 和 [Goose](https://github.com/block/goose)。它可以编写代码、重构项目、执行 shell 命令、管理文件——全部通过终端中的自然语言对话完成。
+
+设计上追求最大灵活性，Ripperdoc 支持**任意 LLM**（Anthropic Claude、OpenAI、DeepSeek、通过 OpenAI 兼容 API 的本地模型），支持**自定义 hooks** 来拦截和控制工具执行，并提供交互式 CLI 和 **Python SDK** 用于无头自动化。
 
 ## 功能特性
 
@@ -18,11 +37,11 @@ Ripperdoc 是一个 AI 驱动的终端助手，专为编码任务设计，提供
 - **后台命令** - 在后台运行命令并监控输出
 - **权限系统** - 安全模式，操作需要权限确认
 - **批量编辑支持** - 对文件进行批量编辑操作
-- **MCP 服务器支持** - 连接 Model Context Protocol 服务器以扩展功能
 - **MCP 服务器支持** - 与 Model Context Protocol 服务器集成
-- **子代理系统** - 将任务委托给专用代理
 - **会话管理** - 持久化会话历史和用量跟踪
 - **Jupyter Notebook 支持** - 直接编辑 .ipynb 文件
+- **Hooks 系统** - 在生命周期事件执行自定义脚本，支持决策控制
+- **自定义命令** - 定义可复用的斜杠命令，支持参数替换
 
 ## 安装
 

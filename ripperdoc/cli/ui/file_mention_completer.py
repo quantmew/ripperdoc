@@ -5,7 +5,7 @@ Supports recursive search across the entire project.
 """
 
 from pathlib import Path
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Set
 
 from prompt_toolkit.completion import Completer, Completion
 
@@ -89,6 +89,13 @@ class FileMentionCompleter(Completer):
 
         try:
             matches = []
+            seen: Set[str] = set()
+
+            def _add_match(display_path: str, item: Path, meta: str, score: int) -> None:
+                if display_path in seen:
+                    return
+                seen.add(display_path)
+                matches.append((display_path, item, meta, score))
 
             # If query contains path separator, do directory-based search
             if "/" in query or "\\" in query:
@@ -117,7 +124,7 @@ class FileMentionCompleter(Completer):
                                 # Right side: show type only
                                 meta = "📁 directory" if item.is_dir() else "📄 file"
 
-                                matches.append((display_path, item, meta, 0))
+                                _add_match(display_path, item, meta, 0)
                             except ValueError:
                                 continue
                 else:
@@ -146,7 +153,7 @@ class FileMentionCompleter(Completer):
                                     # Right side: show type only
                                     meta = "📁 directory" if item.is_dir() else "📄 file"
 
-                                    matches.append((display_path, item, meta, 0))
+                                    _add_match(display_path, item, meta, 0)
                                 except ValueError:
                                     continue
             else:
@@ -170,13 +177,61 @@ class FileMentionCompleter(Completer):
 
                             # Right side: show type only
                             meta = "📁 directory" if item.is_dir() else "📄 file"
-                            matches.append((display_path, item, meta, 0))
+                            _add_match(display_path, item, meta, 0)
                         except ValueError:
                             continue
                 else:
+                    # First, suggest top-level entries that match the prefix to support step-by-step navigation
+                    query_lower = query.lower()
+                    for item in sorted(self.project_path.iterdir()):
+                        if should_skip_path(
+                            item,
+                            self.project_path,
+                            ignore_filter=self.ignore_filter,
+                            skip_hidden=True,
+                        ):
+                            continue
+
+                        name_lower = item.name.lower()
+                        if query_lower in name_lower:
+                            score = 500
+                            if name_lower.startswith(query_lower):
+                                score += 50
+                            if name_lower == query_lower:
+                                score += 100
+
+                            rel_path = item.relative_to(self.project_path)
+                            display_path = str(rel_path)
+                            if item.is_dir():
+                                display_path += "/"
+
+                            meta = "📁 directory" if item.is_dir() else "📄 file"
+                            _add_match(display_path, item, meta, score)
+
+                    # If the query exactly matches a directory, also surface its children for quicker drilling
+                    dir_candidate = self.project_path / query
+                    if dir_candidate.exists() and dir_candidate.is_dir():
+                        for item in sorted(dir_candidate.iterdir()):
+                            if should_skip_path(
+                                item,
+                                self.project_path,
+                                ignore_filter=self.ignore_filter,
+                                skip_hidden=True,
+                            ):
+                                continue
+
+                            try:
+                                rel_path = item.relative_to(self.project_path)
+                                display_path = str(rel_path)
+                                if item.is_dir():
+                                    display_path += "/"
+                                meta = "📁 directory" if item.is_dir() else "📄 file"
+                                _add_match(display_path, item, meta, 400)
+                            except ValueError:
+                                continue
+
                     # Recursively search for files matching the query
                     all_files = self._collect_files_recursive(self.project_path)
-                    query_lower = query.lower()
 
                     for file_path in all_files:
                         try:
@@ -198,7 +253,7 @@ class FileMentionCompleter(Completer):
                                 # Right side: show type only
                                 meta = "📄 file"
 
-                                matches.append((display_path, file_path, meta, score))
+                                _add_match(display_path, file_path, meta, score)
                         except ValueError:
                             continue
 

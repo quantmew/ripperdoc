@@ -57,7 +57,6 @@ For `PreToolUse` and `PostToolUse` events:
 
 Hooks receive these environment variables:
 - `RIPPERDOC_PROJECT_DIR`: Path to the project directory
-- `CLAUDE_PROJECT_DIR`: Alias for compatibility
 
 ### Input/Output
 

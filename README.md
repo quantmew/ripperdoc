@@ -1,6 +1,25 @@
-# Ripperdoc - AI-Powered Terminal Assistant
+<div align="center">
 
-Ripperdoc is an AI-powered terminal assistant for coding tasks, providing an interactive interface for AI-assisted development, file management, and command execution.
+# Ripperdoc
+
+_an open-source, extensible AI coding agent that runs in your terminal_
+
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0">
+    <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg">
+  </a>
+  <a href="https://www.python.org/downloads/">
+    <img src="https://img.shields.io/badge/python-3.10+-blue.svg">
+  </a>
+  <a href="https://github.com/quantmew/ripperdoc/stargazers">
+    <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
+  </a>
+</p>
+</div>
+
+Ripperdoc is your on-machine AI coding assistant, similar to [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Aider](https://github.com/paul-gauthier/aider), and [Goose](https://github.com/block/goose). It can write code, refactor projects, execute shell commands, and manage files - all through natural language conversations in your terminal.
+
+Designed for maximum flexibility, Ripperdoc works with **any LLM** (Anthropic Claude, OpenAI, DeepSeek, local models via OpenAI-compatible APIs), supports **custom hooks** to intercept and control tool execution, and offers both an interactive CLI and a **Python SDK** for headless automation.
 
 [中文文档](README_CN.md) | [Contributing](CONTRIBUTING.md) | [Documentation](docs/)
 
@@ -23,6 +42,8 @@ Ripperdoc is an AI-powered terminal assistant for coding tasks, providing an int
 - **MCP Server Support** - Integration with Model Context Protocol servers
 - **Session Management** - Persistent session history and usage tracking
 - **Jupyter Notebook Support** - Edit .ipynb files directly
+- **Hooks System** - Execute custom scripts at lifecycle events with decision control
+- **Custom Commands** - Define reusable slash commands with parameter substitution
 
 ## Installation
 

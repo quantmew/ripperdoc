@@ -15,8 +15,9 @@ from rich.markup import escape
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, merge_completers
-from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.shortcuts.prompt import CompleteStyle
 
 from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.default_tools import get_default_tools
@@ -881,11 +882,32 @@ class RichUI:
         file_completer = FileMentionCompleter(self.project_path, self._ignore_filter)
         combined_completer = merge_completers([slash_completer, file_completer])
 
+        key_bindings = KeyBindings()
+
+        @key_bindings.add("enter")
+        def _(event: Any) -> None:
+            """Accept completion if menu is open; otherwise submit line."""
+            buf = event.current_buffer
+            if buf.complete_state and buf.complete_state.current_completion:
+                buf.apply_completion(buf.complete_state.current_completion)
+                return
+            buf.validate_and_handle()
+
+        @key_bindings.add("tab")
+        def _(event: Any) -> None:
+            """Use Tab to accept the highlighted completion when visible."""
+            buf = event.current_buffer
+            if buf.complete_state and buf.complete_state.current_completion:
+                buf.apply_completion(buf.complete_state.current_completion)
+            else:
+                buf.start_completion(select_first=True)
+
         self._prompt_session = PromptSession(
             completer=combined_completer,
             complete_style=CompleteStyle.COLUMN,
             complete_while_typing=True,
             history=InMemoryHistory(),
+            key_bindings=key_bindings,
         )
         return self._prompt_session
 
