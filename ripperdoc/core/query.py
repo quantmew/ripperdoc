@@ -65,6 +65,42 @@ DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_API_TIMEOUT", "120"))
 MAX_LLM_RETRIES = int(os.getenv("RIPPERDOC_MAX_RETRIES", "10"))
 
 
+def infer_thinking_mode(model_profile: "ModelProfile") -> Optional[str]:
+    """Infer thinking mode from ModelProfile if not explicitly configured.
+
+    This function checks the model_profile.thinking_mode first. If it's set,
+    returns that value. Otherwise, auto-detects based on api_base and model name.
+
+    Args:
+        model_profile: The model profile to analyze
+
+    Returns:
+        Thinking mode string ("deepseek", "qwen", "openrouter", "gemini_openai")
+        or None if no thinking mode should be applied.
+    """
+    # Use explicit config if set
+    explicit_mode = getattr(model_profile, "thinking_mode", None)
+    if explicit_mode:
+        return explicit_mode
+
+    # Auto-detect based on API base and model name
+    base = (model_profile.api_base or "").lower()
+    name = (model_profile.model or "").lower()
+
+    if "deepseek" in base or name.startswith("deepseek"):
+        return "deepseek"
+    if "dashscope" in base or "qwen" in name:
+        return "qwen"
+    if "openrouter.ai" in base:
+        return "openrouter"
+    if "generativelanguage.googleapis.com" in base or name.startswith("gemini"):
+        return "gemini_openai"
+    if "openai" in base:
+        return "openai"
+
+    return None
+
+
 def _resolve_tool(
     tool_registry: "ToolRegistry", tool_name: str, tool_use_id: str
 ) -> tuple[Optional[Tool[Any, Any]], Optional[UserMessage]]:
@@ -570,8 +606,22 @@ async def query_llm(
     else:
         messages_for_model = messages
 
+    # Get thinking_mode for provider-specific handling
+    # Apply when thinking is enabled (max_thinking_tokens > 0) OR when using a
+    # reasoning model like deepseek-reasoner which has thinking enabled by default
+    thinking_mode: Optional[str] = None
+    if protocol == "openai":
+        model_name = (model_profile.model or "").lower()
+        # DeepSeek Reasoner models have thinking enabled by default
+        is_reasoning_model = "reasoner" in model_name or "r1" in model_name
+        if max_thinking_tokens > 0 or is_reasoning_model:
+            thinking_mode = infer_thinking_mode(model_profile)
+
     normalized_messages: List[Dict[str, Any]] = normalize_messages_for_api(
-        messages_for_model, protocol=protocol, tool_mode=tool_mode
+        messages_for_model,
+        protocol=protocol,
+        tool_mode=tool_mode,
+        thinking_mode=thinking_mode,
     )
     logger.info(
         "[query_llm] Preparing model request",
@@ -582,6 +632,7 @@ async def query_llm(
             "normalized_messages": len(normalized_messages),
             "tool_count": len(tools),
             "max_thinking_tokens": max_thinking_tokens,
+            "thinking_mode": thinking_mode,
             "tool_mode": tool_mode,
         },
     )

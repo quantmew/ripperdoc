@@ -111,7 +111,7 @@ class ModelProfile(BaseModel):
     # interactions into plain text to support providers that reject tool roles.
     openai_tool_mode: Literal["native", "text"] = "native"
     # Optional override for thinking protocol handling (e.g., "deepseek", "openrouter",
-    # "qwen", "gemini_openai", "openai_reasoning"). When unset, provider heuristics are used.
+    # "qwen", "gemini_openai", "openai"). When unset, provider heuristics are used.
     thinking_mode: Optional[str] = None
     # Pricing (USD per 1M tokens). Leave as 0 to skip cost calculation.
     input_cost_per_million_tokens: float = 0.0

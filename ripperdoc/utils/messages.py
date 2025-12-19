@@ -268,14 +268,80 @@ def create_progress_message(
     )
 
 
+def _apply_deepseek_reasoning_content(
+    normalized: List[Dict[str, Any]],
+    is_new_turn: bool = False,
+) -> List[Dict[str, Any]]:
+    """Apply DeepSeek reasoning_content handling to normalized messages.
+
+    DeepSeek thinking mode requires special handling for tool calls:
+    1. During a tool call loop (same turn), reasoning_content MUST be preserved
+       in assistant messages that contain tool_calls
+    2. When a new user turn starts, we can optionally clear previous reasoning_content
+       to save bandwidth (the API will ignore them anyway)
+
+    According to DeepSeek docs, an assistant message with tool_calls should look like:
+    {
+        'role': 'assistant',
+        'content': response.choices[0].message.content,
+        'reasoning_content': response.choices[0].message.reasoning_content,
+        'tool_calls': response.choices[0].message.tool_calls,
+    }
+
+    Args:
+        normalized: The normalized messages list
+        is_new_turn: If True, clear reasoning_content from historical messages
+                     to save network bandwidth
+
+    Returns:
+        The processed messages list
+    """
+    if not normalized:
+        return normalized
+
+    # Find the last user message index to determine the current turn boundary
+    last_user_idx = -1
+    for idx in range(len(normalized) - 1, -1, -1):
+        if normalized[idx].get("role") == "user":
+            last_user_idx = idx
+            break
+
+    if is_new_turn and last_user_idx > 0:
+        # Clear reasoning_content from messages before the last user message
+        # This is optional but recommended by DeepSeek to save bandwidth
+        for idx in range(last_user_idx):
+            msg = normalized[idx]
+            if msg.get("role") == "assistant" and "reasoning_content" in msg:
+                # Set to None instead of deleting to match DeepSeek's example
+                msg["reasoning_content"] = None
+
+    # Validate: ensure all assistant messages with tool_calls have reasoning_content
+    # within the current turn (after last_user_idx)
+    for idx in range(max(0, last_user_idx), len(normalized)):
+        msg = normalized[idx]
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            if "reasoning_content" not in msg:
+                # This is a problem - DeepSeek requires reasoning_content for tool_calls
+                logger.warning(
+                    f"[deepseek] Assistant message at index {idx} has tool_calls "
+                    f"but missing reasoning_content - this may cause API errors"
+                )
+
+    return normalized
+
+
 def normalize_messages_for_api(
     messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
     protocol: str = "anthropic",
     tool_mode: str = "native",
+    thinking_mode: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Normalize messages for API submission.
 
     Progress messages are filtered out as they are not sent to the API.
+
+    For DeepSeek thinking mode, this function ensures reasoning_content is properly
+    included in assistant messages that contain tool_calls, as required by the API.
     """
 
     def _msg_type(msg: Any) -> Optional[str]:
@@ -317,58 +383,6 @@ def normalize_messages_for_api(
                     meta_dict["reasoning"] = message_payload.get("reasoning")
                 return meta_dict
         return {}
-
-    def _block_type(block: Any) -> Optional[str]:
-        if hasattr(block, "type"):
-            return getattr(block, "type", None)
-        if isinstance(block, dict):
-            return block.get("type")
-        return None
-
-    def _block_attr(block: Any, attr: str, default: Any = None) -> Any:
-        if hasattr(block, attr):
-            return getattr(block, attr, default)
-        if isinstance(block, dict):
-            return block.get(attr, default)
-        return default
-
-    def _flatten_blocks_to_text(blocks: List[Any]) -> str:
-        parts: List[str] = []
-        for blk in blocks:
-            btype = _block_type(blk)
-            if btype == "text":
-                text = _block_attr(blk, "text") or _block_attr(blk, "content") or ""
-                if text:
-                    parts.append(str(text))
-            elif btype == "tool_result":
-                text = _block_attr(blk, "text") or _block_attr(blk, "content") or ""
-                tool_id = _block_attr(blk, "tool_use_id") or _block_attr(blk, "id")
-                prefix = "Tool error" if _block_attr(blk, "is_error") else "Tool result"
-                label = f"{prefix}{f' ({tool_id})' if tool_id else ''}"
-                parts.append(f"{label}: {text}" if text else label)
-            elif btype == "tool_use":
-                name = _block_attr(blk, "name") or ""
-                input_data = _block_attr(blk, "input")
-                input_preview = ""
-                if input_data not in (None, {}):
-                    try:
-                        input_preview = json.dumps(input_data)
-                    except (TypeError, ValueError):
-                        input_preview = str(input_data)
-                tool_id = _block_attr(blk, "tool_use_id") or _block_attr(blk, "id")
-                desc = "Tool call"
-                if name:
-                    desc += f" {name}"
-                if tool_id:
-                    desc += f" ({tool_id})"
-                if input_preview:
-                    desc += f": {input_preview}"
-                parts.append(desc)
-            else:
-                text = _block_attr(blk, "text") or _block_attr(blk, "content") or ""
-                if text:
-                    parts.append(str(text))
-        return "\n".join(p for p in parts if p)
 
     effective_tool_mode = (tool_mode or "native").lower()
     if effective_tool_mode not in {"native", "text"}:
@@ -486,19 +500,36 @@ def normalize_messages_for_api(
                             mapped = _content_block_to_openai(block)
                             if mapped:
                                 assistant_openai_msgs.append(mapped)
-                    if text_parts:
+                    if tool_calls:
+                        # For DeepSeek thinking mode, we must include reasoning_content
+                        # in the assistant message that contains tool_calls
+                        tool_call_msg: Dict[str, Any] = {
+                            "role": "assistant",
+                            "content": "\n".join(text_parts) if text_parts else None,
+                            "tool_calls": tool_calls,
+                        }
+                        # Add reasoning_content if present (required for DeepSeek thinking mode)
+                        if thinking_mode == "deepseek":
+                            reasoning_content = meta.get("reasoning_content") if meta else None
+                            if reasoning_content is not None:
+                                tool_call_msg["reasoning_content"] = reasoning_content
+                                logger.debug(
+                                    f"[normalize_messages_for_api] Added reasoning_content to "
+                                    f"tool_call message (len={len(str(reasoning_content))})"
+                                )
+                            else:
+                                logger.warning(
+                                    f"[normalize_messages_for_api] DeepSeek mode: assistant "
+                                    f"message with tool_calls but no reasoning_content in metadata. "
+                                    f"meta_keys={list(meta.keys()) if meta else []}"
+                                )
+                        assistant_openai_msgs.append(tool_call_msg)
+                    elif text_parts:
                         assistant_openai_msgs.append(
                             {"role": "assistant", "content": "\n".join(text_parts)}
                         )
-                    if tool_calls:
-                        assistant_openai_msgs.append(
-                            {
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": tool_calls,
-                            }
-                        )
-                    if meta and assistant_openai_msgs:
+                    # For non-tool-call messages, add reasoning metadata to the last message
+                    if meta and assistant_openai_msgs and not tool_calls:
                         for key in ("reasoning_content", "reasoning_details", "reasoning"):
                             if key in meta and meta[key] is not None:
                                 assistant_openai_msgs[-1][key] = meta[key]
@@ -512,9 +543,10 @@ def normalize_messages_for_api(
                 normalized.append({"role": "assistant", "content": api_blocks})
             else:
                 normalized.append({"role": "assistant", "content": asst_content})  # type: ignore
-
+    
     logger.debug(
         f"[normalize_messages_for_api] protocol={protocol} tool_mode={effective_tool_mode} "
+        f"thinking_mode={thinking_mode} "
         f"input_msgs={len(messages)} normalized={len(normalized)} "
         f"tool_results_seen={tool_results_seen} tool_uses_seen={tool_uses_seen} "
         f"tool_result_positions={len(tool_result_positions)} "
@@ -523,6 +555,11 @@ def normalize_messages_for_api(
         f"skipped_tool_uses_no_id={skipped_tool_uses_no_id} "
         f"skipped_tool_results_no_call={skipped_tool_results_no_call}"
     )
+
+    # Apply DeepSeek-specific reasoning_content handling
+    if thinking_mode == "deepseek":
+        normalized = _apply_deepseek_reasoning_content(normalized, is_new_turn=False)
+
     return normalized
 
 

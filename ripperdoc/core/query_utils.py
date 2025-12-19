@@ -462,11 +462,13 @@ def log_openai_messages(normalized_messages: List[Dict[str, Any]]) -> None:
         role = message.get("role")
         tool_calls = message.get("tool_calls")
         tool_call_id = message.get("tool_call_id")
+        has_reasoning = "reasoning_content" in message and message.get("reasoning_content")
         ids = [tc.get("id") for tc in tool_calls] if tool_calls else []
         summary_parts.append(
             f"{idx}:{role}"
             + (f" tool_calls={ids}" if ids else "")
             + (f" tool_call_id={tool_call_id}" if tool_call_id else "")
+            + (" +reasoning" if has_reasoning else "")
         )
     logger.debug(f"[query_llm] OpenAI normalized messages: {' | '.join(summary_parts)}")
 

@@ -94,7 +94,7 @@ def _detect_openai_vendor(model_profile: ModelProfile) -> str:
     if "generativelanguage.googleapis.com" in base or name.startswith("gemini"):
         return "gemini_openai"
     if "gpt-5" in name:
-        return "openai_reasoning"
+        return "openai"
     return "openai"
 
 
@@ -130,7 +130,7 @@ def _build_thinking_kwargs(
         if effort:
             top_level["reasoning_effort"] = effort
             extra_body.setdefault("reasoning", {"effort": effort})
-    elif vendor == "openai_reasoning":
+    elif vendor == "openai":
         if effort:
             extra_body["reasoning"] = {"effort": effort}
     else:
