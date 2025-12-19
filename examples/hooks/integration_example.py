@@ -119,7 +119,7 @@ HOOKS_CONFIG = {
 }
 
 
-def setup_hooks(project_dir: Path):
+def setup_hooks(project_dir: Path) -> None:
     """Set up hooks configuration in a project directory."""
     hooks_dir = project_dir / ".ripperdoc" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)

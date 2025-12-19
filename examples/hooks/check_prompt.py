@@ -68,7 +68,7 @@ def check_for_secrets(prompt: str) -> list:
     return findings
 
 
-def main():
+def main() -> None:
     # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)

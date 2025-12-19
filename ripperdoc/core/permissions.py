@@ -26,8 +26,29 @@ class PermissionResult:
     decision: Optional[PermissionDecision] = None
 
 
-def _format_input_preview(parsed_input: Any) -> str:
-    """Create a short, human-friendly preview for prompts."""
+def _format_input_preview(parsed_input: Any, tool_name: Optional[str] = None) -> str:
+    """Create a human-friendly preview for prompts.
+
+    For Bash commands, shows full details for security review.
+    For other tools, shows a concise preview.
+    """
+    # For Bash tool, show full command details for security review
+    if tool_name == "Bash" and hasattr(parsed_input, "command"):
+        lines = [f"Command: {getattr(parsed_input, 'command')}"]
+
+        # Add other relevant parameters
+        if hasattr(parsed_input, "timeout") and parsed_input.timeout:
+            lines.append(f"Timeout: {parsed_input.timeout}ms")
+        if hasattr(parsed_input, "sandbox"):
+            lines.append(f"Sandbox: {parsed_input.sandbox}")
+        if hasattr(parsed_input, "run_in_background"):
+            lines.append(f"Background: {parsed_input.run_in_background}")
+        if hasattr(parsed_input, "shell_executable") and parsed_input.shell_executable:
+            lines.append(f"Shell: {parsed_input.shell_executable}")
+
+        return "\n  ".join(lines)
+
+    # For other tools with commands, show concise preview
     if hasattr(parsed_input, "command"):
         return f"command='{getattr(parsed_input, 'command')}'"
     if hasattr(parsed_input, "file_path"):
@@ -203,7 +224,7 @@ def make_permission_checker(
             )
 
         # Ask/passthrough flows prompt the user.
-        input_preview = _format_input_preview(parsed_input)
+        input_preview = _format_input_preview(parsed_input, tool_name=tool.name)
         prompt_lines = [
             f"{tool.name}",
             "",

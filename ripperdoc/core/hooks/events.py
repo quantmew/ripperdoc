@@ -5,10 +5,9 @@ as well as the input/output data structures for each event type.
 """
 
 import json
-import os
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field
+from typing import Any, Dict, Literal, Optional, Union
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HookEvent(str, Enum):
@@ -73,8 +72,7 @@ class HookInput(BaseModel):
     permission_mode: str = "default"  # "default", "plan", "acceptEdits", "bypassPermissions"
     hook_event_name: str = ""
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class PreToolUseInput(HookInput):
@@ -150,6 +148,8 @@ class StopInput(HookInput):
 
     hook_event_name: str = "Stop"
     stop_hook_active: bool = False  # True if already continuing from a stop hook
+    reason: Optional[str] = None
+    stop_sequence: Optional[str] = None
 
 
 class SubagentStopInput(HookInput):
@@ -210,6 +210,8 @@ class SessionEndInput(HookInput):
 
     hook_event_name: str = "SessionEnd"
     reason: str = ""  # "clear", "logout", "prompt_input_exit", "other"
+    duration_seconds: Optional[float] = None
+    message_count: Optional[int] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -232,8 +234,7 @@ class PreToolUseHookOutput(BaseModel):
     )  # Modified tool input
     additional_context: Optional[str] = Field(default=None, alias="additionalContext")
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class PermissionRequestDecision(BaseModel):
@@ -244,8 +245,7 @@ class PermissionRequestDecision(BaseModel):
     message: Optional[str] = None
     interrupt: bool = False
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class PermissionRequestHookOutput(BaseModel):
@@ -254,8 +254,7 @@ class PermissionRequestHookOutput(BaseModel):
     hook_event_name: Literal["PermissionRequest"] = "PermissionRequest"
     decision: Optional[PermissionRequestDecision] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class PostToolUseHookOutput(BaseModel):
@@ -264,8 +263,7 @@ class PostToolUseHookOutput(BaseModel):
     hook_event_name: Literal["PostToolUse"] = "PostToolUse"
     additional_context: Optional[str] = Field(default=None, alias="additionalContext")
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class UserPromptSubmitHookOutput(BaseModel):
@@ -274,8 +272,7 @@ class UserPromptSubmitHookOutput(BaseModel):
     hook_event_name: Literal["UserPromptSubmit"] = "UserPromptSubmit"
     additional_context: Optional[str] = Field(default=None, alias="additionalContext")
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SessionStartHookOutput(BaseModel):
@@ -284,8 +281,7 @@ class SessionStartHookOutput(BaseModel):
     hook_event_name: Literal["SessionStart"] = "SessionStart"
     additional_context: Optional[str] = Field(default=None, alias="additionalContext")
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 HookSpecificOutput = Union[
@@ -325,7 +321,7 @@ class HookOutput(BaseModel):
     )
 
     # Additional context to inject
-    additional_context: Optional[str] = None
+    additional_context: Optional[str] = Field(default=None, alias="additionalContext")
 
     # Raw output (for non-JSON responses)
     raw_output: Optional[str] = None
@@ -336,8 +332,7 @@ class HookOutput(BaseModel):
     exit_code: int = 0
     timed_out: bool = False
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
     @classmethod
     def from_raw(
@@ -420,10 +415,10 @@ class HookOutput(BaseModel):
                 # Handle PreToolUse specific fields
                 if event_name == "PreToolUse":
                     output.hook_specific_output = PreToolUseHookOutput(
-                        permission_decision=hso.get("permissionDecision"),
-                        permission_decision_reason=hso.get("permissionDecisionReason"),
-                        updated_input=hso.get("updatedInput"),
-                        additional_context=hso.get("additionalContext"),
+                        permissionDecision=hso.get("permissionDecision"),
+                        permissionDecisionReason=hso.get("permissionDecisionReason"),
+                        updatedInput=hso.get("updatedInput"),
+                        additionalContext=hso.get("additionalContext"),
                     )
                     # Map permissionDecision to decision
                     perm_decision = hso.get("permissionDecision")
@@ -444,7 +439,7 @@ class HookOutput(BaseModel):
                     if isinstance(decision_obj, dict):
                         decision_data = PermissionRequestDecision(
                             behavior=decision_obj.get("behavior", ""),
-                            updated_input=decision_obj.get("updatedInput"),
+                            updatedInput=decision_obj.get("updatedInput"),
                             message=decision_obj.get("message"),
                             interrupt=decision_obj.get("interrupt", False),
                         )
@@ -462,7 +457,7 @@ class HookOutput(BaseModel):
                 # Handle PostToolUse specific fields
                 elif event_name == "PostToolUse":
                     output.hook_specific_output = PostToolUseHookOutput(
-                        additional_context=hso.get("additionalContext"),
+                        additionalContext=hso.get("additionalContext"),
                     )
                     if hso.get("additionalContext"):
                         output.additional_context = hso["additionalContext"]
@@ -470,7 +465,7 @@ class HookOutput(BaseModel):
                 # Handle UserPromptSubmit specific fields
                 elif event_name == "UserPromptSubmit":
                     output.hook_specific_output = UserPromptSubmitHookOutput(
-                        additional_context=hso.get("additionalContext"),
+                        additionalContext=hso.get("additionalContext"),
                     )
                     if hso.get("additionalContext"):
                         output.additional_context = hso["additionalContext"]
@@ -478,7 +473,7 @@ class HookOutput(BaseModel):
                 # Handle SessionStart specific fields
                 elif event_name == "SessionStart":
                     output.hook_specific_output = SessionStartHookOutput(
-                        additional_context=hso.get("additionalContext"),
+                        additionalContext=hso.get("additionalContext"),
                     )
                     if hso.get("additionalContext"):
                         output.additional_context = hso["additionalContext"]

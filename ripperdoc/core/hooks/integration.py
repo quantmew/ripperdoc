@@ -4,11 +4,9 @@ This module provides convenient integration points for running hooks
 as part of tool execution flows.
 """
 
-from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, TypeVar, Union
 
-from ripperdoc.core.hooks.events import HookDecision
-from ripperdoc.core.hooks.manager import HookManager, HookResult, hook_manager
+from ripperdoc.core.hooks.manager import HookManager, hook_manager
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -129,7 +127,7 @@ class HookInterceptor:
         tool_name: str,
         tool_input: Dict[str, Any],
         execute_fn: Callable[[], T],
-    ) -> Tuple[bool, Union[T, str], Optional[str]]:
+    ) -> Tuple[bool, Union[T, str, None], Optional[str]]:
         """Wrap synchronous tool execution with pre/post hooks.
 
         Args:
@@ -168,7 +166,7 @@ class HookInterceptor:
             combined_context = "\n".join(parts) if parts else None
 
         if tool_error:
-            return False, tool_error, combined_context
+            return False, tool_error or "", combined_context
 
         return True, result, combined_context
 
@@ -177,7 +175,7 @@ class HookInterceptor:
         tool_name: str,
         tool_input: Dict[str, Any],
         execute_fn: Callable[[], T],
-    ) -> Tuple[bool, Union[T, str], Optional[str]]:
+    ) -> Tuple[bool, Union[T, str, None], Optional[str]]:
         """Wrap async tool execution with pre/post hooks."""
         # Run pre-tool hooks
         should_proceed, block_reason, pre_context = await self.check_pre_tool_use_async(
@@ -211,7 +209,7 @@ class HookInterceptor:
             combined_context = "\n".join(parts) if parts else None
 
         if tool_error:
-            return False, tool_error, combined_context
+            return False, tool_error or "", combined_context
 
         return True, result, combined_context
 
@@ -333,7 +331,7 @@ def check_stop(
         - should_stop: True if agent should stop
         - continue_reason: Reason to continue if blocked
     """
-    result = hook_manager.run_stop(reason, stop_sequence)
+    result = hook_manager.run_stop(False, reason, stop_sequence)
 
     if result.should_block:
         return False, result.block_reason
@@ -345,7 +343,7 @@ async def check_stop_async(
     reason: Optional[str] = None, stop_sequence: Optional[str] = None
 ) -> Tuple[bool, Optional[str]]:
     """Async version of check_stop."""
-    result = await hook_manager.run_stop_async(reason, stop_sequence)
+    result = await hook_manager.run_stop_async(False, reason, stop_sequence)
 
     if result.should_block:
         return False, result.block_reason

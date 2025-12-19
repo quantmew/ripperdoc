@@ -87,7 +87,7 @@ def check_command(command: str) -> tuple:
     return "allow", None
 
 
-def main():
+def main() -> None:
     # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)

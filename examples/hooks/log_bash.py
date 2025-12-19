@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-def main():
+def main() -> None:
     # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)

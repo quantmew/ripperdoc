@@ -45,7 +45,7 @@ def format_duration(seconds: float) -> str:
         return f"{hours}h {minutes}m"
 
 
-def main():
+def main() -> None:
     # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)

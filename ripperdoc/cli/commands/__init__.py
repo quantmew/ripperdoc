@@ -29,7 +29,6 @@ from .tools_cmd import command as tools_command
 from ripperdoc.core.custom_commands import (
     CustomCommandDefinition,
     load_all_custom_commands,
-    find_custom_command,
     expand_command_content,
 )
 

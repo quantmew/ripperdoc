@@ -23,7 +23,6 @@ Configuration example (.ripperdoc/hooks.json):
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -88,7 +87,7 @@ def is_sensitive_path(file_path: str) -> bool:
     return False
 
 
-def main():
+def main() -> None:
     # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)
@@ -96,7 +95,6 @@ def main():
         print(f"Error: Invalid JSON input: {e}", file=sys.stderr)
         sys.exit(1)
 
-    tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
     file_path = tool_input.get("file_path", "")
 

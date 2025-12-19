@@ -338,23 +338,23 @@ def _prompt_matcher_selection(
     if event_name not in MATCHER_EVENTS:
         if matchers:
             return matchers[0]
-        matcher = {"matcher": None, "hooks": []}
-        matchers.append(matcher)
-        return matcher
+        default_matcher: Dict[str, Any] = {"matcher": None, "hooks": []}
+        matchers.append(default_matcher)
+        return default_matcher
 
     if not matchers:
         console.print(
             "\nMatcher (tool name or regex). Leave empty to match all tools (*)."
         )
         pattern = console.input("Matcher: ").strip() or "*"
-        matcher = {"matcher": pattern, "hooks": []}
-        matchers.append(matcher)
-        return matcher
+        first_matcher: Dict[str, Any] = {"matcher": pattern, "hooks": []}
+        matchers.append(first_matcher)
+        return first_matcher
 
     console.print("\nSelect matcher:")
     for idx, matcher in enumerate(matchers, start=1):
         label = matcher.get("matcher") or "*"
-        hook_count = len(matcher.get("hooks", []))
+        hook_count = len(matcher.get("hooks") or [])
         console.print(f"  [{idx}] {escape(str(label))} ({hook_count} hook(s))")
     new_idx = len(matchers) + 1
     console.print(f"  [{new_idx}] New matcher pattern")
@@ -372,9 +372,9 @@ def _prompt_matcher_selection(
                 return matchers[idx - 1]
             if idx == new_idx:
                 pattern = console.input("New matcher (blank for '*'): ").strip() or "*"
-                matcher = {"matcher": pattern, "hooks": []}
-                matchers.append(matcher)
-                return matcher
+                created_matcher: Dict[str, Any] = {"matcher": pattern, "hooks": []}
+                matchers.append(created_matcher)
+                return created_matcher
         console.print("[red]Choose a matcher number from the list.[/red]")
 
 

@@ -14,7 +14,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Awaitable
+from typing import Callable, Dict, Optional, Awaitable
 
 from ripperdoc.core.hooks.config import HookDefinition
 from ripperdoc.core.hooks.events import AnyHookInput, HookOutput, HookDecision, SessionStartInput
@@ -191,7 +191,7 @@ class HookExecutor:
             pass
 
         # Not JSON, treat as additional context
-        return HookOutput(raw_output=response, additional_context=response)
+        return HookOutput(raw_output=response, additionalContext=response)
 
     async def execute_prompt_async(
         self,
@@ -224,7 +224,7 @@ class HookExecutor:
         prompt = self._expand_prompt(hook.prompt, input_data)
 
         logger.debug(
-            f"Executing prompt hook",
+            "Executing prompt hook",
             extra={
                 "event": input_data.hook_event_name,
                 "timeout": hook.timeout,

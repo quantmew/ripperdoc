@@ -6,7 +6,7 @@ throughout the application lifecycle.
 
 import os
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ripperdoc.core.hooks.config import (
     HooksConfig,
@@ -478,11 +478,15 @@ class HookManager:
 
     # --- Stop ---
 
-    def run_stop(self, stop_hook_active: bool = False) -> HookResult:
+    def run_stop(
+        self, stop_hook_active: bool = False, reason: Optional[str] = None, stop_sequence: Optional[str] = None
+    ) -> HookResult:
         """Run Stop hooks synchronously.
 
         Args:
             stop_hook_active: True if already continuing from a stop hook
+            reason: Reason for stopping
+            stop_sequence: Stop sequence that triggered the stop
         """
         hooks = self._get_hooks(HookEvent.STOP)
         if not hooks:
@@ -490,6 +494,8 @@ class HookManager:
 
         input_data = StopInput(
             stop_hook_active=stop_hook_active,
+            reason=reason,
+            stop_sequence=stop_sequence,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),
@@ -499,7 +505,9 @@ class HookManager:
         outputs = self.executor.execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
-    async def run_stop_async(self, stop_hook_active: bool = False) -> HookResult:
+    async def run_stop_async(
+        self, stop_hook_active: bool = False, reason: Optional[str] = None, stop_sequence: Optional[str] = None
+    ) -> HookResult:
         """Run Stop hooks asynchronously."""
         hooks = self._get_hooks(HookEvent.STOP)
         if not hooks:
@@ -507,6 +515,8 @@ class HookManager:
 
         input_data = StopInput(
             stop_hook_active=stop_hook_active,
+            reason=reason,
+            stop_sequence=stop_sequence,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),
@@ -645,11 +655,15 @@ class HookManager:
 
     # --- Session End ---
 
-    def run_session_end(self, reason: str) -> HookResult:
+    def run_session_end(
+        self, reason: str, duration_seconds: Optional[float] = None, message_count: Optional[int] = None
+    ) -> HookResult:
         """Run SessionEnd hooks synchronously.
 
         Args:
             reason: "clear", "logout", "prompt_input_exit", or "other"
+            duration_seconds: How long the session lasted
+            message_count: Number of messages in the session
         """
         hooks = self._get_hooks(HookEvent.SESSION_END)
         if not hooks:
@@ -657,6 +671,8 @@ class HookManager:
 
         input_data = SessionEndInput(
             reason=reason,
+            duration_seconds=duration_seconds,
+            message_count=message_count,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),
@@ -666,7 +682,9 @@ class HookManager:
         outputs = self.executor.execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
-    async def run_session_end_async(self, reason: str) -> HookResult:
+    async def run_session_end_async(
+        self, reason: str, duration_seconds: Optional[float] = None, message_count: Optional[int] = None
+    ) -> HookResult:
         """Run SessionEnd hooks asynchronously."""
         hooks = self._get_hooks(HookEvent.SESSION_END)
         if not hooks:
@@ -674,6 +692,8 @@ class HookManager:
 
         input_data = SessionEndInput(
             reason=reason,
+            duration_seconds=duration_seconds,
+            message_count=message_count,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),

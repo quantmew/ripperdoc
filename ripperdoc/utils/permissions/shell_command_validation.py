@@ -440,8 +440,8 @@ def _check_destructive_commands_in_code_string(code_string: str, interpreter: st
             (r'\bsubprocess\.(run|call|Popen)\s*\(\s*[^)]*rm\s+-[a-zA-Z]*r', "Python code executes destructive shell command"),
         ]
         
-        for pattern, message in system_patterns:
-            if re.search(pattern, code_string):
+        for pattern_str, message in system_patterns:
+            if re.search(pattern_str, code_string):
                 return ValidationResult(
                     behavior="ask",
                     message=message,
@@ -548,7 +548,7 @@ def _strip_interpreter_code_strings(command: str, first_token: str) -> str:
     # The (?<!\\) negative lookbehind ensures we don't match escaped quotes
     pattern = rf'({re.escape(first_token)}\s+-(c|e)\s+)(["\'])(.*?)(?<!\\)\3'
     
-    def replace_code_string(match):
+    def replace_code_string(match: re.Match[str]) -> str:
         prefix = match.group(1)
         quote = match.group(3)
         return f'{prefix}{quote}__CODE_STRING__{quote}'
@@ -701,12 +701,11 @@ def validate_shell_command(shell_command: str) -> ValidationResult:
                     if char == ';' and i > 0 and cmd[i-1] == '\\':
                         # Escaped semicolon, already handled above
                         pass
-                    # Check for && or || operators
+                    # Allow && and || operators (common for command chaining)
                     elif char in ('&', '|') and i + 1 < len(cmd) and cmd[i+1] == char:
-                        # This is && or ||, which is a shell operator
-                        # We should allow common patterns like cmd1 && cmd2
-                        # But we need to check if it's safe
-                        return True
+                        # This is && or ||, which are safe operators for command chaining
+                        i += 2  # Skip both characters
+                        continue
                     elif char == ';':
                         # Single ; is a command separator
                         return True

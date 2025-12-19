@@ -199,7 +199,6 @@ async def _run_tool_use_generator(
         )
 
     tool_output = None
-    tool_error = None
 
     try:
         async for output in tool.call(parsed_input, tool_context):
@@ -224,7 +223,6 @@ async def _run_tool_use_generator(
     except CancelledError:
         raise  # Don't suppress task cancellation
     except (RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as exc:
-        tool_error = str(exc)
         logger.warning(
             "Error executing tool '%s': %s: %s",
             tool_name, type(exc).__name__, exc,

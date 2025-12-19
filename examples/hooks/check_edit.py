@@ -69,7 +69,7 @@ def analyze_new_content(new_string: str, file_ext: str) -> list:
     return warnings
 
 
-def main():
+def main() -> None:
     # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)

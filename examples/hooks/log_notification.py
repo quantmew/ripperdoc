@@ -22,13 +22,12 @@ Configuration example (.ripperdoc/hooks.json):
 """
 
 import json
-import os
 import platform
 import subprocess
 import sys
 
 
-def send_notification_linux(title: str, message: str):
+def send_notification_linux(title: str, message: str) -> bool:
     """Send notification on Linux using notify-send."""
     try:
         subprocess.run(
@@ -41,7 +40,7 @@ def send_notification_linux(title: str, message: str):
         return False
 
 
-def send_notification_macos(title: str, message: str):
+def send_notification_macos(title: str, message: str) -> bool:
     """Send notification on macOS using osascript."""
     try:
         script = f'display notification "{message}" with title "{title}" sound name "default"'
@@ -55,7 +54,7 @@ def send_notification_macos(title: str, message: str):
         return False
 
 
-def send_notification_windows(title: str, message: str):
+def send_notification_windows(title: str, message: str) -> bool:
     """Send notification on Windows using PowerShell toast."""
     try:
         # Use PowerShell to send a toast notification
@@ -89,7 +88,7 @@ def send_notification_windows(title: str, message: str):
         return False
 
 
-def send_notification(title: str, message: str):
+def send_notification(title: str, message: str) -> bool:
     """Send a desktop notification based on the current platform."""
     system = platform.system()
 
@@ -103,7 +102,7 @@ def send_notification(title: str, message: str):
         return False
 
 
-def main():
+def main() -> None:
     # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)
