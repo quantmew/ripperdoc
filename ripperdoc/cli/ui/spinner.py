@@ -1,4 +1,6 @@
-from typing import Any, Literal, Optional
+from contextlib import contextmanager
+from typing import Any, Generator, Literal, Optional
+
 from rich.console import Console
 from rich.markup import escape
 from rich.status import Status
@@ -47,3 +49,25 @@ class Spinner:
         self.stop()
         # Do not suppress exceptions
         return False
+
+    @property
+    def is_running(self) -> bool:
+        """Check if spinner is currently running."""
+        return self._status is not None
+
+    @contextmanager
+    def paused(self) -> Generator[None, None, None]:
+        """Context manager to temporarily pause the spinner for clean output.
+
+        Usage:
+            with spinner.paused():
+                console.print("Some output")
+        """
+        was_running = self.is_running
+        if was_running:
+            self.stop()
+        try:
+            yield
+        finally:
+            if was_running:
+                self.start()

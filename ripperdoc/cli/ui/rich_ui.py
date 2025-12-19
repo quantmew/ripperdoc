@@ -476,12 +476,17 @@ class RichUI:
         self,
         message: AssistantMessage,
         tool_registry: Dict[str, Dict[str, Any]],
+        spinner: Optional[ThinkingSpinner] = None,
     ) -> Optional[str]:
         """Handle an assistant message from the query stream.
 
         Returns:
             The last tool name if a tool_use block was processed, None otherwise.
         """
+        # Factory to create pause context - spinner.paused() if spinner exists, else no-op
+        from contextlib import nullcontext
+        pause = lambda: spinner.paused() if spinner else nullcontext()  # noqa: E731
+
         meta = getattr(getattr(message, "message", None), "metadata", {}) or {}
         reasoning_payload = (
             meta.get("reasoning_content")
@@ -489,16 +494,19 @@ class RichUI:
             or meta.get("reasoning_details")
         )
         if reasoning_payload:
-            self._print_reasoning(reasoning_payload)
+            with pause():
+                self._print_reasoning(reasoning_payload)
 
         last_tool_name: Optional[str] = None
 
         if isinstance(message.message.content, str):
-            self.display_message("Ripperdoc", message.message.content)
+            with pause():
+                self.display_message("Ripperdoc", message.message.content)
         elif isinstance(message.message.content, list):
             for block in message.message.content:
                 if hasattr(block, "type") and block.type == "text" and block.text:
-                    self.display_message("Ripperdoc", block.text)
+                    with pause():
+                        self.display_message("Ripperdoc", block.text)
                 elif hasattr(block, "type") and block.type == "tool_use":
                     tool_name = getattr(block, "name", "unknown tool")
                     tool_args = getattr(block, "input", {})
@@ -512,9 +520,10 @@ class RichUI:
                         }
 
                     if tool_name == "Task":
-                        self.display_message(
-                            tool_name, "", is_tool=True, tool_type="call", tool_args=tool_args
-                        )
+                        with pause():
+                            self.display_message(
+                                tool_name, "", is_tool=True, tool_type="call", tool_args=tool_args
+                            )
                         if tool_use_id:
                             tool_registry[tool_use_id]["printed"] = True
 
@@ -527,10 +536,15 @@ class RichUI:
         message: UserMessage,
         tool_registry: Dict[str, Dict[str, Any]],
         last_tool_name: Optional[str],
+        spinner: Optional[ThinkingSpinner] = None,
     ) -> None:
         """Handle a user message containing tool results."""
         if not isinstance(message.message.content, list):
             return
+
+        # Factory to create pause context - spinner.paused() if spinner exists, else no-op
+        from contextlib import nullcontext
+        pause = lambda: spinner.paused() if spinner else nullcontext()  # noqa: E731
 
         for block in message.message.content:
             if not (hasattr(block, "type") and block.type == "tool_result" and block.text):
@@ -545,25 +559,27 @@ class RichUI:
             if entry:
                 tool_name = entry.get("name", tool_name)
                 if not entry.get("printed"):
-                    self.display_message(
-                        tool_name,
-                        "",
-                        is_tool=True,
-                        tool_type="call",
-                        tool_args=entry.get("args", {}),
-                    )
+                    with pause():
+                        self.display_message(
+                            tool_name,
+                            "",
+                            is_tool=True,
+                            tool_type="call",
+                            tool_args=entry.get("args", {}),
+                        )
                     entry["printed"] = True
             elif last_tool_name:
                 tool_name = last_tool_name
 
-            self.display_message(
-                tool_name,
-                block.text,
-                is_tool=True,
-                tool_type="result",
-                tool_data=tool_data,
-                tool_error=is_error,
-            )
+            with pause():
+                self.display_message(
+                    tool_name,
+                    block.text,
+                    is_tool=True,
+                    tool_type="result",
+                    tool_data=tool_data,
+                    tool_error=is_error,
+                )
 
     def _handle_progress_message(
         self,
@@ -577,14 +593,17 @@ class RichUI:
             Updated output token estimate.
         """
         if self.verbose:
-            self.display_message("System", f"Progress: {message.content}", is_tool=True)
+            with spinner.paused():
+                self.display_message("System", f"Progress: {message.content}", is_tool=True)
         elif message.content and isinstance(message.content, str):
             if message.content.startswith("Subagent: "):
-                self.display_message(
-                    "Subagent", message.content[len("Subagent: ") :], is_tool=True
-                )
+                with spinner.paused():
+                    self.display_message(
+                        "Subagent", message.content[len("Subagent: ") :], is_tool=True
+                    )
             elif message.content.startswith("Subagent"):
-                self.display_message("Subagent", message.content, is_tool=True)
+                with spinner.paused():
+                    self.display_message("Subagent", message.content, is_tool=True)
 
         if message.tool_use_id == "stream":
             delta_tokens = estimate_tokens(message.content)
@@ -702,12 +721,14 @@ class RichUI:
                     permission_checker,  # type: ignore[arg-type]
                 ):
                     if message.type == "assistant" and isinstance(message, AssistantMessage):
-                        result = self._handle_assistant_message(message, tool_registry)
+                        result = self._handle_assistant_message(message, tool_registry, spinner)
                         if result:
                             last_tool_name = result
 
                     elif message.type == "user" and isinstance(message, UserMessage):
-                        self._handle_tool_result_message(message, tool_registry, last_tool_name)
+                        self._handle_tool_result_message(
+                            message, tool_registry, last_tool_name, spinner
+                        )
 
                     elif message.type == "progress" and isinstance(message, ProgressMessage):
                         output_token_est = self._handle_progress_message(
