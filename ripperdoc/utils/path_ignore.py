@@ -286,7 +286,7 @@ def _compile_pattern(pattern: str) -> re.Pattern[str]:
             while j < len(pattern) and pattern[j] != "]":
                 j += 1
             if j < len(pattern):
-                regex += pattern[i:j + 1]
+                regex += pattern[i : j + 1]
                 i = j
             else:
                 regex += re.escape(c)
@@ -383,7 +383,9 @@ class IgnoreFilter:
 # =============================================================================
 
 
-def parse_ignore_pattern(pattern: str, settings_path: Optional[Path] = None) -> Tuple[str, Optional[Path]]:
+def parse_ignore_pattern(
+    pattern: str, settings_path: Optional[Path] = None
+) -> Tuple[str, Optional[Path]]:
     """Parse an ignore pattern and return (relative_pattern, root_path).
 
     Supports prefixes:
@@ -503,6 +505,7 @@ def is_path_ignored(
     file_path = Path(file_path)
     if not file_path.is_absolute():
         from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+
         file_path = Path(safe_get_cwd()) / file_path
 
     file_path = file_path.resolve()
@@ -512,6 +515,7 @@ def is_path_ignored(
         root_path = get_git_root(file_path.parent)
         if root_path is None:
             from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+
             root_path = Path(safe_get_cwd())
 
     root_path = root_path.resolve()
@@ -628,12 +632,35 @@ def check_path_for_tool(
         # Check if it's a binary/media file
         suffix = file_path.suffix.lower()
         binary_extensions = {
-            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp",
-            ".mp4", ".avi", ".mkv", ".mov", ".mp3", ".wav", ".flac",
-            ".zip", ".tar", ".gz", ".7z", ".rar",
-            ".exe", ".dll", ".so", ".dylib",
-            ".db", ".sqlite", ".parquet",
-            ".ttf", ".otf", ".woff",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".bmp",
+            ".ico",
+            ".webp",
+            ".mp4",
+            ".avi",
+            ".mkv",
+            ".mov",
+            ".mp3",
+            ".wav",
+            ".flac",
+            ".zip",
+            ".tar",
+            ".gz",
+            ".7z",
+            ".rar",
+            ".exe",
+            ".dll",
+            ".so",
+            ".dylib",
+            ".db",
+            ".sqlite",
+            ".parquet",
+            ".ttf",
+            ".otf",
+            ".woff",
         }
         if suffix in binary_extensions:
             reasons.append("binary/media file")

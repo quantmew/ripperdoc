@@ -26,7 +26,7 @@ from typing import (
 
 from pydantic import ValidationError
 
-from ripperdoc.core.config import provider_protocol
+from ripperdoc.core.config import ModelProfile, provider_protocol
 from ripperdoc.core.providers import ProviderClient, get_provider_client
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.hooks.manager import hook_manager
@@ -65,7 +65,7 @@ DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_API_TIMEOUT", "120"))
 MAX_LLM_RETRIES = int(os.getenv("RIPPERDOC_MAX_RETRIES", "10"))
 
 
-def infer_thinking_mode(model_profile: "ModelProfile") -> Optional[str]:
+def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
     """Infer thinking mode from ModelProfile if not explicitly configured.
 
     This function checks the model_profile.thinking_mode first. If it's set,
@@ -79,7 +79,7 @@ def infer_thinking_mode(model_profile: "ModelProfile") -> Optional[str]:
         or None if no thinking mode should be applied.
     """
     # Use explicit config if set
-    explicit_mode = getattr(model_profile, "thinking_mode", None)
+    explicit_mode = model_profile.thinking_mode
     if explicit_mode:
         return explicit_mode
 
@@ -195,7 +195,9 @@ async def _run_tool_use_generator(
     tool_input_dict = (
         parsed_input.model_dump()
         if hasattr(parsed_input, "model_dump")
-        else dict(parsed_input) if isinstance(parsed_input, dict) else {}
+        else dict(parsed_input)
+        if isinstance(parsed_input, dict)
+        else {}
     )
 
     # Run PreToolUse hooks
@@ -261,7 +263,9 @@ async def _run_tool_use_generator(
     except (RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as exc:
         logger.warning(
             "Error executing tool '%s': %s: %s",
-            tool_name, type(exc).__name__, exc,
+            tool_name,
+            type(exc).__name__,
+            exc,
             extra={"tool": tool_name, "tool_use_id": tool_use_id},
         )
         yield tool_result_message(tool_use_id, f"Error executing tool: {str(exc)}", is_error=True)
@@ -355,7 +359,8 @@ async def _run_concurrent_tool_uses(
         except (RuntimeError, ValueError, TypeError) as exc:
             logger.warning(
                 "[query] Error while consuming tool generator: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
         finally:
             await queue.put(None)
@@ -408,7 +413,8 @@ class ToolRegistry:
             except (TypeError, AttributeError) as exc:
                 logger.warning(
                     "[tool_registry] Tool.defer_loading failed: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                     extra={"tool": getattr(tool, "name", None)},
                 )
                 deferred = False
@@ -495,7 +501,8 @@ def _apply_skill_context_updates(
             except (KeyError, ValueError, TypeError) as exc:
                 logger.warning(
                     "[query] Failed to activate tools listed in skill output: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                 )
 
         model_hint = data.get("model")
@@ -716,7 +723,8 @@ async def query_llm(
         # Return error message
         logger.warning(
             "Error querying AI model: %s: %s",
-            type(e).__name__, e,
+            type(e).__name__,
+            e,
             extra={
                 "model": getattr(model_profile, "model", None),
                 "model_pointer": model,
@@ -807,9 +815,7 @@ async def _run_query_iteration(
 
     model_profile = resolve_model_profile(query_context.model)
     tool_mode = determine_tool_mode(model_profile)
-    tools_for_model: List[Tool[Any, Any]] = (
-        [] if tool_mode == "text" else query_context.all_tools()
-    )
+    tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else query_context.all_tools()
 
     full_system_prompt = build_full_system_prompt(
         system_prompt, context, tool_mode, query_context.all_tools()
@@ -881,7 +887,7 @@ async def _run_query_iteration(
             done, pending = await asyncio.wait(
                 {assistant_task, waiter},
                 return_when=asyncio.FIRST_COMPLETED,
-                timeout=0.1  # Check abort_controller every 100ms
+                timeout=0.1,  # Check abort_controller every 100ms
             )
             if not done:
                 # Timeout - cancel waiter and continue loop to check abort_controller
@@ -939,8 +945,7 @@ async def _run_query_iteration(
     tool_results: List[UserMessage] = []
     permission_denied = False
     sibling_ids = set(
-        getattr(t, "tool_use_id", None) or getattr(t, "id", None) or ""
-        for t in tool_use_blocks
+        getattr(t, "tool_use_id", None) or getattr(t, "id", None) or "" for t in tool_use_blocks
     )
     prepared_calls: List[Dict[str, Any]] = []
 
@@ -948,18 +953,12 @@ async def _run_query_iteration(
         tool_name = tool_use.name
         if not tool_name:
             continue
-        tool_use_id = (
-            getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
-        )
+        tool_use_id = getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
         tool_input = getattr(tool_use, "input", {}) or {}
 
-        tool, missing_msg = _resolve_tool(
-            query_context.tool_registry, tool_name, tool_use_id
-        )
+        tool, missing_msg = _resolve_tool(query_context.tool_registry, tool_name, tool_use_id)
         if missing_msg:
-            logger.warning(
-                f"[query] Tool '{tool_name}' not found for tool_use_id={tool_use_id}"
-            )
+            logger.warning(f"[query] Tool '{tool_name}' not found for tool_use_id={tool_use_id}")
             tool_results.append(missing_msg)
             yield missing_msg
             continue
@@ -986,8 +985,7 @@ async def _run_query_iteration(
             validation = await tool.validate_input(parsed_input, tool_context)
             if not validation.result:
                 logger.debug(
-                    f"[query] Validation failed for tool_use_id={tool_use_id}: "
-                    f"{validation.message}"
+                    f"[query] Validation failed for tool_use_id={tool_use_id}: {validation.message}"
                 )
                 result_msg = tool_result_message(
                     tool_use_id,
@@ -1004,12 +1002,9 @@ async def _run_query_iteration(
                 )
                 if not allowed:
                     logger.debug(
-                        f"[query] Permission denied for tool_use_id={tool_use_id}: "
-                        f"{denial_message}"
+                        f"[query] Permission denied for tool_use_id={tool_use_id}: {denial_message}"
                     )
-                    denial_text = (
-                        denial_message or f"User aborted the tool invocation: {tool_name}"
-                    )
+                    denial_text = denial_message or f"User aborted the tool invocation: {tool_name}"
                     denial_msg = tool_result_message(tool_use_id, denial_text, is_error=True)
                     tool_results.append(denial_msg)
                     yield denial_msg

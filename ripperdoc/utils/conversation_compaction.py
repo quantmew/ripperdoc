@@ -34,6 +34,7 @@ RECENT_MESSAGES_AFTER_COMPACT = 8
 # Summary Prompt Generation
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def generate_summary_prompt(additional_instructions: Optional[str] = None) -> str:
     """Generate the system prompt for conversation summarization.
 
@@ -203,9 +204,11 @@ Please continue the conversation from where we left it off without asking the us
 # Data Classes
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class CompactionResult:
     """Result of a conversation compaction operation."""
+
     messages: List[ConversationMessage]
     summary_text: str
     continuation_prompt: str
@@ -219,6 +222,7 @@ class CompactionResult:
 @dataclass
 class CompactionError:
     """Error during compaction."""
+
     error_type: str  # "not_enough_messages", "empty_summary", "exception"
     message: str
     exception: Optional[Exception] = None
@@ -373,16 +377,15 @@ async def compact_conversation(
     messages_for_summary = micro.messages
 
     # Summarize the conversation
-    
+
     non_progress_messages = [
         m for m in messages_for_summary if getattr(m, "type", "") != "progress"
     ]
     try:
-        summary_text = await summarize_conversation(
-            non_progress_messages, custom_instructions
-        )
+        summary_text = await summarize_conversation(non_progress_messages, custom_instructions)
     except Exception as exc:
         import traceback
+
         logger.warning(
             "[compaction] Error during compaction: %s: %s\n%s",
             type(exc).__name__,
@@ -443,6 +446,7 @@ class ConversationCompactor:
     Deprecated: Use compact_conversation() function directly instead.
     This class is kept for backward compatibility.
     """
+
     # Keep CompactionResult as a nested class for backward compatibility
     CompactionResult = CompactionResult
 

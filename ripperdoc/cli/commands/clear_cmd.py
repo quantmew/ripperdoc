@@ -9,10 +9,7 @@ def _handle(ui: Any, _: str) -> bool:
 
 
 command = SlashCommand(
-    name="clear",
-    description="Clear conversation history",
-    handler=_handle,
-    aliases=("new",)
+    name="clear", description="Clear conversation history", handler=_handle, aliases=("new",)
 )
 
 

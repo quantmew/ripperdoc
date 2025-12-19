@@ -34,19 +34,15 @@ BLOCKED_COMMANDS = [
     r"\bmkfs\b",
     r"\bdd\s+.*of=/dev/",
     r"\b:(){ :\|:& };:",  # Fork bomb
-
     # Network attacks
     r"\bnmap\b.*-sS",  # SYN scan
     r"\bhping3?\b",
-
     # Privilege escalation attempts
     r"\bchmod\s+[0-7]*777\s+/",  # chmod 777 on root paths
     r"\bsudo\s+su\b",
-
     # Credential theft
     r"\bcat\s+.*/(passwd|shadow|sudoers)",
     r"\b/etc/shadow\b",
-
     # Cleanup protection
     r"\bgit\s+push\s+.*--force.*main\b",
     r"\bgit\s+push\s+.*--force.*master\b",

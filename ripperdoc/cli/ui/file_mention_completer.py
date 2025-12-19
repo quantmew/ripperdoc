@@ -85,7 +85,7 @@ class FileMentionCompleter(Completer):
             return
 
         # Extract the query after the @ symbol
-        query = text[at_pos + 1:].strip()
+        query = text[at_pos + 1 :].strip()
 
         try:
             matches = []
@@ -143,6 +143,7 @@ class FileMentionCompleter(Completer):
                                 continue
 
                             import fnmatch
+
                             if fnmatch.fnmatch(item.name.lower(), pattern.lower()):
                                 try:
                                     rel_path = item.relative_to(self.project_path)

@@ -505,9 +505,7 @@ build projects, run tests, and interact with the file system."""
 
         return command, False
 
-    def _create_error_output(
-        self, command: str, stderr: str, sandbox: bool
-    ) -> BashToolOutput:
+    def _create_error_output(self, command: str, stderr: str, sandbox: bool) -> BashToolOutput:
         """Create a standardized error output."""
         return BashToolOutput(
             stdout="",
@@ -531,9 +529,13 @@ build projects, run tests, and interact with the file system."""
             return command, None, None
 
         if not is_sandbox_available():
-            return None, self._create_error_output(
-                command, "Sandbox mode requested but not available on this system", True
-            ), None
+            return (
+                None,
+                self._create_error_output(
+                    command, "Sandbox mode requested but not available on this system", True
+                ),
+                None,
+            )
 
         try:
             wrapper = create_sandbox_wrapper(command)
@@ -541,12 +543,15 @@ build projects, run tests, and interact with the file system."""
         except (OSError, RuntimeError, ValueError) as exc:
             logger.warning(
                 "[bash_tool] Failed to enable sandbox: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"command": command},
             )
-            return None, self._create_error_output(
-                command, f"Failed to enable sandbox: {exc}", True
-            ), None
+            return (
+                None,
+                self._create_error_output(command, f"Failed to enable sandbox: {exc}", True),
+                None,
+            )
 
     async def _run_background_command(
         self,
@@ -570,7 +575,8 @@ build projects, run tests, and interact with the file system."""
             # pragma: no cover - defensive import
             logger.warning(
                 "[bash_tool] Failed to import background shell runner: %s: %s",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
                 extra={"command": effective_command},
             )
             return self._create_error_output(
@@ -696,9 +702,7 @@ build projects, run tests, and interact with the file system."""
         # Store results in a way that the caller can access
         self._last_execution_result = (stdout_lines, stderr_lines, timed_out)
 
-    async def _drain_stream(
-        self, stream: Optional[asyncio.StreamReader], sink: list[str]
-    ) -> None:
+    async def _drain_stream(self, stream: Optional[asyncio.StreamReader], sink: list[str]) -> None:
         """Drain any remaining data from a stream."""
         if not stream:
             return
@@ -969,7 +973,8 @@ build projects, run tests, and interact with the file system."""
                 raise  # Re-raise cancellation
             logger.warning(
                 "[bash_tool] Error executing command: %s: %s",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
                 extra={"command": effective_command},
             )
             error_output = self._create_error_output(

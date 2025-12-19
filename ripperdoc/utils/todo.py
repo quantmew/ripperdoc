@@ -86,7 +86,8 @@ def load_todos(project_root: Optional[Path] = None) -> List[TodoItem]:
     except (json.JSONDecodeError, OSError, IOError, UnicodeDecodeError) as exc:
         logger.warning(
             "Failed to load todos from disk: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"path": str(path)},
         )
         return []

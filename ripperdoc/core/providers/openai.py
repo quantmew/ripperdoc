@@ -303,7 +303,8 @@ class OpenAIClient(ProviderClient):
                             except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
                                 logger.warning(
                                     "[openai_client] Stream callback failed: %s: %s",
-                                    type(cb_exc).__name__, cb_exc,
+                                    type(cb_exc).__name__,
+                                    cb_exc,
                                 )
 
                     # Tool call deltas for native tool mode
@@ -333,7 +334,8 @@ class OpenAIClient(ProviderClient):
                                     except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
                                         logger.warning(
                                             "[openai_client] Stream callback failed: %s: %s",
-                                            type(cb_exc).__name__, cb_exc,
+                                            type(cb_exc).__name__,
+                                            cb_exc,
                                         )
 
                         if idx not in announced_tool_indexes and state.get("name"):
@@ -344,7 +346,8 @@ class OpenAIClient(ProviderClient):
                                 except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
                                     logger.warning(
                                         "[openai_client] Stream callback failed: %s: %s",
-                                        type(cb_exc).__name__, cb_exc,
+                                        type(cb_exc).__name__,
+                                        cb_exc,
                                     )
 
                         streamed_tool_calls[idx] = state

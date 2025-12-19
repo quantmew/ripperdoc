@@ -234,9 +234,7 @@ def _parse_hooks_file(data: Dict[str, Any]) -> HooksConfig:
                 hook_definitions.append(hook_def)
 
             if hook_definitions:
-                parsed_matchers.append(
-                    HookMatcher(matcher=matcher_pattern, hooks=hook_definitions)
-                )
+                parsed_matchers.append(HookMatcher(matcher=matcher_pattern, hooks=hook_definitions))
 
         if parsed_matchers:
             parsed_hooks[event_name] = parsed_matchers

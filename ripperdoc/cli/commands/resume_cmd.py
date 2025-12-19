@@ -72,14 +72,14 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
             return None
 
         # Handle pagination commands
-        if choice_text == 'n':
+        if choice_text == "n":
             if current_page < total_pages - 1:
                 current_page += 1
                 continue
             else:
                 ui.console.print("[yellow]Already at the last page.[/yellow]")
                 continue
-        elif choice_text == 'p':
+        elif choice_text == "p":
             if current_page > 0:
                 current_page -= 1
                 continue
@@ -89,7 +89,9 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
 
         # Handle session selection
         if not choice_text.isdigit():
-            ui.console.print("[red]Please enter a session index number, 'n' for next page, or 'p' for previous page.[/red]")
+            ui.console.print(
+                "[red]Please enter a session index number, 'n' for next page, or 'p' for previous page.[/red]"
+            )
             continue
 
         idx = int(choice_text)

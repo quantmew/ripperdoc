@@ -151,7 +151,11 @@ def make_permission_checker(
             # Tool implementation error - log and deny for safety
             logger.warning(
                 "[permissions] Tool needs_permissions check failed",
-                extra={"tool": getattr(tool, "name", None), "error": str(exc), "error_type": type(exc).__name__},
+                extra={
+                    "tool": getattr(tool, "name", None),
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
             )
             return PermissionResult(
                 result=False,
@@ -193,7 +197,11 @@ def make_permission_checker(
                 # Tool implementation error - fall back to asking user
                 logger.warning(
                     "[permissions] Tool check_permissions failed",
-                    extra={"tool": getattr(tool, "name", None), "error": str(exc), "error_type": type(exc).__name__},
+                    extra={
+                        "tool": getattr(tool, "name", None),
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                    },
                 )
                 decision = PermissionDecision(
                     behavior="ask",

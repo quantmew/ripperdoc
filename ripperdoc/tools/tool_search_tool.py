@@ -193,7 +193,8 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
                 description = ""
                 logger.warning(
                     "[tool_search] Failed to build tool description: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                     extra={"tool_name": getattr(tool, "name", None)},
                 )
             doc_text = " ".join([name, tool.user_facing_name(), description])

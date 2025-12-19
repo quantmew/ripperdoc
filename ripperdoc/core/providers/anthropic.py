@@ -73,17 +73,21 @@ def _content_blocks_from_stream_state(
 
     # Add thinking block if present
     if collected_thinking:
-        blocks.append({
-            "type": "thinking",
-            "thinking": "".join(collected_thinking),
-        })
+        blocks.append(
+            {
+                "type": "thinking",
+                "thinking": "".join(collected_thinking),
+            }
+        )
 
     # Add text block if present
     if collected_text:
-        blocks.append({
-            "type": "text",
-            "text": "".join(collected_text),
-        })
+        blocks.append(
+            {
+                "type": "text",
+                "text": "".join(collected_text),
+            }
+        )
 
     # Add tool_use blocks
     for idx in sorted(collected_tool_calls.keys()):
@@ -92,12 +96,14 @@ def _content_blocks_from_stream_state(
         if not name:
             continue
         tool_use_id = call.get("id") or str(uuid4())
-        blocks.append({
-            "type": "tool_use",
-            "tool_use_id": tool_use_id,
-            "name": name,
-            "input": call.get("input", {}),
-        })
+        blocks.append(
+            {
+                "type": "tool_use",
+                "tool_use_id": tool_use_id,
+                "name": name,
+                "input": call.get("input", {}),
+            }
+        )
 
     return blocks
 
@@ -110,25 +116,31 @@ def _content_blocks_from_response(response: Any) -> List[Dict[str, Any]]:
         if btype == "text":
             blocks.append({"type": "text", "text": getattr(block, "text", "")})
         elif btype == "thinking":
-            blocks.append({
-                "type": "thinking",
-                "thinking": getattr(block, "thinking", None) or "",
-                "signature": getattr(block, "signature", None),
-            })
+            blocks.append(
+                {
+                    "type": "thinking",
+                    "thinking": getattr(block, "thinking", None) or "",
+                    "signature": getattr(block, "signature", None),
+                }
+            )
         elif btype == "redacted_thinking":
-            blocks.append({
-                "type": "redacted_thinking",
-                "data": getattr(block, "data", None),
-                "signature": getattr(block, "signature", None),
-            })
+            blocks.append(
+                {
+                    "type": "redacted_thinking",
+                    "data": getattr(block, "data", None),
+                    "signature": getattr(block, "signature", None),
+                }
+            )
         elif btype == "tool_use":
             raw_input = getattr(block, "input", {}) or {}
-            blocks.append({
-                "type": "tool_use",
-                "tool_use_id": getattr(block, "id", None) or str(uuid4()),
-                "name": getattr(block, "name", None),
-                "input": raw_input if isinstance(raw_input, dict) else {},
-            })
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "tool_use_id": getattr(block, "id", None) or str(uuid4()),
+                    "name": getattr(block, "name", None),
+                    "input": raw_input if isinstance(raw_input, dict) else {},
+                }
+            )
     return blocks
 
 
@@ -239,9 +251,9 @@ class AnthropicClient(ProviderClient):
             # The read timeout applies to waiting for each chunk from the server
             timeout_config = httpx.Timeout(
                 connect=60.0,  # 60 seconds to establish connection
-                read=600.0,    # 10 minutes to wait for each chunk (model may be thinking)
-                write=60.0,    # 60 seconds to send request
-                pool=60.0,     # 60 seconds to get connection from pool
+                read=600.0,  # 10 minutes to wait for each chunk (model may be thinking)
+                write=60.0,  # 60 seconds to send request
+                pool=60.0,  # 60 seconds to get connection from pool
             )
             anthropic_kwargs["timeout"] = timeout_config
         elif request_timeout and request_timeout > 0:
@@ -448,7 +460,12 @@ class AnthropicClient(ProviderClient):
                 else:
                     raise
 
-        if last_error and not collected_text and not collected_thinking and not collected_tool_calls:
+        if (
+            last_error
+            and not collected_text
+            and not collected_thinking
+            and not collected_tool_calls
+        ):
             raise RuntimeError(f"Stream failed after {attempts} attempts") from last_error
 
         # Store reasoning content in metadata
@@ -542,7 +559,8 @@ class AnthropicClient(ProviderClient):
                         except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
                             logger.warning(
                                 "[anthropic_client] Progress callback failed: %s: %s",
-                                type(cb_exc).__name__, cb_exc,
+                                type(cb_exc).__name__,
+                                cb_exc,
                             )
 
             elif delta_type == "text_delta":
@@ -556,7 +574,8 @@ class AnthropicClient(ProviderClient):
                         except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
                             logger.warning(
                                 "[anthropic_client] Progress callback failed: %s: %s",
-                                type(cb_exc).__name__, cb_exc,
+                                type(cb_exc).__name__,
+                                cb_exc,
                             )
 
             elif delta_type == "input_json_delta":
@@ -599,6 +618,7 @@ class AnthropicClient(ProviderClient):
             # Parse accumulated JSON for tool calls
             if index in collected_tool_calls:
                 import json
+
                 json_str = collected_tool_calls[index].get("input_json", "")
                 if json_str:
                     try:

@@ -94,13 +94,14 @@ def _split_frontmatter(raw_text: str) -> Tuple[Dict[str, Any], str]:
         for idx in range(1, len(lines)):
             if lines[idx].strip() == "---":
                 frontmatter_text = "\n".join(lines[1:idx])
-                body = "\n".join(lines[idx + 1:])
+                body = "\n".join(lines[idx + 1 :])
                 try:
                     frontmatter = yaml.safe_load(frontmatter_text) or {}
                 except (yaml.YAMLError, ValueError, TypeError) as exc:
                     logger.warning(
                         "[custom_commands] Invalid frontmatter: %s: %s",
-                        type(exc).__name__, exc,
+                        type(exc).__name__,
+                        exc,
                     )
                     return {"__error__": f"Invalid frontmatter: {exc}"}, body
                 return frontmatter, body
@@ -161,7 +162,8 @@ def _load_command_file(
     except (OSError, IOError, UnicodeDecodeError) as exc:
         logger.warning(
             "[custom_commands] Failed to read command file: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"path": str(path)},
         )
         return None, CustomCommandLoadError(path=path, reason=f"Failed to read file: {exc}")
@@ -237,7 +239,8 @@ def _load_commands_from_dir(
     except OSError as exc:
         logger.warning(
             "[custom_commands] Failed to scan command directory: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"path": str(commands_dir)},
         )
 

@@ -33,16 +33,13 @@ SUSPICIOUS_PATTERNS = [
     (r"password\s*=\s*['\"][^'\"]+['\"]", "hardcoded password"),
     (r"api_key\s*=\s*['\"][^'\"]+['\"]", "hardcoded API key"),
     (r"secret\s*=\s*['\"][^'\"]+['\"]", "hardcoded secret"),
-
     # Dangerous functions
     (r"\beval\s*\(", "eval() usage"),
     (r"\bexec\s*\(", "exec() usage"),
     (r"__import__\s*\(", "dynamic import"),
-
     # SQL injection risks
     (r"f['\"].*SELECT.*{", "possible SQL injection"),
     (r"\.format\(.*\).*(?:SELECT|INSERT|UPDATE|DELETE)", "possible SQL injection"),
-
     # Command injection risks
     (r"subprocess\..*shell\s*=\s*True", "shell=True in subprocess"),
     (r"os\.system\s*\(", "os.system usage"),

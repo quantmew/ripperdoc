@@ -21,7 +21,7 @@ async def example_bash_tool() -> None:
     input_data = BashToolInput(command="echo 'Hello from Ripperdoc!'", timeout=10000)
 
     async for result in tool.call(input_data, context):
-        if hasattr(result, 'data'):
+        if hasattr(result, "data"):
             print(f"Command: {result.data.command}")  # type: ignore[union-attr]
             print(f"Output: {result.data.stdout}")  # type: ignore[union-attr]
             print(f"Exit Code: {result.data.exit_code}")  # type: ignore[union-attr]

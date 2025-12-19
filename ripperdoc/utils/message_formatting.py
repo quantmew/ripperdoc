@@ -12,9 +12,7 @@ from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMess
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
 
-def stringify_message_content(
-    content: Any, *, include_tool_details: bool = False
-) -> str:
+def stringify_message_content(content: Any, *, include_tool_details: bool = False) -> str:
     """Convert message content to plain string.
 
     Args:

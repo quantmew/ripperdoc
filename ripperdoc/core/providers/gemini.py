@@ -240,9 +240,7 @@ async def _async_build_tool_declarations(tools: List[Tool[Any, Any]]) -> List[Di
                 description=description,
                 parameters_json_schema=parameters_schema,
             )
-            declarations.append(
-                func_decl.model_dump(mode="json", exclude_none=True)
-            )
+            declarations.append(func_decl.model_dump(mode="json", exclude_none=True))
         else:
             declarations.append(
                 {
@@ -422,7 +420,12 @@ class GeminiClient(ProviderClient):
                 from google.genai import types as genai_types  # type: ignore
 
                 config["thinking_config"] = genai_types.ThinkingConfig(**thinking_config)
-            except (ImportError, ModuleNotFoundError, TypeError, ValueError):  # pragma: no cover - fallback when SDK not installed
+            except (
+                ImportError,
+                ModuleNotFoundError,
+                TypeError,
+                ValueError,
+            ):  # pragma: no cover - fallback when SDK not installed
                 config["thinking_config"] = thinking_config
         if declarations:
             config["tools"] = [{"function_declarations": declarations}]
@@ -523,7 +526,8 @@ class GeminiClient(ProviderClient):
                                 except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
                                     logger.warning(
                                         "[gemini_client] Stream callback failed: %s: %s",
-                                        type(cb_exc).__name__, cb_exc,
+                                        type(cb_exc).__name__,
+                                        cb_exc,
                                     )
                         if text_chunk:
                             collected_text.append(text_chunk)

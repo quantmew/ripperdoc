@@ -370,7 +370,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             except (TypeError, ValueError) as exc:
                 logger.warning(
                     "[task_tool] Failed to serialize tool_use input: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                     extra={"tool_use_input": str(inp)[:200]},
                 )
                 serialized = str(inp)

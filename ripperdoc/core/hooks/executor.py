@@ -277,9 +277,7 @@ class HookExecutor:
         """
         # Prompt hooks require async - skip in sync mode
         if hook.is_prompt_hook():
-            logger.warning(
-                "Prompt hook skipped in sync mode. Use execute_async for prompt hooks."
-            )
+            logger.warning("Prompt hook skipped in sync mode. Use execute_async for prompt hooks.")
             return HookOutput()
 
         return self._execute_command_sync(hook, input_data)

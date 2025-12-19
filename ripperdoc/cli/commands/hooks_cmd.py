@@ -56,15 +56,9 @@ class HookConfigTarget:
 def _print_usage(console: Any) -> None:
     """Display available subcommands."""
     console.print("[bold]/hooks[/bold] — show configured hooks")
-    console.print(
-        "[bold]/hooks add [scope][/bold] — guided creator (scope: local|project|global)"
-    )
-    console.print(
-        "[bold]/hooks edit [scope][/bold] — step-by-step edit of an existing hook"
-    )
-    console.print(
-        "[bold]/hooks delete [scope][/bold] — remove a hook entry (alias: del)"
-    )
+    console.print("[bold]/hooks add [scope][/bold] — guided creator (scope: local|project|global)")
+    console.print("[bold]/hooks edit [scope][/bold] — step-by-step edit of an existing hook")
+    console.print("[bold]/hooks delete [scope][/bold] — remove a hook entry (alias: del)")
     console.print(
         "[dim]Scopes: local=.ripperdoc/hooks.local.json (git-ignored), "
         "project=.ripperdoc/hooks.json (shared), "
@@ -96,7 +90,9 @@ def _get_targets(project_path: Path) -> List[HookConfigTarget]:
     ]
 
 
-def _select_target(console: Any, project_path: Path, scope_hint: Optional[str]) -> Optional[HookConfigTarget]:
+def _select_target(
+    console: Any, project_path: Path, scope_hint: Optional[str]
+) -> Optional[HookConfigTarget]:
     """Prompt user to choose a hooks config target."""
     targets = _get_targets(project_path)
 
@@ -122,9 +118,7 @@ def _select_target(console: Any, project_path: Path, scope_hint: Optional[str]) 
                 f"      [dim]{target.description}[/dim]"
             )
 
-        choice = console.input(
-            f"Location [1-{len(targets)}, default {default_idx + 1}]: "
-        ).strip()
+        choice = console.input(f"Location [1-{len(targets)}, default {default_idx + 1}]: ").strip()
 
         if not choice:
             return targets[default_idx]
@@ -151,9 +145,7 @@ def _load_hooks_json(console: Any, path: Path) -> Dict[str, List[Dict[str, Any]]
         logger.warning("[hooks_cmd] Invalid JSON in %s: %s", path, exc)
         return {}
     except (OSError, IOError, PermissionError) as exc:
-        console.print(
-            f"[red]Unable to read {escape(str(path))}: {escape(str(exc))}[/red]"
-        )
+        console.print(f"[red]Unable to read {escape(str(path))}: {escape(str(exc))}[/red]")
         logger.warning("[hooks_cmd] Failed to read %s: %s", path, exc)
         return {}
 
@@ -176,9 +168,7 @@ def _load_hooks_json(console: Any, path: Path) -> Dict[str, List[Dict[str, Any]]
             if not isinstance(hooks_list, list):
                 continue
             cleaned_hooks = [h for h in hooks_list if isinstance(h, dict)]
-            cleaned_matchers.append(
-                {"matcher": matcher.get("matcher"), "hooks": cleaned_hooks}
-            )
+            cleaned_matchers.append({"matcher": matcher.get("matcher"), "hooks": cleaned_hooks})
         if cleaned_matchers:
             hooks[event_name] = cleaned_matchers
 
@@ -229,9 +219,7 @@ def _render_hooks_overview(ui: Any, project_path: Path) -> bool:
         if target.path.exists():
             ui.console.print(f"  [green]✓[/green] {target.label}: {target.path}")
         else:
-            ui.console.print(
-                f"  [dim]○[/dim] {target.label}: {target.path} [dim](not found)[/dim]"
-            )
+            ui.console.print(f"  [dim]○[/dim] {target.label}: {target.path} [dim](not found)[/dim]")
 
     ui.console.print()
 
@@ -289,9 +277,7 @@ def _render_hooks_overview(ui: Any, project_path: Path) -> bool:
         ui.console.print(table)
         ui.console.print()
 
-    ui.console.print(
-        "[dim]Tip: Hooks run in order. /hooks add launches a guided setup.[/dim]"
-    )
+    ui.console.print("[dim]Tip: Hooks run in order. /hooks add launches a guided setup.[/dim]")
     return True
 
 
@@ -343,9 +329,7 @@ def _prompt_matcher_selection(
         return default_matcher
 
     if not matchers:
-        console.print(
-            "\nMatcher (tool name or regex). Leave empty to match all tools (*)."
-        )
+        console.print("\nMatcher (tool name or regex). Leave empty to match all tools (*).")
         pattern = console.input("Matcher: ").strip() or "*"
         first_matcher: Dict[str, Any] = {"matcher": pattern, "hooks": []}
         matchers.append(first_matcher)
@@ -361,9 +345,7 @@ def _prompt_matcher_selection(
 
     default_choice = 1
     while True:
-        choice = console.input(
-            f"Matcher [1-{new_idx}, default {default_choice}]: "
-        ).strip()
+        choice = console.input(f"Matcher [1-{new_idx}, default {default_choice}]: ").strip()
         if not choice:
             choice = str(default_choice)
         if choice.isdigit():
@@ -410,9 +392,7 @@ def _prompt_hook_details(
     )
     while True:
         hook_type = (
-            console.input(
-                f"Hook type ({type_label}) [default {default_type}]: "
-            ).strip()
+            console.input(f"Hook type ({type_label}) [default {default_type}]: ").strip()
             or default_type
         ).lower()
         if hook_type in allowed_types:
@@ -424,14 +404,10 @@ def _prompt_hook_details(
     if hook_type == "prompt":
         existing_prompt = (existing_hook or {}).get("prompt", "")
         if existing_prompt:
-            console.print(
-                f"[dim]Current prompt:[/dim] {escape(existing_prompt)}", markup=False
-            )
+            console.print(f"[dim]Current prompt:[/dim] {escape(existing_prompt)}", markup=False)
         while True:
             prompt_text = (
-                console.input(
-                    "Prompt template (use $ARGUMENTS for JSON input): "
-                ).strip()
+                console.input("Prompt template (use $ARGUMENTS for JSON input): ").strip()
                 or existing_prompt
             )
             if prompt_text:
@@ -519,9 +495,7 @@ def _handle_edit(ui: Any, tokens: List[str], project_path: Path) -> bool:
 
     hooks = _load_hooks_json(console, target.path)
     if not hooks:
-        console.print(
-            "[yellow]No hooks found in this file. Use /hooks add to create one.[/yellow]"
-        )
+        console.print("[yellow]No hooks found in this file. Use /hooks add to create one.[/yellow]")
         return True
 
     event_options = list(hooks.keys())

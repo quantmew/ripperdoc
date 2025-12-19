@@ -104,13 +104,15 @@ class SessionHistory:
                     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                         logger.debug(
                             "[session_history] Failed to parse session history line: %s: %s",
-                            type(exc).__name__, exc,
+                            type(exc).__name__,
+                            exc,
                         )
                         continue
         except (OSError, IOError) as exc:
             logger.warning(
                 "Failed to load seen IDs from session: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"session_id": self.session_id, "path": str(self.path)},
             )
             return
@@ -142,7 +144,8 @@ class SessionHistory:
             # Avoid crashing the UI if logging fails
             logger.warning(
                 "Failed to append message to session log: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"session_id": self.session_id, "path": str(self.path)},
             )
             return
@@ -163,7 +166,8 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
         except (OSError, IOError, json.JSONDecodeError) as exc:
             logger.warning(
                 "Failed to load session summary: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"path": str(jsonl_path)},
             )
             continue
@@ -250,13 +254,16 @@ def load_session_messages(project_path: Path, session_id: str) -> List[Conversat
                 except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                     logger.debug(
                         "[session_history] Failed to deserialize message in session %s: %s: %s",
-                        session_id, type(exc).__name__, exc,
+                        session_id,
+                        type(exc).__name__,
+                        exc,
                     )
                     continue
     except (OSError, IOError) as exc:
         logger.warning(
             "Failed to load session messages: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"session_id": session_id, "path": str(path)},
         )
         return []

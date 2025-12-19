@@ -92,7 +92,8 @@ def _ensure_str_dict(raw: object) -> Dict[str, str]:
         except (TypeError, ValueError) as exc:
             logger.warning(
                 "[mcp] Failed to coerce env/header value to string: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"key": key},
             )
             continue
@@ -365,10 +366,17 @@ class McpRuntime:
                     "capabilities": list(info.capabilities.keys()),
                 },
             )
-        except (OSError, RuntimeError, ConnectionError, ValueError, TimeoutError) as exc:  # pragma: no cover - network/process errors
+        except (
+            OSError,
+            RuntimeError,
+            ConnectionError,
+            ValueError,
+            TimeoutError,
+        ) as exc:  # pragma: no cover - network/process errors
             logger.warning(
                 "Failed to connect to MCP server: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"server": config.name},
             )
             info.status = "failed"

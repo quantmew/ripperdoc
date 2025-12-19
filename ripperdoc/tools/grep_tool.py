@@ -358,7 +358,8 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as e:
             logger.warning(
                 "[grep_tool] Error executing grep: %s: %s",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
                 extra={"pattern": input_data.pattern, "path": input_data.path},
             )
             error_output = GrepToolOutput(

@@ -134,7 +134,9 @@ NEVER write new files unless explicitly required by the user."""
 
         # Check if path is ignored (warning for write operations)
         file_path_obj = Path(file_path)
-        should_proceed, warning_msg = check_path_for_tool(file_path_obj, tool_name="Write", warn_only=True)
+        should_proceed, warning_msg = check_path_for_tool(
+            file_path_obj, tool_name="Write", warn_only=True
+        )
         if warning_msg:
             logger.warning("[file_write_tool] %s", warning_msg)
 
@@ -171,7 +173,8 @@ NEVER write new files unless explicitly required by the user."""
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(
                     "[file_write_tool] Failed to record file snapshot: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                     extra={"file_path": abs_file_path},
                 )
 
@@ -189,7 +192,8 @@ NEVER write new files unless explicitly required by the user."""
         except (OSError, IOError, PermissionError, UnicodeEncodeError) as e:
             logger.warning(
                 "[file_write_tool] Error writing file: %s: %s",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
                 extra={"file_path": input_data.file_path},
             )
             error_output = FileWriteToolOutput(

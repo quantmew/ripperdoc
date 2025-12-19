@@ -58,7 +58,7 @@ def send_notification_windows(title: str, message: str) -> bool:
     """Send notification on Windows using PowerShell toast."""
     try:
         # Use PowerShell to send a toast notification
-        ps_script = f'''
+        ps_script = f"""
         [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
         [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 
@@ -77,7 +77,7 @@ def send_notification_windows(title: str, message: str) -> bool:
         $xml.LoadXml($template)
         $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Ripperdoc").Show($toast)
-        '''
+        """
         subprocess.run(
             ["powershell", "-Command", ps_script],
             check=True,

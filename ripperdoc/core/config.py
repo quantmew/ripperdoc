@@ -167,7 +167,7 @@ class ProjectConfig(BaseModel):
     # Path ignore patterns (gitignore-style)
     ignore_patterns: list[str] = Field(
         default_factory=list,
-        description="Gitignore-style patterns for paths to ignore in file operations"
+        description="Gitignore-style patterns for paths to ignore in file operations",
     )
 
     # Context
@@ -222,10 +222,18 @@ class ConfigManager:
                             "profile_count": len(self._global_config.model_profiles),
                         },
                     )
-                except (json.JSONDecodeError, OSError, IOError, UnicodeDecodeError, ValueError, TypeError) as e:
+                except (
+                    json.JSONDecodeError,
+                    OSError,
+                    IOError,
+                    UnicodeDecodeError,
+                    ValueError,
+                    TypeError,
+                ) as e:
                     logger.warning(
                         "Error loading global config: %s: %s",
-                        type(e).__name__, e,
+                        type(e).__name__,
+                        e,
                         extra={"error": str(e)},
                     )
                     self._global_config = GlobalConfig()
@@ -276,10 +284,18 @@ class ConfigManager:
                             "allowed_tools": len(self._project_config.allowed_tools),
                         },
                     )
-                except (json.JSONDecodeError, OSError, IOError, UnicodeDecodeError, ValueError, TypeError) as e:
+                except (
+                    json.JSONDecodeError,
+                    OSError,
+                    IOError,
+                    UnicodeDecodeError,
+                    ValueError,
+                    TypeError,
+                ) as e:
                     logger.warning(
                         "Error loading project config: %s: %s",
-                        type(e).__name__, e,
+                        type(e).__name__,
+                        e,
                         extra={"error": str(e), "path": str(config_path)},
                     )
                     self._project_config = ProjectConfig()
@@ -344,10 +360,18 @@ class ConfigManager:
                             "project_path": str(self.current_project_path),
                         },
                     )
-                except (json.JSONDecodeError, OSError, IOError, UnicodeDecodeError, ValueError, TypeError) as e:
+                except (
+                    json.JSONDecodeError,
+                    OSError,
+                    IOError,
+                    UnicodeDecodeError,
+                    ValueError,
+                    TypeError,
+                ) as e:
                     logger.warning(
                         "Error loading project-local config: %s: %s",
-                        type(e).__name__, e,
+                        type(e).__name__,
+                        e,
                         extra={"error": str(e), "path": str(config_path)},
                     )
                     self._project_local_config = ProjectLocalConfig()

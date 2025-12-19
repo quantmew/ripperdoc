@@ -116,7 +116,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             print_agents_usage()
             logger.warning(
                 "[agents_cmd] Failed to create agent: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
             )
         return True
@@ -148,7 +149,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             print_agents_usage()
             logger.warning(
                 "[agents_cmd] Failed to delete agent: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
             )
         return True
@@ -226,7 +228,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             print_agents_usage()
             logger.warning(
                 "[agents_cmd] Failed to update agent: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"agent": agent_name, "session_id": getattr(ui, "session_id", None)},
             )
         return True

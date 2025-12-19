@@ -49,7 +49,8 @@ def _detect_git_repo(cwd: Path) -> bool:
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning(
             "[system_prompt] Failed to detect git repository: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"cwd": str(cwd)},
         )
         return False
@@ -393,7 +394,8 @@ def build_system_prompt(
         except (OSError, ValueError, RuntimeError) as exc:
             logger.warning(
                 "Failed to load agent definitions: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             agent_section = (
                 "# Subagents\nTask tool available, but agent definitions could not be loaded."

@@ -47,9 +47,9 @@ def main() -> None:
     timestamp = datetime.now().isoformat()
     event_name = input_data.get("event_name", "unknown")
 
-    log_entry = f"\n{'='*60}\n"
+    log_entry = f"\n{'=' * 60}\n"
     log_entry += f"[{timestamp}] Event: {event_name}\n"
-    log_entry += f"{'='*60}\n"
+    log_entry += f"{'=' * 60}\n"
     log_entry += json.dumps(input_data, indent=2, default=str)
     log_entry += "\n"
 

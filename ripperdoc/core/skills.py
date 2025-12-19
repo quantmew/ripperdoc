@@ -84,10 +84,15 @@ def _split_frontmatter(raw_text: str) -> Tuple[Dict[str, Any], str]:
                 body = "\n".join(lines[idx + 1 :])
                 try:
                     frontmatter = yaml.safe_load(frontmatter_text) or {}
-                except (yaml.YAMLError, ValueError, TypeError) as exc:  # pragma: no cover - defensive
+                except (
+                    yaml.YAMLError,
+                    ValueError,
+                    TypeError,
+                ) as exc:  # pragma: no cover - defensive
                     logger.warning(
                         "[skills] Invalid frontmatter in SKILL.md: %s: %s",
-                        type(exc).__name__, exc,
+                        type(exc).__name__,
+                        exc,
                     )
                     return {"__error__": f"Invalid frontmatter: {exc}"}, body
                 return frontmatter, body
@@ -118,7 +123,8 @@ def _load_skill_file(
     except (OSError, IOError, UnicodeDecodeError) as exc:
         logger.warning(
             "[skills] Failed to read skill file: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"path": str(path)},
         )
         return None, SkillLoadError(path=path, reason=f"Failed to read file: {exc}")

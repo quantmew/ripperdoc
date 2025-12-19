@@ -169,7 +169,8 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
         except (OSError, RuntimeError, ValueError) as e:
             logger.warning(
                 "[glob_tool] Error executing glob: %s: %s",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
                 extra={"pattern": input_data.pattern, "path": input_data.path},
             )
             error_output = GlobToolOutput(matches=[], pattern=input_data.pattern, count=0)

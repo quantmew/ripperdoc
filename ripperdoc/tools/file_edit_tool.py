@@ -159,7 +159,9 @@ match exactly (including whitespace and indentation)."""
 
         # Check if path is ignored (warning for edit operations)
         file_path_obj = Path(file_path)
-        should_proceed, warning_msg = check_path_for_tool(file_path_obj, tool_name="Edit", warn_only=True)
+        should_proceed, warning_msg = check_path_for_tool(
+            file_path_obj, tool_name="Edit", warn_only=True
+        )
         if warning_msg:
             logger.warning("[file_edit_tool] %s", warning_msg)
 
@@ -238,7 +240,8 @@ match exactly (including whitespace and indentation)."""
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(
                     "[file_edit_tool] Failed to record file snapshot: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                     extra={"file_path": abs_file_path},
                 )
 
@@ -330,7 +333,8 @@ match exactly (including whitespace and indentation)."""
         except (OSError, IOError, PermissionError, UnicodeDecodeError, ValueError) as e:
             logger.warning(
                 "[file_edit_tool] Error editing file: %s: %s",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
                 extra={"file_path": input_data.file_path},
             )
             error_output = FileEditToolOutput(

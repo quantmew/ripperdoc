@@ -76,10 +76,7 @@ def main() -> None:
         f.write(log_entry)
 
     # Print summary (goes to stderr so it's visible but doesn't affect hook output)
-    print(
-        f"Session ended: {duration_str}, {message_count} messages",
-        file=sys.stderr
-    )
+    print(f"Session ended: {duration_str}, {message_count} messages", file=sys.stderr)
 
     sys.exit(0)
 

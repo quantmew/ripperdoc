@@ -4,7 +4,6 @@ This module provides utilities for creating and normalizing messages
 for communication with AI models.
 """
 
-import json
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 from uuid import uuid4
@@ -93,7 +92,8 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
         except (TypeError, ValueError) as exc:
             logger.warning(
                 "[_content_block_to_openai] Failed to serialize tool arguments: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             args_str = "{}"
         tool_call_id = (
@@ -211,7 +211,8 @@ def create_user_message(
             # Fallback: keep as-is if conversion fails
             logger.warning(
                 "[create_user_message] Failed to normalize tool_use_result: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
 
     message = Message(role=MessageRole.USER, content=message_content)
@@ -440,7 +441,9 @@ def normalize_messages_for_api(
                         if block_type == "tool_result":
                             tool_results_seen += 1
                             # Skip tool_result blocks that lack a preceding tool_use
-                            tool_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
+                            tool_id = getattr(block, "tool_use_id", None) or getattr(
+                                block, "id", None
+                            )
                             if not tool_id:
                                 skipped_tool_results_no_call += 1
                                 continue
@@ -509,20 +512,19 @@ def normalize_messages_for_api(
                             "tool_calls": tool_calls,
                         }
                         # Add reasoning_content if present (required for DeepSeek thinking mode)
-                        if thinking_mode == "deepseek":
-                            reasoning_content = meta.get("reasoning_content") if meta else None
-                            if reasoning_content is not None:
-                                tool_call_msg["reasoning_content"] = reasoning_content
-                                logger.debug(
-                                    f"[normalize_messages_for_api] Added reasoning_content to "
-                                    f"tool_call message (len={len(str(reasoning_content))})"
-                                )
-                            else:
-                                logger.warning(
-                                    f"[normalize_messages_for_api] DeepSeek mode: assistant "
-                                    f"message with tool_calls but no reasoning_content in metadata. "
-                                    f"meta_keys={list(meta.keys()) if meta else []}"
-                                )
+                        reasoning_content = meta.get("reasoning_content") if meta else None
+                        if reasoning_content is not None:
+                            tool_call_msg["reasoning_content"] = reasoning_content
+                            logger.debug(
+                                f"[normalize_messages_for_api] Added reasoning_content to "
+                                f"tool_call message (len={len(str(reasoning_content))})"
+                            )
+                        elif thinking_mode == "deepseek":
+                            logger.warning(
+                                f"[normalize_messages_for_api] DeepSeek mode: assistant "
+                                f"message with tool_calls but no reasoning_content in metadata. "
+                                f"meta_keys={list(meta.keys()) if meta else []}"
+                            )
                         assistant_openai_msgs.append(tool_call_msg)
                     elif text_parts:
                         assistant_openai_msgs.append(
@@ -543,7 +545,7 @@ def normalize_messages_for_api(
                 normalized.append({"role": "assistant", "content": api_blocks})
             else:
                 normalized.append({"role": "assistant", "content": asst_content})  # type: ignore
-    
+
     logger.debug(
         f"[normalize_messages_for_api] protocol={protocol} tool_mode={effective_tool_mode} "
         f"thinking_mode={thinking_mode} "

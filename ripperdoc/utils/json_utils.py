@@ -21,7 +21,8 @@ def safe_parse_json(json_text: Optional[str], log_error: bool = True) -> Optiona
         if log_error:
             logger.debug(
                 "[json_utils] Failed to parse JSON: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"length": len(json_text)},
             )
         return None

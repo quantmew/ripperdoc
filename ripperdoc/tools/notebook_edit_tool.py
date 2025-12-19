@@ -204,7 +204,8 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             logger.warning(
                 "Failed to parse notebook: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"path": str(path)},
             )
             return ValidationResult(
@@ -325,7 +326,8 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(
                     "[notebook_edit_tool] Failed to record file snapshot: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                     extra={"file_path": abs_notebook_path},
                 )
 
@@ -344,7 +346,8 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             # pragma: no cover - error path
             logger.warning(
                 "Error editing notebook: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"path": input_data.notebook_path},
             )
             output = NotebookEditOutput(

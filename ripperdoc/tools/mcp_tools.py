@@ -47,6 +47,7 @@ DEFAULT_MCP_WARNING_FRACTION = 0.8
 # Base class for MCP tools to reduce code duplication
 # =============================================================================
 
+
 class BaseMcpTool(Tool):  # type: ignore[type-arg]
     """Base class for MCP tools with common default implementations.
 
@@ -76,9 +77,7 @@ class BaseMcpTool(Tool):  # type: ignore[type-arg]
         runtime = await ensure_mcp_runtime()
         server_names = {s.name for s in runtime.servers}
         if server_name not in server_names:
-            return ValidationResult(
-                result=False, message=f"Unknown MCP server '{server_name}'."
-            )
+            return ValidationResult(result=False, message=f"Unknown MCP server '{server_name}'.")
         return ValidationResult(result=True)
 
 
@@ -268,7 +267,8 @@ class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResou
         except (TypeError, ValueError) as exc:
             logger.warning(
                 "[mcp_tools] Failed to serialize MCP resources for assistant output: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             return str(output.resources)
 
@@ -314,7 +314,8 @@ class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResou
                     # pragma: no cover - runtime errors
                     logger.warning(
                         "Failed to fetch resources from MCP server: %s: %s",
-                        type(exc).__name__, exc,
+                        type(exc).__name__,
+                        exc,
                         extra={"server": server.name},
                     )
                     fetched = []
@@ -482,7 +483,8 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
                             except (ValueError, binascii.Error) as exc:
                                 logger.warning(
                                     "[mcp_tools] Failed to decode base64 blob content: %s: %s",
-                                    type(exc).__name__, exc,
+                                    type(exc).__name__,
+                                    exc,
                                     extra={"server": input_data.server, "uri": input_data.uri},
                                 )
                                 raw_bytes = None
@@ -515,7 +517,8 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
                 # pragma: no cover - runtime errors
                 logger.warning(
                     "Error reading MCP resource: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                     extra={"server": input_data.server, "uri": input_data.uri},
                 )
                 content_text = f"Error reading MCP resource: {exc}"

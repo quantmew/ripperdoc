@@ -155,7 +155,10 @@ class BashResultRenderer(ToolResultRenderer):
     """Render Bash tool results."""
 
     def __init__(
-        self, console: Console, verbose: bool = False, parse_fallback: Optional[BashOutputParser] = None
+        self,
+        console: Console,
+        verbose: bool = False,
+        parse_fallback: Optional[BashOutputParser] = None,
     ):
         super().__init__(console, verbose)
         self._parse_fallback = parse_fallback
@@ -254,7 +257,10 @@ class ToolResultRendererRegistry:
     """Registry that selects the appropriate renderer for a tool result."""
 
     def __init__(
-        self, console: Console, verbose: bool = False, parse_bash_fallback: Optional[BashOutputParser] = None
+        self,
+        console: Console,
+        verbose: bool = False,
+        parse_bash_fallback: Optional[BashOutputParser] = None,
     ):
         self.console = console
         self.verbose = verbose

@@ -164,9 +164,7 @@ class TestLoadCustomCommands:
         global_cmd = next(cmd for cmd in result.commands if cmd.name == "global")
         assert global_cmd.location == CommandLocation.USER
 
-    def test_project_overrides_global(
-        self, temp_project: Path, temp_home: Path
-    ) -> None:
+    def test_project_overrides_global(self, temp_project: Path, temp_home: Path) -> None:
         # Create same-named command in both locations
         project_cmd = temp_project / ".ripperdoc" / "commands" / "global.md"
         project_cmd.write_text(

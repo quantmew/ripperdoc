@@ -162,7 +162,8 @@ async def _monitor_task(task: BackgroundTask) -> None:
     except (OSError, RuntimeError, ProcessLookupError) as exc:
         logger.warning(
             "Error monitoring background task: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"task_id": task.id, "command": task.command},
         )
         with _tasks_lock:

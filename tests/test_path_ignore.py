@@ -308,6 +308,7 @@ class TestCheckPathForTool:
             # For temp directories, we need to check if the file is ignored
             # based on the ignore filter, not just the path check
             from ripperdoc.utils.path_ignore import is_path_ignored
+
             # Binary files (.exe) are in default ignore patterns
             is_ignored = is_path_ignored(binary, root)
             assert is_ignored is True  # .exe files should be ignored
@@ -320,6 +321,7 @@ class TestCheckPathForTool:
             binary.touch()
             # Check that .dll files are in the ignore patterns
             from ripperdoc.utils.path_ignore import is_path_ignored
+
             is_ignored = is_path_ignored(binary, root)
             assert is_ignored is True  # .dll files should be ignored
 
@@ -344,6 +346,7 @@ class TestCheckPathForTool:
             package.touch()
             # Check that files in node_modules are ignored
             from ripperdoc.utils.path_ignore import is_path_ignored
+
             is_ignored = is_path_ignored(package, root)
             assert is_ignored is True  # Files in node_modules should be ignored
 

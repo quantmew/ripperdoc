@@ -14,7 +14,12 @@ try:  # pragma: no cover - optional dependency
     import tiktoken  # type: ignore
 
     _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
-except (ImportError, ModuleNotFoundError, OSError, RuntimeError):  # pragma: no cover - runtime fallback
+except (
+    ImportError,
+    ModuleNotFoundError,
+    OSError,
+    RuntimeError,
+):  # pragma: no cover - runtime fallback
     pass
 
 

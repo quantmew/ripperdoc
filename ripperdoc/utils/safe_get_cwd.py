@@ -23,7 +23,8 @@ def safe_get_cwd() -> str:
     except (OSError, RuntimeError, ValueError) as exc:
         logger.warning(
             "[safe_get_cwd] Failed to resolve cwd: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
         )
         return get_original_cwd()
 

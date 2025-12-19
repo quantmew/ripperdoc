@@ -228,7 +228,8 @@ async def prompt_user_for_answer(
         except (OSError, RuntimeError, ValueError) as e:
             logger.warning(
                 "[ask_user_question_tool] Error during prompt: %s: %s",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
             )
             return None
 
@@ -410,7 +411,8 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
         except (OSError, RuntimeError, ValueError, KeyError) as exc:
             logger.warning(
                 "[ask_user_question_tool] Error collecting answers: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             output = AskUserQuestionToolOutput(
                 questions=questions,

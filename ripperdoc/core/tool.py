@@ -43,7 +43,9 @@ class ToolUseContext(BaseModel):
     read_file_timestamps: Dict[str, float] = Field(default_factory=dict)
     # SkipValidation prevents Pydantic from copying the dict during validation,
     # ensuring Read and Edit tools share the same cache instance
-    file_state_cache: Annotated[Dict[str, FileSnapshot], SkipValidation] = Field(default_factory=dict)
+    file_state_cache: Annotated[Dict[str, FileSnapshot], SkipValidation] = Field(
+        default_factory=dict
+    )
     tool_registry: Optional[Any] = None
     abort_signal: Optional[Any] = None
     # UI control callbacks for tools that need user interaction
@@ -213,7 +215,8 @@ async def build_tool_description(
     except (TypeError, ValueError, AttributeError, KeyError) as exc:
         logger.warning(
             "[tool] Failed to build input example section: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"tool": getattr(tool, "name", None)},
         )
         return description_text
@@ -233,7 +236,8 @@ def tool_input_examples(tool: Tool[Any, Any], limit: int = 5) -> List[Dict[str, 
         except (TypeError, ValueError, AttributeError) as exc:
             logger.warning(
                 "[tool] Failed to format tool input example: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"tool": getattr(tool, "name", None)},
             )
             continue

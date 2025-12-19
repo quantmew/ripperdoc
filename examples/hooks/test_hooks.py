@@ -151,9 +151,7 @@ class TestHooksConfig:
                 "PreToolUse": [
                     {
                         "matcher": "Bash",
-                        "hooks": [
-                            {"type": "command", "command": "echo test", "timeout": 10}
-                        ]
+                        "hooks": [{"type": "command", "command": "echo test", "timeout": 10}],
                     }
                 ]
             }
@@ -173,14 +171,8 @@ class TestHooksConfig:
         config = HooksConfig(
             hooks={
                 "PreToolUse": [
-                    HookMatcher(
-                        matcher="Bash",
-                        hooks=[HookDefinition(command="echo bash")]
-                    ),
-                    HookMatcher(
-                        matcher="Write",
-                        hooks=[HookDefinition(command="echo write")]
-                    ),
+                    HookMatcher(matcher="Bash", hooks=[HookDefinition(command="echo bash")]),
+                    HookMatcher(matcher="Write", hooks=[HookDefinition(command="echo write")]),
                 ]
             }
         )
@@ -211,9 +203,7 @@ class TestHooksConfig:
                 "PreToolUse": [
                     HookMatcher(matcher="Write", hooks=[HookDefinition(command="echo 2")])
                 ],
-                "PostToolUse": [
-                    HookMatcher(matcher="*", hooks=[HookDefinition(command="echo 3")])
-                ]
+                "PostToolUse": [HookMatcher(matcher="*", hooks=[HookDefinition(command="echo 3")])],
             }
         )
 

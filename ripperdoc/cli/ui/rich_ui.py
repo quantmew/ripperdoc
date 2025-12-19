@@ -138,6 +138,7 @@ class RichUI:
         )
         # Build ignore filter for file completion
         from ripperdoc.utils.path_ignore import get_project_ignore_patterns
+
         project_patterns = get_project_ignore_patterns()
         self._ignore_filter = build_ignore_filter(
             self.project_path,
@@ -157,7 +158,8 @@ class RichUI:
         except (OSError, RuntimeError, ConnectionError) as exc:
             logger.warning(
                 "[ui] Failed to initialize MCP runtime at startup: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"session_id": self.session_id},
             )
 
@@ -215,7 +217,8 @@ class RichUI:
             # Logging failures should never interrupt the UI flow
             logger.warning(
                 "[ui] Failed to append message to session history: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"session_id": self.session_id},
             )
 
@@ -229,7 +232,8 @@ class RichUI:
         except (AttributeError, TypeError, ValueError) as exc:
             logger.warning(
                 "[ui] Failed to append prompt history: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"session_id": self.session_id},
             )
 
@@ -485,13 +489,12 @@ class RichUI:
         """
         # Factory to create pause context - spinner.paused() if spinner exists, else no-op
         from contextlib import nullcontext
+
         pause = lambda: spinner.paused() if spinner else nullcontext()  # noqa: E731
 
         meta = getattr(getattr(message, "message", None), "metadata", {}) or {}
         reasoning_payload = (
-            meta.get("reasoning_content")
-            or meta.get("reasoning")
-            or meta.get("reasoning_details")
+            meta.get("reasoning_content") or meta.get("reasoning") or meta.get("reasoning_details")
         )
         if reasoning_payload:
             with pause():
@@ -544,6 +547,7 @@ class RichUI:
 
         # Factory to create pause context - spinner.paused() if spinner exists, else no-op
         from contextlib import nullcontext
+
         pause = lambda: spinner.paused() if spinner else nullcontext()  # noqa: E731
 
         for block in message.message.content:
@@ -703,7 +707,8 @@ class RichUI:
                     except (RuntimeError, ValueError, OSError) as exc:
                         logger.debug(
                             "[ui] Failed to restart spinner after permission check: %s: %s",
-                            type(exc).__name__, exc,
+                            type(exc).__name__,
+                            exc,
                         )
 
             # Process query stream
@@ -744,7 +749,8 @@ class RichUI:
             except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as e:
                 logger.warning(
                     "[ui] Error while processing streamed query response: %s: %s",
-                    type(e).__name__, e,
+                    type(e).__name__,
+                    e,
                     extra={"session_id": self.session_id},
                 )
                 self.display_message("System", f"Error: {str(e)}", is_tool=True)
@@ -754,7 +760,8 @@ class RichUI:
                 except (RuntimeError, ValueError, OSError) as exc:
                     logger.warning(
                         "[ui] Failed to stop spinner: %s: %s",
-                        type(exc).__name__, exc,
+                        type(exc).__name__,
+                        exc,
                         extra={"session_id": self.session_id},
                     )
 
@@ -774,7 +781,8 @@ class RichUI:
         except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as exc:
             logger.warning(
                 "[ui] Error during query processing: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"session_id": self.session_id},
             )
             self.display_message("System", f"Error: {str(exc)}", is_tool=True)
@@ -844,14 +852,10 @@ class RichUI:
         custom_cmd = get_custom_command(command_name, self.project_path)
         if custom_cmd is not None:
             # Expand the custom command content
-            expanded_content = expand_command_content(
-                custom_cmd, trimmed_arg, self.project_path
-            )
+            expanded_content = expand_command_content(custom_cmd, trimmed_arg, self.project_path)
 
             # Show a hint that this is from a custom command
-            self.console.print(
-                f"[dim]Running custom command: /{command_name}[/dim]"
-            )
+            self.console.print(f"[dim]Running custom command: /{command_name}[/dim]")
             if custom_cmd.argument_hint and trimmed_arg:
                 self.console.print(f"[dim]Arguments: {trimmed_arg}[/dim]")
 
@@ -942,7 +946,9 @@ class RichUI:
         # Display status
         console.print(create_status_bar())
         console.print()
-        console.print("[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. Press ESC to interrupt a running query.[/dim]\n")
+        console.print(
+            "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. Press ESC to interrupt a running query.[/dim]\n"
+        )
 
         session = self.get_prompt_session()
         logger.info(
@@ -993,7 +999,9 @@ class RichUI:
                     interrupted = self._run_async_with_esc_interrupt(self.process_query(user_input))
 
                     if interrupted:
-                        console.print("\n[red]■ Conversation interrupted[/red] · [dim]Tell the model what to do differently.[/dim]")
+                        console.print(
+                            "\n[red]■ Conversation interrupted[/red] · [dim]Tell the model what to do differently.[/dim]"
+                        )
                         logger.info(
                             "[ui] Query interrupted by ESC key",
                             extra={"session_id": self.session_id},
@@ -1012,11 +1020,19 @@ class RichUI:
                 except EOFError:
                     console.print("\n[yellow]Goodbye![/yellow]")
                     break
-                except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as e:
+                except (
+                    OSError,
+                    ConnectionError,
+                    RuntimeError,
+                    ValueError,
+                    KeyError,
+                    TypeError,
+                ) as e:
                     console.print(f"[red]Error: {escape(str(e))}[/]")
                     logger.warning(
                         "[ui] Error in interactive loop: %s: %s",
-                        type(e).__name__, e,
+                        type(e).__name__,
+                        e,
                         extra={"session_id": self.session_id},
                     )
                     if self.verbose:
@@ -1050,7 +1066,8 @@ class RichUI:
                     # pragma: no cover - defensive shutdown
                     logger.warning(
                         "[ui] Failed to shut down MCP runtime cleanly: %s: %s",
-                        type(exc).__name__, exc,
+                        type(exc).__name__,
+                        exc,
                         extra={"session_id": self.session_id},
                     )
             finally:
@@ -1103,6 +1120,7 @@ class RichUI:
             )
         except Exception as exc:
             import traceback
+
             self.console.print(f"[red]Error during compaction: {escape(str(exc))}[/red]")
             self.console.print(f"[dim red]{traceback.format_exc()}[/dim red]")
             return

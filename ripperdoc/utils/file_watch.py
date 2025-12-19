@@ -102,10 +102,16 @@ def detect_changed_files(
 
         try:
             new_content = _read_portion(file_path, snapshot.offset, snapshot.limit)
-        except (OSError, IOError, UnicodeDecodeError, ValueError) as exc:  # pragma: no cover - best-effort telemetry
+        except (
+            OSError,
+            IOError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as exc:  # pragma: no cover - best-effort telemetry
             logger.warning(
                 "[file_watch] Failed reading changed file: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"file_path": file_path},
             )
             notices.append(

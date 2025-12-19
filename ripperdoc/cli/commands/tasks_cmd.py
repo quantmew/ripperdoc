@@ -109,7 +109,8 @@ def _list_tasks(ui: Any) -> bool:
             table.add_row(escape(task_id), "[red]error[/]", escape(str(exc)), "-")
             logger.warning(
                 "[tasks_cmd] Failed to read background task status: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
             )
             continue
@@ -148,7 +149,8 @@ def _kill_task(ui: Any, task_id: str) -> bool:
         console.print(f"[red]Failed to read task '{escape(task_id)}': {escape(str(exc))}[/red]")
         logger.warning(
             "[tasks_cmd] Failed to read task before kill: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
         )
         return True
@@ -172,7 +174,8 @@ def _kill_task(ui: Any, task_id: str) -> bool:
         console.print(f"[red]Error stopping task {escape(task_id)}: {escape(str(exc))}[/red]")
         logger.warning(
             "[tasks_cmd] Error stopping background task: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
         )
         return True
@@ -197,7 +200,8 @@ def _show_task(ui: Any, task_id: str) -> bool:
         console.print(f"[red]Failed to read task '{escape(task_id)}': {escape(str(exc))}[/red]")
         logger.warning(
             "[tasks_cmd] Failed to read task for detail view: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"task_id": task_id, "session_id": getattr(ui, "session_id", None)},
         )
         return True

@@ -14,7 +14,7 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 # Keys that trigger interrupt
-INTERRUPT_KEYS: Set[str] = {'\x1b', '\x03'}  # ESC, Ctrl+C
+INTERRUPT_KEYS: Set[str] = {"\x1b", "\x03"}  # ESC, Ctrl+C
 
 
 class InterruptHandler:
@@ -149,8 +149,7 @@ class InterruptHandler:
 
         try:
             done, _ = await asyncio.wait(
-                {query_task, interrupt_task},
-                return_when=asyncio.FIRST_COMPLETED
+                {query_task, interrupt_task}, return_when=asyncio.FIRST_COMPLETED
             )
 
             # Check if interrupted

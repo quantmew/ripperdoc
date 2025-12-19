@@ -31,25 +31,19 @@ SENSITIVE_PATTERNS = [
     # Password patterns
     (r"(?i)\b(password|passwd|pwd)\s*[:=]\s*\S+", "password"),
     (r"(?i)\bpassword\s+is\s+['\"]?\S+", "password"),
-
     # API key patterns
     (r"(?i)\b(api[_-]?key|apikey)\s*[:=]\s*\S+", "API key"),
     (r"(?i)\b(secret[_-]?key|secretkey)\s*[:=]\s*\S+", "secret key"),
-
     # Token patterns
     (r"(?i)\b(auth[_-]?token|bearer)\s*[:=]\s*\S+", "auth token"),
     (r"(?i)\b(access[_-]?token)\s*[:=]\s*\S+", "access token"),
-
     # AWS patterns
     (r"AKIA[0-9A-Z]{16}", "AWS access key"),
     (r"(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*\S+", "AWS secret key"),
-
     # Private key patterns
     (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "private key"),
-
     # Database connection strings
     (r"(?i)(mysql|postgres|mongodb)://[^\s]+:[^\s]+@", "database connection string"),
-
     # Generic secret patterns
     (r"(?i)\bsecret\s*[:=]\s*['\"]?\S{10,}", "secret value"),
 ]

@@ -29,14 +29,14 @@ HOOKS_CONFIG = {
                     {
                         "type": "command",
                         "command": "python $RIPPERDOC_PROJECT_DIR/.ripperdoc/hooks/log_bash.py",
-                        "timeout": 5
+                        "timeout": 5,
                     },
                     {
                         "type": "command",
                         "command": "python $RIPPERDOC_PROJECT_DIR/.ripperdoc/hooks/check_bash.py",
-                        "timeout": 5
-                    }
-                ]
+                        "timeout": 5,
+                    },
+                ],
             },
             # Protect sensitive files from modification
             {
@@ -45,12 +45,11 @@ HOOKS_CONFIG = {
                     {
                         "type": "command",
                         "command": "python $RIPPERDOC_PROJECT_DIR/.ripperdoc/hooks/check_write.py",
-                        "timeout": 5
+                        "timeout": 5,
                     }
-                ]
-            }
+                ],
+            },
         ],
-
         # Code quality checks after edits
         "PostToolUse": [
             {
@@ -59,12 +58,11 @@ HOOKS_CONFIG = {
                     {
                         "type": "command",
                         "command": "python $RIPPERDOC_PROJECT_DIR/.ripperdoc/hooks/check_edit.py",
-                        "timeout": 5
+                        "timeout": 5,
                     }
-                ]
+                ],
             }
         ],
-
         # Validate user prompts for sensitive content
         "UserPromptSubmit": [
             {
@@ -72,12 +70,11 @@ HOOKS_CONFIG = {
                     {
                         "type": "command",
                         "command": "python $RIPPERDOC_PROJECT_DIR/.ripperdoc/hooks/check_prompt.py",
-                        "timeout": 5
+                        "timeout": 5,
                     }
                 ]
             }
         ],
-
         # Desktop notifications
         "Notification": [
             {
@@ -85,12 +82,11 @@ HOOKS_CONFIG = {
                     {
                         "type": "command",
                         "command": "python $RIPPERDOC_PROJECT_DIR/.ripperdoc/hooks/log_notification.py",
-                        "timeout": 10
+                        "timeout": 10,
                     }
                 ]
             }
         ],
-
         # Session lifecycle tracking
         "SessionStart": [
             {
@@ -98,23 +94,22 @@ HOOKS_CONFIG = {
                     {
                         "type": "command",
                         "command": "python $RIPPERDOC_PROJECT_DIR/.ripperdoc/hooks/session_start.py",
-                        "timeout": 5
+                        "timeout": 5,
                     }
                 ]
             }
         ],
-
         "SessionEnd": [
             {
                 "hooks": [
                     {
                         "type": "command",
                         "command": "python $RIPPERDOC_PROJECT_DIR/.ripperdoc/hooks/session_end.py",
-                        "timeout": 5
+                        "timeout": 5,
                     }
                 ]
             }
-        ]
+        ],
     }
 }
 

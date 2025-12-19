@@ -190,9 +190,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
 
         # Check if this is a file creation (first edit has empty old_string)
         is_creation = (
-            not path.exists()
-            and len(input_data.edits) > 0
-            and input_data.edits[0].old_string == ""
+            not path.exists() and len(input_data.edits) > 0 and input_data.edits[0].old_string == ""
         )
 
         # If file exists, check if it has been read before editing
@@ -350,7 +348,8 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             # pragma: no cover - unlikely permission issue
             logger.warning(
                 "[multi_edit_tool] Error reading file before edits: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"file_path": str(file_path)},
             )
             output = MultiEditToolOutput(
@@ -408,13 +407,15 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(
                     "[multi_edit_tool] Failed to record file snapshot: %s: %s",
-                    type(exc).__name__, exc,
+                    type(exc).__name__,
+                    exc,
                     extra={"file_path": str(file_path)},
                 )
         except (OSError, IOError, PermissionError, UnicodeDecodeError) as exc:
             logger.warning(
                 "[multi_edit_tool] Error writing edited file: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"file_path": str(file_path)},
             )
             output = MultiEditToolOutput(

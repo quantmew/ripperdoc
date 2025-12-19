@@ -47,10 +47,7 @@ class HookResult:
     @property
     def should_block(self) -> bool:
         """Check if any hook returned a blocking decision."""
-        return any(
-            o.decision in (HookDecision.DENY, HookDecision.BLOCK)
-            for o in self.outputs
-        )
+        return any(o.decision in (HookDecision.DENY, HookDecision.BLOCK) for o in self.outputs)
 
     @property
     def should_allow(self) -> bool:
@@ -431,9 +428,7 @@ class HookManager:
 
     # --- Notification ---
 
-    def run_notification(
-        self, message: str, notification_type: str = "info"
-    ) -> HookResult:
+    def run_notification(self, message: str, notification_type: str = "info") -> HookResult:
         """Run Notification hooks synchronously.
 
         Args:
@@ -479,7 +474,10 @@ class HookManager:
     # --- Stop ---
 
     def run_stop(
-        self, stop_hook_active: bool = False, reason: Optional[str] = None, stop_sequence: Optional[str] = None
+        self,
+        stop_hook_active: bool = False,
+        reason: Optional[str] = None,
+        stop_sequence: Optional[str] = None,
     ) -> HookResult:
         """Run Stop hooks synchronously.
 
@@ -506,7 +504,10 @@ class HookManager:
         return HookResult(outputs)
 
     async def run_stop_async(
-        self, stop_hook_active: bool = False, reason: Optional[str] = None, stop_sequence: Optional[str] = None
+        self,
+        stop_hook_active: bool = False,
+        reason: Optional[str] = None,
+        stop_sequence: Optional[str] = None,
     ) -> HookResult:
         """Run Stop hooks asynchronously."""
         hooks = self._get_hooks(HookEvent.STOP)
@@ -568,9 +569,7 @@ class HookManager:
 
     # --- Pre Compact ---
 
-    def run_pre_compact(
-        self, trigger: str, custom_instructions: str = ""
-    ) -> HookResult:
+    def run_pre_compact(self, trigger: str, custom_instructions: str = "") -> HookResult:
         """Run PreCompact hooks synchronously.
 
         Args:
@@ -656,7 +655,10 @@ class HookManager:
     # --- Session End ---
 
     def run_session_end(
-        self, reason: str, duration_seconds: Optional[float] = None, message_count: Optional[int] = None
+        self,
+        reason: str,
+        duration_seconds: Optional[float] = None,
+        message_count: Optional[int] = None,
     ) -> HookResult:
         """Run SessionEnd hooks synchronously.
 
@@ -683,7 +685,10 @@ class HookManager:
         return HookResult(outputs)
 
     async def run_session_end_async(
-        self, reason: str, duration_seconds: Optional[float] = None, message_count: Optional[int] = None
+        self,
+        reason: str,
+        duration_seconds: Optional[float] = None,
+        message_count: Optional[int] = None,
     ) -> HookResult:
         """Run SessionEnd hooks asynchronously."""
         hooks = self._get_hooks(HookEvent.SESSION_END)

@@ -431,7 +431,7 @@ class TestWindowsDestructiveCommands:
 
     def test_cmd_c_with_rmdir_blocked(self):
         """cmd /c with rmdir should be blocked."""
-        result = validate_shell_command('cmd /c rmdir /s folder')
+        result = validate_shell_command("cmd /c rmdir /s folder")
         assert result.behavior == "ask"
         assert "cmd /c" in result.message.lower() or "rmdir" in result.message.lower()
 
@@ -530,19 +530,19 @@ class TestCriticalPathDetection:
 
     def test_rmdir_on_c_drive_root_denied(self):
         """rmdir /s on C:\\ should be denied."""
-        result = validate_shell_command('rmdir /s /q C:\\')
+        result = validate_shell_command("rmdir /s /q C:\\")
         assert result.behavior == "deny"
         assert "blocked" in result.message.lower()
 
     def test_rmdir_on_windows_denied(self):
         """rmdir /s on Windows folder should be denied."""
-        result = validate_shell_command(r'rmdir /s /q C:\Windows')
+        result = validate_shell_command(r"rmdir /s /q C:\Windows")
         assert result.behavior == "deny"
         assert "blocked" in result.message.lower()
 
     def test_rmdir_on_users_denied(self):
         """rmdir /s on Users folder should be denied."""
-        result = validate_shell_command(r'rmdir /s /q C:\Users')
+        result = validate_shell_command(r"rmdir /s /q C:\Users")
         assert result.behavior == "deny"
         assert "blocked" in result.message.lower()
 
@@ -614,7 +614,7 @@ class TestNestedQuoteDetection:
 
     def test_simple_cmd_c_allowed(self):
         """Simple cmd /c without nested quotes should pass."""
-        result = validate_shell_command('cmd /c dir')
+        result = validate_shell_command("cmd /c dir")
         assert result.behavior == "passthrough"
 
     def test_cmd_c_with_simple_quotes_allowed(self):
@@ -650,13 +650,13 @@ class TestFalsePositivePrevention:
         """Variables containing 'rm' should not trigger detection."""
         # This should be blocked for other reasons ($ substitution)
         # but not for rm detection
-        result = validate_shell_command('echo $rmdir')
+        result = validate_shell_command("echo $rmdir")
         # This is blocked due to $ but not due to rmdir
         assert "rmdir" not in result.message.lower() if result.behavior == "ask" else True
 
     def test_path_containing_rm_not_blocked(self):
         """Paths containing 'rm' in folder names should not trigger detection."""
-        result = validate_shell_command('ls /home/user/firmware/')
+        result = validate_shell_command("ls /home/user/firmware/")
         assert result.behavior == "passthrough"
 
     def test_safe_dd_usage_allowed(self):
@@ -693,12 +693,12 @@ class TestEdgeCases:
 
     def test_mixed_case_windows_paths(self):
         """Windows paths should be case-insensitive."""
-        result = validate_shell_command(r'rmdir /s /q c:\WINDOWS')
+        result = validate_shell_command(r"rmdir /s /q c:\WINDOWS")
         assert result.behavior == "deny"
 
     def test_forward_slash_windows_path(self):
         """Windows paths with forward slashes should be detected."""
-        result = validate_shell_command('rmdir /s /q C:/Users')
+        result = validate_shell_command("rmdir /s /q C:/Users")
         # This might not match our pattern, but should still ask for rmdir /s
         assert result.behavior in ("ask", "deny")
 

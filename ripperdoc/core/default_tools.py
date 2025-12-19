@@ -68,11 +68,20 @@ def get_default_tools() -> List[Tool[Any, Any]]:
             if isinstance(tool, Tool):
                 base_tools.append(tool)
                 dynamic_tools.append(tool)
-    except (ImportError, ModuleNotFoundError, OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+    except (
+        ImportError,
+        ModuleNotFoundError,
+        OSError,
+        RuntimeError,
+        ConnectionError,
+        ValueError,
+        TypeError,
+    ) as exc:
         # If MCP runtime is not available, continue with base tools only.
         logger.warning(
             "[default_tools] Failed to load dynamic MCP tools: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
         )
 
     task_tool = TaskTool(lambda: base_tools)

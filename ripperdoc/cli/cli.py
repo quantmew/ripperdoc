@@ -169,7 +169,8 @@ async def run_query(
             console.print(f"[red]Error: {escape(str(e))}[/red]")
             logger.warning(
                 "[cli] Unhandled error while running prompt: %s: %s",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
                 extra={"session_id": session_id},
             )
             if verbose:
@@ -397,11 +398,20 @@ def main() -> None:
         sys.exit(130)
     except SystemExit:
         raise
-    except (RuntimeError, ValueError, TypeError, OSError, IOError, ConnectionError, click.ClickException) as e:
+    except (
+        RuntimeError,
+        ValueError,
+        TypeError,
+        OSError,
+        IOError,
+        ConnectionError,
+        click.ClickException,
+    ) as e:
         console.print(f"[red]Fatal error: {escape(str(e))}[/red]")
         logger.warning(
             "[cli] Fatal error in main CLI entrypoint: %s: %s",
-            type(e).__name__, e,
+            type(e).__name__,
+            e,
         )
         sys.exit(1)
 

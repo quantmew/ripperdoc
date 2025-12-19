@@ -17,9 +17,7 @@ def test_top_level_directory_completion(tmp_path, monkeypatch):
     (tmp_path / "ripperdoc" / "__init__.py").write_text("")
     (tmp_path / "README.md").write_text("")
 
-    ignore_filter = build_ignore_filter(
-        tmp_path, include_defaults=False, include_gitignore=False
-    )
+    ignore_filter = build_ignore_filter(tmp_path, include_defaults=False, include_gitignore=False)
     completer = FileMentionCompleter(tmp_path, ignore_filter)
 
     suggestions = _get_text_suggestions(completer, "@ripp")
@@ -33,9 +31,7 @@ def test_nested_directory_completion(tmp_path, monkeypatch):
     (tmp_path / "ripperdoc" / "cli" / "__init__.py").write_text("")
     (tmp_path / "ripperdoc" / "cli" / "cli.py").write_text("")
 
-    ignore_filter = build_ignore_filter(
-        tmp_path, include_defaults=False, include_gitignore=False
-    )
+    ignore_filter = build_ignore_filter(tmp_path, include_defaults=False, include_gitignore=False)
     completer = FileMentionCompleter(tmp_path, ignore_filter)
 
     suggestions = _get_text_suggestions(completer, "@ripperdoc/cli/")
@@ -50,9 +46,7 @@ def test_directory_name_also_surfaces_children(tmp_path, monkeypatch):
     (tmp_path / "ripperdoc" / "__init__.py").write_text("")
     (tmp_path / "ripperdoc" / "cli" / "__init__.py").write_text("")
 
-    ignore_filter = build_ignore_filter(
-        tmp_path, include_defaults=False, include_gitignore=False
-    )
+    ignore_filter = build_ignore_filter(tmp_path, include_defaults=False, include_gitignore=False)
     completer = FileMentionCompleter(tmp_path, ignore_filter)
 
     suggestions = _get_text_suggestions(completer, "@ripperdoc")
@@ -66,9 +60,7 @@ def test_completion_keeps_at_until_accept(tmp_path, monkeypatch):
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "__init__.py").write_text("")
 
-    ignore_filter = build_ignore_filter(
-        tmp_path, include_defaults=False, include_gitignore=False
-    )
+    ignore_filter = build_ignore_filter(tmp_path, include_defaults=False, include_gitignore=False)
     completer = FileMentionCompleter(tmp_path, ignore_filter)
 
     query = "@pkg"

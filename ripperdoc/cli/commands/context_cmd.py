@@ -126,7 +126,8 @@ def _handle(ui: Any, _: str) -> bool:
     except (OSError, RuntimeError, AttributeError, TypeError) as exc:
         logger.warning(
             "[context_cmd] Failed to summarize MCP tools: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"session_id": getattr(ui, "session_id", None)},
         )
     for line in lines:

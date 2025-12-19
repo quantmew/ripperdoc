@@ -35,7 +35,9 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         console.print("[bold]/models edit <name>[/bold] — edit an existing model profile")
         console.print("[bold]/models delete <name>[/bold] — delete a model profile")
         console.print("[bold]/models use <name>[/bold] — set the main model pointer")
-        console.print("[bold]/models use <pointer> <name>[/bold] — set a specific pointer (main/task/reasoning/quick)")
+        console.print(
+            "[bold]/models use <pointer> <name>[/bold] — set a specific pointer (main/task/reasoning/quick)"
+        )
 
     def parse_int(prompt_text: str, default_value: Optional[int]) -> Optional[int]:
         raw = console.input(prompt_text).strip()
@@ -186,7 +188,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print(f"[red]Failed to save model: {escape(str(exc))}[/red]")
             logger.warning(
                 "[models_cmd] Failed to save model profile: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"profile": profile_name, "session_id": getattr(ui, "session_id", None)},
             )
             return True
@@ -295,7 +298,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print(f"[red]Failed to update model: {escape(str(exc))}[/red]")
             logger.warning(
                 "[models_cmd] Failed to update model profile: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"profile": profile_name, "session_id": getattr(ui, "session_id", None)},
             )
             return True
@@ -319,7 +323,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             print_models_usage()
             logger.warning(
                 "[models_cmd] Failed to delete model profile: %s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
                 extra={"profile": target, "session_id": getattr(ui, "session_id", None)},
             )
         return True
@@ -333,7 +338,9 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             pointer = tokens[1].lower()
             target = tokens[2]
             if pointer not in valid_pointers:
-                console.print(f"[red]Invalid pointer '{escape(pointer)}'. Valid pointers: {', '.join(valid_pointers)}[/red]")
+                console.print(
+                    f"[red]Invalid pointer '{escape(pointer)}'. Valid pointers: {', '.join(valid_pointers)}[/red]"
+                )
                 print_models_usage()
                 return True
         elif len(tokens) >= 2:
@@ -346,9 +353,14 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
                 pointer = "main"
                 target = tokens[1]
         else:
-            pointer = console.input("Pointer (main/task/reasoning/quick) [main]: ").strip().lower() or "main"
+            pointer = (
+                console.input("Pointer (main/task/reasoning/quick) [main]: ").strip().lower()
+                or "main"
+            )
             if pointer not in valid_pointers:
-                console.print(f"[red]Invalid pointer '{escape(pointer)}'. Valid pointers: {', '.join(valid_pointers)}[/red]")
+                console.print(
+                    f"[red]Invalid pointer '{escape(pointer)}'. Valid pointers: {', '.join(valid_pointers)}[/red]"
+                )
                 return True
             target = console.input(f"Model to use for '{pointer}': ").strip()
 
@@ -364,8 +376,13 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             print_models_usage()
             logger.warning(
                 "[models_cmd] Failed to set model pointer: %s: %s",
-                type(exc).__name__, exc,
-                extra={"pointer": pointer, "profile": target, "session_id": getattr(ui, "session_id", None)},
+                type(exc).__name__,
+                exc,
+                extra={
+                    "pointer": pointer,
+                    "profile": target,
+                    "session_id": getattr(ui, "session_id", None),
+                },
             )
         return True
 

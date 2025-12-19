@@ -68,9 +68,7 @@ def test_get_complete_tool_pairs_tail_with_paired_tools():
         create_assistant_message(
             [{"type": "tool_use", "id": "call_1", "name": "foo", "input": {}}]
         ),
-        create_user_message(
-            [{"type": "tool_result", "tool_use_id": "call_1", "text": "ok"}]
-        ),
+        create_user_message([{"type": "tool_result", "tool_use_id": "call_1", "text": "ok"}]),
     ]
 
     tail = get_complete_tool_pairs_tail(messages, 2)
@@ -85,9 +83,7 @@ def test_get_complete_tool_pairs_tail_expands_for_orphan_result():
         create_assistant_message(
             [{"type": "tool_use", "id": "call_1", "name": "foo", "input": {}}]
         ),
-        create_user_message(
-            [{"type": "tool_result", "tool_use_id": "call_1", "text": "ok"}]
-        ),
+        create_user_message([{"type": "tool_result", "tool_use_id": "call_1", "text": "ok"}]),
         create_assistant_message("Done"),
     ]
 

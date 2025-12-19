@@ -96,9 +96,7 @@ class HookInterceptor:
         Returns:
             Tuple of (should_continue, block_reason, additional_context)
         """
-        result = self.manager.run_post_tool_use(
-            tool_name, tool_input, tool_output, tool_error
-        )
+        result = self.manager.run_post_tool_use(tool_name, tool_input, tool_output, tool_error)
 
         if result.should_block:
             return False, result.block_reason, result.additional_context
@@ -139,9 +137,7 @@ class HookInterceptor:
             Tuple of (success, result_or_error, additional_context)
         """
         # Run pre-tool hooks
-        should_proceed, block_reason, pre_context = self.check_pre_tool_use(
-            tool_name, tool_input
-        )
+        should_proceed, block_reason, pre_context = self.check_pre_tool_use(tool_name, tool_input)
 
         if not should_proceed:
             return False, block_reason or "Blocked by hook", pre_context
@@ -155,9 +151,7 @@ class HookInterceptor:
             tool_error = str(e)
 
         # Run post-tool hooks
-        _, _, post_context = self.run_post_tool_use(
-            tool_name, tool_input, result, tool_error
-        )
+        _, _, post_context = self.run_post_tool_use(tool_name, tool_input, result, tool_error)
 
         # Combine contexts
         combined_context = None
@@ -188,6 +182,7 @@ class HookInterceptor:
         # Execute the tool
         try:
             import asyncio
+
             if asyncio.iscoroutinefunction(execute_fn):
                 result = await execute_fn()
             else:
@@ -239,9 +234,7 @@ def run_post_tool_use(
     tool_error: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """Convenience function to run post-tool hooks using global interceptor."""
-    return hook_interceptor.run_post_tool_use(
-        tool_name, tool_input, tool_output, tool_error
-    )
+    return hook_interceptor.run_post_tool_use(tool_name, tool_input, tool_output, tool_error)
 
 
 async def run_post_tool_use_async(

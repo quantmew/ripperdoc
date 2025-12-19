@@ -48,7 +48,8 @@ def _is_path_under_directory(path: Path, directory: Path) -> bool:
     except (ValueError, OSError) as exc:
         logger.warning(
             "[memory] Failed to compare path containment: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"path": str(path), "directory": str(directory)},
         )
         return False
@@ -126,7 +127,8 @@ def _collect_files(
     except (OSError, ValueError) as exc:
         logger.warning(
             "[memory] Failed to resolve memory file path: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             extra={"path": str(resolved_path)},
         )
 

@@ -270,7 +270,9 @@ def get_remaining_context_tokens(
     """Context window minus configured output tokens."""
     context_limit = max(get_model_context_limit(model_profile, explicit_limit), MIN_CONTEXT_TOKENS)
     try:
-        max_output_tokens = int(getattr(model_profile, "max_tokens", 0) or 0) if model_profile else 0
+        max_output_tokens = (
+            int(getattr(model_profile, "max_tokens", 0) or 0) if model_profile else 0
+        )
     except (TypeError, ValueError):
         max_output_tokens = 0
     return max(MIN_CONTEXT_TOKENS, context_limit - max(0, max_output_tokens))
@@ -298,7 +300,9 @@ def get_context_usage_status(
     )
 
     tokens_left = max(effective_limit - used_tokens, 0)
-    percent_left = 0.0 if effective_limit <= 0 else min(100.0, (tokens_left / effective_limit) * 100)
+    percent_left = (
+        0.0 if effective_limit <= 0 else min(100.0, (tokens_left / effective_limit) * 100)
+    )
     percent_used = 100.0 - percent_left
 
     warning_limit = max(0, effective_limit - WARNING_THRESHOLD)
@@ -419,7 +423,9 @@ def _estimate_message_tokens(content_block: Any) -> int:
     if isinstance(content, list):
         total = 0
         for part in content:
-            part_type = getattr(part, "type", None) or (part.get("type") if isinstance(part, dict) else None)
+            part_type = getattr(part, "type", None) or (
+                part.get("type") if isinstance(part, dict) else None
+            )
             if part_type == "text":
                 text_val = getattr(part, "text", None) if hasattr(part, "text") else None
                 if text_val is None and isinstance(part, dict):
@@ -501,7 +507,9 @@ def micro_compact_messages(
                 token_counts_by_tool_use_id[tool_use_id] = token_count
 
     latest_tool_use_ids = (
-        tool_use_ids_to_compact[-MAX_TOOL_USES_TO_PRESERVE:] if MAX_TOOL_USES_TO_PRESERVE > 0 else []
+        tool_use_ids_to_compact[-MAX_TOOL_USES_TO_PRESERVE:]
+        if MAX_TOOL_USES_TO_PRESERVE > 0
+        else []
     )
     total_token_count = sum(token_counts_by_tool_use_id.values())
 
@@ -525,7 +533,9 @@ def micro_compact_messages(
             messages, protocol=protocol, precomputed_total_tokens=tokens_before
         )
         status = get_context_usage_status(
-            usage_tokens, max_context_tokens=context_limit, auto_compact_enabled=resolved_auto_compact
+            usage_tokens,
+            max_context_tokens=context_limit,
+            auto_compact_enabled=resolved_auto_compact,
         )
         if not status.is_above_warning_threshold or total_tokens_removed < MAX_TOKENS_SOFT:
             ids_to_remove.clear()
@@ -571,7 +581,11 @@ def micro_compact_messages(
                     new_block = content_item.model_copy()
                     new_block.text = MICRO_PLACEHOLDER
                 else:
-                    block_dict = dict(content_item) if isinstance(content_item, dict) else {"type": "tool_result"}
+                    block_dict = (
+                        dict(content_item)
+                        if isinstance(content_item, dict)
+                        else {"type": "tool_result"}
+                    )
                     block_dict["text"] = MICRO_PLACEHOLDER
                     block_dict["tool_use_id"] = tool_use_id
                     new_block = MessageContent(**block_dict)

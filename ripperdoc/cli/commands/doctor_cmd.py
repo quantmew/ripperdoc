@@ -125,10 +125,17 @@ def _mcp_status(
             servers = asyncio.run(_load())
         else:
             servers = runner(_load())
-    except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:  # pragma: no cover - defensive
+    except (
+        OSError,
+        RuntimeError,
+        ConnectionError,
+        ValueError,
+        TypeError,
+    ) as exc:  # pragma: no cover - defensive
         logger.warning(
             "[doctor] Failed to load MCP servers: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             exc_info=exc,
         )
         rows.append(_status_row("MCP", "error", f"Failed to load MCP config: {exc}"))
@@ -161,10 +168,17 @@ def _project_status(project_path: Path) -> Tuple[str, str, str]:
         return _status_row(
             "Project config", "ok", f".ripperdoc/config.json loaded for {project_path}"
         )
-    except (OSError, IOError, json.JSONDecodeError, ValueError, TypeError) as exc:  # pragma: no cover - defensive
+    except (
+        OSError,
+        IOError,
+        json.JSONDecodeError,
+        ValueError,
+        TypeError,
+    ) as exc:  # pragma: no cover - defensive
         logger.warning(
             "[doctor] Failed to load project config: %s: %s",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
             exc_info=exc,
         )
         return _status_row(
