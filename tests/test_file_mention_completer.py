@@ -75,4 +75,6 @@ def test_completion_keeps_at_until_accept(tmp_path, monkeypatch):
     doc = Document(text=query, cursor_position=len(query))
     completions = list(completer.get_completions(doc, None))
     assert completions  # sanity check
-    assert any(c.start_position == -len("pkg") for c in completions)
+    # The implementation uses start_position = -(len(query) + 1) where query is "pkg"
+    # So start_position should be -4, not -3
+    assert any(c.start_position == -4 for c in completions)

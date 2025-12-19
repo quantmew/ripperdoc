@@ -25,62 +25,135 @@ def _strip_single_quotes(shell_command: str, first_token: str) -> str:
 
     Single-quoted content in shell is literal and cannot contain command
     substitution, so we can safely ignore it for security analysis.
+    
+    Double quotes are kept for analysis since they can contain variable
+    expansions and command substitutions.
     """
-    in_single_quote_mode = False
-    next_char_is_backslash_escaped = False
-    command_without_single_quotes = ""
+    in_single_quote = False
+    escaped = False
+    result = []
 
-    for i, current_char in enumerate(shell_command):
-        if next_char_is_backslash_escaped:
-            next_char_is_backslash_escaped = False
-            if not in_single_quote_mode:
-                command_without_single_quotes += current_char
+    i = 0
+    while i < len(shell_command):
+        char = shell_command[i]
+        
+        if escaped:
+            escaped = False
+            result.append(char)
+            i += 1
             continue
-
-        if current_char == "\\":
-            next_char_is_backslash_escaped = True
-            if not in_single_quote_mode:
-                command_without_single_quotes += current_char
+        
+        if char == '\\':
+            escaped = True
+            result.append(char)
+            i += 1
             continue
-
-        if current_char == "'" and not next_char_is_backslash_escaped:
-            in_single_quote_mode = not in_single_quote_mode
+        
+        if char == "'":
+            in_single_quote = not in_single_quote
+            i += 1
             continue
+        
+        if not in_single_quote:
+            result.append(char)
+        
+        i += 1
+    
+    return ''.join(result)
 
-        # Special handling for jq double-quoted strings
-        if (
-            first_token == "jq"
-            and current_char == '"'
-            and not next_char_is_backslash_escaped
-            and not in_single_quote_mode
-        ):
-            # Scan to find the end of the double-quoted string
-            quoted_string = ""
-            scan_position = i + 1
 
-            while scan_position < len(shell_command) and shell_command[scan_position] != '"':
-                if (
-                    shell_command[scan_position] == "\\"
-                    and scan_position + 1 < len(shell_command)
-                ):
-                    scan_position += 2
-                    continue
-                quoted_string += shell_command[scan_position]
-                scan_position += 1
+def _strip_quotes_for_analysis(command: str) -> str:
+    """Strip content inside both single and double quotes for security analysis.
+    
+    This is used for checking shell metacharacters in arguments.
+    Double quotes are stripped because they can contain variable expansions
+    and command substitutions that need to be analyzed.
+    """
+    result = []
+    in_single_quote = False
+    in_double_quote = False
+    escaped = False
+    
+    i = 0
+    while i < len(command):
+        char = command[i]
+        
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+        
+        if char == '\\':
+            escaped = True
+            i += 1
+            continue
+        
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            i += 1
+            continue
+        
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            i += 1
+            continue
+        
+        if not in_single_quote and not in_double_quote:
+            result.append(char)
+        
+        i += 1
+    
+    return ''.join(result)
 
-            # If the quoted string contains command substitution, keep it for analysis
-            if "$(" in quoted_string or "`" in quoted_string:
-                command_without_single_quotes += current_char
-                continue
 
-            # Skip the entire quoted string
-            # Note: We can't modify i in Python, so we'll need a different approach
-            # For now, just add the character if not in single quote mode
-
-        if not in_single_quote_mode:
-            command_without_single_quotes += current_char
-
-    return command_without_single_quotes
+def _is_safe_command_pattern(command: str) -> bool:
+    """Check if command matches known safe patterns.
+    
+    These are commands that are commonly used and known to be safe
+    even if they contain characters that might otherwise trigger warnings.
+    """
+    import re
+    
+    safe_patterns = [
+        # Common version checks
+        r'^\s*(python|python3|node|npm|git|bash|sh)\s+--version\s*$',
+        r'^\s*(python|python3|node|npm|git|bash|sh)\s+-v\s*$',
+        r'^\s*(python|python3|node|npm|git|bash|sh)\s+-V\s*$',
+        
+        # Common help commands
+        r'^\s*\w+\s+--help\s*$',
+        r'^\s*\w+\s+-h\s*$',
+        r'^\s*\w+\s+help\s*$',
+        
+        # Simple echo/print commands
+        r'^\s*echo\s+["\'].*["\']\s*$',
+        r'^\s*print(env|f)?\s+.*$',
+        
+        # Directory listing with common options
+        r'^\s*ls\s+(-[a-zA-Z]*[lhtr]*\s*)*["\']?[^;&|<>]*["\']?\s*$',
+        r'^\s*dir\s+.*$',
+        
+        # Current directory
+        r'^\s*pwd\s*$',
+        
+        # Environment variable checks
+        r'^\s*env\s*$',
+        r'^\s*printenv\s*$',
+        
+        # Which/whereis commands
+        r'^\s*which\s+\w+\s*$',
+        r'^\s*whereis\s+\w+\s*$',
+        
+        # Type/command commands
+        r'^\s*type\s+\w+\s*$',
+        r'^\s*command\s+-v\s+\w+\s*$',
+    ]
+    
+    for pattern in safe_patterns:
+        if re.match(pattern, command, re.IGNORECASE):
+            return True
+    
+    return False
 
 
 def _sanitize_safe_redirections(command: str) -> str:
@@ -262,6 +335,28 @@ def _check_destructive_commands(command: str) -> Optional[ValidationResult]:
     # Check if command targets critical paths with any destructive operation
     has_critical_path = any(p.search(command) for p in _CRITICAL_PATH_PATTERNS)
 
+    # For interpreter commands, we need to check the code string for destructive commands
+    # First, extract the first token to check if it's an interpreter
+    trimmed = command.strip()
+    first_token = trimmed.split()[0] if trimmed.split() else ""
+    
+    # Check if it's an interpreter command
+    if _is_interpreter_command(command, first_token):
+        # Extract and check the code string
+        code_string = _extract_code_string(command, first_token)
+        if code_string:
+            # Check the code string for destructive patterns
+            # We need to check both the code string itself and any commands it might execute
+            code_check_result = _check_destructive_commands_in_code_string(code_string, first_token)
+            if code_check_result:
+                if has_critical_path:
+                    return ValidationResult(
+                        behavior="deny",
+                        message=f"BLOCKED: {code_check_result.message} targeting a critical system path",
+                        rule_suggestions=None,
+                    )
+                return code_check_result
+
     # Strip quoted content to avoid false positives like 'echo "rmdir /s /q folder"'
     command_without_quotes = _strip_quoted_content_for_destructive_check(command)
 
@@ -316,6 +411,47 @@ def _check_destructive_commands(command: str) -> Optional[ValidationResult]:
     return None
 
 
+def _check_destructive_commands_in_code_string(code_string: str, interpreter: str) -> Optional[ValidationResult]:
+    """Check for destructive commands in interpreter code strings.
+    
+    This handles cases like `bash -c "rm -rf /"` where the destructive
+    command is inside the code string.
+    """
+    import re
+    
+    # For shell interpreters (bash, sh, zsh), the code string is shell code
+    if interpreter in ("bash", "sh", "zsh"):
+        # Check for destructive patterns in the shell code
+        stripped_code = _strip_quoted_content_for_destructive_check(code_string)
+        
+        for pattern, message in _UNIX_DESTRUCTIVE_PATTERNS:
+            if pattern.search(stripped_code):
+                return ValidationResult(
+                    behavior="ask",
+                    message=f"Code string contains {message}",
+                    rule_suggestions=None,
+                )
+    
+    # For Python, check for os.system, subprocess, etc.
+    elif interpreter in ("python", "python3"):
+        # Check for system calls that execute shell commands
+        system_patterns = [
+            (r'\bos\.system\s*\(\s*["\'][^"\']*rm\s+-[a-zA-Z]*r', "Python code executes destructive shell command"),
+            (r'\bsubprocess\.(run|call|Popen)\s*\(\s*[^)]*rm\s+-[a-zA-Z]*r', "Python code executes destructive shell command"),
+        ]
+        
+        for pattern, message in system_patterns:
+            if re.search(pattern, code_string):
+                return ValidationResult(
+                    behavior="ask",
+                    message=message,
+                    rule_suggestions=None,
+                )
+    
+    # For other interpreters, we could add more checks as needed
+    return None
+
+
 def _strip_quoted_content_for_destructive_check(command: str) -> str:
     """Strip content inside quotes for destructive command checking.
 
@@ -354,6 +490,73 @@ def _strip_quoted_content_for_destructive_check(command: str) -> str:
     return ''.join(result)
 
 
+def _is_interpreter_command(command: str, first_token: str) -> bool:
+    """Check if the command is an interpreter command that executes code strings.
+    
+    Interpreter commands like `python -c "code"`, `node -e "code"`, `bash -c "code"`
+    should have different validation rules for their code strings.
+    """
+    interpreter_tokens = {"python", "python3", "node", "bash", "sh", "zsh", "perl", "ruby"}
+    
+    if first_token not in interpreter_tokens:
+        return False
+    
+    # Check for -c or -e flag (execute code string)
+    # Pattern: command -c "code" or command -e "code"
+    import re
+    pattern = rf'\b{re.escape(first_token)}\s+-(c|e)\s+["\']'
+    return bool(re.search(pattern, command))
+
+
+def _extract_code_string(command: str, first_token: str) -> str:
+    """Extract the code string from an interpreter command.
+    
+    Returns the code string without the surrounding quotes, or empty string
+    if not an interpreter command or no code string found.
+    """
+    if not _is_interpreter_command(command, first_token):
+        return ""
+    
+    import re
+    # Find the code string after -c or -e flag
+    # Match: command -c "code" or command -e 'code'
+    pattern = rf'{re.escape(first_token)}\s+-(c|e)\s+(["\'])(.*?)(?<!\\)\2'
+    match = re.search(pattern, command, re.DOTALL)
+    
+    if match:
+        code_string = match.group(3)
+        # Remove escape characters
+        code_string = code_string.replace('\\"', '"').replace("\\'", "'")
+        return code_string
+    
+    return ""
+
+
+def _strip_interpreter_code_strings(command: str, first_token: str) -> str:
+    """Strip code strings from interpreter commands for validation.
+    
+    This allows us to validate the shell command structure while
+    ignoring the content of code strings which may contain shell-like
+    characters that are actually part of the code language.
+    """
+    if not _is_interpreter_command(command, first_token):
+        return command
+    
+    import re
+    # Replace code strings with placeholder
+    # Match: command -c "code" or command -e 'code'
+    # The (?<!\\) negative lookbehind ensures we don't match escaped quotes
+    pattern = rf'({re.escape(first_token)}\s+-(c|e)\s+)(["\'])(.*?)(?<!\\)\3'
+    
+    def replace_code_string(match):
+        prefix = match.group(1)
+        quote = match.group(3)
+        return f'{prefix}{quote}__CODE_STRING__{quote}'
+    
+    result = re.sub(pattern, replace_code_string, command, flags=re.DOTALL)
+    return result
+
+
 def validate_shell_command(shell_command: str) -> ValidationResult:
     """Validate a shell command for security risks.
 
@@ -375,6 +578,14 @@ def validate_shell_command(shell_command: str) -> ValidationResult:
 
     trimmed = shell_command.strip()
     first_token = trimmed.split()[0] if trimmed.split() else ""
+    
+    # Check for safe command patterns first
+    if _is_safe_command_pattern(trimmed):
+        return ValidationResult(
+            behavior="passthrough",
+            message="Command matches safe pattern",
+            rule_suggestions=None,
+        )
 
     # FIRST: Check for destructive commands (highest priority)
     # This catches dangerous patterns like the Gemini incident
@@ -429,23 +640,102 @@ def validate_shell_command(shell_command: str) -> ValidationResult:
     # Strip single-quoted content for further analysis
     sanitized = _strip_single_quotes(trimmed, first_token)
 
+    # For interpreter commands, strip code strings before checking shell metacharacters
+    # This allows code strings to contain language-specific characters like ;
+    sanitized_for_metachar_check = sanitized
+    if _is_interpreter_command(trimmed, first_token):
+        sanitized_for_metachar_check = _strip_interpreter_code_strings(sanitized, first_token)
+
     # Remove safe redirections
     sanitized = _sanitize_safe_redirections(sanitized)
+    sanitized_for_metachar_check = _sanitize_safe_redirections(sanitized_for_metachar_check)
 
-    # Check for shell metacharacters in quoted arguments
-    if re.search(r'(?:^|\s)["\'][^"\']*[;&][^"\']*["\'](?:\s|$)', sanitized):
+    # Check for shell metacharacters outside of quotes
+    # We'll parse the command and check for ; & characters that are not inside quotes
+    # Special handling for find -exec escaped semicolon (\;)
+    def has_metachars_outside_quotes(cmd: str) -> bool:
+        in_single_quote = False
+        in_double_quote = False
+        escaped = False
+        
+        i = 0
+        while i < len(cmd):
+            char = cmd[i]
+            
+            if escaped:
+                escaped = False
+                # If we have an escaped semicolon (\\;), check if it's part of find -exec
+                if char == ';' and i > 2:
+                    # Check if this is find -exec ... \\;
+                    # Look backward for "-exec"
+                    j = i - 2  # Skip the escaped semicolon and backslash
+                    while j >= 0 and cmd[j].isspace():
+                        j -= 1
+                    # Check if we have "-exec" before this
+                    if j >= 4 and cmd[j-4:j+1] == "-exec":
+                        # This is find -exec escaped semicolon, not a shell metacharacter
+                        i += 1
+                        continue
+                
+                i += 1
+                continue
+            
+            if char == '\\':
+                escaped = True
+                i += 1
+                continue
+            
+            if char == "'" and not in_double_quote:
+                in_single_quote = not in_single_quote
+                i += 1
+                continue
+            
+            if char == '"' and not in_single_quote:
+                in_double_quote = not in_double_quote
+                i += 1
+                continue
+            
+            if not in_single_quote and not in_double_quote:
+                if char in (';', '&', '|'):
+                    # Check if this is part of find -exec pattern
+                    if char == ';' and i > 0 and cmd[i-1] == '\\':
+                        # Escaped semicolon, already handled above
+                        pass
+                    # Check for && or || operators
+                    elif char in ('&', '|') and i + 1 < len(cmd) and cmd[i+1] == char:
+                        # This is && or ||, which is a shell operator
+                        # We should allow common patterns like cmd1 && cmd2
+                        # But we need to check if it's safe
+                        return True
+                    elif char == ';':
+                        # Single ; is a command separator
+                        return True
+                    elif char == '&' and (i + 1 >= len(cmd) or cmd[i+1] != '&'):
+                        # Single & (background operator)
+                        return True
+                    elif char == '|' and (i + 1 >= len(cmd) or cmd[i+1] != '|'):
+                        # Single | (pipe operator)
+                        return True
+            
+            i += 1
+        
+        return False
+    
+    if has_metachars_outside_quotes(sanitized_for_metachar_check):
         return ValidationResult(
             behavior="ask",
-            message="Command contains shell metacharacters (;, |, or &) in arguments",
+            message="Command contains shell metacharacters (;, |, or &) outside of quoted arguments",
             rule_suggestions=None,
         )
 
     # Check for dangerous metacharacters in find/grep arguments
+    # Use the version with quotes stripped for this check
+    stripped_for_pattern_check = _strip_quotes_for_analysis(sanitized)
     for pattern in _DANGEROUS_METACHARACTER_PATTERNS:
-        if pattern.search(sanitized):
+        if pattern.search(stripped_for_pattern_check):
             return ValidationResult(
                 behavior="ask",
-                message="Command contains shell metacharacters (;, |, or &) in arguments",
+                message="Command contains shell metacharacters (;, |, or &) in find/grep arguments",
                 rule_suggestions=None,
             )
 
@@ -489,6 +779,54 @@ def validate_shell_command(shell_command: str) -> ValidationResult:
     # Check all dangerous patterns
     for pattern, message in _DANGEROUS_PATTERNS:
         if pattern.search(sanitized):
+            # Special handling for newlines
+            if "newlines" in message:
+                # Check if newlines are in quotes or code strings
+                in_quote = False
+                quote_char = None
+                escaped = False
+                newline_outside_quotes = False
+                
+                i = 0
+                while i < len(trimmed):
+                    char = trimmed[i]
+                    
+                    if escaped:
+                        escaped = False
+                        i += 1
+                        continue
+                    
+                    if char == '\\':
+                        escaped = True
+                        i += 1
+                        continue
+                    
+                    if char in ("'", '"') and not escaped:
+                        if not in_quote:
+                            in_quote = True
+                            quote_char = char
+                        elif char == quote_char:
+                            in_quote = False
+                            quote_char = None
+                    
+                    if char in ('\n', '\r') and not in_quote:
+                        newline_outside_quotes = True
+                        break
+                    
+                    i += 1
+                
+                if not newline_outside_quotes:
+                    # Newlines are inside quotes, which is safer
+                    # For interpreter commands, check if newlines are in code strings
+                    if _is_interpreter_command(trimmed, first_token):
+                        code_string = _extract_code_string(trimmed, first_token)
+                        if code_string and any(c in code_string for c in ('\n', '\r')):
+                            # Newlines are in code string, which is allowed for interpreter commands
+                            continue
+                    else:
+                        # For non-interpreter commands, newlines in quotes are questionable but not blocked
+                        continue
+            
             return ValidationResult(
                 behavior="ask",
                 message=message,
