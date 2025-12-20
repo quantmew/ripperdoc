@@ -194,11 +194,20 @@ async def run_query(
     help="YOLO mode: skip all permission prompts for tools",
 )
 @click.option("--verbose", is_flag=True, help="Verbose output")
-@click.option("--show-full-thinking", is_flag=True, help="Show full reasoning content instead of truncated preview")
+@click.option(
+    "--show-full-thinking/--hide-full-thinking",
+    default=None,
+    help="Show full reasoning content instead of truncated preview",
+)
 @click.option("-p", "--prompt", type=str, help="Direct prompt (non-interactive)")
 @click.pass_context
 def cli(
-    ctx: click.Context, cwd: Optional[str], yolo: bool, verbose: bool, show_full_thinking: bool, prompt: Optional[str]
+    ctx: click.Context,
+    cwd: Optional[str],
+    yolo: bool,
+    verbose: bool,
+    show_full_thinking: Optional[bool],
+    prompt: Optional[str],
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())

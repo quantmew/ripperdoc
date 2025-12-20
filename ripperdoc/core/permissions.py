@@ -148,8 +148,9 @@ def make_permission_checker(
             return PermissionResult(result=True)
 
         try:
-            if hasattr(tool, "needs_permissions") and not tool.needs_permissions(parsed_input):
-                return PermissionResult(result=True)
+            needs_permission = True
+            if hasattr(tool, "needs_permissions"):
+                needs_permission = tool.needs_permissions(parsed_input)
         except (TypeError, AttributeError, ValueError) as exc:
             # Tool implementation error - log and deny for safety
             logger.warning(
@@ -166,10 +167,25 @@ def make_permission_checker(
             )
 
         allowed_tools = set(config.allowed_tools or [])
+
+        global_config = config_manager.get_global_config()
+        local_config = config_manager.get_project_local_config(project_path)
+
         allow_rules = {
-            "Bash": set(config.bash_allow_rules or []) | session_tool_rules.get("Bash", set())
+            "Bash": (
+                set(config.bash_allow_rules or [])
+                | set(global_config.user_allow_rules or [])
+                | set(local_config.local_allow_rules or [])
+                | session_tool_rules.get("Bash", set())
+            )
         }
-        deny_rules = {"Bash": set(config.bash_deny_rules or [])}
+        deny_rules = {
+            "Bash": (
+                set(config.bash_deny_rules or [])
+                | set(global_config.user_deny_rules or [])
+                | set(local_config.local_deny_rules or [])
+            )
+        }
         allowed_working_dirs = {
             str(project_path.resolve()),
             *[str(Path(p).resolve()) for p in config.working_directories or []],
@@ -217,6 +233,22 @@ def make_permission_checker(
                 behavior="passthrough",
                 message=f"Allow tool '{tool.name}'?",
                 rule_suggestions=[ToolRule(tool_name=tool.name, rule_content=tool.name)],
+            )
+
+        # If tool doesn't normally require permission (e.g., read-only Bash),
+        # enforce deny rules but otherwise skip prompting.
+        if not needs_permission:
+            if decision.behavior == "deny":
+                return PermissionResult(
+                    result=False,
+                    message=decision.message or f"Permission denied for tool '{tool.name}'.",
+                    decision=decision,
+                )
+            return PermissionResult(
+                result=True,
+                message=decision.message,
+                updated_input=decision.updated_input,
+                decision=decision,
             )
 
         if decision.behavior == "allow":

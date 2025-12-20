@@ -8,7 +8,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Literal
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
 from ripperdoc.utils.log import get_logger
@@ -192,7 +192,6 @@ class ProjectConfig(BaseModel):
 
     # Project settings
     dont_crawl_directory: bool = False
-    enable_architect_tool: bool = False
 
     # Trust
     has_trust_dialog_accepted: bool = False

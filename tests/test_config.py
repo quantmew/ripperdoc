@@ -80,7 +80,6 @@ def test_project_config():
     """Test project configuration."""
     config = ProjectConfig()
     assert not config.dont_crawl_directory
-    assert not config.enable_architect_tool
     assert isinstance(config.allowed_tools, list)
     assert isinstance(config.bash_allow_rules, list)
     assert isinstance(config.bash_deny_rules, list)

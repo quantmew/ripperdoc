@@ -11,8 +11,15 @@ from ripperdoc.core.permissions import (
     PermissionResult,
     make_permission_checker,
 )
-from ripperdoc.core.config import config_manager
+from ripperdoc.core.config import (
+    GlobalConfig,
+    ProjectLocalConfig,
+    config_manager,
+    save_global_config,
+    save_project_local_config,
+)
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
+from ripperdoc.tools.bash_tool import BashTool, BashToolInput
 
 
 class DummyInput(BaseModel):
@@ -49,6 +56,27 @@ class DictPermissionTool(DummyTool):
 
     async def check_permissions(self, input_data: DummyInput, permission_context: Any):
         return {"behavior": "allow", "updated_input": input_data}
+
+
+@pytest.fixture
+def isolated_config(tmp_path):
+    """Isolate global/project config paths for permission tests."""
+    original_global_path = config_manager.global_config_path
+    original_global = config_manager._global_config
+    original_project = config_manager._project_config
+    original_project_local = config_manager._project_local_config
+
+    config_manager.global_config_path = tmp_path / "global.json"
+    config_manager._global_config = None
+    config_manager._project_config = None
+    config_manager._project_local_config = None
+
+    yield
+
+    config_manager.global_config_path = original_global_path
+    config_manager._global_config = original_global
+    config_manager._project_config = original_project
+    config_manager._project_local_config = original_project_local
 
 
 def test_yolo_mode_off_does_not_persist_permissions(tmp_path: Path):
@@ -148,3 +176,37 @@ def test_dict_permission_result_is_handled(tmp_path: Path):
     checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=lambda _: "y")
     result = asyncio.run(checker(tool, parsed_input))
     assert result.result is True
+
+
+def test_bash_permissions_include_global_and_local_rules(tmp_path: Path, isolated_config):
+    """Global and local allow rules should be honored for Bash permissions."""
+    save_global_config(GlobalConfig(user_allow_rules=["rm -rf /tmp/allowed"]))
+    save_project_local_config(
+        ProjectLocalConfig(local_allow_rules=["touch /tmp/local"]), project_path=tmp_path
+    )
+
+    tool = BashTool()
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=lambda _: "n")
+
+    global_allowed = asyncio.run(checker(tool, BashToolInput(command="rm -rf /tmp/allowed")))
+    local_allowed = asyncio.run(checker(tool, BashToolInput(command="touch /tmp/local")))
+
+    assert global_allowed.result is True
+    assert local_allowed.result is True
+
+
+def test_bash_permissions_apply_denies_from_all_scopes(tmp_path: Path, isolated_config):
+    """Deny rules from any scope should block Bash commands."""
+    save_global_config(GlobalConfig(user_deny_rules=["rm -rf /tmp/deny"]))
+    save_project_local_config(
+        ProjectLocalConfig(local_deny_rules=["echo local-deny"]), project_path=tmp_path
+    )
+
+    tool = BashTool()
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=lambda _: "y")
+
+    global_denied = asyncio.run(checker(tool, BashToolInput(command="rm -rf /tmp/deny")))
+    local_denied = asyncio.run(checker(tool, BashToolInput(command="echo local-deny")))
+
+    assert global_denied.result is False
+    assert local_denied.result is False

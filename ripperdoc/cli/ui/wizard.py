@@ -93,14 +93,12 @@ def run_onboarding_wizard(config: GlobalConfig) -> bool:
             model_suggestions=(),
         )
     else:
-        provider_option = KNOWN_PROVIDERS.get(provider_choice)
-        if provider_option is None:
-            provider_option = ProviderOption(
-                key=provider_choice,
-                protocol=ProviderType.OPENAI_COMPATIBLE,
-                default_model=default_model_for_protocol(ProviderType.OPENAI_COMPATIBLE),
-                model_suggestions=(),
-            )
+        provider_option = KNOWN_PROVIDERS.get(provider_choice) or ProviderOption(
+            key=provider_choice,
+            protocol=ProviderType.OPENAI_COMPATIBLE,
+            default_model=default_model_for_protocol(ProviderType.OPENAI_COMPATIBLE),
+            model_suggestions=(),
+        )
 
     api_key = ""
     while not api_key:

@@ -74,7 +74,6 @@ PROJECT_CONFIG = {
     },
     "context_files": ["README.md", "requirements.txt", "src/main.py"],
     "dont_crawl_directory": False,
-    "enable_architect_tool": False,
 }
 
 # Example 4: Yolo Mode disabled (prompt for permissions)
