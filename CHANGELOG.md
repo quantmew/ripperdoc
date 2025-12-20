@@ -5,6 +5,21 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9] - 2025-12-20
+
+### Added
+- **Full thinking output flag** - New `--show-full-thinking` CLI option to display full provider reasoning
+- **Spinner pause control** - UI spinner now pauses around blocking operations for cleaner terminal output
+
+### Changed
+- **Permission mode rename** - Renamed `safe_mode` to `yolo_mode` to better describe relaxed permission behavior
+- **Provider selection refactor** - Streamlined provider selection logic and defaults
+- **Shell command validation** - Improved quote handling and interpreter detection for safer execution
+- **Hooks typing improvements** - Better type annotations and parameter handling for hooks
+
+### Fixed
+- **DeepSeek tool call compatibility** - Include `reasoning_content` for DeepSeek API tool calls to prevent errors
+
 ## [0.2.8] - 2025-12-19
 
 ### Added
@@ -111,6 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple command execution
 - Basic project navigation
 
+[0.2.9]: https://github.com/quantmew/Ripperdoc/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/quantmew/Ripperdoc/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/quantmew/Ripperdoc/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/quantmew/Ripperdoc/compare/v0.2.5...v0.2.6
