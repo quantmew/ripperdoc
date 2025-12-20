@@ -2,44 +2,56 @@ from contextlib import contextmanager
 from typing import Any, Generator, Literal, Optional
 
 from rich.console import Console
-from rich.markup import escape
-from rich.status import Status
+from rich.live import Live
+from rich.text import Text
+from rich.spinner import Spinner as RichSpinner
 
 
 class Spinner:
-    """Lightweight spinner wrapper for Rich status."""
+    """Lightweight spinner wrapper that plays nicely with other console output."""
 
     def __init__(self, console: Console, text: str = "Thinking...", spinner: str = "dots"):
         self.console = console
         self.text = text
         self.spinner = spinner
-        self._status: Optional[Status] = None
+        self._style = "cyan"
+        self._live: Optional[Live] = None
+        # Blue spinner for clearer visual separation in the terminal (icon + text)
+        self._renderable: RichSpinner = RichSpinner(
+            spinner, text=Text(self.text, style=self._style), style=self._style
+        )
 
     def start(self) -> None:
         """Start the spinner if not already running."""
-
-        if self._status is not None:
+        if self._live is not None:
             return
-        self._status = self.console.status(
-            f"[cyan]{escape(self.text)}[/cyan]", spinner=self.spinner
+        self._renderable.text = Text(self.text, style=self._style)
+        self._live = Live(
+            self._renderable,
+            console=self.console,
+            transient=True,  # Remove spinner line when stopped to avoid layout glitches
+            refresh_per_second=12,
         )
-        self._status.__enter__()
+        self._live.start()
 
     def update(self, text: Optional[str] = None) -> None:
         """Update spinner text."""
-
-        if self._status is None:
+        if self._live is None:
             return
-        new_text = text if text is not None else self.text
-        self._status.update(f"[cyan]{escape(new_text)}[/cyan]")
+        if text is not None:
+            self.text = text
+        self._renderable.text = Text(self.text, style=self._style)
+        # Live.refresh() redraws the current renderable
+        self._live.refresh()
 
     def stop(self) -> None:
         """Stop the spinner if running."""
-
-        if self._status is None:
+        if self._live is None:
             return
-        self._status.__exit__(None, None, None)
-        self._status = None
+        try:
+            self._live.stop()
+        finally:
+            self._live = None
 
     def __enter__(self) -> "Spinner":
         self.start()
@@ -53,7 +65,7 @@ class Spinner:
     @property
     def is_running(self) -> bool:
         """Check if spinner is currently running."""
-        return self._status is not None
+        return self._live is not None
 
     @contextmanager
     def paused(self) -> Generator[None, None, None]:

@@ -114,7 +114,7 @@ class ThinkingSpinner(Spinner):
 
     def _format_text(self, suffix: Optional[str] = None) -> str:
         elapsed = int(time.monotonic() - self.start_time)
-        base = f"✽ {self.thinking_word}… (esc to interrupt · {elapsed}s"
+        base = f" {self.thinking_word}… (esc to interrupt · {elapsed}s"
         if self.out_tokens > 0:
             base += f" · ↓ {self.out_tokens} tokens"
         else:
