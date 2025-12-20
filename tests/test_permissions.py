@@ -31,7 +31,7 @@ class DummyTool(Tool[DummyInput, None]):
     def input_schema(self) -> type[DummyInput]:
         return DummyInput
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
         return "dummy prompt"
 
     def render_result_for_assistant(self, output: None) -> str:
@@ -51,7 +51,7 @@ class DictPermissionTool(DummyTool):
         return {"behavior": "allow", "updated_input": input_data}
 
 
-def test_safe_mode_does_not_persist_permissions(tmp_path: Path):
+def test_yolo_mode_off_does_not_persist_permissions(tmp_path: Path):
     """Approvals should not be written to project config."""
     tool = DummyTool()
     parsed_input = DummyInput(command="echo hello")
@@ -63,7 +63,7 @@ def test_safe_mode_does_not_persist_permissions(tmp_path: Path):
         prompt_calls += 1
         return "a"  # approve for the session only
 
-    checker = make_permission_checker(tmp_path, safe_mode=True, prompt_fn=prompt_fn)
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=prompt_fn)
     result = asyncio.run(checker(tool, parsed_input))
     assert isinstance(result, PermissionResult)
     assert result.result is True
@@ -79,7 +79,7 @@ def test_safe_mode_does_not_persist_permissions(tmp_path: Path):
         second_prompt_calls += 1
         return "y"
 
-    checker_again = make_permission_checker(tmp_path, safe_mode=True, prompt_fn=prompt_fn_again)
+    checker_again = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=prompt_fn_again)
     second = asyncio.run(checker_again(tool, DummyInput(command="echo goodbye")))
     assert second.result is True
     assert prompt_calls == 1
@@ -97,7 +97,7 @@ def test_session_always_allows_similar_commands(tmp_path: Path):
         prompt_calls += 1
         return next(prompts)
 
-    checker = make_permission_checker(tmp_path, safe_mode=True, prompt_fn=prompt_fn)
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=prompt_fn)
 
     first = asyncio.run(checker(tool, DummyInput(command="echo first")))
     second = asyncio.run(checker(tool, DummyInput(command="echo second")))
@@ -111,15 +111,15 @@ def test_session_always_allows_similar_commands(tmp_path: Path):
     assert tool.name not in config.allowed_tools
 
 
-def test_safe_mode_respects_read_only_tools(tmp_path: Path):
-    """Read-only tools should bypass permission prompts even in safe mode."""
+def test_yolo_mode_off_respects_read_only_tools(tmp_path: Path):
+    """Read-only tools should bypass permission prompts even when prompts are on."""
     from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
 
     temp_file = tmp_path / "file.txt"
     temp_file.write_text("hello")
 
     checker = make_permission_checker(
-        tmp_path, safe_mode=True, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
     )
     tool = FileReadTool()
     parsed_input = FileReadToolInput(file_path=str(temp_file))
@@ -128,13 +128,13 @@ def test_safe_mode_respects_read_only_tools(tmp_path: Path):
     assert result.result is True
 
 
-def test_non_safe_mode_allows_without_prompt(tmp_path: Path):
-    """When safe mode is disabled, tools should run without permission checks."""
+def test_yolo_mode_allows_without_prompt(tmp_path: Path):
+    """When yolo mode is enabled, tools should run without permission checks."""
     tool = DummyTool()
     parsed_input = DummyInput(command="rm -rf /tmp/test")
 
     checker = make_permission_checker(
-        tmp_path, safe_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+        tmp_path, yolo_mode=True, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
     )
     result = asyncio.run(checker(tool, parsed_input))
     assert result.result is True
@@ -145,6 +145,6 @@ def test_dict_permission_result_is_handled(tmp_path: Path):
     tool = DictPermissionTool()
     parsed_input = DummyInput(command="echo ok")
 
-    checker = make_permission_checker(tmp_path, safe_mode=True, prompt_fn=lambda _: "y")
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=lambda _: "y")
     result = asyncio.run(checker(tool, parsed_input))
     assert result.result is True

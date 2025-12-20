@@ -12,7 +12,7 @@ from ripperdoc.utils.messages import AssistantMessage, ProgressMessage
 
 async def main():
     options = RipperdocOptions(
-        safe_mode=False,  # default is False to avoid interactive permission prompts
+        yolo_mode=True,  # set True to skip interactive permission prompts
         allowed_tools=["Bash", "View", "Glob"],
         cwd="/path/to/project",
     )
@@ -36,7 +36,7 @@ from ripperdoc.utils.messages import AssistantMessage
 
 
 async def main():
-    async with RipperdocClient(RipperdocOptions(safe_mode=False)) as client:
+    async with RipperdocClient(RipperdocOptions(yolo_mode=True)) as client:
         await client.query("Summarize README.md")
         async for msg in client.receive_response():
             if isinstance(msg, AssistantMessage):
@@ -53,7 +53,7 @@ asyncio.run(main())
 
 ## Options you can tweak
 
-- `safe_mode` (defaults to False here to avoid blocking on prompts); set to True to reuse the CLI-style permission prompts or provide a custom `permission_checker`.
+- `yolo_mode` (defaults to False, meaning permission prompts are enabled); set to True to skip prompts or provide a custom `permission_checker`.
 - `allowed_tools` / `disallowed_tools` limit which tools the agent can call.
 - `cwd` pins the working directory for the session.
 - `additional_instructions` appends text to the system prompt; use `system_prompt` to fully override it.

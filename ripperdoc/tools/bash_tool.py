@@ -150,7 +150,7 @@ build projects, run tests, and interact with the file system."""
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         sandbox_available = is_sandbox_available()
         try:
             current_shell = find_suitable_shell()
@@ -398,6 +398,11 @@ build projects, run tests, and interact with the file system."""
 
         validation = validate_shell_command(input_data.command)
         if validation.behavior == "ask":
+            # In yolo mode, allow shell metacharacters
+            if context and hasattr(context, 'yolo_mode') and context.yolo_mode \
+               and "shell metacharacters" in validation.message:
+                # Allow commands with shell metacharacters in yolo mode
+                return ValidationResult(result=True)
             return ValidationResult(result=False, message=validation.message)
 
         return ValidationResult(result=True)

@@ -34,7 +34,7 @@ class DummyTool(Tool[DummyInput, str]):
     def input_schema(self) -> type[DummyInput]:
         return DummyInput
 
-    async def prompt(self, safe_mode: bool = False) -> str:  # noqa: ARG002
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
         return ""
 
     def defer_loading(self) -> bool:

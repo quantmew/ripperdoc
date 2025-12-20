@@ -76,7 +76,7 @@ class GlobTool(Tool[GlobToolInput, GlobToolOutput]):
             ),
         ]
 
-    async def prompt(self, _safe_mode: bool = False) -> str:
+    async def prompt(self, _yolo_mode: bool = False) -> str:
         return GLOB_USAGE
 
     def is_read_only(self) -> bool:

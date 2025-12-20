@@ -15,7 +15,7 @@ def test_tool_filtering_respects_allowed_names():
     async def _run():
         options = RipperdocOptions(
             allowed_tools=["Bash", "Read", "Task"],
-            safe_mode=False,
+            yolo_mode=True,
         )
         client = RipperdocClient(options=options, query_runner=_fake_runner)
         await client.connect()
@@ -34,7 +34,7 @@ def test_tool_filtering_respects_allowed_names():
 
 def test_query_helper_streams_messages():
     async def _run():
-        options = RipperdocOptions(safe_mode=False)
+        options = RipperdocOptions(yolo_mode=True)
         messages = []
 
         async for message in sdk_query("hello", options=options, query_runner=_fake_runner):

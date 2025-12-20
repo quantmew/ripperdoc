@@ -115,10 +115,13 @@ def _rule_strings(rule_suggestions: Optional[Any]) -> list[str]:
 
 def make_permission_checker(
     project_path: Path,
-    safe_mode: bool,
+    yolo_mode: bool,
     prompt_fn: Optional[Callable[[str], str]] = None,
 ) -> Callable[[Tool[Any, Any], Any], Awaitable[PermissionResult]]:
-    """Create a permission checking function for the current project."""
+    """Create a permission checking function for the current project.
+
+    In yolo mode, all tool calls are allowed without prompting.
+    """
 
     project_path = project_path.resolve()
     config_manager.get_project_config(project_path)
@@ -141,7 +144,7 @@ def make_permission_checker(
         """Check and optionally persist permission for a tool invocation."""
         config = config_manager.get_project_config(project_path)
 
-        if not safe_mode:
+        if yolo_mode:
             return PermissionResult(result=True)
 
         try:

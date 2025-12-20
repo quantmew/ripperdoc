@@ -149,7 +149,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         return MULTI_EDIT_DESCRIPTION
 
     def is_read_only(self) -> bool:

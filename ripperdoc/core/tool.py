@@ -37,7 +37,7 @@ class ToolUseContext(BaseModel):
 
     message_id: Optional[str] = None
     agent_id: Optional[str] = None
-    safe_mode: bool = False
+    yolo_mode: bool = False
     verbose: bool = False
     permission_checker: Optional[Any] = None
     read_file_timestamps: Dict[str, float] = Field(default_factory=dict)
@@ -112,7 +112,7 @@ class Tool(ABC, Generic[TInput, TOutput]):
         pass
 
     @abstractmethod
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         """Get the system prompt for this tool."""
         pass
 

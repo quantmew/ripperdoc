@@ -152,8 +152,8 @@ def format_reasoning_preview(reasoning: Any) -> str:
     lines = text.strip().splitlines()
     if not lines:
         return ""
-    preview = lines[0][:80]
-    if len(lines) > 1 or len(lines[0]) > 80:
+    preview = lines[0][:250]
+    if len(lines) > 1 or len(lines[0]) > 250:
         preview += "..."
     return preview
 

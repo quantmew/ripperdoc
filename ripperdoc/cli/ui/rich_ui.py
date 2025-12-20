@@ -96,7 +96,7 @@ class RichUI:
 
     def __init__(
         self,
-        safe_mode: bool = False,
+        yolo_mode: bool = False,
         verbose: bool = False,
         session_id: Optional[str] = None,
         log_file_path: Optional[Path] = None,
@@ -104,7 +104,7 @@ class RichUI:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self.console = console
-        self.safe_mode = safe_mode
+        self.yolo_mode = yolo_mode
         self.verbose = verbose
         self.conversation_messages: List[ConversationMessage] = []
         self._saved_conversation: Optional[List[ConversationMessage]] = None
@@ -128,13 +128,13 @@ class RichUI:
                 "session_id": self.session_id,
                 "project_path": str(self.project_path),
                 "log_file": str(self.log_file_path),
-                "safe_mode": self.safe_mode,
+                "yolo_mode": self.yolo_mode,
                 "verbose": self.verbose,
             },
         )
         self._session_history = SessionHistory(self.project_path, self.session_id)
         self._permission_checker = (
-            make_permission_checker(self.project_path, safe_mode) if safe_mode else None
+            None if yolo_mode else make_permission_checker(self.project_path, yolo_mode=False)
         )
         # Build ignore filter for file completion
         from ripperdoc.utils.path_ignore import get_project_ignore_patterns
@@ -623,7 +623,7 @@ class RichUI:
         # Initialize or reset query context
         if not self.query_context:
             self.query_context = QueryContext(
-                tools=self.get_default_tools(), safe_mode=self.safe_mode, verbose=self.verbose
+                tools=self.get_default_tools(), yolo_mode=self.yolo_mode, verbose=self.verbose
             )
         else:
             abort_controller = getattr(self.query_context, "abort_controller", None)
@@ -1149,14 +1149,14 @@ def check_onboarding_rich() -> bool:
     if config.has_completed_onboarding:
         return True
 
-    # Use simple console onboarding
-    from ripperdoc.cli.cli import check_onboarding
+    # Use the wizard onboarding
+    from ripperdoc.cli.ui.wizard import check_onboarding
 
     return check_onboarding()
 
 
 def main_rich(
-    safe_mode: bool = False,
+    yolo_mode: bool = False,
     verbose: bool = False,
     session_id: Optional[str] = None,
     log_file_path: Optional[Path] = None,
@@ -1169,7 +1169,7 @@ def main_rich(
 
     # Run the Rich UI
     ui = RichUI(
-        safe_mode=safe_mode,
+        yolo_mode=yolo_mode,
         verbose=verbose,
         session_id=session_id,
         log_file_path=log_file_path,

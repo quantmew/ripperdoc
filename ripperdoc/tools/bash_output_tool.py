@@ -40,7 +40,7 @@ class BashOutputTool(Tool[BashOutputInput, BashOutputData]):
     async def description(self) -> str:
         return "Read output and status from a background bash command started with BashTool(run_in_background=True)."
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         return "Fetch buffered output and status for a background bash task by id."
 
     @property

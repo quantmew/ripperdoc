@@ -106,7 +106,7 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:  # noqa: ARG002
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
         return (
             "Search for a tool by providing a short description (e.g., 'query database', 'render notebook'). "
             "Use names to activate tools you've already discovered. "

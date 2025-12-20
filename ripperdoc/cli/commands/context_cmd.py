@@ -40,7 +40,7 @@ def _handle(ui: Any, _: str) -> bool:
     if not ui.query_context:
         ui.query_context = QueryContext(
             tools=ui.get_default_tools(),
-            safe_mode=ui.safe_mode,
+            yolo_mode=ui.yolo_mode,
             verbose=ui.verbose,
         )
 

@@ -7,8 +7,8 @@ including API keys, model settings, and user preferences.
 import json
 import os
 from pathlib import Path
-from typing import Dict, Optional, Literal
-from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional, Literal
+from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 
 from ripperdoc.utils.log import get_logger
@@ -130,7 +130,7 @@ class ModelPointers(BaseModel):
 class GlobalConfig(BaseModel):
     """Global configuration stored in ~/.ripperdoc.json"""
 
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "populate_by_name": True}
 
     # Model configuration
     model_profiles: Dict[str, ModelProfile] = Field(default_factory=dict)
@@ -139,7 +139,7 @@ class GlobalConfig(BaseModel):
     # User preferences
     theme: str = "dark"
     verbose: bool = False
-    safe_mode: bool = True
+    yolo_mode: bool = Field(default=False)
     auto_compact_enabled: bool = True
     context_token_limit: Optional[int] = None
 
@@ -153,6 +153,18 @@ class GlobalConfig(BaseModel):
 
     # Statistics
     num_startups: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_safe_mode(cls, data: Any) -> Any:
+        """Translate legacy safe_mode to the new yolo_mode flag."""
+        if isinstance(data, dict) and "safe_mode" in data and "yolo_mode" not in data:
+            data = dict(data)
+            try:
+                data["yolo_mode"] = not bool(data.pop("safe_mode"))
+            except Exception:
+                data["yolo_mode"] = False
+        return data
 
 
 class ProjectConfig(BaseModel):

@@ -85,7 +85,7 @@ def _setting_sources_summary(
     profile: Optional[ModelProfile],
     memory_files: List[MemoryFile],
     auth_env_var: Optional[str],
-    safe_mode: bool,
+    yolo_mode: bool,
     verbose: bool,
     project_path: Path,
 ) -> str:
@@ -105,9 +105,9 @@ def _setting_sources_summary(
     if auth_env_var:
         sources.append("Environment variables")
 
-    config_safe_mode = getattr(config, "safe_mode", True)
+    config_yolo_mode = getattr(config, "yolo_mode", False)
     config_verbose = getattr(config, "verbose", False)
-    if safe_mode != config_safe_mode or verbose != config_verbose:
+    if yolo_mode != config_yolo_mode or verbose != config_verbose:
         sources.append("Command line arguments")
 
     if profile and profile.api_key and not auth_env_var:
@@ -133,7 +133,7 @@ def _handle(ui: Any, _: str) -> bool:
         profile,
         memory_files,
         auth_env_var,
-        ui.safe_mode,
+        ui.yolo_mode,
         ui.verbose,
         ui.project_path,
     )

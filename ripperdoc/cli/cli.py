@@ -13,11 +13,9 @@ from typing import Any, Dict, List, Optional
 from ripperdoc import __version__
 from ripperdoc.core.config import (
     get_global_config,
-    save_global_config,
     get_project_config,
-    ModelProfile,
-    ProviderType,
 )
+from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
@@ -33,7 +31,7 @@ from ripperdoc.utils.mcp import (
 )
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
-from ripperdoc.utils.prompt import prompt_secret
+
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -47,7 +45,7 @@ logger = get_logger()
 async def run_query(
     prompt: str,
     tools: list,
-    safe_mode: bool = False,
+    yolo_mode: bool = False,
     verbose: bool = False,
     session_id: Optional[str] = None,
 ) -> None:
@@ -56,7 +54,7 @@ async def run_query(
     logger.info(
         "[cli] Running single prompt session",
         extra={
-            "safe_mode": safe_mode,
+            "yolo_mode": yolo_mode,
             "verbose": verbose,
             "session_id": session_id,
             "prompt_length": len(prompt),
@@ -69,7 +67,7 @@ async def run_query(
         )
 
     project_path = Path.cwd()
-    can_use_tool = make_permission_checker(project_path, safe_mode) if safe_mode else None
+    can_use_tool = None if yolo_mode else make_permission_checker(project_path, yolo_mode=False)
 
     # Initialize hook manager
     hook_manager.set_project_dir(project_path)
@@ -81,7 +79,7 @@ async def run_query(
     messages: List[UserMessage | AssistantMessage | ProgressMessage] = [create_user_message(prompt)]
 
     # Create query context
-    query_context = QueryContext(tools=tools, safe_mode=safe_mode, verbose=verbose)
+    query_context = QueryContext(tools=tools, yolo_mode=yolo_mode, verbose=verbose)
 
     try:
         context: Dict[str, Any] = {}
@@ -186,104 +184,6 @@ async def run_query(
         logger.debug("[cli] Shutdown MCP runtime", extra={"session_id": session_id})
 
 
-def check_onboarding() -> bool:
-    """Check if onboarding is complete and run if needed."""
-    config = get_global_config()
-
-    if config.has_completed_onboarding:
-        return True
-
-    console.print("[bold cyan]Welcome to Ripperdoc![/bold cyan]\n")
-    console.print("Let's set up your AI model configuration.\n")
-
-    # Simple onboarding
-    provider_choices = [
-        *[p.value for p in ProviderType],
-        "openai",
-        "deepseek",
-        "mistral",
-        "kimi",
-        "qwen",
-        "glm",
-        "custom",
-    ]
-    provider_choice = click.prompt(
-        "Choose your model protocol",
-        type=click.Choice(provider_choices),
-        default=ProviderType.ANTHROPIC.value,
-    )
-
-    api_base = None
-    if provider_choice == "custom":
-        provider_choice = click.prompt(
-            "Protocol family (for API compatibility)",
-            type=click.Choice([p.value for p in ProviderType]),
-            default=ProviderType.OPENAI_COMPATIBLE.value,
-        )
-        api_base = click.prompt("API Base URL")
-
-    api_key = ""
-    while not api_key:
-        api_key = prompt_secret("Enter your API key").strip()
-        if not api_key:
-            console.print("[red]API key is required.[/red]")
-
-    provider = ProviderType(provider_choice)
-
-    # Get model name
-    if provider == ProviderType.ANTHROPIC:
-        model = click.prompt("Model name", default="claude-3-5-sonnet-20241022")
-    elif provider == ProviderType.OPENAI_COMPATIBLE:
-        default_model = "gpt-4o-mini"
-        if provider_choice == "deepseek":
-            default_model = "deepseek-chat"
-            api_base = api_base or "https://api.deepseek.com"
-        model = click.prompt("Model name", default=default_model)
-        if api_base is None:
-            api_base = (
-                click.prompt("API base URL (optional)", default="", show_default=False) or None
-            )
-    elif provider == ProviderType.GEMINI:
-        console.print(
-            "[yellow]Gemini protocol support is not yet available; configuration is saved for "
-            "future support.[/yellow]"
-        )
-        model = click.prompt("Model name", default="gemini-1.5-pro")
-        if api_base is None:
-            api_base = (
-                click.prompt("API base URL (optional)", default="", show_default=False) or None
-            )
-    else:
-        model = click.prompt("Model name")
-
-    context_window_input = click.prompt(
-        "Context window in tokens (optional, press Enter to skip)", default="", show_default=False
-    )
-    context_window = None
-    if context_window_input.strip():
-        try:
-            context_window = int(context_window_input.strip())
-        except ValueError:
-            console.print("[yellow]Invalid context window, using auto-detected defaults.[/yellow]")
-
-    # Create model profile
-    config.model_profiles["default"] = ModelProfile(
-        provider=provider,
-        model=model,
-        api_key=api_key,
-        api_base=api_base,
-        context_window=context_window,
-    )
-
-    config.has_completed_onboarding = True
-    config.last_onboarding_version = __version__
-
-    save_global_config(config)
-
-    console.print("\n[green]✓ Configuration saved![/green]\n")
-
-    return True
-
 
 @click.group(invoke_without_command=True)
 @click.version_option(version=__version__)
@@ -335,16 +235,16 @@ def cli(
     # Initialize project configuration for the current working directory
     get_project_config(project_path)
 
-    safe_mode = not yolo
+    yolo_mode = yolo
     logger.debug(
         "[cli] Configuration initialized",
-        extra={"session_id": session_id, "safe_mode": safe_mode, "verbose": verbose},
+        extra={"session_id": session_id, "yolo_mode": yolo_mode, "verbose": verbose},
     )
 
     # If prompt is provided, run directly
     if prompt:
         tools = get_default_tools()
-        asyncio.run(run_query(prompt, tools, safe_mode, verbose, session_id=session_id))
+        asyncio.run(run_query(prompt, tools, yolo_mode, verbose, session_id=session_id))
         return
 
     # If no command specified, start interactive REPL with Rich interface
@@ -353,7 +253,7 @@ def cli(
         from ripperdoc.cli.ui.rich_ui import main_rich
 
         main_rich(
-            safe_mode=safe_mode,
+            yolo_mode=yolo_mode,
             verbose=verbose,
             session_id=session_id,
             log_file_path=log_file,
@@ -371,7 +271,7 @@ def config_cmd() -> None:
     console.print(f"Onboarding Complete: {config.has_completed_onboarding}")
     console.print(f"Theme: {config.theme}")
     console.print(f"Verbose: {config.verbose}")
-    console.print(f"Safe Mode: {config.safe_mode}\n")
+    console.print(f"Yolo Mode: {config.yolo_mode}\n")
 
     if config.model_profiles:
         console.print("[bold]Model Profiles:[/bold]")

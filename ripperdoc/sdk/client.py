@@ -83,7 +83,7 @@ class RipperdocOptions:
     tools: Optional[Sequence[Tool[Any, Any]]] = None
     allowed_tools: Optional[Sequence[str]] = None
     disallowed_tools: Optional[Sequence[str]] = None
-    safe_mode: bool = False
+    yolo_mode: bool = False
     verbose: bool = False
     model: str = "main"
     max_thinking_tokens: int = 0
@@ -227,7 +227,7 @@ class RipperdocClient:
         query_context = QueryContext(
             tools=self._tools,
             max_thinking_tokens=self.options.max_thinking_tokens,
-            safe_mode=self.options.safe_mode,
+            yolo_mode=self.options.yolo_mode,
             model=self.options.model,
             verbose=self.options.verbose,
         )

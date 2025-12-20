@@ -23,7 +23,7 @@ BASIC_ANTHROPIC = {
     },
     "theme": "dark",
     "verbose": False,
-    "safe_mode": False,
+    "yolo_mode": True,
 }
 
 # Example 2: Multi-Model Configuration
@@ -77,8 +77,8 @@ PROJECT_CONFIG = {
     "enable_architect_tool": False,
 }
 
-# Example 4: Safe Mode Configuration
-SAFE_MODE = {
+# Example 4: Yolo Mode disabled (prompt for permissions)
+YOLO_MODE_OFF = {
     "model_profiles": {
         "default": {
             "provider": "anthropic",
@@ -86,7 +86,7 @@ SAFE_MODE = {
             "api_key": "your_api_key",
         }
     },
-    "safe_mode": True,  # Always ask for permission
+    "yolo_mode": False,  # Always ask for permission
     "verbose": True,  # Show all operations
 }
 
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     print("\n1. Basic Anthropic Configuration")
     print("2. Multi-Model Configuration")
     print("3. Project-Specific Configuration")
-    print("4. Safe Mode Configuration")
+    print("4. Yolo Mode Disabled Configuration")
     print("\nTo use these examples:")
     print("  from ripperdoc.examples.config_examples import MULTI_MODEL, create_config_file")
     print("  create_config_file(MULTI_MODEL)")

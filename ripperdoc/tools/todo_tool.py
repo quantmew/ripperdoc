@@ -309,7 +309,7 @@ class TodoWriteTool(Tool[TodoWriteToolInput, TodoToolOutput]):
             ),
         ]
 
-    async def prompt(self, _safe_mode: bool = False) -> str:
+    async def prompt(self, _yolo_mode: bool = False) -> str:
         return TODO_WRITE_PROMPT
 
     def is_read_only(self) -> bool:
@@ -403,7 +403,7 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
             ),
         ]
 
-    async def prompt(self, _safe_mode: bool = False) -> str:
+    async def prompt(self, _yolo_mode: bool = False) -> str:
         return (
             "Use TodoRead to fetch the current todo list before making progress or when you need "
             "to confirm the next action. You can request only the next actionable item or filter "

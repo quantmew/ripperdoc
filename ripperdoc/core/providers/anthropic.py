@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import uuid4
@@ -200,6 +201,15 @@ class AnthropicClient(ProviderClient):
         except Exception as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_code, error_message = _classify_anthropic_error(exc)
+            logger.debug(
+                "[anthropic_client] Exception details",
+                extra={
+                    "model": model_profile.model,
+                    "exception_type": type(exc).__name__,
+                    "exception_str": str(exc),
+                    "error_code": error_code,
+                },
+            )
             logger.error(
                 "[anthropic_client] API call failed",
                 extra={
@@ -233,6 +243,17 @@ class AnthropicClient(ProviderClient):
         """Internal implementation of call, may raise exceptions."""
         tool_schemas = await build_anthropic_tool_schemas(tools)
         response_metadata: Dict[str, Any] = {}
+
+        logger.debug(
+            "[anthropic_client] Preparing request",
+            extra={
+                "model": model_profile.model,
+                "tool_mode": tool_mode,
+                "stream": stream,
+                "max_thinking_tokens": max_thinking_tokens,
+                "num_tools": len(tool_schemas),
+            },
+        )
 
         anthropic_kwargs: Dict[str, Any] = {}
         if model_profile.api_base:
@@ -279,6 +300,21 @@ class AnthropicClient(ProviderClient):
         if thinking_payload:
             request_kwargs["thinking"] = thinking_payload
 
+        logger.debug(
+            "[anthropic_client] Request parameters",
+            extra={
+                "model": model_profile.model,
+                "request_kwargs": json.dumps(
+                    {k: v for k, v in request_kwargs.items() if k != "messages"},
+                    ensure_ascii=False,
+                    default=str,
+                )[:1000],
+                "thinking_payload": json.dumps(thinking_payload, ensure_ascii=False)
+                if thinking_payload
+                else None,
+            },
+        )
+
         async with await self._client(anthropic_kwargs) as client:
             if stream:
                 # Streaming mode: use event-based streaming with per-token timeout
@@ -304,6 +340,16 @@ class AnthropicClient(ProviderClient):
         cost_usd = estimate_cost_usd(model_profile, usage_tokens)
         record_usage(
             model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
+        )
+
+        logger.debug(
+            "[anthropic_client] Response content blocks",
+            extra={
+                "model": model_profile.model,
+                "content_blocks": json.dumps(content_blocks, ensure_ascii=False)[:1000],
+                "usage_tokens": json.dumps(usage_tokens, ensure_ascii=False),
+                "metadata": json.dumps(response_metadata, ensure_ascii=False)[:500],
+            },
         )
 
         logger.info(
@@ -365,6 +411,13 @@ class AnthropicClient(ProviderClient):
             nonlocal event_count, message_stop_received
             event_count = 0
             message_stop_received = False
+
+            logger.debug(
+                "[anthropic_client] Initiating stream request",
+                extra={
+                    "model": request_kwargs.get("model"),
+                },
+            )
 
             # Create the stream - this initiates the connection
             stream = client.messages.stream(**request_kwargs)

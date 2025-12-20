@@ -25,7 +25,7 @@ from ripperdoc.utils.messages import AssistantMessage, ProgressMessage
 
 async def main():
     options = RipperdocOptions(
-        safe_mode=False,                # 关闭交互式权限提示，方便无人值守
+        yolo_mode=True,                 # 关闭交互式权限提示，方便无人值守
         allowed_tools=["Bash", "View"], # 限制可用工具
         cwd="/path/to/project",         # 固定工作目录
     )
@@ -48,7 +48,7 @@ from ripperdoc.utils.messages import AssistantMessage
 
 
 async def main():
-    async with RipperdocClient(RipperdocOptions(safe_mode=False)) as client:
+    async with RipperdocClient(RipperdocOptions(yolo_mode=True)) as client:
         await client.query("总结 README.md 的作用")
         async for msg in client.receive_response():
             if isinstance(msg, AssistantMessage):
@@ -66,7 +66,7 @@ asyncio.run(main())
 ## 配置项速查（`RipperdocOptions`）
 - `tools`: 自定义工具列表；默认使用内置工具集。
 - `allowed_tools` / `disallowed_tools`: 名称白/黑名单，过滤后自动重建 Task 工具，确保子代理只看到允许的工具。
-- `safe_mode`: True 时复用 CLI 的权限询问逻辑；False 适合无人值守。
+- `yolo_mode`: True 时跳过权限询问（适合无人值守）；False 则启用与 CLI 一致的权限提示。
 - `permission_checker`: 自定义检查函数，签名为 `(tool, parsed_input) -> bool | PermissionResult`，可异步。
 - `cwd`: 会话生效的工作目录，断开连接后自动恢复。
 - `system_prompt`: 完全替换系统提示；`additional_instructions`: 在默认提示后追加文字。
@@ -86,14 +86,14 @@ asyncio.run(main())
 使用 `allowed_tools`/`disallowed_tools` 过滤后，SDK 会重建默认的 Task 工具，使子代理仅能看到过滤后的基础工具集合，避免越权。
 
 ## 权限控制
-默认 `safe_mode=False`，不会弹出交互式确认。若需要自定义策略，可提供 `permission_checker`：
+默认 `yolo_mode=False`，会弹出交互式确认。若需要自定义策略或无人值守执行，可设置 `yolo_mode=True`，并提供 `permission_checker`：
 ```python
 async def allow_only_reads(tool, parsed_input):
     if tool.is_read_only():
         return True
     return False  # 拒绝写操作
 
-options = RipperdocOptions(permission_checker=allow_only_reads, safe_mode=True)
+options = RipperdocOptions(permission_checker=allow_only_reads, yolo_mode=True)
 ```
 
 ## 提示词与记忆

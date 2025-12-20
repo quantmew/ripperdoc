@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
+import json
 import os
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, cast
@@ -383,6 +384,17 @@ class GeminiClient(ProviderClient):
     ) -> ProviderResponse:
         start_time = time.time()
 
+        logger.debug(
+            "[gemini_client] Preparing request",
+            extra={
+                "model": model_profile.model,
+                "tool_mode": tool_mode,
+                "stream": stream,
+                "max_thinking_tokens": max_thinking_tokens,
+                "num_tools": len(tools),
+            },
+        )
+
         try:
             client = await self._client(model_profile)
         except asyncio.CancelledError:
@@ -390,6 +402,15 @@ class GeminiClient(ProviderClient):
         except Exception as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_code, error_message = _classify_gemini_error(exc)
+            logger.debug(
+                "[gemini_client] Exception details during init",
+                extra={
+                    "model": model_profile.model,
+                    "exception_type": type(exc).__name__,
+                    "exception_str": str(exc),
+                    "error_code": error_code,
+                },
+            )
             logger.error(
                 "[gemini_client] Initialization failed",
                 extra={
@@ -435,6 +456,23 @@ class GeminiClient(ProviderClient):
             "contents": contents,
             "config": config,
         }
+
+        logger.debug(
+            "[gemini_client] Request parameters",
+            extra={
+                "model": model_profile.model,
+                "config": json.dumps(
+                    {k: v for k, v in config.items() if k != "system_instruction"},
+                    ensure_ascii=False,
+                    default=str,
+                )[:1000],
+                "num_declarations": len(declarations),
+                "thinking_config": json.dumps(thinking_config, ensure_ascii=False)
+                if thinking_config
+                else None,
+            },
+        )
+
         usage_tokens: Dict[str, int] = {}
         collected_text: List[str] = []
         function_calls: List[Dict[str, Any]] = []
@@ -486,6 +524,10 @@ class GeminiClient(ProviderClient):
 
         try:
             if stream:
+                logger.debug(
+                    "[gemini_client] Initiating stream request",
+                    extra={"model": model_profile.model},
+                )
                 stream_resp = await _call_generate(streaming=True)
 
                 # Normalize streams into an async iterator to avoid StopIteration surfacing through
@@ -556,6 +598,15 @@ class GeminiClient(ProviderClient):
         except Exception as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_code, error_message = _classify_gemini_error(exc)
+            logger.debug(
+                "[gemini_client] Exception details",
+                extra={
+                    "model": model_profile.model,
+                    "exception_type": type(exc).__name__,
+                    "exception_str": str(exc),
+                    "error_code": error_code,
+                },
+            )
             logger.error(
                 "[gemini_client] API call failed",
                 extra={
@@ -597,6 +648,16 @@ class GeminiClient(ProviderClient):
             duration_ms=duration_ms,
             cost_usd=cost_usd,
             **(usage_tokens or {}),
+        )
+
+        logger.debug(
+            "[gemini_client] Response content blocks",
+            extra={
+                "model": model_profile.model,
+                "content_blocks": json.dumps(content_blocks, ensure_ascii=False)[:1000],
+                "usage_tokens": json.dumps(usage_tokens, ensure_ascii=False),
+                "metadata": json.dumps(response_metadata, ensure_ascii=False)[:500],
+            },
         )
 
         logger.info(

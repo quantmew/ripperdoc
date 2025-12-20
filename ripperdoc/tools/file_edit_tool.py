@@ -84,7 +84,7 @@ match exactly (including whitespace and indentation)."""
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         return (
             "Performs exact string replacements in files.\n\n"
             "Usage:\n"

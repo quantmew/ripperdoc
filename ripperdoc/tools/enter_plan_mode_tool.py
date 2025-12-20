@@ -151,7 +151,7 @@ class EnterPlanModeTool(Tool[EnterPlanModeToolInput, EnterPlanModeToolOutput]):
     def input_schema(self) -> type[EnterPlanModeToolInput]:
         return EnterPlanModeToolInput
 
-    async def prompt(self, safe_mode: bool = False) -> str:  # noqa: ARG002
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
         return ENTER_PLAN_MODE_PROMPT
 
     def user_facing_name(self) -> str:

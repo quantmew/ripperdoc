@@ -27,7 +27,7 @@ class DummyTool(Tool[DummyInput, None]):
     def input_schema(self) -> type[DummyInput]:
         return DummyInput
 
-    async def prompt(self, safe_mode: bool = False) -> str:  # noqa: ARG002
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
         return "dummy"
 
     def render_result_for_assistant(self, output: None) -> str:  # noqa: ARG002
@@ -56,7 +56,7 @@ class RecordingTool(DummyTool):
 async def test_permission_denial_does_not_set_abort(monkeypatch: Any):
     """Permission denial should not flip abort flag for subsequent queries."""
     tool = DummyTool()
-    query_context = QueryContext(tools=[tool], safe_mode=False, verbose=False)
+    query_context = QueryContext(tools=[tool], yolo_mode=True, verbose=False)
 
     async def fake_query_llm(
         messages: List[Any],
@@ -111,7 +111,7 @@ async def test_permission_denial_does_not_set_abort(monkeypatch: Any):
 async def test_permission_denial_prevents_tool_execution(monkeypatch: Any):
     """When permission is denied, the tool should not be executed."""
     tool = RecordingTool()
-    query_context = QueryContext(tools=[tool], safe_mode=False, verbose=False)
+    query_context = QueryContext(tools=[tool], yolo_mode=True, verbose=False)
 
     async def fake_query_llm(
         messages: List[Any],

@@ -205,7 +205,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
     def input_schema(self) -> type[BaseModel]:
         return self._input_model
 
-    async def prompt(self, _safe_mode: bool = False) -> str:
+    async def prompt(self, _yolo_mode: bool = False) -> str:
         return await self.description()
 
     def is_read_only(self) -> bool:

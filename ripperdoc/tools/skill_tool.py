@@ -82,7 +82,7 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:  # noqa: ARG002
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
         return (
             "Load a skill by name to read its SKILL.md content. "
             "Only call this when the skill description is clearly relevant. "

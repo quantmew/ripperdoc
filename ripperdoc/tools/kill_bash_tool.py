@@ -53,7 +53,7 @@ class KillBashTool(Tool[KillBashInput, KillBashOutput]):
     async def description(self) -> str:
         return "Kill a background bash shell by ID"
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         return KILL_BASH_PROMPT
 
     @property

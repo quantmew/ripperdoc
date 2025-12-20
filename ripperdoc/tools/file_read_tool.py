@@ -70,7 +70,7 @@ and limit to read only a portion of the file."""
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         return (
             "Read a file from the local filesystem.\n\n"
             "Usage:\n"

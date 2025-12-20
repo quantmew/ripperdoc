@@ -16,7 +16,7 @@ def _handle(ui: Any, _: str) -> bool:
     ui.console.print(
         f"\n[bold]Model (main -> {escape(str(main_pointer))}):[/bold] {escape(str(model_label))}"
     )
-    ui.console.print(f"[bold]Safe Mode:[/bold] {escape(str(ui.safe_mode))}")
+    ui.console.print(f"[bold]Yolo Mode:[/bold] {escape(str(ui.yolo_mode))}")
     ui.console.print(f"[bold]Verbose:[/bold] {escape(str(ui.verbose))}")
     return True
 

@@ -146,7 +146,7 @@ async def _check_tool_permissions(
                 return bool(decision[0]), decision[1]
             return bool(decision), None
 
-        if query_context.safe_mode and tool.needs_permissions(parsed_input):
+        if not query_context.yolo_mode and tool.needs_permissions(parsed_input):
             loop = asyncio.get_running_loop()
             input_preview = (
                 parsed_input.model_dump()
@@ -532,7 +532,7 @@ class QueryContext:
         self,
         tools: List[Tool[Any, Any]],
         max_thinking_tokens: int = 0,
-        safe_mode: bool = False,
+        yolo_mode: bool = False,
         model: str = "main",
         verbose: bool = False,
         pause_ui: Optional[Callable[[], None]] = None,
@@ -540,7 +540,7 @@ class QueryContext:
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
-        self.safe_mode = safe_mode
+        self.yolo_mode = yolo_mode
         self.model = model
         self.verbose = verbose
         self.abort_controller = asyncio.Event()
@@ -972,7 +972,7 @@ async def _run_query_iteration(
             )
 
             tool_context = ToolUseContext(
-                safe_mode=query_context.safe_mode,
+                yolo_mode=query_context.yolo_mode,
                 verbose=query_context.verbose,
                 permission_checker=can_use_tool_fn,
                 tool_registry=query_context.tool_registry,
@@ -996,7 +996,7 @@ async def _run_query_iteration(
                 yield result_msg
                 continue
 
-            if query_context.safe_mode or can_use_tool_fn is not None:
+            if not query_context.yolo_mode or can_use_tool_fn is not None:
                 allowed, denial_message = await _check_tool_permissions(
                     tool, parsed_input, query_context, can_use_tool_fn
                 )
@@ -1114,7 +1114,7 @@ async def query(
         extra={
             "message_count": len(messages),
             "tool_count": len(query_context.tools),
-            "safe_mode": query_context.safe_mode,
+            "yolo_mode": query_context.yolo_mode,
             "model_pointer": query_context.model,
         },
     )

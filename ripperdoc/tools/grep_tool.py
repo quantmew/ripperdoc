@@ -148,7 +148,7 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             ),
         ]
 
-    async def prompt(self, _safe_mode: bool = False) -> str:
+    async def prompt(self, _yolo_mode: bool = False) -> str:
         return GREP_USAGE
 
     def is_read_only(self) -> bool:

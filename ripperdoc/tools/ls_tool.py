@@ -320,7 +320,7 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         return (
             "Lists files and directories in a given path. The path parameter must be an absolute path, "
             "not a relative path. You can optionally provide an array of glob patterns to ignore with "

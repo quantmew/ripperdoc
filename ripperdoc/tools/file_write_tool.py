@@ -72,10 +72,10 @@ the file if it already exists."""
             ),
         ]
 
-    async def prompt(self, safe_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
         prompt = """Use the Write tool to create new files. """
 
-        if safe_mode:
+        if not yolo_mode:
             prompt += """IMPORTANT: You must ALWAYS prefer editing existing files.
 NEVER write new files unless explicitly required by the user."""
 

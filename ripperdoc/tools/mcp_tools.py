@@ -159,7 +159,7 @@ class ListMcpServersTool(BaseMcpTool, Tool[ListMcpServersInput, ListMcpServersOu
     def input_schema(self) -> type[ListMcpServersInput]:
         return ListMcpServersInput
 
-    async def prompt(self, _safe_mode: bool = False) -> str:
+    async def prompt(self, _yolo_mode: bool = False) -> str:
         servers = await load_mcp_servers_async()
         return format_mcp_instructions(servers)
 
@@ -242,7 +242,7 @@ class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResou
     def input_schema(self) -> type[ListMcpResourcesInput]:
         return ListMcpResourcesInput
 
-    async def prompt(self, _safe_mode: bool = False) -> str:
+    async def prompt(self, _yolo_mode: bool = False) -> str:
         return (
             "List available resources from configured MCP servers.\n"
             "Each returned resource will include all standard MCP resource fields plus a 'server' field\n"
@@ -395,7 +395,7 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
     def input_schema(self) -> type[ReadMcpResourceInput]:
         return ReadMcpResourceInput
 
-    async def prompt(self, _safe_mode: bool = False) -> str:
+    async def prompt(self, _yolo_mode: bool = False) -> str:
         return (
             "Reads a specific resource from an MCP server, identified by server name and resource URI.\n\n"
             "Parameters:\n"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any, Dict, List, Optional, cast
 from uuid import uuid4
@@ -178,6 +179,15 @@ class OpenAIClient(ProviderClient):
         except Exception as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_code, error_message = _classify_openai_error(exc)
+            logger.debug(
+                "[openai_client] Exception details",
+                extra={
+                    "model": model_profile.model,
+                    "exception_type": type(exc).__name__,
+                    "exception_str": str(exc),
+                    "error_code": error_code,
+                },
+            )
             logger.error(
                 "[openai_client] API call failed",
                 extra={
@@ -213,6 +223,18 @@ class OpenAIClient(ProviderClient):
         openai_messages: List[Dict[str, object]] = [
             {"role": "system", "content": system_prompt}
         ] + sanitize_tool_history(list(normalized_messages))
+
+        logger.debug(
+            "[openai_client] Preparing request",
+            extra={
+                "model": model_profile.model,
+                "tool_mode": tool_mode,
+                "stream": stream,
+                "max_thinking_tokens": max_thinking_tokens,
+                "num_tools": len(openai_tools),
+                "num_messages": len(openai_messages),
+            },
+        )
         collected_text: List[str] = []
         streamed_tool_calls: Dict[int, Dict[str, Optional[str]]] = {}
         streamed_tool_text: List[str] = []
@@ -226,6 +248,16 @@ class OpenAIClient(ProviderClient):
         can_stream = can_stream_text or can_stream_tools
         thinking_extra_body, thinking_top_level = _build_thinking_kwargs(
             model_profile, max_thinking_tokens
+        )
+
+        logger.debug(
+            "[openai_client] Request parameters",
+            extra={
+                "model": model_profile.model,
+                "thinking_extra_body": json.dumps(thinking_extra_body, ensure_ascii=False),
+                "thinking_top_level": json.dumps(thinking_top_level, ensure_ascii=False),
+                "messages_preview": json.dumps(openai_messages[:2], ensure_ascii=False)[:500],
+            },
         )
 
         async with AsyncOpenAI(
@@ -246,6 +278,16 @@ class OpenAIClient(ProviderClient):
                 }
                 if thinking_extra_body:
                     stream_kwargs["extra_body"] = thinking_extra_body
+                logger.debug(
+                    "[openai_client] Initiating stream request",
+                    extra={
+                        "model": model_profile.model,
+                        "stream_kwargs": json.dumps(
+                            {k: v for k, v in stream_kwargs.items() if k != "messages"},
+                            ensure_ascii=False,
+                        ),
+                    },
+                )
                 stream_coro = client.chat.completions.create(  # type: ignore[call-overload]
                     **stream_kwargs
                 )
@@ -469,6 +511,16 @@ class OpenAIClient(ProviderClient):
                 response_metadata.setdefault("reasoning", joined)
             if stream_reasoning_details:
                 response_metadata["reasoning_details"] = stream_reasoning_details
+
+        logger.debug(
+            "[openai_client] Response content blocks",
+            extra={
+                "model": model_profile.model,
+                "content_blocks": json.dumps(content_blocks, ensure_ascii=False)[:1000],
+                "usage_tokens": json.dumps(usage_tokens, ensure_ascii=False),
+                "metadata": json.dumps(response_metadata, ensure_ascii=False)[:500],
+            },
+        )
 
         logger.info(
             "[openai_client] Response received",

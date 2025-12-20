@@ -69,8 +69,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
     def input_schema(self) -> type[TaskToolInput]:
         return TaskToolInput
 
-    async def prompt(self, safe_mode: bool = False) -> str:
-        del safe_mode
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        del yolo_mode
         clear_agent_cache()
         agents: AgentLoadResult = load_agent_definitions()
 
@@ -221,7 +221,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
         subagent_context = QueryContext(
             tools=typed_agent_tools,
-            safe_mode=context.safe_mode,
+            yolo_mode=context.yolo_mode,
             verbose=context.verbose,
             model=target_agent.model or "task",
         )
