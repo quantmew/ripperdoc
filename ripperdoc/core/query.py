@@ -715,6 +715,13 @@ async def query_llm(
             cost_usd=provider_response.cost_usd,
             duration_ms=provider_response.duration_ms,
             metadata=provider_response.metadata,
+            model=model_profile.model,
+            input_tokens=provider_response.usage_tokens.get("input_tokens", 0),
+            output_tokens=provider_response.usage_tokens.get("output_tokens", 0),
+            cache_read_tokens=provider_response.usage_tokens.get("cache_read_input_tokens", 0),
+            cache_creation_tokens=provider_response.usage_tokens.get(
+                "cache_creation_input_tokens", 0
+            ),
         )
 
     except CancelledError:

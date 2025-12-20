@@ -169,6 +169,12 @@ class AssistantMessage(BaseModel):
     cost_usd: float = 0.0
     duration_ms: float = 0.0
     is_api_error_message: bool = False
+    # Model and token usage information
+    model: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
     def __init__(self, **data: object) -> None:
         if "uuid" not in data or not data["uuid"]:
@@ -237,6 +243,11 @@ def create_assistant_message(
     duration_ms: float = 0.0,
     reasoning: Optional[Any] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    model: Optional[str] = None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
 ) -> AssistantMessage:
     """Create an assistant message."""
     if isinstance(content, str):
@@ -251,7 +262,16 @@ def create_assistant_message(
         metadata=metadata or {},
     )
 
-    return AssistantMessage(message=message, cost_usd=cost_usd, duration_ms=duration_ms)
+    return AssistantMessage(
+        message=message,
+        cost_usd=cost_usd,
+        duration_ms=duration_ms,
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+    )
 
 
 def create_progress_message(

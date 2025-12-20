@@ -21,6 +21,7 @@ from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
 from .permissions_cmd import command as permissions_command
 from .resume_cmd import command as resume_command
+from .stats_cmd import command as stats_command
 from .tasks_cmd import command as tasks_command
 from .status_cmd import command as status_command
 from .todos_cmd import command as todos_command
@@ -51,6 +52,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     models_command,
     exit_command,
     status_command,
+    stats_command,
     doctor_command,
     memory_command,
     permissions_command,
