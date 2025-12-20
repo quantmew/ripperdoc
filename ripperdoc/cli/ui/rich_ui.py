@@ -98,6 +98,7 @@ class RichUI:
         self,
         yolo_mode: bool = False,
         verbose: bool = False,
+        show_full_thinking: Optional[bool] = None,
         session_id: Optional[str] = None,
         log_file_path: Optional[Path] = None,
     ):
@@ -147,8 +148,17 @@ class RichUI:
             include_gitignore=True,
         )
 
+        # Get global config for display preferences
+        config = get_global_config()
+        if show_full_thinking is None:
+            self.show_full_thinking = config.show_full_thinking
+        else:
+            self.show_full_thinking = show_full_thinking
+
         # Initialize component handlers
-        self._message_display = MessageDisplay(self.console, self.verbose)
+        self._message_display = MessageDisplay(
+            self.console, self.verbose, self.show_full_thinking
+        )
         self._interrupt_handler = InterruptHandler()
         self._interrupt_handler.set_abort_callback(self._trigger_abort)
 
@@ -1158,6 +1168,7 @@ def check_onboarding_rich() -> bool:
 def main_rich(
     yolo_mode: bool = False,
     verbose: bool = False,
+    show_full_thinking: Optional[bool] = None,
     session_id: Optional[str] = None,
     log_file_path: Optional[Path] = None,
 ) -> None:
@@ -1171,6 +1182,7 @@ def main_rich(
     ui = RichUI(
         yolo_mode=yolo_mode,
         verbose=verbose,
+        show_full_thinking=show_full_thinking,
         session_id=session_id,
         log_file_path=log_file_path,
     )

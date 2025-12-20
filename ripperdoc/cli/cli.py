@@ -194,10 +194,11 @@ async def run_query(
     help="YOLO mode: skip all permission prompts for tools",
 )
 @click.option("--verbose", is_flag=True, help="Verbose output")
+@click.option("--show-full-thinking", is_flag=True, help="Show full reasoning content instead of truncated preview")
 @click.option("-p", "--prompt", type=str, help="Direct prompt (non-interactive)")
 @click.pass_context
 def cli(
-    ctx: click.Context, cwd: Optional[str], yolo: bool, verbose: bool, prompt: Optional[str]
+    ctx: click.Context, cwd: Optional[str], yolo: bool, verbose: bool, show_full_thinking: bool, prompt: Optional[str]
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
@@ -255,6 +256,7 @@ def cli(
         main_rich(
             yolo_mode=yolo_mode,
             verbose=verbose,
+            show_full_thinking=show_full_thinking,
             session_id=session_id,
             log_file_path=log_file,
         )
@@ -271,7 +273,8 @@ def config_cmd() -> None:
     console.print(f"Onboarding Complete: {config.has_completed_onboarding}")
     console.print(f"Theme: {config.theme}")
     console.print(f"Verbose: {config.verbose}")
-    console.print(f"Yolo Mode: {config.yolo_mode}\n")
+    console.print(f"Yolo Mode: {config.yolo_mode}")
+    console.print(f"Show Full Thinking: {config.show_full_thinking}\n")
 
     if config.model_profiles:
         console.print("[bold]Model Profiles:[/bold]")

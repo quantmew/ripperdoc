@@ -140,6 +140,7 @@ class GlobalConfig(BaseModel):
     theme: str = "dark"
     verbose: bool = False
     yolo_mode: bool = Field(default=False)
+    show_full_thinking: bool = Field(default=False)
     auto_compact_enabled: bool = True
     context_token_limit: Optional[int] = None
 

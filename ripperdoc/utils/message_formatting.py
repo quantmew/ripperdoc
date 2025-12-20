@@ -126,14 +126,16 @@ def format_tool_result_detail(result_text: str, is_error: bool = False) -> str:
     return f"{prefix}: {result_preview}"
 
 
-def format_reasoning_preview(reasoning: Any) -> str:
+def format_reasoning_preview(reasoning: Any, show_full_thinking: bool = False) -> str:
     """Return a short preview of reasoning/thinking content.
 
     Args:
         reasoning: The reasoning content (string, list, or other).
+        show_full_thinking: If True, return full reasoning content without truncation.
+            If False, return a truncated preview (max 250 chars).
 
     Returns:
-        A short preview string (max ~80 chars with ellipsis).
+        A short preview string or full reasoning content.
     """
     if reasoning is None:
         return ""
@@ -149,6 +151,10 @@ def format_reasoning_preview(reasoning: Any) -> str:
         text = "\n".join(p for p in parts if p)
     else:
         text = str(reasoning)
+    
+    if show_full_thinking:
+        return text
+    
     lines = text.strip().splitlines()
     if not lines:
         return ""

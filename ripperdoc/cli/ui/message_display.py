@@ -22,15 +22,17 @@ ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 class MessageDisplay:
     """Handles message rendering and display operations."""
 
-    def __init__(self, console: Console, verbose: bool = False):
+    def __init__(self, console: Console, verbose: bool = False, show_full_thinking: bool = False):
         """Initialize the message display handler.
 
         Args:
             console: Rich console for output
             verbose: Whether to show verbose output
+            show_full_thinking: Whether to show full reasoning content instead of truncated preview
         """
         self.console = console
         self.verbose = verbose
+        self.show_full_thinking = show_full_thinking
 
     def format_tool_args(self, tool_name: str, tool_args: Optional[dict]) -> List[str]:
         """Render tool arguments into concise display-friendly parts."""
@@ -212,7 +214,7 @@ class MessageDisplay:
 
     def print_reasoning(self, reasoning: Any) -> None:
         """Display a collapsed preview of reasoning/thinking blocks."""
-        preview = format_reasoning_preview(reasoning)
+        preview = format_reasoning_preview(reasoning, self.show_full_thinking)
         if preview:
             self.console.print(f"[dim italic]Thinking: {escape(preview)}[/]")
 
