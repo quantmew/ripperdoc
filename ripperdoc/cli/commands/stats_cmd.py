@@ -4,7 +4,6 @@ from typing import Any
 
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from ripperdoc.utils.session_heatmap import render_heatmap
 from ripperdoc.utils.session_stats import (

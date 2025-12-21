@@ -71,7 +71,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 files = ["ripperdoc"]
-exclude = ["^tests/"]
+exclude = ["^tests/", "^setup\\.py$"]
 
 [tool.ruff]
 line-length = 100

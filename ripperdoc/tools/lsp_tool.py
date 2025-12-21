@@ -291,10 +291,12 @@ def _format_workspace_symbols(result: Any) -> Tuple[str, int, int]:
         location = None
         if isinstance(symbol.get("location"), dict):
             location = symbol.get("location")
-        elif isinstance(symbol.get("locations"), list) and symbol.get("locations"):
-            first = symbol.get("locations")[0]
-            if isinstance(first, dict):
-                location = first
+        else:
+            locations = symbol.get("locations")
+            if isinstance(locations, list) and locations:
+                first = locations[0]
+                if isinstance(first, dict):
+                    location = first
         path, line, char = _location_to_path_line_char(location)
         unique_files.add(path)
         container_text = f" ({container})" if container else ""
@@ -488,7 +490,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
             output = LspToolOutput(
                 operation=input_data.operation,
                 result=f"Error reading file for LSP: {exc}",
-                filePath=input_data.file_path,
+                file_path=input_data.file_path,
                 is_error=True,
             )
             yield ToolResult(data=output, result_for_assistant=output.result)
@@ -522,7 +524,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
                 output = LspToolOutput(
                     operation=operation,
                     result="No symbol found at the given position to search in workspace.",
-                    filePath=input_data.file_path,
+                    file_path=input_data.file_path,
                 )
                 yield ToolResult(data=output, result_for_assistant=output.result)
                 return
@@ -535,7 +537,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
             output = LspToolOutput(
                 operation=operation,
                 result=f"Unknown LSP operation: {operation}",
-                filePath=input_data.file_path,
+                file_path=input_data.file_path,
                 is_error=True,
             )
             yield ToolResult(data=output, result_for_assistant=output.result)
@@ -551,7 +553,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
                     "Configure servers in ~/.ripperdoc/lsp.json, ~/.lsp.json, "
                     ".ripperdoc/lsp.json, or .lsp.json."
                 ),
-                filePath=input_data.file_path,
+                file_path=input_data.file_path,
                 is_error=True,
             )
             yield ToolResult(data=output, result_for_assistant=output.result)
@@ -568,7 +570,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
             output = LspToolOutput(
                 operation=operation,
                 result=f"Error performing {operation}: {exc}",
-                filePath=input_data.file_path,
+                file_path=input_data.file_path,
                 is_error=True,
             )
             yield ToolResult(data=output, result_for_assistant=output.result)
@@ -606,8 +608,8 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
         output = LspToolOutput(
             operation=operation,
             result=formatted,
-            filePath=input_data.file_path,
-            resultCount=result_count,
-            fileCount=file_count,
+            file_path=input_data.file_path,
+            result_count=result_count,
+            file_count=file_count,
         )
         yield ToolResult(data=output, result_for_assistant=output.result)

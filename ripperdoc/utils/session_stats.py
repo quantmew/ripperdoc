@@ -187,9 +187,7 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
 
     # Load detailed session data for token and model statistics
     import json
-    from pathlib import Path as PathlibPath
 
-    sessions_root = PathlibPath.home() / ".ripperdoc" / "sessions"
     for summary in recent_summaries:
         session_file = summary.path
         if not session_file.exists():

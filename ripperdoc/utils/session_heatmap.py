@@ -145,11 +145,6 @@ def render_heatmap(
         console.print("[dim]No activity data[/dim]")
         return
 
-    # Calculate total days to display
-    total_days = weeks_count * 7
-    end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=total_days - 1)
-
     # Build month labels row
     # Each week column is exactly 1 character wide in the heatmap
     # Month labels are 3 characters wide (e.g., "Dec", "Jan", "Feb")

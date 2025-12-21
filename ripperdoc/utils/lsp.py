@@ -401,6 +401,9 @@ class LspServer:
         env = os.environ.copy()
         env.update(self.config.env)
 
+        if not self.config.command:
+            raise ValueError(f"LSP server '{self.config.name}' has no command configured")
+
         try:
             self._process = await asyncio.create_subprocess_exec(
                 self.config.command,
@@ -482,6 +485,8 @@ class LspServer:
     async def _handle_message(self, message: Dict[str, Any]) -> None:
         if "id" in message and ("result" in message or "error" in message):
             request_id = message.get("id")
+            if not isinstance(request_id, int):
+                return
             future = self._pending.pop(request_id, None)
             if future:
                 if "error" in message:

@@ -563,7 +563,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
         yield ToolProgress(content=f"Launching subagent '{target_agent.agent_type}'")
 
-        assistant_messages: List[AssistantMessage] = []
+        assistant_messages = []
         tool_use_count = 0
         async for message in query(
             record.history,  # type: ignore[arg-type]

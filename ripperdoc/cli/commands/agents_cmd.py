@@ -18,7 +18,7 @@ from ripperdoc.tools.task_tool import (
 )
 from ripperdoc.utils.log import get_logger
 
-from typing import Any
+from typing import Any, Dict, Optional
 from .base import SlashCommand
 
 logger = get_logger()
@@ -99,7 +99,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         table.add_column("Result", style="white")
 
         for run_id in sorted(run_ids):
-            snapshot = get_agent_run_snapshot(run_id) or {}
+            snapshot: Dict[Any, Any] = get_agent_run_snapshot(run_id) or {}
             result_text = snapshot.get("result_text") or snapshot.get("error") or ""
             result_preview = (
                 result_text if len(result_text) <= 80 else result_text[:77] + "..."
@@ -127,7 +127,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print("[red]Usage: /agents show <id>[/red]")
             return True
         run_id = tokens[1]
-        snapshot = get_agent_run_snapshot(run_id)
+        snapshot = get_agent_run_snapshot(run_id)  # type: ignore[assignment]
         if not snapshot:
             console.print(f"[red]No subagent run found with id '{escape(run_id)}'.[/red]")
             return True
