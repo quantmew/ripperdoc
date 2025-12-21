@@ -433,7 +433,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 tools=record.tools,
                 yolo_mode=context.yolo_mode,
                 verbose=context.verbose,
-                model=record.model_used or "task",
+                model=record.model_used or "main",
                 stop_hook="subagent",
             )
 
@@ -528,7 +528,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             system_prompt=agent_system_prompt,
             history=subagent_messages,
             missing_tools=missing_tools,
-            model_used=target_agent.model or "task",
+            model_used=target_agent.model or "main",
             start_time=time.time(),
             is_background=bool(input_data.run_in_background),
         )
@@ -538,7 +538,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             tools=typed_agent_tools,
             yolo_mode=context.yolo_mode,
             verbose=context.verbose,
-            model=target_agent.model or "task",
+            model=target_agent.model or "main",
             stop_hook="subagent",
         )
 

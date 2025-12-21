@@ -74,7 +74,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             f"or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
         )
         console.print(
-            "[dim]Model can be a profile name or pointer (task/main/etc). Defaults to 'task'.[/dim]"
+            "[dim]Model can be a profile name or pointer (main/quick). Defaults to 'main'.[/dim]"
         )
 
     if subcmd in ("help", "-h", "--help"):
@@ -211,7 +211,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
 
         config = get_global_config()
         pointer_map = config.model_pointers.model_dump()
-        default_model_value = model_arg or pointer_map.get("task", "task")
+        default_model_value = model_arg or pointer_map.get("main", "main")
         model_input = (
             console.input(f"Model profile or pointer [{default_model_value}]: ").strip()
             or default_model_value
@@ -332,7 +332,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
 
         config = get_global_config()
         pointer_map = config.model_pointers.model_dump()
-        model_default = target_agent.model or pointer_map.get("task", "task")
+        model_default = target_agent.model or pointer_map.get("main", "main")
         model_input = (
             console.input(f"Model profile or pointer [{model_default}]: ").strip() or model_default
         )
@@ -372,7 +372,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         console.print(f"  • {escape(agent.agent_type)} ({escape(str(location))})", markup=False)
         console.print(f"      {escape(agent.when_to_use)}", markup=False)
         console.print(f"      tools: {escape(tools_str)}", markup=False)
-        console.print(f"      model: {escape(agent.model or 'task (default)')}", markup=False)
+        console.print(f"      model: {escape(agent.model or 'main (default)')}", markup=False)
     if agents.failed_files:
         console.print("[yellow]Some agent files could not be loaded:[/yellow]")
         for path, error in agents.failed_files:

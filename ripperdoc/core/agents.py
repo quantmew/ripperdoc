@@ -236,7 +236,7 @@ def _built_in_agents() -> List[AgentDefinition]:
             system_prompt=EXPLORE_AGENT_PROMPT,
             location=AgentLocation.BUILT_IN,
             color="green",
-            model="task",
+            model="main",
         ),
         AgentDefinition(
             agent_type="plan",

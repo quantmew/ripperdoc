@@ -333,7 +333,7 @@ async def summarize_conversation(
         system_prompt=system_prompt,
         tools=[],
         max_thinking_tokens=0,
-        model="main",
+        model="quick",
     )
 
     result = extract_assistant_text(assistant_response)

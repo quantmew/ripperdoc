@@ -36,7 +36,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         console.print("[bold]/models delete <name>[/bold] — delete a model profile")
         console.print("[bold]/models use <name>[/bold] — set the main model pointer")
         console.print(
-            "[bold]/models use <pointer> <name>[/bold] — set a specific pointer (main/task/reasoning/quick)"
+            "[bold]/models use <pointer> <name>[/bold] — set a specific pointer (main/quick)"
         )
 
     def parse_int(prompt_text: str, default_value: Optional[int]) -> Optional[int]:
@@ -331,7 +331,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
 
     if subcmd in ("use", "main", "set-main"):
         # Support both "/models use <profile>" and "/models use <pointer> <profile>"
-        valid_pointers = {"main", "task", "reasoning", "quick"}
+        valid_pointers = {"main", "quick"}
 
         if len(tokens) >= 3:
             # /models use <pointer> <profile>
@@ -354,7 +354,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
                 target = tokens[1]
         else:
             pointer = (
-                console.input("Pointer (main/task/reasoning/quick) [main]: ").strip().lower()
+                console.input("Pointer (main/quick) [main]: ").strip().lower()
                 or "main"
             )
             if pointer not in valid_pointers:

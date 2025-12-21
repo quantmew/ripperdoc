@@ -17,8 +17,6 @@ BASIC_ANTHROPIC = {
     },
     "model_pointers": {
         "main": "default",
-        "task": "default",
-        "reasoning": "default",
         "quick": "default",
     },
     "theme": "dark",
@@ -56,9 +54,7 @@ MULTI_MODEL = {
     },
     "model_pointers": {
         "main": "sonnet",  # Use Sonnet for main tasks
-        "task": "haiku",  # Use Haiku for sub-tasks
-        "reasoning": "sonnet",  # Use Sonnet for reasoning
-        "quick": "haiku",  # Use Haiku for quick tasks
+        "quick": "haiku",  # Use Haiku for summaries/compaction
     },
     "theme": "dark",
     "verbose": True,

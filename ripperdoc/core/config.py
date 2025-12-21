@@ -122,8 +122,6 @@ class ModelPointers(BaseModel):
     """Pointers to different model profiles for different purposes."""
 
     main: str = "default"
-    task: str = "default"
-    reasoning: str = "default"
     quick: str = "default"
 
 
@@ -516,7 +514,7 @@ class ConfigManager:
         return config
 
     def set_model_pointer(self, pointer: str, profile_name: str) -> GlobalConfig:
-        """Point a logical model slot (e.g., main/task) to a profile name."""
+        """Point a logical model slot (e.g., main/quick) to a profile name."""
         if pointer not in ModelPointers.model_fields:
             raise ValueError(f"Unknown model pointer '{pointer}'.")
 
@@ -574,7 +572,7 @@ def delete_model_profile(name: str) -> GlobalConfig:
 
 
 def set_model_pointer(pointer: str, profile_name: str) -> GlobalConfig:
-    """Update a model pointer (e.g., main/task) to target a profile."""
+    """Update a model pointer (e.g., main/quick) to target a profile."""
     return config_manager.set_model_pointer(pointer, profile_name)
 
 
