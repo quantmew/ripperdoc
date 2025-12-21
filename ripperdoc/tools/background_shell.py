@@ -8,6 +8,7 @@ via the KillBash tool.
 import asyncio
 import concurrent.futures
 import contextlib
+import os
 import threading
 import time
 import uuid
@@ -47,6 +48,7 @@ _background_loop: Optional[asyncio.AbstractEventLoop] = None
 _background_thread: Optional[threading.Thread] = None
 _loop_lock = threading.Lock()
 _shutdown_registered = False
+DEFAULT_TASK_TTL_SEC = float(os.getenv("RIPPERDOC_BASH_TASK_TTL_SEC", "3600"))
 
 
 def _safe_log_exception(message: str, **extra: Any) -> None:
@@ -309,8 +311,27 @@ async def kill_background_task(task_id: str) -> bool:
 
 def list_background_tasks() -> List[str]:
     """Return known background task ids."""
+    _prune_background_tasks()
     with _tasks_lock:
         return list(_tasks.keys())
+
+
+def _prune_background_tasks(max_age_seconds: Optional[float] = None) -> int:
+    """Remove finished background tasks older than the TTL."""
+    ttl = DEFAULT_TASK_TTL_SEC if max_age_seconds is None else max_age_seconds
+    if ttl is None or ttl <= 0:
+        return 0
+    now = _loop_time()
+    removed = 0
+    with _tasks_lock:
+        for task_id, task in list(_tasks.items()):
+            if task.exit_code is None:
+                continue
+            age = (now - task.start_time) if task.start_time else 0.0
+            if age > ttl:
+                _tasks.pop(task_id, None)
+                removed += 1
+    return removed
 
 
 async def _shutdown_loop(loop: asyncio.AbstractEventLoop) -> None:

@@ -6,6 +6,7 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 import asyncio
 import json
 import sys
+import time
 import uuid
 from typing import List, Dict, Any, Optional, Union, Iterable
 from pathlib import Path
@@ -136,6 +137,11 @@ class RichUI:
             },
         )
         self._session_history = SessionHistory(self.project_path, self.session_id)
+        self._session_hook_contexts: List[str] = []
+        self._session_start_time = time.time()
+        self._session_end_sent = False
+        self._exit_reason: Optional[str] = None
+        hook_manager.set_transcript_path(str(self._session_history.path))
         self._permission_checker = (
             None if yolo_mode else make_permission_checker(self.project_path, yolo_mode=False)
         )
@@ -186,6 +192,7 @@ class RichUI:
                 "project_path": str(self.project_path),
             },
         )
+        self._run_session_start("startup")
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Properties for backward compatibility with interrupt handler
@@ -221,6 +228,69 @@ class RichUI:
             },
         )
         self._session_history = SessionHistory(self.project_path, session_id)
+        hook_manager.set_session_id(self.session_id)
+        hook_manager.set_transcript_path(str(self._session_history.path))
+
+    def _collect_hook_contexts(self, hook_result: Any) -> List[str]:
+        contexts: List[str] = []
+        system_message = getattr(hook_result, "system_message", None)
+        additional_context = getattr(hook_result, "additional_context", None)
+        if system_message:
+            contexts.append(str(system_message))
+        if additional_context:
+            contexts.append(str(additional_context))
+        return contexts
+
+    def _set_session_hook_contexts(self, hook_result: Any) -> None:
+        self._session_hook_contexts = self._collect_hook_contexts(hook_result)
+        self._session_start_time = time.time()
+        self._session_end_sent = False
+
+    def _run_session_start(self, source: str) -> None:
+        try:
+            result = self._run_async(hook_manager.run_session_start_async(source))
+        except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+            logger.warning(
+                "[ui] SessionStart hook failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"session_id": self.session_id, "source": source},
+            )
+            return
+        self._set_session_hook_contexts(result)
+
+    async def _run_session_start_async(self, source: str) -> None:
+        try:
+            result = await hook_manager.run_session_start_async(source)
+        except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+            logger.warning(
+                "[ui] SessionStart hook failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"session_id": self.session_id, "source": source},
+            )
+            return
+        self._set_session_hook_contexts(result)
+
+    def _run_session_end(self, reason: str) -> None:
+        if self._session_end_sent:
+            return
+        duration = max(time.time() - self._session_start_time, 0.0)
+        message_count = len(self.conversation_messages)
+        try:
+            self._run_async(
+                hook_manager.run_session_end_async(
+                    reason, duration_seconds=duration, message_count=message_count
+                )
+            )
+        except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+            logger.warning(
+                "[ui] SessionEnd hook failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"session_id": self.session_id, "reason": reason},
+            )
+        self._session_end_sent = True
 
     def _log_message(self, message: Any) -> None:
         """Best-effort persistence of a message to the session log."""
@@ -337,7 +407,9 @@ class RichUI:
     def _print_reasoning(self, reasoning: Any) -> None:
         self._message_display.print_reasoning(reasoning)
 
-    async def _prepare_query_context(self, user_input: str) -> tuple[str, Dict[str, str]]:
+    async def _prepare_query_context(
+        self, user_input: str, hook_instructions: Optional[List[str]] = None
+    ) -> tuple[str, Dict[str, str]]:
         """Load MCP servers, skills, and build system prompt.
 
         Returns:
@@ -383,6 +455,10 @@ class RichUI:
         memory_instructions = build_memory_instructions()
         if memory_instructions:
             additional_instructions.append(memory_instructions)
+        if self._session_hook_contexts:
+            additional_instructions.extend(self._session_hook_contexts)
+        if hook_instructions:
+            additional_instructions.extend([text for text in hook_instructions if text])
 
         system_prompt = build_system_prompt(
             self.query_context.tools if self.query_context else [],
@@ -455,10 +531,33 @@ class RichUI:
         if usage_status.should_auto_compact:
             original_messages = list(messages)
             spinner = Spinner(self.console, "Summarizing conversation...", spinner="dots")
+            hook_instructions = ""
+            try:
+                hook_result = await hook_manager.run_pre_compact_async(
+                    trigger="auto", custom_instructions=""
+                )
+                if hook_result.should_block or not hook_result.should_continue:
+                    reason = (
+                        hook_result.block_reason
+                        or hook_result.stop_reason
+                        or "Compaction blocked by hook."
+                    )
+                    console.print(f"[yellow]{escape(str(reason))}[/yellow]")
+                    return messages
+                hook_contexts = self._collect_hook_contexts(hook_result)
+                if hook_contexts:
+                    hook_instructions = "\n\n".join(hook_contexts)
+            except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "[ui] PreCompact hook failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={"session_id": self.session_id},
+                )
             try:
                 spinner.start()
                 result = await compact_conversation(
-                    messages, custom_instructions="", protocol=protocol
+                    messages, custom_instructions=hook_instructions, protocol=protocol
                 )
             finally:
                 spinner.stop()
@@ -479,6 +578,7 @@ class RichUI:
                         "tokens_saved": result.tokens_saved,
                     },
                 )
+                await self._run_session_start_async("compact")
                 return result.messages
             elif isinstance(result, CompactionError):
                 logger.warning(
@@ -642,6 +742,7 @@ class RichUI:
             abort_controller = getattr(self.query_context, "abort_controller", None)
             if abort_controller is not None:
                 abort_controller.clear()
+        self.query_context.stop_hook_active = False
 
         logger.info(
             "[ui] Starting query processing",
@@ -653,8 +754,21 @@ class RichUI:
         )
 
         try:
+            hook_result = await hook_manager.run_user_prompt_submit_async(user_input)
+            if hook_result.should_block or not hook_result.should_continue:
+                reason = (
+                    hook_result.block_reason
+                    or hook_result.stop_reason
+                    or "Prompt blocked by hook."
+                )
+                self.console.print(f"[red]{escape(str(reason))}[/red]")
+                return
+            hook_instructions = self._collect_hook_contexts(hook_result)
+
             # Prepare context and system prompt
-            system_prompt, context = await self._prepare_query_context(user_input)
+            system_prompt, context = await self._prepare_query_context(
+                user_input, hook_instructions
+            )
 
             # Create and log user message
             user_message = create_user_message(user_input)
@@ -969,6 +1083,7 @@ class RichUI:
             extra={"session_id": self.session_id, "log_file": str(self.log_file_path)},
         )
 
+        exit_reason = "other"
         try:
             while not self._should_exit:
                 try:
@@ -991,6 +1106,7 @@ class RichUI:
                         )
                         handled = self.handle_slash_command(user_input)
                         if self._should_exit:
+                            exit_reason = self._exit_reason or "other"
                             break
                         # If handled is a string, it's expanded custom command content
                         if isinstance(handled, str):
@@ -1029,9 +1145,11 @@ class RichUI:
                         if abort_controller is not None:
                             abort_controller.set()
                     console.print("\n[yellow]Goodbye![/yellow]")
+                    exit_reason = "prompt_input_exit"
                     break
                 except EOFError:
                     console.print("\n[yellow]Goodbye![/yellow]")
+                    exit_reason = "prompt_input_exit"
                     break
                 except (
                     OSError,
@@ -1058,6 +1176,8 @@ class RichUI:
                 abort_controller = getattr(self.query_context, "abort_controller", None)
                 if abort_controller is not None:
                     abort_controller.set()
+
+            self._run_session_end(exit_reason)
 
             # Suppress async generator cleanup errors during shutdown
             original_hook = sys.unraisablehook
@@ -1125,11 +1245,42 @@ class RichUI:
         original_messages = list(self.conversation_messages)
         spinner = Spinner(self.console, "Summarizing conversation...", spinner="dots")
 
+        hook_instructions = ""
+        try:
+            hook_result = await hook_manager.run_pre_compact_async(
+                trigger="manual", custom_instructions=custom_instructions
+            )
+            if hook_result.should_block or not hook_result.should_continue:
+                reason = (
+                    hook_result.block_reason
+                    or hook_result.stop_reason
+                    or "Compaction blocked by hook."
+                )
+                self.console.print(f"[yellow]{escape(str(reason))}[/yellow]")
+                return
+            hook_contexts = self._collect_hook_contexts(hook_result)
+            if hook_contexts:
+                hook_instructions = "\n\n".join(hook_contexts)
+        except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+            logger.warning(
+                "[ui] PreCompact hook failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"session_id": self.session_id},
+            )
+
+        merged_instructions = custom_instructions.strip()
+        if hook_instructions:
+            merged_instructions = (
+                f"{merged_instructions}\n\n{hook_instructions}".strip()
+                if merged_instructions
+                else hook_instructions
+            )
         try:
             spinner.start()
             result = await compact_conversation(
                 self.conversation_messages,
-                custom_instructions,
+                merged_instructions,
                 protocol=protocol,
             )
         except Exception as exc:
@@ -1148,6 +1299,7 @@ class RichUI:
                 f"[green]✓ Conversation compacted[/green] "
                 f"(saved ~{result.tokens_saved} tokens). Use /resume to restore full history."
             )
+            await self._run_session_start_async("compact")
         elif isinstance(result, CompactionError):
             self.console.print(f"[red]{escape(result.message)}[/red]")
 

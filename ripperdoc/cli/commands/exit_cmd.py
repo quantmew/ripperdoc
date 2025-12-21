@@ -4,6 +4,7 @@ from .base import SlashCommand
 
 def _handle(ui: Any, _: str) -> bool:
     ui.console.print("[yellow]Goodbye![/yellow]")
+    ui._exit_reason = "prompt_input_exit"
     ui._should_exit = True
     return True
 

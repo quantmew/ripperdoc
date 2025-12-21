@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Set
 
 from ripperdoc.core.config import config_manager
+from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.permissions import PermissionDecision, ToolRule
 from ripperdoc.utils.log import get_logger
@@ -267,6 +268,47 @@ def make_permission_checker(
             )
 
         # Ask/passthrough flows prompt the user.
+        tool_input_dict = (
+            parsed_input.model_dump()
+            if hasattr(parsed_input, "model_dump")
+            else dict(parsed_input)
+            if isinstance(parsed_input, dict)
+            else {}
+        )
+        try:
+            hook_result = await hook_manager.run_permission_request_async(
+                tool.name, tool_input_dict
+            )
+            if hook_result.outputs:
+                updated_input = hook_result.updated_input or decision.updated_input
+                if hook_result.should_allow:
+                    return PermissionResult(
+                        result=True,
+                        message=decision.message,
+                        updated_input=updated_input,
+                        decision=decision,
+                    )
+                if hook_result.should_block or not hook_result.should_continue:
+                    reason = (
+                        hook_result.block_reason
+                        or hook_result.stop_reason
+                        or decision.message
+                        or f"Permission denied for tool '{tool.name}'."
+                    )
+                    return PermissionResult(
+                        result=False,
+                        message=reason,
+                        updated_input=updated_input,
+                        decision=decision,
+                    )
+        except (RuntimeError, ValueError, TypeError, OSError) as exc:
+            logger.warning(
+                "[permissions] PermissionRequest hook failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"tool": getattr(tool, "name", None)},
+            )
+
         input_preview = _format_input_preview(parsed_input, tool_name=tool.name)
         prompt_lines = [
             f"{tool.name}",

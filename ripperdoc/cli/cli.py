@@ -6,6 +6,7 @@ This module provides the command-line interface for the Ripperdoc agent.
 import asyncio
 import click
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -25,6 +26,7 @@ from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.utils.messages import create_user_message
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.core.permissions import make_permission_checker
+from ripperdoc.utils.session_history import SessionHistory
 from ripperdoc.utils.mcp import (
     load_mcp_servers_async,
     format_mcp_instructions,
@@ -75,15 +77,29 @@ async def run_query(
     hook_manager.set_project_dir(project_path)
     hook_manager.set_session_id(session_id)
     hook_manager.set_llm_callback(build_hook_llm_callback())
+    session_history = SessionHistory(project_path, session_id or str(uuid.uuid4()))
+    hook_manager.set_transcript_path(str(session_history.path))
+
+    def _collect_hook_contexts(result: Any) -> List[str]:
+        contexts: List[str] = []
+        system_message = getattr(result, "system_message", None)
+        additional_context = getattr(result, "additional_context", None)
+        if system_message:
+            contexts.append(str(system_message))
+        if additional_context:
+            contexts.append(str(additional_context))
+        return contexts
 
     # Create initial user message
     from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMessage
 
     messages: List[UserMessage | AssistantMessage | ProgressMessage] = [create_user_message(prompt)]
+    session_history.append(messages[0])
 
     # Create query context
     query_context = QueryContext(tools=tools, yolo_mode=yolo_mode, verbose=verbose)
 
+    session_start_time = time.time()
     try:
         context: Dict[str, Any] = {}
         # System prompt
@@ -106,6 +122,25 @@ async def run_query(
         memory_instructions = build_memory_instructions()
         if memory_instructions:
             additional_instructions.append(memory_instructions)
+
+        session_start_result = await hook_manager.run_session_start_async("startup")
+        session_hook_contexts = _collect_hook_contexts(session_start_result)
+        if session_hook_contexts:
+            additional_instructions.extend(session_hook_contexts)
+
+        prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
+        if prompt_hook_result.should_block or not prompt_hook_result.should_continue:
+            reason = (
+                prompt_hook_result.block_reason
+                or prompt_hook_result.stop_reason
+                or "Prompt blocked by hook."
+            )
+            console.print(f"[red]{escape(str(reason))}[/red]")
+            return
+        prompt_hook_contexts = _collect_hook_contexts(prompt_hook_result)
+        if prompt_hook_contexts:
+            additional_instructions.extend(prompt_hook_contexts)
+
         system_prompt = build_system_prompt(
             tools,
             prompt,
@@ -161,6 +196,7 @@ async def run_query(
 
                 # Add message to history
                 messages.append(message)  # type: ignore[arg-type]
+                session_history.append(message)  # type: ignore[arg-type]
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted by user[/yellow]")
@@ -183,6 +219,18 @@ async def run_query(
             extra={"session_id": session_id, "message_count": len(messages)},
         )
     finally:
+        duration = max(time.time() - session_start_time, 0.0)
+        try:
+            await hook_manager.run_session_end_async(
+                "other", duration_seconds=duration, message_count=len(messages)
+            )
+        except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+            logger.warning(
+                "[cli] SessionEnd hook failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"session_id": session_id},
+            )
         await shutdown_mcp_runtime()
         await shutdown_lsp_manager()
         logger.debug("[cli] Shutdown MCP runtime", extra={"session_id": session_id})

@@ -515,6 +515,10 @@ class HookOutput(BaseModel):
         """Get updated input from PreToolUse hook."""
         if isinstance(self.hook_specific_output, PreToolUseHookOutput):
             return self.hook_specific_output.updated_input
+        if isinstance(self.hook_specific_output, PermissionRequestHookOutput):
+            decision = self.hook_specific_output.decision
+            if decision and decision.updated_input:
+                return decision.updated_input
         if isinstance(self.hook_specific_output, dict):
             return self.hook_specific_output.get("updatedInput")
         return None

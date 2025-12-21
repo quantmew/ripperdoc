@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import (
@@ -38,6 +40,7 @@ from ripperdoc.utils.messages import (
     AssistantMessage,
     ProgressMessage,
     UserMessage,
+    create_assistant_message,
     create_user_message,
 )
 from ripperdoc.utils.mcp import (
@@ -161,6 +164,10 @@ class RipperdocClient:
         self._current_context: Optional[QueryContext] = None
         self._connected = False
         self._previous_cwd: Optional[Path] = None
+        self._session_hook_contexts: List[str] = []
+        self._session_id: Optional[str] = None
+        self._session_start_time: Optional[float] = None
+        self._session_end_sent: bool = False
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -186,7 +193,20 @@ class RipperdocClient:
             self._connected = True
             project_path = _coerce_to_path(self.options.cwd or Path.cwd())
             hook_manager.set_project_dir(project_path)
+            self._session_id = self._session_id or str(uuid.uuid4())
+            hook_manager.set_session_id(self._session_id)
             hook_manager.set_llm_callback(build_hook_llm_callback())
+            try:
+                result = await hook_manager.run_session_start_async("startup")
+                self._session_hook_contexts = self._collect_hook_contexts(result)
+                self._session_start_time = time.time()
+                self._session_end_sent = False
+            except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "[sdk] SessionStart hook failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
 
         if prompt:
             await self.query(prompt)
@@ -208,6 +228,25 @@ class RipperdocClient:
             self._previous_cwd = None
 
         self._connected = False
+        if not self._session_end_sent:
+            duration = (
+                max(time.time() - self._session_start_time, 0.0)
+                if self._session_start_time is not None
+                else None
+            )
+            try:
+                await hook_manager.run_session_end_async(
+                    "other",
+                    duration_seconds=duration,
+                    message_count=len(self._history),
+                )
+            except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "[sdk] SessionEnd hook failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+            self._session_end_sent = True
         await shutdown_mcp_runtime()
 
     async def query(self, prompt: str) -> None:
@@ -222,11 +261,26 @@ class RipperdocClient:
 
         self._queue = asyncio.Queue()
 
+        hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
+        if hook_result.should_block or not hook_result.should_continue:
+            reason = (
+                hook_result.block_reason
+                or hook_result.stop_reason
+                or "Prompt blocked by hook."
+            )
+            blocked_message = create_assistant_message(str(reason))
+            self._history.append(blocked_message)
+            await self._queue.put(blocked_message)
+            await self._queue.put(_END_OF_STREAM)
+            self._current_task = asyncio.create_task(asyncio.sleep(0))
+            return
+        hook_instructions = self._collect_hook_contexts(hook_result)
+
         user_message = create_user_message(prompt)
         history = list(self._history) + [user_message]
         self._history.append(user_message)
 
-        system_prompt = await self._build_system_prompt(prompt)
+        system_prompt = await self._build_system_prompt(prompt, hook_instructions)
         context = dict(self.options.context)
 
         query_context = QueryContext(
@@ -285,7 +339,9 @@ class RipperdocClient:
 
         await self._queue.put(_END_OF_STREAM)
 
-    async def _build_system_prompt(self, user_prompt: str) -> str:
+    async def _build_system_prompt(
+        self, user_prompt: str, hook_instructions: Optional[List[str]] = None
+    ) -> str:
         if self.options.system_prompt:
             return self.options.system_prompt
 
@@ -304,6 +360,10 @@ class RipperdocClient:
         memory = build_memory_instructions()
         if memory:
             instructions.append(memory)
+        if self._session_hook_contexts:
+            instructions.extend(self._session_hook_contexts)
+        if hook_instructions:
+            instructions.extend([text for text in hook_instructions if text])
 
         dynamic_tools = await load_dynamic_mcp_tools_async(project_path)
         if dynamic_tools:
@@ -319,6 +379,16 @@ class RipperdocClient:
             instructions or None,
             mcp_instructions=mcp_instructions,
         )
+
+    def _collect_hook_contexts(self, hook_result: Any) -> List[str]:
+        contexts: List[str] = []
+        system_message = getattr(hook_result, "system_message", None)
+        additional_context = getattr(hook_result, "additional_context", None)
+        if system_message:
+            contexts.append(str(system_message))
+        if additional_context:
+            contexts.append(str(additional_context))
+        return contexts
 
 
 async def query(

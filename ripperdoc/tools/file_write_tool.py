@@ -104,6 +104,13 @@ NEVER write new files unless explicitly required by the user."""
 
         file_path = os.path.abspath(input_data.file_path)
 
+        file_path_obj = Path(file_path)
+        should_proceed, warning_msg = check_path_for_tool(
+            file_path_obj, tool_name="Write", warn_only=True
+        )
+        if warning_msg:
+            logger.warning("[file_write_tool] %s", warning_msg)
+
         # If file doesn't exist, it's a new file - allow without reading first
         if not os.path.exists(file_path):
             return ValidationResult(result=True)
@@ -131,14 +138,6 @@ NEVER write new files unless explicitly required by the user."""
                 )
         except OSError:
             pass  # File mtime check failed, proceed anyway
-
-        # Check if path is ignored (warning for write operations)
-        file_path_obj = Path(file_path)
-        should_proceed, warning_msg = check_path_for_tool(
-            file_path_obj, tool_name="Write", warn_only=True
-        )
-        if warning_msg:
-            logger.warning("[file_write_tool] %s", warning_msg)
 
         return ValidationResult(result=True)
 

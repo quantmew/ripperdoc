@@ -1,4 +1,7 @@
 from rich.markup import escape
+from rich import box
+from rich.panel import Panel
+from rich.table import Table
 
 from ripperdoc.core.agents import (
     AGENT_DIR_NAME,
@@ -8,12 +11,36 @@ from ripperdoc.core.agents import (
     save_agent_definition,
 )
 from ripperdoc.core.config import get_global_config
+from ripperdoc.tools.task_tool import (
+    list_agent_runs,
+    get_agent_run_snapshot,
+    cancel_agent_run,
+)
 from ripperdoc.utils.log import get_logger
 
 from typing import Any
 from .base import SlashCommand
 
 logger = get_logger()
+
+
+def _format_duration(duration_ms: float | None) -> str:
+    if duration_ms is None:
+        return "-"
+    try:
+        duration = float(duration_ms)
+    except (TypeError, ValueError):
+        return "-"
+    if duration < 1000:
+        return f"{int(duration)} ms"
+    seconds = duration / 1000.0
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(seconds), 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h {mins}m"
 
 
 def _handle(ui: Any, trimmed_arg: str) -> bool:
@@ -39,6 +66,9 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             "[bold]/agents delete <name> [location][/bold] — "
             "delete agent (location: user|project, default user)"
         )
+        console.print("[bold]/agents runs[/bold] — list subagent runs")
+        console.print("[bold]/agents show <id>[/bold] — show subagent run details")
+        console.print("[bold]/agents cancel <id>[/bold] — cancel a background subagent run")
         console.print(
             f"[dim]Agent files live in ~/.ripperdoc/{AGENT_DIR_NAME} "
             f"or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
@@ -49,6 +79,103 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
 
     if subcmd in ("help", "-h", "--help"):
         print_agents_usage()
+        return True
+
+    if subcmd in ("runs", "run", "tasks", "status"):
+        console = ui.console
+        run_ids = list_agent_runs()
+        if not run_ids:
+            console.print(
+                Panel("No subagent runs recorded", title="Subagent runs", box=box.ROUNDED)
+            )
+            return True
+
+        table = Table(box=box.SIMPLE_HEAVY, expand=True)
+        table.add_column("ID", style="cyan", no_wrap=True)
+        table.add_column("Status", style="magenta", no_wrap=True)
+        table.add_column("Agent", style="white", no_wrap=True)
+        table.add_column("Duration", style="dim", no_wrap=True)
+        table.add_column("Background", style="dim", no_wrap=True)
+        table.add_column("Result", style="white")
+
+        for run_id in sorted(run_ids):
+            snapshot = get_agent_run_snapshot(run_id) or {}
+            result_text = snapshot.get("result_text") or snapshot.get("error") or ""
+            result_preview = (
+                result_text if len(result_text) <= 80 else result_text[:77] + "..."
+            )
+            table.add_row(
+                escape(run_id),
+                escape(snapshot.get("status") or "unknown"),
+                escape(snapshot.get("agent_type") or "unknown"),
+                _format_duration(snapshot.get("duration_ms")),
+                "yes" if snapshot.get("is_background") else "no",
+                escape(result_preview),
+            )
+
+        console.print(
+            Panel(table, title="Subagent runs", box=box.ROUNDED, padding=(1, 2)),
+            markup=False,
+        )
+        console.print(
+            "[dim]Use /agents show <id> for details or /agents cancel <id> to stop a background run.[/dim]"
+        )
+        return True
+
+    if subcmd in ("show", "info", "details"):
+        if len(tokens) < 2:
+            console.print("[red]Usage: /agents show <id>[/red]")
+            return True
+        run_id = tokens[1]
+        snapshot = get_agent_run_snapshot(run_id)
+        if not snapshot:
+            console.print(f"[red]No subagent run found with id '{escape(run_id)}'.[/red]")
+            return True
+        details = Table(box=box.SIMPLE_HEAVY, show_header=False)
+        details.add_row("ID", escape(run_id))
+        details.add_row("Status", escape(snapshot.get("status") or "unknown"))
+        details.add_row("Agent", escape(snapshot.get("agent_type") or "unknown"))
+        details.add_row("Duration", _format_duration(snapshot.get("duration_ms")))
+        details.add_row(
+            "Background", "yes" if snapshot.get("is_background") else "no"
+        )
+        if snapshot.get("model_used"):
+            details.add_row("Model", escape(str(snapshot.get("model_used"))))
+        if snapshot.get("tool_use_count"):
+            details.add_row("Tool uses", str(snapshot.get("tool_use_count")))
+        if snapshot.get("missing_tools"):
+            details.add_row("Missing tools", escape(", ".join(snapshot["missing_tools"])))
+        if snapshot.get("error"):
+            details.add_row("Error", escape(str(snapshot.get("error"))))
+        console.print(
+            Panel(details, title=f"Subagent {escape(run_id)}", box=box.ROUNDED, padding=(1, 2)),
+            markup=False,
+        )
+        result_text = snapshot.get("result_text")
+        if result_text:
+            console.print(Panel(escape(result_text), title="Result", box=box.SIMPLE))
+        return True
+
+    if subcmd in ("cancel", "kill", "stop"):
+        if len(tokens) < 2:
+            console.print("[red]Usage: /agents cancel <id>[/red]")
+            return True
+        run_id = tokens[1]
+        runner = getattr(ui, "run_async", None)
+        try:
+            if callable(runner):
+                cancelled = runner(cancel_agent_run(run_id))
+            else:
+                import asyncio
+
+                cancelled = asyncio.run(cancel_agent_run(run_id))
+        except (OSError, RuntimeError, ValueError) as exc:
+            console.print(f"[red]Failed to cancel '{escape(run_id)}': {escape(str(exc))}[/red]")
+            return True
+        if cancelled:
+            console.print(f"[green]Cancelled subagent {escape(run_id)}[/green]")
+        else:
+            console.print(f"[yellow]No running subagent found for '{escape(run_id)}'.[/yellow]")
         return True
 
     if subcmd in ("create", "add"):

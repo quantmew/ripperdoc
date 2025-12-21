@@ -131,7 +131,7 @@ async def _check_tool_permissions(
     parsed_input: Any,
     query_context: "QueryContext",
     can_use_tool_fn: Optional[ToolPermissionCallable],
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, Optional[str], Optional[Any]]:
     """Evaluate whether a tool call is allowed."""
     try:
         if can_use_tool_fn is not None:
@@ -139,12 +139,14 @@ async def _check_tool_permissions(
             if inspect.isawaitable(decision):
                 decision = await decision
             if isinstance(decision, PermissionResult):
-                return decision.result, decision.message
+                return decision.result, decision.message, decision.updated_input
             if isinstance(decision, dict) and "result" in decision:
-                return bool(decision.get("result")), decision.get("message")
+                return bool(decision.get("result")), decision.get("message"), decision.get(
+                    "updated_input"
+                )
             if isinstance(decision, tuple) and len(decision) == 2:
-                return bool(decision[0]), decision[1]
-            return bool(decision), None
+                return bool(decision[0]), decision[1], None
+            return bool(decision), None, None
 
         if not query_context.yolo_mode and tool.needs_permissions(parsed_input):
             loop = asyncio.get_running_loop()
@@ -155,15 +157,15 @@ async def _check_tool_permissions(
             )
             prompt = f"Allow tool '{tool.name}' with input {input_preview}? [y/N]: "
             response = await loop.run_in_executor(None, lambda: input(prompt))
-            return response.strip().lower() in ("y", "yes"), None
+            return response.strip().lower() in ("y", "yes"), None, None
 
-        return True, None
+        return True, None, None
     except (TypeError, AttributeError, ValueError) as exc:
         logger.warning(
             f"Error checking permissions for tool '{tool.name}': {type(exc).__name__}: {exc}",
             extra={"tool": getattr(tool, "name", None), "error_type": type(exc).__name__},
         )
-        return False, None
+        return False, None, None
 
 
 def _format_changed_file_notice(notices: List[ChangedFileNotice]) -> str:
@@ -182,6 +184,18 @@ def _format_changed_file_notice(notices: List[ChangedFileNotice]) -> str:
     return "\n".join(lines)
 
 
+def _append_hook_context(context: Dict[str, str], label: str, payload: Optional[str]) -> None:
+    """Append hook-supplied context to the shared context dict."""
+    if not payload:
+        return
+    key = f"Hook:{label}"
+    existing = context.get(key)
+    if existing:
+        context[key] = f"{existing}\n{payload}"
+    else:
+        context[key] = payload
+
+
 async def _run_tool_use_generator(
     tool: Tool[Any, Any],
     tool_use_id: str,
@@ -189,6 +203,7 @@ async def _run_tool_use_generator(
     parsed_input: Any,
     sibling_ids: set[str],
     tool_context: ToolUseContext,
+    context: Dict[str, str],
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Execute a single tool_use and yield progress/results."""
     # Get tool input as dict for hooks
@@ -235,6 +250,9 @@ async def _run_tool_use_generator(
             f"[query] PreToolUse hook added context for {tool_name}",
             extra={"context": pre_result.additional_context[:100]},
         )
+        _append_hook_context(context, f"PreToolUse:{tool_name}", pre_result.additional_context)
+    if pre_result.system_message:
+        _append_hook_context(context, f"PreToolUse:{tool_name}:system", pre_result.system_message)
 
     tool_output = None
 
@@ -271,9 +289,18 @@ async def _run_tool_use_generator(
         yield tool_result_message(tool_use_id, f"Error executing tool: {str(exc)}", is_error=True)
 
     # Run PostToolUse hooks
-    await hook_manager.run_post_tool_use_async(
+    post_result = await hook_manager.run_post_tool_use_async(
         tool_name, tool_input_dict, tool_response=tool_output, tool_use_id=tool_use_id
     )
+    if post_result.additional_context:
+        _append_hook_context(context, f"PostToolUse:{tool_name}", post_result.additional_context)
+    if post_result.system_message:
+        _append_hook_context(
+            context, f"PostToolUse:{tool_name}:system", post_result.system_message
+        )
+    if post_result.should_block:
+        reason = post_result.block_reason or post_result.stop_reason or "Blocked by hook."
+        yield create_user_message(f"PostToolUse hook blocked: {reason}")
 
 
 def _group_tool_calls_by_concurrency(prepared_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -537,6 +564,7 @@ class QueryContext:
         verbose: bool = False,
         pause_ui: Optional[Callable[[], None]] = None,
         resume_ui: Optional[Callable[[], None]] = None,
+        stop_hook: str = "stop",
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
@@ -547,6 +575,8 @@ class QueryContext:
         self.file_state_cache: Dict[str, FileSnapshot] = {}
         self.pause_ui = pause_ui
         self.resume_ui = resume_ui
+        self.stop_hook = stop_hook
+        self.stop_hook_active = False
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -956,6 +986,27 @@ async def _run_query_iteration(
 
     if not tool_use_blocks:
         logger.debug("[query] No tool_use blocks; returning response to user.")
+        stop_hook = query_context.stop_hook
+        stop_result = (
+            await hook_manager.run_subagent_stop_async(
+                stop_hook_active=query_context.stop_hook_active
+            )
+            if stop_hook == "subagent"
+            else await hook_manager.run_stop_async(stop_hook_active=query_context.stop_hook_active)
+        )
+        if stop_result.additional_context:
+            _append_hook_context(context, f"{stop_hook}:context", stop_result.additional_context)
+        if stop_result.system_message:
+            _append_hook_context(context, f"{stop_hook}:system", stop_result.system_message)
+        if stop_result.should_block:
+            reason = stop_result.block_reason or stop_result.stop_reason or "Blocked by hook."
+            result.tool_results = [create_user_message(f"{stop_hook} hook blocked: {reason}")]
+            for msg in result.tool_results:
+                yield msg
+            query_context.stop_hook_active = True
+            result.should_stop = False
+            return
+        query_context.stop_hook_active = False
         result.should_stop = True
         return
 
@@ -1017,7 +1068,7 @@ async def _run_query_iteration(
                 continue
 
             if not query_context.yolo_mode or can_use_tool_fn is not None:
-                allowed, denial_message = await _check_tool_permissions(
+                allowed, denial_message, updated_input = await _check_tool_permissions(
                     tool, parsed_input, query_context, can_use_tool_fn
                 )
                 if not allowed:
@@ -1030,6 +1081,29 @@ async def _run_query_iteration(
                     yield denial_msg
                     permission_denied = True
                     break
+                if updated_input:
+                    try:
+                        parsed_input = tool.input_schema(**updated_input)
+                    except ValidationError as ve:
+                        detail_text = format_pydantic_errors(ve)
+                        error_msg = tool_result_message(
+                            tool_use_id,
+                            f"Invalid permission-updated input for tool '{tool_name}': {detail_text}",
+                            is_error=True,
+                        )
+                        tool_results.append(error_msg)
+                        yield error_msg
+                        continue
+                    validation = await tool.validate_input(parsed_input, tool_context)
+                    if not validation.result:
+                        error_msg = tool_result_message(
+                            tool_use_id,
+                            validation.message or "Tool input validation failed.",
+                            is_error=True,
+                        )
+                        tool_results.append(error_msg)
+                        yield error_msg
+                        continue
 
             prepared_calls.append(
                 {
@@ -1041,6 +1115,7 @@ async def _run_query_iteration(
                         parsed_input,
                         sibling_ids,
                         tool_context,
+                        context,
                     ),
                 }
             )

@@ -116,6 +116,10 @@ def _handle(ui: Any, arg: str) -> bool:
     ui.conversation_messages = messages
     ui._saved_conversation = None
     ui._set_session(summary.session_id)
+    try:
+        ui._run_session_start("resume")
+    except (AttributeError, RuntimeError, ValueError):
+        pass
     ui.replay_conversation(messages)
     ui.console.print(
         f"[green]✓ Resumed session {escape(summary.session_id)} "

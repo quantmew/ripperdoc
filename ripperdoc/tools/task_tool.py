@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -59,10 +60,12 @@ class AgentRunRecord:
     result_text: Optional[str] = None
     error: Optional[str] = None
     task: Optional[asyncio.Task] = None
+    is_background: bool = False
 
 
 _AGENT_RUNS: Dict[str, AgentRunRecord] = {}
 _AGENT_RUNS_LOCK = threading.Lock()
+DEFAULT_AGENT_RUN_TTL_SEC = float(os.getenv("RIPPERDOC_AGENT_RUN_TTL_SEC", "3600"))
 
 
 def _new_agent_id() -> str:
@@ -72,11 +75,82 @@ def _new_agent_id() -> str:
 def _register_agent_run(record: AgentRunRecord) -> None:
     with _AGENT_RUNS_LOCK:
         _AGENT_RUNS[record.agent_id] = record
+    prune_agent_runs()
 
 
 def _get_agent_run(agent_id: str) -> Optional[AgentRunRecord]:
     with _AGENT_RUNS_LOCK:
         return _AGENT_RUNS.get(agent_id)
+
+
+def _snapshot_agent_run(record: AgentRunRecord) -> dict:
+    duration_ms = (
+        record.duration_ms
+        if record.duration_ms
+        else max((time.time() - record.start_time) * 1000.0, 0.0)
+    )
+    return {
+        "id": record.agent_id,
+        "agent_type": record.agent_type,
+        "status": record.status,
+        "duration_ms": duration_ms,
+        "tool_use_count": record.tool_use_count,
+        "missing_tools": list(record.missing_tools),
+        "model_used": record.model_used,
+        "result_text": record.result_text,
+        "error": record.error,
+        "is_background": record.is_background,
+    }
+
+
+def list_agent_runs() -> List[str]:
+    """Return known subagent run ids."""
+    prune_agent_runs()
+    with _AGENT_RUNS_LOCK:
+        return list(_AGENT_RUNS.keys())
+
+
+def get_agent_run_snapshot(agent_id: str) -> Optional[dict]:
+    """Return a snapshot of a subagent run by id."""
+    record = _get_agent_run(agent_id)
+    if not record:
+        return None
+    return _snapshot_agent_run(record)
+
+
+def prune_agent_runs(max_age_seconds: Optional[float] = None) -> int:
+    """Remove finished subagent runs older than the TTL."""
+    ttl = DEFAULT_AGENT_RUN_TTL_SEC if max_age_seconds is None else max_age_seconds
+    if ttl is None or ttl <= 0:
+        return 0
+    now = time.time()
+    removed = 0
+    with _AGENT_RUNS_LOCK:
+        for agent_id, record in list(_AGENT_RUNS.items()):
+            if record.status == "running" or record.task:
+                continue
+            age = now - record.start_time
+            if age > ttl:
+                _AGENT_RUNS.pop(agent_id, None)
+                removed += 1
+    return removed
+
+
+async def cancel_agent_run(agent_id: str) -> bool:
+    """Cancel a running subagent, if possible."""
+    record = _get_agent_run(agent_id)
+    if not record or not record.task or record.task.done():
+        return False
+    record.task.cancel()
+    try:
+        await record.task
+    except asyncio.CancelledError:
+        pass
+    record.status = "cancelled"
+    record.error = record.error or "Cancelled by user."
+    record.duration_ms = (time.time() - record.start_time) * 1000
+    record.task = None
+    return True
 
 class TaskToolInput(BaseModel):
     """Input schema for delegating to a subagent."""
@@ -360,6 +434,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 yolo_mode=context.yolo_mode,
                 verbose=context.verbose,
                 model=record.model_used or "task",
+                stop_hook="subagent",
             )
 
             yield ToolProgress(content=f"Resuming subagent '{record.agent_type}'")
@@ -455,6 +530,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             missing_tools=missing_tools,
             model_used=target_agent.model or "task",
             start_time=time.time(),
+            is_background=bool(input_data.run_in_background),
         )
         _register_agent_run(record)
 
@@ -463,6 +539,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             yolo_mode=context.yolo_mode,
             verbose=context.verbose,
             model=target_agent.model or "task",
+            stop_hook="subagent",
         )
 
         if input_data.run_in_background:
