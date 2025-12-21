@@ -30,6 +30,7 @@ from ripperdoc.utils.mcp import (
     format_mcp_instructions,
     shutdown_mcp_runtime,
 )
+from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 
@@ -183,6 +184,7 @@ async def run_query(
         )
     finally:
         await shutdown_mcp_runtime()
+        await shutdown_lsp_manager()
         logger.debug("[cli] Shutdown MCP runtime", extra={"session_id": session_id})
 
 

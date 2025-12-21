@@ -65,6 +65,7 @@ from ripperdoc.utils.mcp import (
     load_mcp_servers_async,
     shutdown_mcp_runtime,
 )
+from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.session_history import SessionHistory
 from ripperdoc.utils.memory import build_memory_instructions
@@ -1074,6 +1075,7 @@ class RichUI:
             try:
                 try:
                     self._run_async(shutdown_mcp_runtime())
+                    self._run_async(shutdown_lsp_manager())
                 except (OSError, RuntimeError, ConnectionError, asyncio.CancelledError) as exc:
                     # pragma: no cover - defensive shutdown
                     logger.warning(
