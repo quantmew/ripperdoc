@@ -22,7 +22,6 @@ THINKING_WORDS: list[str] = [
     "Cerebrating",
     "Channelling",
     "Churning",
-    "Clauding",
     "Coalescing",
     "Cogitating",
     "Computing",

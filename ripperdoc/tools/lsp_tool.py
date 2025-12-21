@@ -338,6 +338,12 @@ class LspToolOutput(BaseModel):
     operation: str
     result: str
     file_path: str = Field(validation_alias="filePath", serialization_alias="filePath")
+    is_error: bool = Field(
+        default=False,
+        validation_alias="is_error",
+        serialization_alias="is_error",
+        description="Whether the LSP operation failed.",
+    )
     result_count: Optional[int] = Field(
         default=None,
         validation_alias="resultCount",
@@ -483,6 +489,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
                 operation=input_data.operation,
                 result=f"Error reading file for LSP: {exc}",
                 filePath=input_data.file_path,
+                is_error=True,
             )
             yield ToolResult(data=output, result_for_assistant=output.result)
             return
@@ -529,6 +536,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
                 operation=operation,
                 result=f"Unknown LSP operation: {operation}",
                 filePath=input_data.file_path,
+                is_error=True,
             )
             yield ToolResult(data=output, result_for_assistant=output.result)
             return
@@ -544,6 +552,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
                     ".ripperdoc/lsp.json, or .lsp.json."
                 ),
                 filePath=input_data.file_path,
+                is_error=True,
             )
             yield ToolResult(data=output, result_for_assistant=output.result)
             return
@@ -560,6 +569,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
                 operation=operation,
                 result=f"Error performing {operation}: {exc}",
                 filePath=input_data.file_path,
+                is_error=True,
             )
             yield ToolResult(data=output, result_for_assistant=output.result)
             return
