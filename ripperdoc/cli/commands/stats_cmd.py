@@ -211,7 +211,11 @@ def _handle(ui: Any, _args: str) -> bool:
     )
 
     # Create the main panel with statistics
-    console.print(Panel(table, title="Statistics", border_style="blue"))
+    # Match heatmap width: WEEKDAY_LABEL_WIDTH (8) + weeks_count (52) = 60
+    heatmap_width = 8 + weeks_count + 16
+    console.print(
+        Panel(table, title="Statistics", border_style="blue", width=heatmap_width)
+    )
     console.print()
 
     # Fun comparisons
