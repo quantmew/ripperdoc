@@ -100,7 +100,7 @@ See the [examples/](examples/) directory for complete SDK usage examples.
 
 ### Safe Mode Permissions
 
-Safe mode is the default. Use `--unsafe` to skip permission prompts. Choose `a`/`always` to allow a tool for the current session (not persisted across sessions).
+Safe mode is the default. Use `--yolo` to skip permission prompts. Choose `a`/`always` to allow a tool for the current session (not persisted across sessions).
 
 ### Agent Skills
 

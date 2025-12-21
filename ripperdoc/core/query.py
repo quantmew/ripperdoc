@@ -657,13 +657,25 @@ async def query_llm(
     start_time = time.time()
 
     try:
-        client: Optional[ProviderClient] = get_provider_client(model_profile.provider)
-        if client is None:
+        try:
+            client: Optional[ProviderClient] = get_provider_client(model_profile.provider)
+        except RuntimeError as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_msg = create_assistant_message(
+                content=str(exc),
+                duration_ms=duration_ms,
+            )
+            error_msg.is_api_error_message = True
+            return error_msg
+        if client is None:
+            duration_ms = (time.time() - start_time) * 1000
+            provider_label = getattr(model_profile.provider, "value", None) or str(
+                model_profile.provider
+            )
+            error_msg = create_assistant_message(
                 content=(
-                    "Gemini protocol is not supported yet in Ripperdoc. "
-                    "Please configure an Anthropic or OpenAI-compatible model."
+                    f"No provider client available for '{provider_label}'. "
+                    "Check your model configuration and provider dependencies."
                 ),
                 duration_ms=duration_ms,
             )
@@ -984,6 +996,7 @@ async def _run_query_iteration(
                 permission_checker=can_use_tool_fn,
                 tool_registry=query_context.tool_registry,
                 file_state_cache=query_context.file_state_cache,
+                conversation_messages=messages,
                 abort_signal=query_context.abort_controller,
                 pause_ui=query_context.pause_ui,
                 resume_ui=query_context.resume_ui,

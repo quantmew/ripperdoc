@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
+from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.log import get_logger
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
 from ripperdoc.tools.bash_output_tool import BashOutputTool
@@ -91,6 +92,7 @@ class AgentDefinition:
     model: Optional[str] = None
     color: Optional[str] = None
     filename: Optional[str] = None
+    fork_context: bool = False
 
 
 @dataclass
@@ -339,6 +341,7 @@ def _parse_agent_file(
     color_value = frontmatter.get("color")
     model = model_value if isinstance(model_value, str) else None
     color = color_value if isinstance(color_value, str) else None
+    fork_context = parse_boolish(frontmatter.get("fork_context") or frontmatter.get("fork-context"))
 
     agent = AgentDefinition(
         agent_type=agent_name.strip(),
@@ -349,6 +352,7 @@ def _parse_agent_file(
         model=model,
         color=color,
         filename=path.stem,
+        fork_context=fork_context,
     )
     return agent, None
 
@@ -404,6 +408,8 @@ def summarize_agent(agent: AgentDefinition) -> str:
     tool_label = "all tools" if "*" in agent.tools else ", ".join(agent.tools)
     location = getattr(agent.location, "value", agent.location)
     details = [f"tools: {tool_label}"]
+    if agent.fork_context:
+        details.append("context: forked")
     if agent.model:
         details.append(f"model: {agent.model}")
     return f"- {agent.agent_type} ({location}): {agent.when_to_use} [{'; '.join(details)}]"

@@ -46,6 +46,10 @@ class ToolUseContext(BaseModel):
     file_state_cache: Annotated[Dict[str, FileSnapshot], SkipValidation] = Field(
         default_factory=dict
     )
+    conversation_messages: Annotated[Optional[List[Any]], SkipValidation] = Field(
+        default=None,
+        description="Full conversation history for tools that need parent context.",
+    )
     tool_registry: Optional[Any] = None
     abort_signal: Optional[Any] = None
     # UI control callbacks for tools that need user interaction

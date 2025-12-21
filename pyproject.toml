@@ -46,6 +46,9 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+anthropic = ["anthropic>=0.39.0"]
+openai = ["openai>=1.0.0"]
+gemini = ["google-genai>=0.3.0"]
 
 [project.scripts]
 ripperdoc = "ripperdoc.cli.cli:main"

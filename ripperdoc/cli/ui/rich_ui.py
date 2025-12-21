@@ -25,6 +25,7 @@ from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
 from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.cli.commands import (
     get_slash_command,
     get_custom_command,
@@ -176,6 +177,7 @@ class RichUI:
         # Initialize hook manager with project context
         hook_manager.set_project_dir(self.project_path)
         hook_manager.set_session_id(self.session_id)
+        hook_manager.set_llm_callback(build_hook_llm_callback())
         logger.debug(
             "[ui] Initialized hook manager",
             extra={

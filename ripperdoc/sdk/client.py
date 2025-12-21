@@ -24,6 +24,8 @@ from typing import (
 )
 
 from ripperdoc.core.default_tools import get_default_tools
+from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
+from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.query import QueryContext, query as _core_query
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.system_prompt import build_system_prompt
@@ -182,6 +184,9 @@ class RipperdocClient:
                 self._previous_cwd = Path.cwd()
                 os.chdir(_coerce_to_path(self.options.cwd))
             self._connected = True
+            project_path = _coerce_to_path(self.options.cwd or Path.cwd())
+            hook_manager.set_project_dir(project_path)
+            hook_manager.set_llm_callback(build_hook_llm_callback())
 
         if prompt:
             await self.query(prompt)
