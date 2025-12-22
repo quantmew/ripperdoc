@@ -53,6 +53,7 @@ gemini = ["google-genai>=0.3.0"]
 [project.scripts]
 ripperdoc = "ripperdoc.cli.cli:main"
 rd = "ripperdoc.cli.cli:main"
+viper = "ripperdoc.cli.viper_cli:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "ripperdoc.__version__"}
