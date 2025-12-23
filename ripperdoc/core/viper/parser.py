@@ -24,12 +24,14 @@ from ripperdoc.core.viper.ast_nodes import (
     ExpressionStmt,
     ExceptHandler,
     ForStmt,
+    GeneratorExp,
     FunctionDef,
     IfStmt,
     ImportAlias,
     ImportFromStmt,
     ImportStmt,
     ListLiteral,
+    ListComp,
     Literal,
     LambdaExpr,
     Module,
@@ -44,11 +46,19 @@ from ripperdoc.core.viper.ast_nodes import (
     PatternName,
     PatternOr,
     PatternSequence,
+    PatternStar,
     PatternWildcard,
+    PatternAs,
+    PatternValue,
+    PatternMapping,
+    PatternClass,
+    PatternKey,
     ReturnStmt,
     RaiseStmt,
     Statement,
     Subscript,
+    SetLiteral,
+    SetComp,
     TupleLiteral,
     TypeAliasStmt,
     TypeParam,
@@ -66,6 +76,8 @@ from ripperdoc.core.viper.ast_nodes import (
     YieldExpr,
     YieldFromExpr,
     ConditionalExpr,
+    DictComp,
+    Comprehension,
 )
 from ripperdoc.core.viper.errors import ViperSyntaxError
 from ripperdoc.core.viper.tokenizer import Token
@@ -106,12 +118,25 @@ class Parser:
             decorators = self._parse_decorators()
             if self._peek_is_keyword("class"):
                 return self._parse_class(decorators)
+            if self._peek_is_keyword("def"):
+                return self._parse_function_def(decorators=decorators)
+            if self._peek_is_keyword("async"):
+                async_token = self._advance()
+                if not self._peek_is_keyword("def"):
+                    raise ViperSyntaxError(
+                        "Expected 'def' after 'async'", async_token.line, async_token.column
+                    )
+                return self._parse_function_def(is_async=True, decorators=decorators)
             token = self._current()
-            raise ViperSyntaxError("Decorators are only supported for classes", token.line, token.column)
+            raise ViperSyntaxError(
+                "Decorators must precede class or function definitions",
+                token.line,
+                token.column,
+            )
         if self._peek_is_keyword("class"):
             return self._parse_class([])
         if self._peek_is_keyword("def"):
-            return self._parse_function_def()
+            return self._parse_function_def(decorators=[])
         if self._peek_is_keyword("try"):
             return self._parse_try()
         if self._peek_is_keyword("with"):
@@ -415,7 +440,7 @@ class Parser:
             break
         return params
 
-    def _parse_parameters(self, end_token: str) -> List[Parameter]:
+    def _parse_parameters(self, end_token: str, *, allow_annotations: bool) -> List[Parameter]:
         params: List[Parameter] = []
         seen_names: set[str] = set()
         seen_kwonly = False
@@ -455,6 +480,9 @@ class Parser:
                         "Multiple '**' in parameter list", token.line, token.column
                     )
                 name_token = self._expect("NAME")
+                annotation: Optional[Expression] = None
+                if allow_annotations and self._match("OP", ":"):
+                    annotation = self._parse_expression(allow_tuple=False)
                 if name_token.value in seen_names:
                     raise ViperSyntaxError(
                         "Duplicate parameter name", name_token.line, name_token.column
@@ -464,6 +492,7 @@ class Parser:
                     Parameter(
                         name=name_token.value,
                         kind="varkw",
+                        annotation=annotation,
                         default=None,
                         line=name_token.line,
                         column=name_token.column,
@@ -498,6 +527,9 @@ class Parser:
                         )
                     continue
                 name_token = self._expect("NAME")
+                annotation: Optional[Expression] = None
+                if allow_annotations and self._match("OP", ":"):
+                    annotation = self._parse_expression(allow_tuple=False)
                 if name_token.value in seen_names:
                     raise ViperSyntaxError(
                         "Duplicate parameter name", name_token.line, name_token.column
@@ -507,6 +539,7 @@ class Parser:
                     Parameter(
                         name=name_token.value,
                         kind="varpos",
+                        annotation=annotation,
                         default=None,
                         line=name_token.line,
                         column=name_token.column,
@@ -520,6 +553,9 @@ class Parser:
                     continue
                 break
             name_token = self._expect("NAME")
+            annotation: Optional[Expression] = None
+            if allow_annotations and self._match("OP", ":"):
+                annotation = self._parse_expression(allow_tuple=False)
             if name_token.value in seen_names:
                 raise ViperSyntaxError(
                     "Duplicate parameter name", name_token.line, name_token.column
@@ -542,6 +578,7 @@ class Parser:
                 Parameter(
                     name=name_token.value,
                     kind=kind,
+                    annotation=annotation,
                     default=default,
                     line=name_token.line,
                     column=name_token.column,
@@ -597,25 +634,257 @@ class Parser:
         return MatchStmt(subject=subject, cases=cases, line=token.line, column=token.column)
 
     def _parse_case_patterns(self) -> List[Pattern]:
-        patterns = [self._parse_pattern()]
-        while self._match("OP", "|"):
-            patterns.append(self._parse_pattern())
-        return patterns
+        start_pos = self.position
+        first = self._parse_sequence_pattern_element()
+        if self._match("OP", ","):
+            elements = [first]
+            while True:
+                if self._at("OP", ":") or self._peek_is_keyword("if"):
+                    break
+                elements.append(self._parse_sequence_pattern_element())
+                if not self._match("OP", ","):
+                    break
+            if self._at("OP", "|"):
+                token = self._current()
+                raise ViperSyntaxError(
+                    "Or-pattern cannot follow a sequence pattern",
+                    token.line,
+                    token.column,
+                )
+            return [self._build_sequence_pattern(elements, first.line, first.column)]
+        self.position = start_pos
+        pattern = self._parse_pattern()
+        if isinstance(pattern, PatternOr):
+            return pattern.patterns
+        return [pattern]
 
-    def _parse_pattern(self) -> Pattern:
+    def _parse_open_sequence_pattern(self) -> Pattern:
+        first = self._parse_sequence_pattern_element()
+        if not self._match("OP", ","):
+            if isinstance(first, PatternStar):
+                raise ViperSyntaxError(
+                    "Starred pattern must be part of a sequence", first.line, first.column
+                )
+            return first
+        elements = [first]
+        while True:
+            if self._at("OP", ":") or self._peek_is_keyword("if"):
+                break
+            elements.append(self._parse_sequence_pattern_element())
+            if not self._match("OP", ","):
+                break
+        return self._build_sequence_pattern(elements, first.line, first.column)
+
+    def _parse_sequence_pattern_element(self) -> Pattern:
+        if self._at("OP", "*"):
+            token = self._advance()
+            target = self._parse_pattern_capture_target()
+            return PatternStar(target=target, line=token.line, column=token.column)
+        return self._parse_pattern()
+
+    def _parse_pattern_capture_target(self) -> Pattern:
         token = self._current()
-        if token.kind == "NAME":
+        if token.kind != "NAME":
+            raise ViperSyntaxError("Expected capture target", token.line, token.column)
+        self._advance()
+        if token.value == "_":
+            return PatternWildcard(line=token.line, column=token.column)
+        return PatternName(identifier=token.value, line=token.line, column=token.column)
+
+    def _build_sequence_pattern(self, elements: List[Pattern], line: int, column: int) -> PatternSequence:
+        star_count = sum(1 for element in elements if isinstance(element, PatternStar))
+        if star_count > 1:
+            raise ViperSyntaxError("Multiple starred patterns are not allowed", line, column)
+        self._validate_pattern_unique_names(elements, line, column)
+        return PatternSequence(elements=elements, line=line, column=column)
+
+    def _parse_mapping_key(self) -> PatternKey:
+        token = self._current()
+        if token.kind == "OP" and token.value in {"+", "-"} and self._peek_next_is("NUMBER"):
+            sign = token.value
             self._advance()
-            if token.value == "_":
-                return PatternWildcard(line=token.line, column=token.column)
-            return PatternName(identifier=token.value, line=token.line, column=token.column)
+            number = self._advance()
+            value = self._parse_number_value(f"{sign}{number.value}", number)
+            return PatternLiteral(value=value, line=token.line, column=token.column)
         if token.kind == "NUMBER":
             self._advance()
-            value: float | int
-            if "." in token.value or "e" in token.value or "E" in token.value:
-                value = float(token.value)
+            value = self._parse_number_value(str(token.value), token)
+            return PatternLiteral(value=value, line=token.line, column=token.column)
+        if token.kind in {"STRING", "BYTES", "FSTRING", "BFSTRING", "TSTRING", "BTSTRING"}:
+            expr = self._parse_string_sequence()
+            if not isinstance(expr, Literal):
+                raise ViperSyntaxError(
+                    "Formatted strings are not allowed in mapping keys", token.line, token.column
+                )
+            return PatternLiteral(value=expr.value, line=expr.line, column=expr.column)
+        if token.kind == "KEYWORD" and token.value in {"True", "False", "None"}:
+            self._advance()
+            value = {"True": True, "False": False, "None": None}[token.value]
+            return PatternLiteral(value=value, line=token.line, column=token.column)
+        if token.kind == "NAME":
+            value_pattern = self._parse_pattern_value()
+            if len(value_pattern.parts) < 2:
+                raise ViperSyntaxError(
+                    "Mapping keys must be literal or dotted names",
+                    value_pattern.line,
+                    value_pattern.column,
+                )
+            return value_pattern
+        raise ViperSyntaxError("Invalid mapping key pattern", token.line, token.column)
+
+    def _parse_pattern_value(self) -> PatternValue:
+        first = self._expect("NAME")
+        if first.value == "_" and self._at("OP", "."):
+            raise ViperSyntaxError("Invalid wildcard value pattern", first.line, first.column)
+        parts = [first.value]
+        while self._match("OP", "."):
+            part = self._expect("NAME")
+            parts.append(part.value)
+        return PatternValue(parts=parts, line=first.line, column=first.column)
+
+    def _parse_class_pattern(self, class_path: PatternValue) -> PatternClass:
+        self._expect("OP", "(")
+        if self._match("OP", ")"):
+            return PatternClass(
+                class_path=class_path,
+                positional=[],
+                keywords=[],
+                line=class_path.line,
+                column=class_path.column,
+            )
+        positional: List[Pattern] = []
+        keywords: List[Tuple[str, Pattern]] = []
+        seen_keyword = False
+        seen_names: set[str] = set()
+        while True:
+            if self._at("NAME") and self._peek_next_is("OP", "="):
+                name_token = self._advance()
+                self._advance()
+                if name_token.value in seen_names:
+                    raise ViperSyntaxError(
+                        "Duplicate keyword in class pattern", name_token.line, name_token.column
+                    )
+                seen_names.add(name_token.value)
+                seen_keyword = True
+                keyword_pattern = self._parse_pattern()
+                keywords.append((name_token.value, keyword_pattern))
             else:
-                value = int(token.value)
+                if seen_keyword:
+                    token = self._current()
+                    raise ViperSyntaxError(
+                        "Positional pattern follows keyword pattern",
+                        token.line,
+                        token.column,
+                    )
+                positional.append(self._parse_pattern())
+            if self._match("OP", ","):
+                if self._match("OP", ")"):
+                    break
+                continue
+            self._expect("OP", ")")
+            break
+        all_patterns = positional + [pattern for _, pattern in keywords]
+        self._validate_pattern_unique_names(all_patterns, class_path.line, class_path.column)
+        return PatternClass(
+            class_path=class_path,
+            positional=positional,
+            keywords=keywords,
+            line=class_path.line,
+            column=class_path.column,
+        )
+
+    def _parse_mapping_pattern(self, line: int, column: int) -> PatternMapping:
+        items: List[Tuple[PatternKey, Pattern]] = []
+        rest: Optional[Pattern] = None
+        seen_keys: set[tuple[str, object]] = set()
+        if self._match("OP", "}"):
+            return PatternMapping(items=items, rest=rest, line=line, column=column)
+        while True:
+            if self._at("OP", "**"):
+                if rest is not None:
+                    raise ViperSyntaxError("Multiple mapping rest patterns", line, column)
+                self._advance()
+                rest = self._parse_pattern_capture_target()
+                if self._match("OP", ","):
+                    self._expect("OP", "}")
+                else:
+                    self._expect("OP", "}")
+                break
+            key = self._parse_mapping_key()
+            key_id: Optional[tuple[str, object]] = None
+            if isinstance(key, PatternLiteral):
+                key_id = ("literal", key.value)
+            elif isinstance(key, PatternValue):
+                key_id = ("value", tuple(key.parts))
+            if key_id is not None:
+                if key_id in seen_keys:
+                    raise ViperSyntaxError("Duplicate mapping pattern key", line, column)
+                seen_keys.add(key_id)
+            self._expect("OP", ":")
+            value = self._parse_pattern()
+            items.append((key, value))
+            if self._match("OP", ","):
+                if self._match("OP", "}"):
+                    break
+                continue
+            self._expect("OP", "}")
+            break
+        patterns_to_check = [value for _, value in items]
+        if rest is not None:
+            patterns_to_check.append(rest)
+        self._validate_pattern_unique_names(patterns_to_check, line, column)
+        return PatternMapping(items=items, rest=rest, line=line, column=column)
+
+    def _parse_pattern(self) -> Pattern:
+        pattern = self._parse_or_pattern()
+        if self._peek_is_keyword("as"):
+            self._advance()
+            target = self._parse_pattern_capture_target()
+            if isinstance(target, PatternWildcard):
+                raise ViperSyntaxError("Cannot bind wildcard in as-pattern", target.line, target.column)
+            if target.identifier in self._collect_pattern_names(pattern):
+                raise ViperSyntaxError(
+                    "Multiple assignments to the same name in pattern",
+                    target.line,
+                    target.column,
+                )
+            return PatternAs(pattern=pattern, name=target.identifier, line=pattern.line, column=pattern.column)
+        return pattern
+
+    def _parse_or_pattern(self) -> Pattern:
+        patterns = [self._parse_closed_pattern()]
+        while self._match("OP", "|"):
+            patterns.append(self._parse_closed_pattern())
+        if len(patterns) == 1:
+            return patterns[0]
+        self._validate_or_pattern_bindings(patterns)
+        return PatternOr(patterns=patterns, line=patterns[0].line, column=patterns[0].column)
+
+    def _parse_closed_pattern(self) -> Pattern:
+        token = self._current()
+        if token.kind == "OP" and token.value in {"+", "-"} and self._peek_next_is("NUMBER"):
+            sign = token.value
+            self._advance()
+            number = self._advance()
+            value = self._parse_number_value(f"{sign}{number.value}", number)
+            return PatternLiteral(value=value, line=token.line, column=token.column)
+        if token.kind == "NAME":
+            name_token = token
+            class_path = self._parse_pattern_value()
+            if class_path.parts == ["_"] and self._at("OP", "("):
+                raise ViperSyntaxError(
+                    "Invalid class pattern name", name_token.line, name_token.column
+                )
+            if self._at("OP", "("):
+                return self._parse_class_pattern(class_path)
+            if len(class_path.parts) > 1:
+                return class_path
+            if name_token.value == "_":
+                return PatternWildcard(line=name_token.line, column=name_token.column)
+            return PatternName(identifier=name_token.value, line=name_token.line, column=name_token.column)
+        if token.kind == "NUMBER":
+            self._advance()
+            value = self._parse_number_value(str(token.value), token)
             return PatternLiteral(value=value, line=token.line, column=token.column)
         if token.kind in {"STRING", "BYTES", "FSTRING", "BFSTRING", "TSTRING", "BTSTRING"}:
             expr = self._parse_string_sequence()
@@ -626,36 +895,42 @@ class Parser:
             self._advance()
             value = {"True": True, "False": False, "None": None}[token.value]
             return PatternLiteral(value=value, line=token.line, column=token.column)
+        if self._match("OP", "{"):
+            return self._parse_mapping_pattern(token.line, token.column)
         if self._match("OP", "["):
-            elements: List[Pattern] = []
             if self._match("OP", "]"):
-                return PatternSequence(elements=elements, line=token.line, column=token.column)
+                return PatternSequence(elements=[], line=token.line, column=token.column)
+            elements = [self._parse_sequence_pattern_element()]
             while True:
-                elements.append(self._parse_pattern())
                 if self._match("OP", ","):
                     if self._match("OP", "]"):
                         break
+                    elements.append(self._parse_sequence_pattern_element())
                     continue
                 self._expect("OP", "]")
                 break
-            return PatternSequence(elements=elements, line=token.line, column=token.column)
+            return self._build_sequence_pattern(elements, token.line, token.column)
         if self._match("OP", "("):
             if self._match("OP", ")"):
                 return PatternSequence(elements=[], line=token.line, column=token.column)
-            first = self._parse_pattern()
+            first = self._parse_sequence_pattern_element()
             if self._match("OP", ","):
                 elements = [first]
                 if self._match("OP", ")"):
-                    return PatternSequence(elements=elements, line=token.line, column=token.column)
+                    return self._build_sequence_pattern(elements, token.line, token.column)
                 while True:
-                    elements.append(self._parse_pattern())
+                    elements.append(self._parse_sequence_pattern_element())
                     if self._match("OP", ","):
                         if self._match("OP", ")"):
                             break
                         continue
                     self._expect("OP", ")")
                     break
-                return PatternSequence(elements=elements, line=token.line, column=token.column)
+                return self._build_sequence_pattern(elements, token.line, token.column)
+            if isinstance(first, PatternStar):
+                raise ViperSyntaxError(
+                    "Starred pattern must be part of a sequence", first.line, first.column
+                )
             self._expect("OP", ")")
             return first
         raise ViperSyntaxError("Invalid match pattern", token.line, token.column)
@@ -861,16 +1136,24 @@ class Parser:
             column=token.column,
         )
 
-    def _parse_function_def(self, *, is_async: bool = False) -> FunctionDef:
+    def _parse_function_def(
+        self, *, is_async: bool = False, decorators: Optional[List[Expression]] = None
+    ) -> FunctionDef:
         token = self._expect("KEYWORD", "def")
         name_token = self._expect("NAME")
         type_params: List[TypeParam] = []
         if self._at("OP", "["):
             type_params = self._parse_type_params()
         self._expect("OP", "(")
-        params = self._parse_parameters(")") if not self._at("OP", ")") else []
+        params = (
+            self._parse_parameters(")", allow_annotations=True) if not self._at("OP", ")") else []
+        )
         self._expect("OP", ")")
+        returns: Optional[Expression] = None
+        if self._match("OP", "->"):
+            returns = self._parse_expression(allow_tuple=False)
         self._expect("OP", ":")
+        self._parse_type_comment()
         body = self._parse_block()
         return FunctionDef(
             name=name_token.value,
@@ -880,6 +1163,8 @@ class Parser:
             is_async=is_async,
             line=token.line,
             column=token.column,
+            decorators=decorators or [],
+            returns=returns,
         )
 
     def _parse_with(self, *, is_async: bool = False) -> WithStmt:
@@ -957,7 +1242,9 @@ class Parser:
 
     def _parse_lambda(self) -> Expression:
         token = self._expect("KEYWORD", "lambda")
-        params = self._parse_parameters(":") if not self._at("OP", ":") else []
+        params = (
+            self._parse_parameters(":", allow_annotations=False) if not self._at("OP", ":") else []
+        )
         self._expect("OP", ":")
         body = self._parse_expression(allow_tuple=False)
         return LambdaExpr(params=params, body=body, line=token.line, column=token.column)
@@ -1175,6 +1462,49 @@ class Parser:
                 step = self._parse_expression(allow_tuple=False)
         return SliceExpr(start=start, stop=stop, step=step, line=line, column=column)
 
+    def _parse_comprehension_clauses(self) -> List[Comprehension]:
+        clauses: List[Comprehension] = []
+        while True:
+            is_async = False
+            async_token = None
+            if self._peek_is_keyword("async"):
+                async_token = self._advance()
+                is_async = True
+            if not self._peek_is_keyword("for"):
+                if is_async and async_token is not None:
+                    raise ViperSyntaxError(
+                        "Expected 'for' after 'async' in comprehension",
+                        async_token.line,
+                        async_token.column,
+                    )
+                break
+            for_token = self._advance()
+            target = self._parse_for_target()
+            if not self._peek_is_keyword("in"):
+                raise ViperSyntaxError("Expected 'in' in comprehension", for_token.line, for_token.column)
+            self._advance()
+            iterable = self._parse_or()
+            ifs: List[Expression] = []
+            while self._peek_is_keyword("if"):
+                self._advance()
+                ifs.append(self._parse_or())
+            clauses.append(
+                Comprehension(
+                    target=target,
+                    iterable=iterable,
+                    ifs=ifs,
+                    is_async=is_async,
+                    line=for_token.line,
+                    column=for_token.column,
+                )
+            )
+            if not self._peek_is_keyword("for") and not self._peek_is_keyword("async"):
+                break
+        if not clauses:
+            token = self._current()
+            raise ViperSyntaxError("Expected comprehension clause", token.line, token.column)
+        return clauses
+
     def _parse_call_args(self) -> Tuple[List[Expression], List[Tuple[Optional[str], Expression]]]:
         args: List[Expression] = []
         kwargs: List[Tuple[Optional[str], Expression]] = []
@@ -1211,7 +1541,16 @@ class Parser:
                         token.line,
                         token.column,
                     )
-                args.append(self._parse_expression(allow_tuple=False))
+                expr = self._parse_expression(allow_tuple=False)
+                if self._peek_is_keyword("for") or self._peek_is_keyword("async"):
+                    generators = self._parse_comprehension_clauses()
+                    expr = GeneratorExp(
+                        element=expr,
+                        generators=generators,
+                        line=expr.line,
+                        column=expr.column,
+                    )
+                args.append(expr)
             if self._match("OP", ","):
                 if self._match("OP", ")"):
                     break
@@ -1231,16 +1570,28 @@ class Parser:
         token = self._current()
         if token.kind in {"STRING", "BYTES", "FSTRING", "BFSTRING", "TSTRING", "BTSTRING"}:
             return self._parse_string_sequence()
+        if token.kind == "ELLIPSIS":
+            self._advance()
+            return Literal(value=Ellipsis, line=token.line, column=token.column)
         if token.kind == "NAME":
             self._advance()
             return Name(identifier=token.value, line=token.line, column=token.column)
         if token.kind == "NUMBER":
             self._advance()
-            value: float | int
-            if "." in token.value or "e" in token.value or "E" in token.value:
-                value = float(token.value)
-            else:
-                value = int(token.value)
+            raw = str(token.value)
+            normalized = raw.replace("_", "")
+            value: float | int | complex
+            try:
+                if normalized.endswith(("j", "J")):
+                    value = complex(normalized)
+                elif any(ch in normalized for ch in ".eE"):
+                    value = float(normalized)
+                elif normalized.startswith(("0x", "0X", "0b", "0B", "0o", "0O")):
+                    value = int(normalized, 0)
+                else:
+                    value = int(normalized, 10)
+            except ValueError as exc:
+                raise ViperSyntaxError("Invalid numeric literal", token.line, token.column) from exc
             return Literal(value=value, line=token.line, column=token.column)
         if token.kind == "STRING":
             self._advance()
@@ -1253,6 +1604,17 @@ class Parser:
             if self._match("OP", ")"):
                 return TupleLiteral(elements=[], line=token.line, column=token.column)
             expr = self._parse_star_expression()
+            if not isinstance(expr, Starred) and (
+                self._peek_is_keyword("for") or self._peek_is_keyword("async")
+            ):
+                generators = self._parse_comprehension_clauses()
+                self._expect("OP", ")")
+                return GeneratorExp(
+                    element=expr,
+                    generators=generators,
+                    line=expr.line,
+                    column=expr.column,
+                )
             if self._match("OP", ","):
                 elements = [expr]
                 if self._match("OP", ")"):
@@ -1274,36 +1636,111 @@ class Parser:
             elements: List[Expression] = []
             if self._match("OP", "]"):
                 return ListLiteral(elements=elements, line=token.line, column=token.column)
+            first = self._parse_star_expression()
+            if not isinstance(first, Starred) and (
+                self._peek_is_keyword("for") or self._peek_is_keyword("async")
+            ):
+                generators = self._parse_comprehension_clauses()
+                self._expect("OP", "]")
+                return ListComp(
+                    element=first,
+                    generators=generators,
+                    line=first.line,
+                    column=first.column,
+                )
+            elements.append(first)
             while True:
-                elements.append(self._parse_star_expression())
                 if self._match("OP", ","):
                     if self._match("OP", "]"):
                         break
+                    elements.append(self._parse_star_expression())
                     continue
                 self._expect("OP", "]")
                 break
             return ListLiteral(elements=elements, line=token.line, column=token.column)
         if self._match("OP", "{"):
-            items: List[Tuple[Optional[Expression], Expression]] = []
             if self._match("OP", "}"):
+                return DictLiteral(items=[], line=token.line, column=token.column)
+            if self._at("OP", "**"):
+                items: List[Tuple[Optional[Expression], Expression]] = []
+                while True:
+                    if self._at("OP", "**"):
+                        self._advance()
+                        value = self._parse_expression(allow_tuple=False)
+                        items.append((None, value))
+                    else:
+                        key = self._parse_expression(allow_tuple=False)
+                        self._expect("OP", ":")
+                        value = self._parse_expression(allow_tuple=False)
+                        items.append((key, value))
+                    if self._match("OP", ","):
+                        if self._match("OP", "}"):
+                            break
+                        continue
+                    self._expect("OP", "}")
+                    break
                 return DictLiteral(items=items, line=token.line, column=token.column)
+            first = self._parse_star_expression()
+            if isinstance(first, Starred):
+                elements = [first]
+                while True:
+                    if self._match("OP", ","):
+                        if self._match("OP", "}"):
+                            break
+                        elements.append(self._parse_star_expression())
+                        continue
+                    self._expect("OP", "}")
+                    break
+                return SetLiteral(elements=elements, line=token.line, column=token.column)
+            if self._match("OP", ":"):
+                value = self._parse_expression(allow_tuple=False)
+                if self._peek_is_keyword("for") or self._peek_is_keyword("async"):
+                    generators = self._parse_comprehension_clauses()
+                    self._expect("OP", "}")
+                    return DictComp(
+                        key=first,
+                        value=value,
+                        generators=generators,
+                        line=first.line,
+                        column=first.column,
+                    )
+                items = [(first, value)]
+                while True:
+                    if self._match("OP", ","):
+                        if self._match("OP", "}"):
+                            break
+                        if self._at("OP", "**"):
+                            self._advance()
+                            value = self._parse_expression(allow_tuple=False)
+                            items.append((None, value))
+                            continue
+                        key = self._parse_expression(allow_tuple=False)
+                        self._expect("OP", ":")
+                        value = self._parse_expression(allow_tuple=False)
+                        items.append((key, value))
+                        continue
+                    self._expect("OP", "}")
+                    break
+                return DictLiteral(items=items, line=token.line, column=token.column)
+            if self._peek_is_keyword("for") or self._peek_is_keyword("async"):
+                generators = self._parse_comprehension_clauses()
+                self._expect("OP", "}")
+                return SetComp(
+                    element=first,
+                    generators=generators,
+                    line=first.line,
+                    column=first.column,
+                )
+            elements = [first]
             while True:
-                if self._at("OP", "**"):
-                    token = self._advance()
-                    value = self._parse_expression(allow_tuple=False)
-                    items.append((None, value))
-                else:
-                    key = self._parse_expression(allow_tuple=False)
-                    self._expect("OP", ":")
-                    value = self._parse_expression(allow_tuple=False)
-                    items.append((key, value))
                 if self._match("OP", ","):
                     if self._match("OP", "}"):
                         break
+                    elements.append(self._parse_star_expression())
                     continue
                 self._expect("OP", "}")
                 break
-            return DictLiteral(items=items, line=token.line, column=token.column)
+            return SetLiteral(elements=elements, line=token.line, column=token.column)
         raise ViperSyntaxError("Unexpected token", token.line, token.column)
 
     def _parse_assignment_target_list(self) -> Optional[Expression]:
@@ -1512,6 +1949,86 @@ class Parser:
             self._advance()
             return "not in"
         return None
+
+    def _parse_number_value(self, raw: str, token: Token) -> float | int | complex:
+        normalized = raw.replace("_", "")
+        try:
+            if normalized.endswith(("j", "J")):
+                return complex(normalized)
+            if any(ch in normalized for ch in ".eE"):
+                return float(normalized)
+            if normalized.startswith(("0x", "0X", "0b", "0B", "0o", "0O")):
+                return int(normalized, 0)
+            return int(normalized, 10)
+        except ValueError as exc:
+            raise ViperSyntaxError("Invalid numeric literal", token.line, token.column) from exc
+
+    def _collect_pattern_names(self, pattern: Pattern) -> set[str]:
+        names: set[str] = set()
+
+        def _walk(node: Pattern) -> None:
+            if isinstance(node, PatternName):
+                names.add(node.identifier)
+                return
+            if isinstance(node, PatternAs):
+                names.add(node.name)
+                _walk(node.pattern)
+                return
+            if isinstance(node, PatternStar):
+                if isinstance(node.target, PatternName):
+                    names.add(node.target.identifier)
+                return
+            if isinstance(node, PatternSequence):
+                for element in node.elements:
+                    _walk(element)
+                return
+            if isinstance(node, PatternOr):
+                for element in node.patterns:
+                    _walk(element)
+                return
+            if isinstance(node, PatternMapping):
+                for _, value_pattern in node.items:
+                    _walk(value_pattern)
+                if node.rest is not None:
+                    _walk(node.rest)
+                return
+            if isinstance(node, PatternClass):
+                for item in node.positional:
+                    _walk(item)
+                for _, item in node.keywords:
+                    _walk(item)
+                return
+            if isinstance(node, (PatternLiteral, PatternWildcard, PatternValue)):
+                return
+
+        _walk(pattern)
+        return names
+
+    def _validate_or_pattern_bindings(self, patterns: List[Pattern]) -> None:
+        expected: Optional[set[str]] = None
+        for pattern in patterns:
+            names = self._collect_pattern_names(pattern)
+            if expected is None:
+                expected = names
+                continue
+            if names != expected:
+                raise ViperSyntaxError(
+                    "All alternatives in an or-pattern must bind the same names",
+                    getattr(pattern, "line", 0),
+                    getattr(pattern, "column", 0),
+                )
+
+    def _validate_pattern_unique_names(
+        self, patterns: List[Pattern], line: int, column: int
+    ) -> None:
+        seen: set[str] = set()
+        for pattern in patterns:
+            for name in self._collect_pattern_names(pattern):
+                if name in seen:
+                    raise ViperSyntaxError(
+                        "Multiple assignments to the same name in pattern", line, column
+                    )
+                seen.add(name)
 
     def _is_assignable(self, expr: Expression) -> bool:
         if isinstance(expr, (Name, Attribute, Subscript)):

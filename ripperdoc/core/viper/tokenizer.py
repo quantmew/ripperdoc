@@ -51,6 +51,7 @@ KEYWORDS = {
 
 MULTI_CHAR_OPERATORS = {
     ":=",
+    "->",
     "+=",
     "-=",
     "*=",
@@ -228,8 +229,15 @@ class Tokenizer:
                 at_line_start = False
                 continue
 
-            if ch.isdigit():
-                value, i = self._read_number(src, i, line)
+            if ch == "." and src.startswith("...", i):
+                tokens.append(Token("ELLIPSIS", "...", line, col))
+                i += 3
+                col += 3
+                at_line_start = False
+                continue
+
+            if ch.isdigit() or (ch == "." and i + 1 < length and src[i + 1].isdigit()):
+                value, i = self._read_number(src, i, line, col)
                 tokens.append(Token("NUMBER", value, line, col))
                 col += len(value)
                 at_line_start = False
@@ -489,22 +497,126 @@ class Tokenizer:
             raise ViperSyntaxError("Unknown unicode name", line, column) from exc
         return value, end + 1, line, column + (end + 1 - idx)
 
-    def _read_number(self, source: str, start: int, line: int) -> tuple[str, int]:
+    def _read_digit_group(
+        self,
+        source: str,
+        start: int,
+        line: int,
+        column: int,
+        valid_chars: str,
+        *,
+        allow_empty: bool = False,
+    ) -> int:
         idx = start
-        while idx < len(source) and source[idx].isdigit():
-            idx += 1
-        if idx < len(source) and source[idx] == "." and idx + 1 < len(source) and source[idx + 1].isdigit():
-            idx += 1
-            while idx < len(source) and source[idx].isdigit():
+        if idx < len(source) and source[idx] == "_":
+            raise ViperSyntaxError("Invalid underscore in number", line, column + (idx - start))
+        saw_digit = False
+        prev_underscore = False
+        while idx < len(source):
+            ch = source[idx]
+            if ch == "_":
+                if not saw_digit or prev_underscore:
+                    raise ViperSyntaxError(
+                        "Invalid underscore in number", line, column + (idx - start)
+                    )
+                prev_underscore = True
                 idx += 1
-        if idx < len(source) and source[idx] in "eE":
+                continue
+            if ch in valid_chars:
+                saw_digit = True
+                prev_underscore = False
+                idx += 1
+                continue
+            break
+        if prev_underscore:
+            raise ViperSyntaxError("Invalid underscore in number", line, column + (idx - start))
+        if not saw_digit and not allow_empty:
+            raise ViperSyntaxError("Invalid numeric literal", line, column + (idx - start))
+        return idx
+
+    def _read_number(self, source: str, start: int, line: int, column: int) -> tuple[str, int]:
+        idx = start
+        length = len(source)
+
+        def invalid(msg: str) -> None:
+            raise ViperSyntaxError(msg, line, column)
+
+        if source[idx] == ".":
             idx += 1
-            if idx < len(source) and source[idx] in "+-":
+            idx = self._read_digit_group(
+                source,
+                idx,
+                line,
+                column + (idx - start),
+                "0123456789",
+            )
+            if idx < length and source[idx] in "eE":
                 idx += 1
-            if idx >= len(source) or not source[idx].isdigit():
-                raise ViperSyntaxError("Invalid exponent in number", line, start + 1)
-            while idx < len(source) and source[idx].isdigit():
+                if idx < length and source[idx] in "+-":
+                    idx += 1
+                idx = self._read_digit_group(
+                    source,
+                    idx,
+                    line,
+                    column + (idx - start),
+                    "0123456789",
+                )
+            if idx < length and source[idx] in "jJ":
                 idx += 1
+            return source[start:idx], idx
+
+        if source[idx] == "0" and idx + 1 < length and source[idx + 1] in "xXoObB":
+            prefix = source[idx + 1].lower()
+            idx += 2
+            if prefix == "x":
+                valid = "0123456789abcdefABCDEF"
+            elif prefix == "o":
+                valid = "01234567"
+            else:
+                valid = "01"
+            idx = self._read_digit_group(
+                source,
+                idx,
+                line,
+                column + (idx - start),
+                valid,
+            )
+            if idx < length and source[idx] in ".eEjJ":
+                if source[idx] in "jJ":
+                    invalid("Imaginary literal must be decimal")
+                invalid("Invalid numeric literal")
+            return source[start:idx], idx
+
+        idx = self._read_digit_group(
+            source,
+            idx,
+            line,
+            column + (idx - start),
+            "0123456789",
+        )
+        if idx < length and source[idx] == ".":
+            idx += 1
+            idx = self._read_digit_group(
+                source,
+                idx,
+                line,
+                column + (idx - start),
+                "0123456789",
+                allow_empty=True,
+            )
+        if idx < length and source[idx] in "eE":
+            idx += 1
+            if idx < length and source[idx] in "+-":
+                idx += 1
+            idx = self._read_digit_group(
+                source,
+                idx,
+                line,
+                column + (idx - start),
+                "0123456789",
+            )
+        if idx < length and source[idx] in "jJ":
+            idx += 1
         return source[start:idx], idx
 
     def _read_identifier(self, source: str, start: int) -> tuple[str, int]:

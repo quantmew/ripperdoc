@@ -8,6 +8,7 @@ from typing import Any, List, Literal, Optional
 OpCode = Literal[
     "LOAD_CONST",
     "LOAD_NAME",
+    "LOAD_ENV",
     "STORE_NAME",
     "DELETE_NAME",
     "SET_RESULT",
@@ -27,6 +28,7 @@ OpCode = Literal[
     "BUILD_TUPLE_UNPACK",
     "BUILD_DICT",
     "BUILD_DICT_UNPACK",
+    "BUILD_SET",
     "BUILD_SLICE",
     "UNPACK_SEQUENCE",
     "UNPACK_EX",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from ripperdoc.core.viper.ast_nodes import (
     AssignStmt,
@@ -20,6 +20,7 @@ from ripperdoc.core.viper.ast_nodes import (
     ConditionalExpr,
     ContinueStmt,
     DictLiteral,
+    DictComp,
     DelStmt,
     Expression,
     ExpressionStmt,
@@ -31,8 +32,10 @@ from ripperdoc.core.viper.ast_nodes import (
     ImportStmt,
     GlobalStmt,
     NonlocalStmt,
+    Comprehension,
     ListLiteral,
     FormattedString,
+    GeneratorExp,
     FormatField,
     LambdaExpr,
     Literal,
@@ -49,6 +52,9 @@ from ripperdoc.core.viper.ast_nodes import (
     Subscript,
     StringText,
     TupleLiteral,
+    SetLiteral,
+    SetComp,
+    ListComp,
     TypeAliasStmt,
     Parameter,
     UnaryOp,
@@ -63,6 +69,12 @@ from ripperdoc.core.viper.ast_nodes import (
     PatternOr,
     PatternSequence,
     PatternWildcard,
+    PatternStar,
+    PatternAs,
+    PatternValue,
+    PatternMapping,
+    PatternClass,
+    PatternKey,
     Starred,
 )
 from ripperdoc.core.viper.bytecode import CodeObject, Instruction, Label, ParamSpec
@@ -195,8 +207,17 @@ class BytecodeCompiler:
             kw_default_names = [name for name, _ in kw_defaults]
             for _, expr in kw_defaults:
                 self._compile_expression(expr)
+            has_annotations = self._compile_function_annotations(stmt)
             self._emit("LOAD_CONST", func_code, stmt)
-            self._emit("MAKE_FUNCTION", (len(pos_defaults), kw_default_names), stmt)
+            if has_annotations:
+                make_args = (len(pos_defaults), kw_default_names, True)
+            else:
+                make_args = (len(pos_defaults), kw_default_names)
+            self._emit("MAKE_FUNCTION", make_args, stmt)
+            for decorator in reversed(stmt.decorators):
+                self._compile_expression(decorator)
+                self._emit("SWAP", None, stmt)
+                self._emit("CALL_FUNCTION", (1, []), stmt)
             self._emit("STORE_NAME", stmt.name, stmt)
             self._emit("LOAD_CONST", None, stmt)
             self._emit("SET_RESULT", None, stmt)
@@ -659,7 +680,8 @@ class BytecodeCompiler:
         self._emit("LOAD_NAME", "__viper_match_pattern", case)
         self._emit("LOAD_NAME", subject_name, case)
         self._emit("LOAD_CONST", pattern, case)
-        self._emit("CALL_FUNCTION", (2, []), case)
+        self._emit("LOAD_ENV", None, case)
+        self._emit("CALL_FUNCTION", (3, []), case)
         self._emit("STORE_NAME", bindings_name, case)
         self._emit("LOAD_NAME", bindings_name, case)
         self._emit("LOAD_CONST", None, case)
@@ -716,6 +738,33 @@ class BytecodeCompiler:
                 self._compile_store_target(element, stmt)
             return
         raise ViperSyntaxError("Invalid for-loop target", stmt.line, stmt.column)
+
+    def _compile_comprehension(
+        self,
+        generators: List[Comprehension],
+        emit_element: "Callable[[], None]",
+        node: Expression,
+    ) -> None:
+        def _walk(index: int) -> None:
+            gen = generators[index]
+            self._compile_expression(gen.iterable)
+            self._emit("BUILD_ITER", None, node)
+            start_label = Label()
+            end_label = Label()
+            self._mark(start_label)
+            self._emit("FOR_ITER", end_label, node)
+            self._compile_store_target(gen.target, node)
+            for if_expr in gen.ifs:
+                self._compile_expression(if_expr)
+                self._emit("JUMP_IF_FALSE", start_label, node)
+            if index + 1 < len(generators):
+                _walk(index + 1)
+            else:
+                emit_element()
+            self._emit("JUMP", start_label, node)
+            self._mark(end_label)
+
+        _walk(0)
 
     def _compile_yield_from(self, expr: YieldFromExpr) -> None:
         self._compile_expression(expr.value)
@@ -780,6 +829,22 @@ class BytecodeCompiler:
                     self._compile_expression(element)
                 self._emit("BUILD_LIST", len(expr.elements), expr)
             return
+        if isinstance(expr, ListComp):
+            temp_name = self._new_temp_name("listcomp")
+            self._emit("BUILD_LIST", 0, expr)
+            self._emit("STORE_NAME", temp_name, expr)
+
+            def emit_element() -> None:
+                self._emit("LOAD_NAME", temp_name, expr)
+                self._emit("GET_ATTR", "append", expr)
+                self._compile_expression(expr.element)
+                self._emit("CALL_FUNCTION", (1, []), expr)
+                self._emit("POP_TOP", None, expr)
+
+            self._compile_comprehension(expr.generators, emit_element, expr)
+            self._emit("LOAD_NAME", temp_name, expr)
+            self._emit("DELETE_NAME", temp_name, expr)
+            return
         if isinstance(expr, TupleLiteral):
             if any(isinstance(element, Starred) for element in expr.elements):
                 flags = []
@@ -795,6 +860,47 @@ class BytecodeCompiler:
                 for element in expr.elements:
                     self._compile_expression(element)
                 self._emit("BUILD_TUPLE", len(expr.elements), expr)
+            return
+        if isinstance(expr, SetLiteral):
+            if any(isinstance(element, Starred) for element in expr.elements):
+                temp_name = self._new_temp_name("set")
+                self._emit("BUILD_SET", 0, expr)
+                self._emit("STORE_NAME", temp_name, expr)
+                for element in expr.elements:
+                    if isinstance(element, Starred):
+                        self._emit("LOAD_NAME", temp_name, expr)
+                        self._emit("GET_ATTR", "update", expr)
+                        self._compile_expression(element.target)
+                        self._emit("CALL_FUNCTION", (1, []), expr)
+                        self._emit("POP_TOP", None, expr)
+                    else:
+                        self._emit("LOAD_NAME", temp_name, expr)
+                        self._emit("GET_ATTR", "add", expr)
+                        self._compile_expression(element)
+                        self._emit("CALL_FUNCTION", (1, []), expr)
+                        self._emit("POP_TOP", None, expr)
+                self._emit("LOAD_NAME", temp_name, expr)
+                self._emit("DELETE_NAME", temp_name, expr)
+                return
+            for element in expr.elements:
+                self._compile_expression(element)
+            self._emit("BUILD_SET", len(expr.elements), expr)
+            return
+        if isinstance(expr, SetComp):
+            temp_name = self._new_temp_name("setcomp")
+            self._emit("BUILD_SET", 0, expr)
+            self._emit("STORE_NAME", temp_name, expr)
+
+            def emit_element() -> None:
+                self._emit("LOAD_NAME", temp_name, expr)
+                self._emit("GET_ATTR", "add", expr)
+                self._compile_expression(expr.element)
+                self._emit("CALL_FUNCTION", (1, []), expr)
+                self._emit("POP_TOP", None, expr)
+
+            self._compile_comprehension(expr.generators, emit_element, expr)
+            self._emit("LOAD_NAME", temp_name, expr)
+            self._emit("DELETE_NAME", temp_name, expr)
             return
         if isinstance(expr, DictLiteral):
             if any(key is None for key, _ in expr.items):
@@ -813,6 +919,47 @@ class BytecodeCompiler:
                     self._compile_expression(key)
                     self._compile_expression(value)
                 self._emit("BUILD_DICT", len(expr.items), expr)
+            return
+        if isinstance(expr, DictComp):
+            temp_name = self._new_temp_name("dictcomp")
+            self._emit("BUILD_DICT", 0, expr)
+            self._emit("STORE_NAME", temp_name, expr)
+
+            def emit_element() -> None:
+                self._emit("LOAD_NAME", temp_name, expr)
+                self._compile_expression(expr.key)
+                self._compile_expression(expr.value)
+                self._emit("SET_SUBSCRIPT", None, expr)
+
+            self._compile_comprehension(expr.generators, emit_element, expr)
+            self._emit("LOAD_NAME", temp_name, expr)
+            self._emit("DELETE_NAME", temp_name, expr)
+            return
+        if isinstance(expr, GeneratorExp):
+            nested = BytecodeCompiler()
+            nested._in_generator = True
+
+            def emit_element() -> None:
+                nested._compile_expression(expr.element)
+                nested._emit("YIELD_VALUE", None, expr)
+                nested._emit("POP_TOP", None, expr)
+
+            nested._compile_comprehension(expr.generators, emit_element, expr)
+            nested._emit("LOAD_CONST", None, expr)
+            nested._emit("RETURN_VALUE", False, expr)
+            code = CodeObject(
+                name="<genexpr>",
+                instructions=nested._instructions,
+                params=[],
+                param_spec=nested._build_param_spec([]),
+                is_module=False,
+                is_generator=True,
+                is_coroutine=False,
+            )
+            nested._resolve_labels(code)
+            self._emit("LOAD_CONST", code, expr)
+            self._emit("MAKE_FUNCTION", (0, []), expr)
+            self._emit("CALL_FUNCTION", (0, []), expr)
             return
         if isinstance(expr, ConditionalExpr):
             else_label = Label()
@@ -1089,10 +1236,33 @@ class BytecodeCompiler:
         seen: set[str] = set()
 
         def _walk(node: Pattern) -> None:
+            if isinstance(node, PatternAs):
+                if node.name not in seen:
+                    seen.add(node.name)
+                    names.append(node.name)
+                _walk(node.pattern)
+                return
             if isinstance(node, PatternName):
                 if node.identifier not in seen:
                     seen.add(node.identifier)
                     names.append(node.identifier)
+                return
+            if isinstance(node, PatternStar):
+                if isinstance(node.target, PatternName) and node.target.identifier not in seen:
+                    seen.add(node.target.identifier)
+                    names.append(node.target.identifier)
+                return
+            if isinstance(node, PatternMapping):
+                for _, value_pattern in node.items:
+                    _walk(value_pattern)
+                if node.rest is not None:
+                    _walk(node.rest)
+                return
+            if isinstance(node, PatternClass):
+                for item in node.positional:
+                    _walk(item)
+                for _, item in node.keywords:
+                    _walk(item)
                 return
             if isinstance(node, PatternSequence):
                 for element in node.elements:
@@ -1107,6 +1277,21 @@ class BytecodeCompiler:
 
         _walk(pattern)
         return names
+
+    def _compile_function_annotations(self, func: FunctionDef) -> bool:
+        items: List[Tuple[str, Expression]] = []
+        for param in func.params:
+            if param.annotation is not None:
+                items.append((param.name, param.annotation))
+        if func.returns is not None:
+            items.append(("return", func.returns))
+        if not items:
+            return False
+        for name, expr in items:
+            self._emit("LOAD_CONST", name, func)
+            self._compile_expression(expr)
+        self._emit("BUILD_DICT", len(items), func)
+        return True
 
     def _emit(self, op: str, arg: Optional[object] = None, node: Optional[object] = None) -> None:
         line = 0
@@ -1142,6 +1327,33 @@ def _contains_yield(statements: List[Statement]) -> bool:
             return expr_has_yield(expr.value)
         if isinstance(expr, Starred):
             return expr_has_yield(expr.target)
+        if isinstance(expr, ListComp):
+            return expr_has_yield(expr.element) or any(
+                expr_has_yield(gen.target)
+                or expr_has_yield(gen.iterable)
+                or any(expr_has_yield(condition) for condition in gen.ifs)
+                for gen in expr.generators
+            )
+        if isinstance(expr, SetComp):
+            return expr_has_yield(expr.element) or any(
+                expr_has_yield(gen.target)
+                or expr_has_yield(gen.iterable)
+                or any(expr_has_yield(condition) for condition in gen.ifs)
+                for gen in expr.generators
+            )
+        if isinstance(expr, DictComp):
+            return (
+                expr_has_yield(expr.key)
+                or expr_has_yield(expr.value)
+                or any(
+                    expr_has_yield(gen.target)
+                    or expr_has_yield(gen.iterable)
+                    or any(expr_has_yield(condition) for condition in gen.ifs)
+                    for gen in expr.generators
+                )
+            )
+        if isinstance(expr, GeneratorExp):
+            return False
         if isinstance(expr, ConditionalExpr):
             return (
                 expr_has_yield(expr.test)
@@ -1170,6 +1382,8 @@ def _contains_yield(statements: List[Statement]) -> bool:
         if isinstance(expr, ListLiteral):
             return any(expr_has_yield(e) for e in expr.elements)
         if isinstance(expr, TupleLiteral):
+            return any(expr_has_yield(e) for e in expr.elements)
+        if isinstance(expr, SetLiteral):
             return any(expr_has_yield(e) for e in expr.elements)
         if isinstance(expr, DictLiteral):
             return any(

@@ -90,7 +90,18 @@ class TypeParam:
 class Parameter:
     name: str
     kind: str
+    annotation: Optional["Expression"]
     default: Optional["Expression"]
+    line: int
+    column: int
+
+
+@dataclass
+class Comprehension:
+    target: "Expression"
+    iterable: "Expression"
+    ifs: List["Expression"]
+    is_async: bool
     line: int
     column: int
 
@@ -133,6 +144,8 @@ class FunctionDef:
     is_async: bool
     line: int
     column: int
+    decorators: List[Expression]
+    returns: Optional[Expression]
 
 
 @dataclass
@@ -301,6 +314,13 @@ class TupleLiteral:
 
 
 @dataclass
+class SetLiteral:
+    elements: List[Expression]
+    line: int
+    column: int
+
+
+@dataclass
 class StringText:
     value: str | bytes
     line: int
@@ -323,6 +343,39 @@ class FormattedString:
     parts: List["FStringPart"]
     is_template: bool
     is_bytes: bool
+    line: int
+    column: int
+
+
+@dataclass
+class ListComp:
+    element: Expression
+    generators: List[Comprehension]
+    line: int
+    column: int
+
+
+@dataclass
+class SetComp:
+    element: Expression
+    generators: List[Comprehension]
+    line: int
+    column: int
+
+
+@dataclass
+class DictComp:
+    key: Expression
+    value: Expression
+    generators: List[Comprehension]
+    line: int
+    column: int
+
+
+@dataclass
+class GeneratorExp:
+    element: Expression
+    generators: List[Comprehension]
     line: int
     column: int
 
@@ -453,6 +506,45 @@ class PatternSequence:
 
 
 @dataclass
+class PatternStar:
+    target: "Pattern"
+    line: int
+    column: int
+
+
+@dataclass
+class PatternAs:
+    pattern: "Pattern"
+    name: str
+    line: int
+    column: int
+
+
+@dataclass
+class PatternValue:
+    parts: List[str]
+    line: int
+    column: int
+
+
+@dataclass
+class PatternMapping:
+    items: List[Tuple["PatternKey", "Pattern"]]
+    rest: Optional["Pattern"]
+    line: int
+    column: int
+
+
+@dataclass
+class PatternClass:
+    class_path: "PatternValue"
+    positional: List["Pattern"]
+    keywords: List[Tuple[str, "Pattern"]]
+    line: int
+    column: int
+
+
+@dataclass
 class PatternOr:
     patterns: List["Pattern"]
     line: int
@@ -511,7 +603,12 @@ Expression = Union[
     ListLiteral,
     DictLiteral,
     TupleLiteral,
+    SetLiteral,
     FormattedString,
+    ListComp,
+    SetComp,
+    DictComp,
+    GeneratorExp,
     UnaryOp,
     AwaitExpr,
     LambdaExpr,
@@ -534,4 +631,11 @@ Pattern = Union[
     PatternLiteral,
     PatternSequence,
     PatternOr,
+    PatternStar,
+    PatternAs,
+    PatternValue,
+    PatternMapping,
+    PatternClass,
 ]
+
+PatternKey = Union[PatternLiteral, PatternValue]

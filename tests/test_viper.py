@@ -297,6 +297,37 @@ box.decorated
     assert result.value is True
 
 
+def test_function_decorator_applies():
+    code = """
+def wrap(fn):
+    def inner(value):
+        return fn(value) + 1
+    return inner
+
+@wrap
+def add_one(x):
+    return x
+
+add_one(2)
+"""
+    result = run(code)
+    assert result.value == 3
+
+
+def test_function_annotations_set():
+    code = """
+def add(x: int, y: int) -> int:
+    return x + y
+
+add.__annotations__
+"""
+    result = run(code, globals={"int": int})
+    annotations = result.value
+    assert annotations["x"] is int
+    assert annotations["y"] is int
+    assert annotations["return"] is int
+
+
 def test_class_inheritance_overrides_method():
     code = """
 class Base:
@@ -1068,6 +1099,175 @@ result
 """
     result = run(code)
     assert result.value == 3
+
+
+def test_match_case_star_and_as_patterns():
+    code = """
+value = [1, 2, 3, 4]
+match value:
+    case [head, *tail]:
+        result = (head, tail)
+result
+"""
+    result = run(code)
+    assert result.value == (1, [2, 3, 4])
+
+    code = """
+value = [1, 2]
+match value:
+    case [a, b] as whole:
+        result = (a + b, whole)
+result
+"""
+    result = run(code)
+    assert result.value == (3, [1, 2])
+
+
+def test_match_case_mapping_and_class_patterns():
+    code = """
+class Keys:
+    a = "a"
+
+value = {"a": 1, "b": 2}
+match value:
+    case {Keys.a: x, "b": y, **rest}:
+        result = (x + y, rest)
+result
+"""
+    result = run(code)
+    assert result.value == (3, {})
+
+    code = """
+class Point:
+    __match_args__ = ("x", "y")
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+p = Point(1, 2)
+match p:
+    case Point(1, y=val):
+        result = val
+result
+"""
+    result = run(code)
+    assert result.value == 2
+
+    code = """
+class Colors:
+    Red = 1
+
+value = 1
+match value:
+    case Colors.Red:
+        result = "red"
+    case _:
+        result = "other"
+result
+"""
+    result = run(code)
+    assert result.value == "red"
+
+
+def test_match_pattern_semantics_errors():
+    code = """
+value = {"a": 1, "b": 2}
+match value:
+    case {"a": x, "a": y}:
+        result = x + y
+"""
+    with pytest.raises(ViperSyntaxError):
+        run(code)
+
+    code = """
+class Keys:
+    a = "a"
+
+value = {"a": 1}
+match value:
+    case {Keys.a: x, Keys.a: y}:
+        result = x + y
+"""
+    with pytest.raises(ViperSyntaxError):
+        run(code)
+
+    code = """
+class Point:
+    __match_args__ = ("x", "y")
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+p = Point(1, 2)
+match p:
+    case Point(1, x=2):
+        result = 1
+"""
+    with pytest.raises(ViperRuntimeError):
+        run(code)
+
+    code = """
+class Bad:
+    __match_args__ = ("x", 1)
+    def __init__(self, x):
+        self.x = x
+
+value = Bad(1)
+match value:
+    case Bad(1):
+        result = 1
+"""
+    with pytest.raises(ViperRuntimeError):
+        run(code)
+
+    code = """
+value = {"a": 1, "b": 2}
+match value:
+    case {"a": 1, **_}:
+        result = 1
+result
+"""
+    result = run(code)
+    assert result.value == 1
+
+    code = """
+value = [1, 2]
+match value:
+    case [x, x]:
+        result = x
+"""
+    with pytest.raises(ViperSyntaxError):
+        run(code)
+
+    code = """
+value = 1
+match value:
+    case 1 as x:
+        result = x
+    case 2:
+        result = 2
+result
+"""
+    result = run(code)
+    assert result.value == 1
+
+    code = """
+value = 1
+match value:
+    case 1 as x | 2:
+        result = x
+"""
+    with pytest.raises(ViperSyntaxError):
+        run(code)
+
+    code = """
+value = [1]
+match value:
+    case [x] | [y, z]:
+        result = x
+"""
+    with pytest.raises(ViperSyntaxError):
+        run(code)
 
 
 def test_yield_and_yield_from():

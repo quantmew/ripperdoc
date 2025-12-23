@@ -16,6 +16,12 @@ from ripperdoc.core.viper.ast_nodes import (
     PatternOr,
     PatternSequence,
     PatternWildcard,
+    PatternStar,
+    PatternAs,
+    PatternValue,
+    PatternMapping,
+    PatternClass,
+    PatternKey,
 )
 from ripperdoc.core.viper.errors import ViperRuntimeError
 
@@ -371,6 +377,8 @@ class VirtualMachine:
                     frame.stack.append(instr.arg)
                 elif op == "LOAD_NAME":
                     frame.stack.append(self._load_name(frame, instr.arg, instr))
+                elif op == "LOAD_ENV":
+                    frame.stack.append(frame.env)
                 elif op == "STORE_NAME":
                     value = frame.stack.pop()
                     self._store_name(frame, instr.arg, value, instr)
@@ -499,6 +507,12 @@ class VirtualMachine:
                         else:
                             result.append(value)
                     frame.stack.append(tuple(result))
+                elif op == "BUILD_SET":
+                    count = int(instr.arg)
+                    items = frame.stack[-count:] if count else []
+                    if count:
+                        del frame.stack[-count:]
+                    frame.stack.append(set(items))
                 elif op == "BUILD_DICT":
                     count = int(instr.arg)
                     items: List[tuple[Any, Any]] = []
@@ -778,9 +792,14 @@ class VirtualMachine:
                 elif op == "MAKE_FUNCTION":
                     pos_defaults = 0
                     kw_default_names: List[str] = []
+                    has_annotations = False
                     if instr.arg is not None:
-                        pos_defaults, kw_default_names = instr.arg
+                        if isinstance(instr.arg, tuple) and len(instr.arg) == 3:
+                            pos_defaults, kw_default_names, has_annotations = instr.arg
+                        else:
+                            pos_defaults, kw_default_names = instr.arg
                     code_obj = frame.stack.pop()
+                    annotations = frame.stack.pop() if has_annotations else None
                     kw_defaults: Dict[str, Any] = {}
                     if kw_default_names:
                         values = [frame.stack.pop() for _ in range(len(kw_default_names))]
@@ -792,7 +811,7 @@ class VirtualMachine:
                         values = [frame.stack.pop() for _ in range(int(pos_defaults))]
                         values.reverse()
                         defaults = values
-                    frame.stack.append(
+                    func = (
                         ViperFunction(
                             code=code_obj,
                             closure=frame.env,
@@ -801,6 +820,9 @@ class VirtualMachine:
                             kw_defaults=kw_defaults,
                         )
                     )
+                    if annotations is not None:
+                        setattr(func, "__annotations__", annotations)
+                    frame.stack.append(func)
                 elif op == "MAKE_CLASS":
                     arg = instr.arg
                     if isinstance(arg, tuple) and len(arg) == 3:
@@ -1481,18 +1503,51 @@ def format_value(value: Any, format_spec: Optional[str]) -> str:
     return format(value, spec)
 
 
-def match_pattern(value: Any, pattern: Pattern) -> Optional[Dict[str, Any]]:
+def match_pattern(
+    value: Any, pattern: Pattern, env: Optional[Environment] = None
+) -> Optional[Dict[str, Any]]:
     bindings: Dict[str, Any] = {}
-    if _match_pattern(value, pattern, bindings):
+    if _match_pattern(value, pattern, bindings, env):
         return bindings
     return None
 
 
-def _match_pattern(value: Any, pattern: Pattern, bindings: Dict[str, Any]) -> bool:
+def _resolve_pattern_value(pattern: PatternValue, env: Optional[Environment]) -> Any:
+    if env is None:
+        raise ViperRuntimeError("Pattern value resolution requires an environment", pattern.line, pattern.column)
+    current = env.get(pattern.parts[0], pattern.line, pattern.column)
+    for part in pattern.parts[1:]:
+        try:
+            current = getattr(current, part)
+        except Exception as exc:  # noqa: BLE001
+            raise ViperRuntimeError("Attribute not found", pattern.line, pattern.column) from exc
+    return current
+
+
+def _resolve_pattern_key(key: PatternKey, env: Optional[Environment]) -> Any:
+    if isinstance(key, PatternLiteral):
+        return key.value
+    if isinstance(key, PatternValue):
+        return _resolve_pattern_value(key, env)
+    return key
+
+
+def _match_pattern(
+    value: Any, pattern: Pattern, bindings: Dict[str, Any], env: Optional[Environment]
+) -> bool:
+    if isinstance(pattern, PatternAs):
+        if not _match_pattern(value, pattern.pattern, bindings, env):
+            return False
+        if pattern.name in bindings:
+            return bindings[pattern.name] == value
+        bindings[pattern.name] = value
+        return True
     if isinstance(pattern, PatternWildcard):
         return True
     if isinstance(pattern, PatternLiteral):
         return value == pattern.value
+    if isinstance(pattern, PatternValue):
+        return value == _resolve_pattern_value(pattern, env)
     if isinstance(pattern, PatternName):
         if pattern.identifier in bindings:
             return bindings[pattern.identifier] == value
@@ -1501,16 +1556,115 @@ def _match_pattern(value: Any, pattern: Pattern, bindings: Dict[str, Any]) -> bo
     if isinstance(pattern, PatternSequence):
         if not isinstance(value, (list, tuple)):
             return False
-        if len(value) != len(pattern.elements):
+        star_index = None
+        for index, element in enumerate(pattern.elements):
+            if isinstance(element, PatternStar):
+                star_index = index
+                break
+        if star_index is None:
+            if len(value) != len(pattern.elements):
+                return False
+            for item, subpattern in zip(value, pattern.elements):
+                if not _match_pattern(item, subpattern, bindings, env):
+                    return False
+            return True
+        prefix = pattern.elements[:star_index]
+        suffix = pattern.elements[star_index + 1 :]
+        if len(value) < len(prefix) + len(suffix):
             return False
-        for item, subpattern in zip(value, pattern.elements):
-            if not _match_pattern(item, subpattern, bindings):
+        for item, subpattern in zip(value[: len(prefix)], prefix):
+            if not _match_pattern(item, subpattern, bindings, env):
+                return False
+        if suffix:
+            for item, subpattern in zip(value[-len(suffix) :], suffix):
+                if not _match_pattern(item, subpattern, bindings, env):
+                    return False
+        star_pattern = pattern.elements[star_index]
+        captured = list(value[len(prefix) : len(value) - len(suffix)])
+        if isinstance(star_pattern, PatternStar):
+            if isinstance(star_pattern.target, PatternWildcard):
+                return True
+            if isinstance(star_pattern.target, PatternName):
+                name = star_pattern.target.identifier
+                if name in bindings:
+                    return bindings[name] == captured
+                bindings[name] = captured
+                return True
+        return False
+    if isinstance(pattern, PatternMapping):
+        if not isinstance(value, Mapping):
+            return False
+        used_keys: set[Any] = set()
+        for key_pattern, value_pattern in pattern.items:
+            key = _resolve_pattern_key(key_pattern, env)
+            try:
+                present = key in value
+            except Exception as exc:  # noqa: BLE001
+                raise ViperRuntimeError(
+                    "Invalid mapping key pattern", pattern.line, pattern.column
+                ) from exc
+            if not present:
+                return False
+            used_keys.add(key)
+            if not _match_pattern(value[key], value_pattern, bindings, env):
+                return False
+        if pattern.rest is None:
+            return True
+        remaining = {k: v for k, v in value.items() if k not in used_keys}
+        if isinstance(pattern.rest, PatternWildcard):
+            return True
+        if isinstance(pattern.rest, PatternName):
+            name = pattern.rest.identifier
+            if name in bindings:
+                return bindings[name] == remaining
+            bindings[name] = remaining
+            return True
+        return False
+    if isinstance(pattern, PatternClass):
+        cls = _resolve_pattern_value(pattern.class_path, env)
+        try:
+            if not isinstance(value, cls):
+                return False
+        except Exception as exc:  # noqa: BLE001
+            raise ViperRuntimeError("Invalid class pattern", pattern.line, pattern.column) from exc
+        has_match_args = hasattr(cls, "__match_args__")
+        try:
+            match_args = getattr(cls, "__match_args__", ())
+        except Exception as exc:  # noqa: BLE001
+            raise ViperRuntimeError("Invalid __match_args__", pattern.line, pattern.column) from exc
+        if has_match_args:
+            if not isinstance(match_args, tuple):
+                raise ViperRuntimeError("Invalid __match_args__", pattern.line, pattern.column)
+            for item in match_args:
+                if not isinstance(item, str):
+                    raise ViperRuntimeError("Invalid __match_args__", pattern.line, pattern.column)
+            if len(set(match_args)) != len(match_args):
+                raise ViperRuntimeError("Duplicate __match_args__", pattern.line, pattern.column)
+        else:
+            match_args = ()
+        if len(pattern.positional) > len(match_args):
+            raise ViperRuntimeError("Too many positional patterns", pattern.line, pattern.column)
+        used_names: set[str] = set()
+        for name, subpattern in zip(match_args, pattern.positional):
+            used_names.add(name)
+            if not hasattr(value, name):
+                return False
+            if not _match_pattern(getattr(value, name), subpattern, bindings, env):
+                return False
+        for name, subpattern in pattern.keywords:
+            if name in used_names:
+                raise ViperRuntimeError("Duplicate class pattern attribute", pattern.line, pattern.column)
+            if not hasattr(value, name):
+                return False
+            if not _match_pattern(getattr(value, name), subpattern, bindings, env):
                 return False
         return True
+    if isinstance(pattern, PatternStar):
+        return False
     if isinstance(pattern, PatternOr):
         for subpattern in pattern.patterns:
             temp = dict(bindings)
-            if _match_pattern(value, subpattern, temp):
+            if _match_pattern(value, subpattern, temp, env):
                 bindings.clear()
                 bindings.update(temp)
                 return True
