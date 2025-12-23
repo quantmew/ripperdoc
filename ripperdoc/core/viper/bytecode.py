@@ -22,10 +22,14 @@ OpCode = Literal[
     "BUILD_TEMPLATE",
     "BUILD_TEMPLATE_BYTES",
     "BUILD_LIST",
+    "BUILD_LIST_UNPACK",
     "BUILD_TUPLE",
+    "BUILD_TUPLE_UNPACK",
     "BUILD_DICT",
+    "BUILD_DICT_UNPACK",
     "BUILD_SLICE",
     "UNPACK_SEQUENCE",
+    "UNPACK_EX",
     "UNARY_OP",
     "BINARY_OP",
     "COMPARE_CHAIN",
@@ -63,7 +67,9 @@ OpCode = Literal[
     "SWAP",
     "ROT_THREE",
     "CALL_FUNCTION",
+    "CALL_FUNCTION_EX",
     "MAKE_FUNCTION",
+    "AWAIT",
     "YIELD_VALUE",
     "RETURN_VALUE",
 ]
@@ -83,10 +89,20 @@ class Instruction:
 
 
 @dataclass
+class ParamSpec:
+    posonly: List[str]
+    pos_or_kw: List[str]
+    kwonly: List[str]
+    vararg: Optional[str]
+    varkw: Optional[str]
+
+
+@dataclass
 class CodeObject:
     name: str
     instructions: List[Instruction]
     params: List[str]
+    param_spec: Optional[ParamSpec] = None
     is_module: bool = False
     is_generator: bool = False
     is_coroutine: bool = False

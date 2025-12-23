@@ -69,10 +69,15 @@ def _format_arg(instr: Instruction, labels: dict[int, str]) -> str:
     if instr.op == "CALL_FUNCTION":
         argc, kwarg_names = instr.arg
         return f"argc={argc} kwargs={list(kwarg_names)}"
+    if instr.op == "CALL_FUNCTION_EX":
+        return f"kwargs={bool(instr.arg)}"
     if instr.op in {
         "BUILD_LIST",
+        "BUILD_LIST_UNPACK",
         "BUILD_TUPLE",
+        "BUILD_TUPLE_UNPACK",
         "BUILD_DICT",
+        "BUILD_DICT_UNPACK",
         "BUILD_STRING",
         "BUILD_BYTES",
         "BUILD_TEMPLATE",

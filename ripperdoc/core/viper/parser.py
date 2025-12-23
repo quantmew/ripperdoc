@@ -7,7 +7,11 @@ from typing import List, Optional, Tuple
 
 from ripperdoc.core.viper.ast_nodes import (
     AssignStmt,
+    AugAssignStmt,
+    AnnAssignStmt,
     Attribute,
+    AssignmentExpr,
+    AwaitExpr,
     BinaryOp,
     BreakStmt,
     Call,
@@ -27,6 +31,7 @@ from ripperdoc.core.viper.ast_nodes import (
     ImportStmt,
     ListLiteral,
     Literal,
+    LambdaExpr,
     Module,
     Name,
     NonlocalStmt,
@@ -46,6 +51,8 @@ from ripperdoc.core.viper.ast_nodes import (
     Subscript,
     TupleLiteral,
     TypeAliasStmt,
+    TypeParam,
+    Parameter,
     UnaryOp,
     WhileStmt,
     WithItem,
@@ -55,8 +62,10 @@ from ripperdoc.core.viper.ast_nodes import (
     StringText,
     TryStmt,
     SliceExpr,
+    Starred,
     YieldExpr,
     YieldFromExpr,
+    ConditionalExpr,
 )
 from ripperdoc.core.viper.errors import ViperSyntaxError
 from ripperdoc.core.viper.tokenizer import Token
@@ -140,7 +149,7 @@ class Parser:
                     exception = self._parse_expression()
                     if self._peek_is_keyword("from"):
                         self._advance()
-                        cause = self._parse_expression()
+                        cause = self._parse_expression(allow_tuple=False)
                 stmt = RaiseStmt(
                     exception=exception,
                     cause=cause,
@@ -151,10 +160,10 @@ class Parser:
                 return stmt
             if token.value == "assert":
                 self._advance()
-                test = self._parse_expression()
+                test = self._parse_expression(allow_tuple=False)
                 message = None
                 if self._match("OP", ","):
-                    message = self._parse_expression()
+                    message = self._parse_expression(allow_tuple=False)
                 stmt = AssertStmt(
                     test=test,
                     message=message,
@@ -180,23 +189,65 @@ class Parser:
                 return stmt
         start_pos = self.position
         target = self._parse_assignment_target_list()
-        if target is not None and self._match("OP", "="):
-            if not self._is_assignable(target):
-                raise ViperSyntaxError("Invalid assignment target", target.line, target.column)
-            value = self._parse_assignment_value()
-            stmt = AssignStmt(target=target, value=value, line=target.line, column=target.column)
-            self._expect("NEWLINE")
-            return stmt
+        if target is not None:
+            if self._match("OP", ":"):
+                if not self._is_simple_target(target):
+                    raise ViperSyntaxError("Invalid assignment target", target.line, target.column)
+                annotation = self._parse_expression(allow_tuple=False)
+                value = None
+                if self._match("OP", "="):
+                    value = self._parse_assignment_value()
+                type_comment = self._parse_type_comment()
+                stmt = AnnAssignStmt(
+                    target=target,
+                    annotation=annotation,
+                    value=value,
+                    type_comment=type_comment,
+                    line=target.line,
+                    column=target.column,
+                )
+                self._expect("NEWLINE")
+                return stmt
+            augassign = self._match_augassign()
+            if augassign is not None:
+                if not self._is_simple_target(target):
+                    raise ViperSyntaxError("Invalid assignment target", target.line, target.column)
+                value = self._parse_expression()
+                self._parse_type_comment()
+                stmt = AugAssignStmt(
+                    target=target,
+                    op=augassign,
+                    value=value,
+                    line=target.line,
+                    column=target.column,
+                )
+                self._expect("NEWLINE")
+                return stmt
+            if self._match("OP", "="):
+                if isinstance(target, Starred) or not self._is_assignable(target):
+                    raise ViperSyntaxError("Invalid assignment target", target.line, target.column)
+                targets = [target]
+                expr = self._parse_expression()
+                while self._match("OP", "="):
+                    if not self._is_assignable(expr):
+                        raise ViperSyntaxError("Invalid assignment target", expr.line, expr.column)
+                    targets.append(expr)
+                    expr = self._parse_expression()
+                value = self._parse_assignment_value_tail(expr)
+                type_comment = self._parse_type_comment()
+                stmt = AssignStmt(
+                    targets=targets,
+                    value=value,
+                    type_comment=type_comment,
+                    line=targets[0].line,
+                    column=targets[0].column,
+                )
+                self._expect("NEWLINE")
+                return stmt
 
         self.position = start_pos
         expr = self._parse_expression()
-        if self._match("OP", "="):
-            if not self._is_assignable(expr):
-                raise ViperSyntaxError("Invalid assignment target", expr.line, expr.column)
-            value = self._parse_assignment_value()
-            stmt = AssignStmt(target=expr, value=value, line=expr.line, column=expr.column)
-        else:
-            stmt = ExpressionStmt(expression=expr, line=expr.line, column=expr.column)
+        stmt = ExpressionStmt(expression=expr, line=expr.line, column=expr.column)
         self._expect("NEWLINE")
         return stmt
 
@@ -302,9 +353,9 @@ class Parser:
 
     def _parse_del_stmt(self) -> DelStmt:
         token = self._expect("KEYWORD", "del")
-        targets = [self._parse_expression()]
+        targets = [self._parse_expression(allow_tuple=False)]
         while self._match("OP", ","):
-            targets.append(self._parse_expression())
+            targets.append(self._parse_expression(allow_tuple=False))
         for target in targets:
             if not self._is_assignable(target):
                 raise ViperSyntaxError("Invalid delete target", target.line, target.column)
@@ -314,15 +365,198 @@ class Parser:
     def _parse_type_alias_stmt(self) -> TypeAliasStmt:
         token = self._expect("KEYWORD", "type")
         name_token = self._expect("NAME")
+        type_params: List[TypeParam] = []
+        if self._at("OP", "["):
+            type_params = self._parse_type_params()
         self._expect("OP", "=")
         value = self._parse_expression()
         self._expect("NEWLINE")
         return TypeAliasStmt(
             name=name_token.value,
+            type_params=type_params,
             value=value,
             line=token.line,
             column=token.column,
         )
+
+    def _parse_type_params(self) -> List[TypeParam]:
+        params: List[TypeParam] = []
+        self._expect("OP", "[")
+        if self._match("OP", "]"):
+            return params
+        while True:
+            kind = ""
+            if self._match("OP", "**"):
+                kind = "**"
+            elif self._match("OP", "*"):
+                kind = "*"
+            name_token = self._expect("NAME")
+            bound: Optional[Expression] = None
+            default: Optional[Expression] = None
+            if self._match("OP", ":"):
+                bound = self._parse_expression()
+            if self._match("OP", "="):
+                default = self._parse_expression()
+            params.append(
+                TypeParam(
+                    name=name_token.value,
+                    kind=kind,
+                    bound=bound,
+                    default=default,
+                    line=name_token.line,
+                    column=name_token.column,
+                )
+            )
+            if self._match("OP", ","):
+                if self._match("OP", "]"):
+                    break
+                continue
+            self._expect("OP", "]")
+            break
+        return params
+
+    def _parse_parameters(self, end_token: str) -> List[Parameter]:
+        params: List[Parameter] = []
+        seen_names: set[str] = set()
+        seen_kwonly = False
+        seen_vararg = False
+        seen_varkw = False
+        seen_pos_default = False
+        seen_posonly = False
+
+        def _mark_posonly() -> None:
+            for param in params:
+                if param.kind == "poskw":
+                    param.kind = "posonly"
+
+        while not self._at("OP", end_token):
+            if self._match("OP", "/"):
+                if seen_posonly:
+                    token = self._current()
+                    raise ViperSyntaxError(
+                        "Multiple '/' in parameter list", token.line, token.column
+                    )
+                if not params or seen_kwonly or seen_vararg or seen_varkw:
+                    token = self._current()
+                    raise ViperSyntaxError(
+                        "Invalid positional-only marker", token.line, token.column
+                    )
+                _mark_posonly()
+                seen_posonly = True
+                if self._match("OP", ","):
+                    if self._at("OP", end_token):
+                        break
+                    continue
+                continue
+            if self._match("OP", "**"):
+                if seen_varkw:
+                    token = self._current()
+                    raise ViperSyntaxError(
+                        "Multiple '**' in parameter list", token.line, token.column
+                    )
+                name_token = self._expect("NAME")
+                if name_token.value in seen_names:
+                    raise ViperSyntaxError(
+                        "Duplicate parameter name", name_token.line, name_token.column
+                    )
+                seen_names.add(name_token.value)
+                params.append(
+                    Parameter(
+                        name=name_token.value,
+                        kind="varkw",
+                        default=None,
+                        line=name_token.line,
+                        column=name_token.column,
+                    )
+                )
+                seen_varkw = True
+                if self._match("OP", ",") and not self._at("OP", end_token):
+                    raise ViperSyntaxError(
+                        "Parameters after '**' are not allowed",
+                        name_token.line,
+                        name_token.column,
+                    )
+                break
+            if self._match("OP", "*"):
+                if seen_vararg or seen_varkw:
+                    token = self._current()
+                    raise ViperSyntaxError(
+                        "Multiple '*' in parameter list", token.line, token.column
+                    )
+                if self._at("OP", end_token):
+                    token = self._current()
+                    raise ViperSyntaxError(
+                        "Expected parameter name after '*'", token.line, token.column
+                    )
+                if self._at("OP", ","):
+                    self._advance()
+                    seen_kwonly = True
+                    if self._at("OP", end_token):
+                        token = self._current()
+                        raise ViperSyntaxError(
+                            "Expected parameter name after '*'", token.line, token.column
+                        )
+                    continue
+                name_token = self._expect("NAME")
+                if name_token.value in seen_names:
+                    raise ViperSyntaxError(
+                        "Duplicate parameter name", name_token.line, name_token.column
+                    )
+                seen_names.add(name_token.value)
+                params.append(
+                    Parameter(
+                        name=name_token.value,
+                        kind="varpos",
+                        default=None,
+                        line=name_token.line,
+                        column=name_token.column,
+                    )
+                )
+                seen_vararg = True
+                seen_kwonly = True
+                if self._match("OP", ","):
+                    if self._at("OP", end_token):
+                        break
+                    continue
+                break
+            name_token = self._expect("NAME")
+            if name_token.value in seen_names:
+                raise ViperSyntaxError(
+                    "Duplicate parameter name", name_token.line, name_token.column
+                )
+            seen_names.add(name_token.value)
+            kind = "kwonly" if seen_kwonly else "poskw"
+            default: Optional[Expression] = None
+            if self._match("OP", "="):
+                default = self._parse_expression(allow_tuple=False)
+                if kind in {"poskw", "posonly"}:
+                    seen_pos_default = True
+            else:
+                if kind in {"poskw", "posonly"} and seen_pos_default:
+                    raise ViperSyntaxError(
+                        "Non-default argument follows default argument",
+                        name_token.line,
+                        name_token.column,
+                    )
+            params.append(
+                Parameter(
+                    name=name_token.value,
+                    kind=kind,
+                    default=default,
+                    line=name_token.line,
+                    column=name_token.column,
+                )
+            )
+            if self._match("OP", ","):
+                if self._at("OP", end_token):
+                    break
+                continue
+            if not self._at("OP", end_token):
+                token = self._current()
+                raise ViperSyntaxError(
+                    f"Expected ',' or '{end_token}'", token.line, token.column
+                )
+        return params
 
     def _parse_dotted_name(self) -> tuple[str, int, int]:
         first = self._expect("NAME")
@@ -478,12 +712,12 @@ class Parser:
                 line=token.line,
                 column=token.column,
             )
-        exc_type = self._parse_expression()
+        exc_type = self._parse_expression(allow_tuple=False)
         exprs = [exc_type]
         while self._match("OP", ","):
             if self._peek_is_keyword("as") or self._at("OP", ":"):
                 raise ViperSyntaxError("Expected exception type", token.line, token.column)
-            exprs.append(self._parse_expression())
+            exprs.append(self._parse_expression(allow_tuple=False))
         if len(exprs) > 1:
             exc_type = TupleLiteral(
                 elements=exprs,
@@ -592,28 +826,35 @@ class Parser:
     def _parse_decorators(self) -> List[Expression]:
         decorators: List[Expression] = []
         while self._match("OP", "@"):
-            decorators.append(self._parse_expression())
+            decorators.append(self._parse_expression(allow_tuple=False))
             self._expect("NEWLINE")
         return decorators
 
     def _parse_class(self, decorators: List[Expression]) -> ClassDef:
         token = self._expect("KEYWORD", "class")
         name_token = self._expect("NAME")
+        type_params: List[TypeParam] = []
+        if self._at("OP", "["):
+            type_params = self._parse_type_params()
         bases: List[Expression] = []
+        keywords: List[Tuple[str, Expression]] = []
         if self._match("OP", "("):
             args, kwargs = self._parse_call_args()
-            if kwargs:
-                raise ViperSyntaxError(
-                    "Keyword arguments in class bases are not supported",
-                    name_token.line,
-                    name_token.column,
-                )
+            for arg in args:
+                if isinstance(arg, Starred):
+                    raise ViperSyntaxError("Starred bases are not supported", arg.line, arg.column)
+            for name, value in kwargs:
+                if name is None:
+                    raise ViperSyntaxError("Unpacking class keywords is not supported", value.line, value.column)
             bases = args
+            keywords = kwargs
         self._expect("OP", ":")
         body = self._parse_block()
         return ClassDef(
             name=name_token.value,
             bases=bases,
+            keywords=keywords,
+            type_params=type_params,
             body=body,
             decorators=decorators,
             line=token.line,
@@ -623,22 +864,18 @@ class Parser:
     def _parse_function_def(self, *, is_async: bool = False) -> FunctionDef:
         token = self._expect("KEYWORD", "def")
         name_token = self._expect("NAME")
+        type_params: List[TypeParam] = []
+        if self._at("OP", "["):
+            type_params = self._parse_type_params()
         self._expect("OP", "(")
-        params: List[str] = []
-        if not self._at("OP", ")"):
-            while True:
-                param_token = self._expect("NAME")
-                params.append(param_token.value)
-                if not self._match("OP", ","):
-                    break
-                if self._at("OP", ")"):
-                    break
+        params = self._parse_parameters(")") if not self._at("OP", ")") else []
         self._expect("OP", ")")
         self._expect("OP", ":")
         body = self._parse_block()
         return FunctionDef(
             name=name_token.value,
             params=params,
+            type_params=type_params,
             body=body,
             is_async=is_async,
             line=token.line,
@@ -676,7 +913,7 @@ class Parser:
         return items
 
     def _parse_with_item(self) -> WithItem:
-        expr = self._parse_expression()
+        expr = self._parse_expression(allow_tuple=False)
         target: Optional[Expression] = None
         if self._peek_is_keyword("as"):
             self._advance()
@@ -699,27 +936,80 @@ class Parser:
         self._expect("DEDENT")
         return statements
 
-    def _parse_expression(self) -> Expression:
+    def _parse_expression(self, *, allow_tuple: bool = True) -> Expression:
+        if self._peek_is_keyword("lambda"):
+            return self._parse_lambda()
         if self._peek_is_keyword("yield"):
             return self._parse_yield()
-        return self._parse_or()
+        expr = self._parse_named_expression()
+        if not allow_tuple:
+            return expr
+        if not self._match("OP", ","):
+            return expr
+        elements = [expr]
+        while True:
+            if self._at("NEWLINE") or self._at("DEDENT") or self._at("OP", ")") or self._at("OP", "]") or self._at("OP", "}"):
+                break
+            elements.append(self._parse_expression(allow_tuple=False))
+            if not self._match("OP", ","):
+                break
+        return TupleLiteral(elements=elements, line=elements[0].line, column=elements[0].column)
+
+    def _parse_lambda(self) -> Expression:
+        token = self._expect("KEYWORD", "lambda")
+        params = self._parse_parameters(":") if not self._at("OP", ":") else []
+        self._expect("OP", ":")
+        body = self._parse_expression(allow_tuple=False)
+        return LambdaExpr(params=params, body=body, line=token.line, column=token.column)
+
+    def _parse_named_expression(self) -> Expression:
+        if self._at("NAME") and self._peek_next_is("OP", ":="):
+            name_token = self._advance()
+            self._advance()
+            value = self._parse_expression(allow_tuple=False)
+            return AssignmentExpr(
+                target=Name(identifier=name_token.value, line=name_token.line, column=name_token.column),
+                value=value,
+                line=name_token.line,
+                column=name_token.column,
+            )
+        return self._parse_conditional()
+
+    def _parse_conditional(self) -> Expression:
+        expr = self._parse_or()
+        if not self._peek_is_keyword("if"):
+            return expr
+        self._advance()
+        test = self._parse_or()
+        if not self._peek_is_keyword("else"):
+            token = self._current()
+            raise ViperSyntaxError("Expected 'else' in conditional expression", token.line, token.column)
+        self._advance()
+        orelse = self._parse_expression(allow_tuple=False)
+        return ConditionalExpr(
+            test=test,
+            body=expr,
+            orelse=orelse,
+            line=expr.line,
+            column=expr.column,
+        )
 
     def _parse_yield(self) -> Expression:
         token = self._expect("KEYWORD", "yield")
         if self._peek_is_keyword("from"):
             self._advance()
-            value = self._parse_expression()
+            value = self._parse_expression(allow_tuple=False)
             return YieldFromExpr(value=value, line=token.line, column=token.column)
         if self._at("NEWLINE") or self._at("OP", ")") or self._at("OP", "]") or self._at("OP", "}") or self._at("DEDENT"):
             return YieldExpr(value=None, line=token.line, column=token.column)
-        expr = self._parse_expression()
+        expr = self._parse_expression(allow_tuple=False)
         if not self._match("OP", ","):
             return YieldExpr(value=expr, line=token.line, column=token.column)
         elements = [expr]
         while True:
             if self._at("NEWLINE") or self._at("OP", ")") or self._at("OP", "]") or self._at("OP", "}") or self._at("DEDENT"):
                 break
-            elements.append(self._parse_expression())
+            elements.append(self._parse_expression(allow_tuple=False))
             if not self._match("OP", ","):
                 break
         return YieldExpr(
@@ -752,18 +1042,50 @@ class Parser:
         return self._parse_comparison()
 
     def _parse_comparison(self) -> Expression:
-        expr = self._parse_term()
+        expr = self._parse_bitwise_or()
         ops: List[str] = []
         comparators: List[Expression] = []
         while True:
             op = self._match_comparison_op()
             if op is None:
                 break
-            right = self._parse_term()
+            right = self._parse_bitwise_or()
             ops.append(op)
             comparators.append(right)
         if ops:
             return CompareOp(left=expr, ops=ops, comparators=comparators, line=expr.line, column=expr.column)
+        return expr
+
+    def _parse_bitwise_or(self) -> Expression:
+        expr = self._parse_bitwise_xor()
+        while self._at("OP") and self._current().value == "|":
+            token = self._advance()
+            right = self._parse_bitwise_xor()
+            expr = BinaryOp(left=expr, op=token.value, right=right, line=token.line, column=token.column)
+        return expr
+
+    def _parse_bitwise_xor(self) -> Expression:
+        expr = self._parse_bitwise_and()
+        while self._at("OP") and self._current().value == "^":
+            token = self._advance()
+            right = self._parse_bitwise_and()
+            expr = BinaryOp(left=expr, op=token.value, right=right, line=token.line, column=token.column)
+        return expr
+
+    def _parse_bitwise_and(self) -> Expression:
+        expr = self._parse_shift_expr()
+        while self._at("OP") and self._current().value == "&":
+            token = self._advance()
+            right = self._parse_shift_expr()
+            expr = BinaryOp(left=expr, op=token.value, right=right, line=token.line, column=token.column)
+        return expr
+
+    def _parse_shift_expr(self) -> Expression:
+        expr = self._parse_term()
+        while self._at("OP") and self._current().value in {"<<", ">>"}:
+            token = self._advance()
+            right = self._parse_term()
+            expr = BinaryOp(left=expr, op=token.value, right=right, line=token.line, column=token.column)
         return expr
 
     def _parse_term(self) -> Expression:
@@ -776,14 +1098,18 @@ class Parser:
 
     def _parse_factor(self) -> Expression:
         expr = self._parse_unary()
-        while self._at("OP") and self._current().value in {"*", "/", "//", "%"}:
+        while self._at("OP") and self._current().value in {"*", "/", "//", "%", "@"}:
             token = self._advance()
             right = self._parse_unary()
             expr = BinaryOp(left=expr, op=token.value, right=right, line=token.line, column=token.column)
         return expr
 
     def _parse_unary(self) -> Expression:
-        if self._at("OP") and self._current().value in {"+", "-"}:
+        if self._peek_is_keyword("await"):
+            token = self._advance()
+            operand = self._parse_unary()
+            return AwaitExpr(value=operand, line=token.line, column=token.column)
+        if self._at("OP") and self._current().value in {"+", "-", "~"}:
             token = self._advance()
             operand = self._parse_unary()
             return UnaryOp(op=token.value, operand=operand, line=token.line, column=token.column)
@@ -832,7 +1158,7 @@ class Parser:
         if self._at("OP", ":"):
             colon = self._expect("OP", ":")
             return self._parse_slice_tail(None, colon.line, colon.column)
-        expr = self._parse_expression()
+        expr = self._parse_expression(allow_tuple=False)
         if self._match("OP", ":"):
             return self._parse_slice_tail(expr, expr.line, expr.column)
         return expr
@@ -843,32 +1169,49 @@ class Parser:
         stop: Optional[Expression] = None
         step: Optional[Expression] = None
         if not self._at("OP", "]") and not self._at("OP", ",") and not self._at("OP", ":"):
-            stop = self._parse_expression()
+            stop = self._parse_expression(allow_tuple=False)
         if self._match("OP", ":"):
             if not self._at("OP", "]") and not self._at("OP", ","):
-                step = self._parse_expression()
+                step = self._parse_expression(allow_tuple=False)
         return SliceExpr(start=start, stop=stop, step=step, line=line, column=column)
 
-    def _parse_call_args(self) -> Tuple[List[Expression], List[Tuple[str, Expression]]]:
+    def _parse_call_args(self) -> Tuple[List[Expression], List[Tuple[Optional[str], Expression]]]:
         args: List[Expression] = []
-        kwargs: List[Tuple[str, Expression]] = []
+        kwargs: List[Tuple[Optional[str], Expression]] = []
         saw_kwarg = False
         if self._match("OP", ")"):
             return args, kwargs
         while True:
-            if self._at("NAME") and self._peek_next_is("OP", "="):
+            if self._at("OP", "**"):
+                token = self._advance()
+                value = self._parse_expression(allow_tuple=False)
+                kwargs.append((None, value))
+                saw_kwarg = True
+            elif self._at("OP", "*"):
+                token = self._advance()
+                if saw_kwarg:
+                    raise ViperSyntaxError(
+                        "Positional argument follows keyword argument",
+                        token.line,
+                        token.column,
+                    )
+                value = self._parse_expression(allow_tuple=False)
+                args.append(Starred(target=value, line=token.line, column=token.column))
+            elif self._at("NAME") and self._peek_next_is("OP", "="):
                 name_token = self._advance()
                 self._expect("OP", "=")
-                value = self._parse_expression()
+                value = self._parse_expression(allow_tuple=False)
                 kwargs.append((name_token.value, value))
                 saw_kwarg = True
             else:
                 if saw_kwarg:
                     token = self._current()
                     raise ViperSyntaxError(
-                        "Positional argument follows keyword argument", token.line, token.column
+                        "Positional argument follows keyword argument",
+                        token.line,
+                        token.column,
                     )
-                args.append(self._parse_expression())
+                args.append(self._parse_expression(allow_tuple=False))
             if self._match("OP", ","):
                 if self._match("OP", ")"):
                     break
@@ -876,6 +1219,13 @@ class Parser:
             self._expect("OP", ")")
             break
         return args, kwargs
+
+    def _parse_star_expression(self) -> Expression:
+        if self._at("OP", "*"):
+            token = self._advance()
+            value = self._parse_expression(allow_tuple=False)
+            return Starred(target=value, line=token.line, column=token.column)
+        return self._parse_expression(allow_tuple=False)
 
     def _parse_atom(self) -> Expression:
         token = self._current()
@@ -902,13 +1252,13 @@ class Parser:
         if self._match("OP", "("):
             if self._match("OP", ")"):
                 return TupleLiteral(elements=[], line=token.line, column=token.column)
-            expr = self._parse_expression()
+            expr = self._parse_star_expression()
             if self._match("OP", ","):
                 elements = [expr]
                 if self._match("OP", ")"):
                     return TupleLiteral(elements=elements, line=token.line, column=token.column)
                 while True:
-                    elements.append(self._parse_expression())
+                    elements.append(self._parse_star_expression())
                     if self._match("OP", ","):
                         if self._match("OP", ")"):
                             break
@@ -916,6 +1266,8 @@ class Parser:
                     self._expect("OP", ")")
                     break
                 return TupleLiteral(elements=elements, line=token.line, column=token.column)
+            if isinstance(expr, Starred):
+                raise ViperSyntaxError("Starred expression is not allowed here", expr.line, expr.column)
             self._expect("OP", ")")
             return expr
         if self._match("OP", "["):
@@ -923,7 +1275,7 @@ class Parser:
             if self._match("OP", "]"):
                 return ListLiteral(elements=elements, line=token.line, column=token.column)
             while True:
-                elements.append(self._parse_expression())
+                elements.append(self._parse_star_expression())
                 if self._match("OP", ","):
                     if self._match("OP", "]"):
                         break
@@ -932,14 +1284,19 @@ class Parser:
                 break
             return ListLiteral(elements=elements, line=token.line, column=token.column)
         if self._match("OP", "{"):
-            items: List[Tuple[Expression, Expression]] = []
+            items: List[Tuple[Optional[Expression], Expression]] = []
             if self._match("OP", "}"):
                 return DictLiteral(items=items, line=token.line, column=token.column)
             while True:
-                key = self._parse_expression()
-                self._expect("OP", ":")
-                value = self._parse_expression()
-                items.append((key, value))
+                if self._at("OP", "**"):
+                    token = self._advance()
+                    value = self._parse_expression(allow_tuple=False)
+                    items.append((None, value))
+                else:
+                    key = self._parse_expression(allow_tuple=False)
+                    self._expect("OP", ":")
+                    value = self._parse_expression(allow_tuple=False)
+                    items.append((key, value))
                 if self._match("OP", ","):
                     if self._match("OP", "}"):
                         break
@@ -951,33 +1308,124 @@ class Parser:
 
     def _parse_assignment_target_list(self) -> Optional[Expression]:
         start_pos = self.position
-        expr = self._parse_expression()
+        try:
+            expr = self._parse_assignment_target()
+        except ViperSyntaxError:
+            self.position = start_pos
+            return None
         elements = [expr]
         saw_comma = False
         while self._match("OP", ","):
             saw_comma = True
-            if self._at("OP", "="):
+            if self._at("OP", "=") or self._at("OP", ":") or self._peek_is_augassign():
                 break
-            elements.append(self._parse_expression())
+            if self._at("NEWLINE"):
+                break
+            elements.append(self._parse_assignment_target())
         if not saw_comma:
             return expr
-        if self._at("OP", "="):
+        if self._at("OP", "=") or self._at("OP", ":") or self._peek_is_augassign():
             return TupleLiteral(elements=elements, line=elements[0].line, column=elements[0].column)
         self.position = start_pos
         return None
 
+    def _parse_assignment_target(self) -> Expression:
+        token = self._current()
+        if self._match("OP", "*"):
+            target = self._parse_assignment_target()
+            return Starred(target=target, line=token.line, column=token.column)
+        if self._match("OP", "("):
+            if self._match("OP", ")"):
+                return TupleLiteral(elements=[], line=token.line, column=token.column)
+            first = self._parse_assignment_target()
+            if self._match("OP", ","):
+                elements = [first]
+                if self._match("OP", ")"):
+                    return TupleLiteral(elements=elements, line=token.line, column=token.column)
+                while True:
+                    elements.append(self._parse_assignment_target())
+                    if self._match("OP", ","):
+                        if self._match("OP", ")"):
+                            break
+                        continue
+                    self._expect("OP", ")")
+                    break
+                return TupleLiteral(elements=elements, line=token.line, column=token.column)
+            self._expect("OP", ")")
+            return first
+        if self._match("OP", "["):
+            elements: List[Expression] = []
+            if self._match("OP", "]"):
+                return ListLiteral(elements=elements, line=token.line, column=token.column)
+            while True:
+                elements.append(self._parse_assignment_target())
+                if self._match("OP", ","):
+                    if self._match("OP", "]"):
+                        break
+                    continue
+                self._expect("OP", "]")
+                break
+            return ListLiteral(elements=elements, line=token.line, column=token.column)
+        return self._parse_postfix()
+
     def _parse_assignment_value(self) -> Expression:
         expr = self._parse_expression()
+        return self._parse_assignment_value_tail(expr)
+
+    def _parse_assignment_value_tail(self, expr: Expression) -> Expression:
         elements = [expr]
         if not self._match("OP", ","):
             return expr
         while True:
             if self._at("NEWLINE"):
                 break
-            elements.append(self._parse_expression())
+            elements.append(self._parse_expression(allow_tuple=False))
             if not self._match("OP", ","):
                 break
         return TupleLiteral(elements=elements, line=elements[0].line, column=elements[0].column)
+
+    def _parse_type_comment(self) -> Optional[str]:
+        if self._at("TYPE_COMMENT"):
+            token = self._advance()
+            return str(token.value)
+        return None
+
+    def _match_augassign(self) -> Optional[str]:
+        if self._at("OP") and self._current().value in {
+            "+=",
+            "-=",
+            "*=",
+            "/=",
+            "//=",
+            "%=",
+            "**=",
+            "@=",
+            "|=",
+            "&=",
+            "^=",
+            "<<=",
+            ">>=",
+        }:
+            token = self._advance()
+            return token.value[:-1]
+        return None
+
+    def _peek_is_augassign(self) -> bool:
+        return self._at("OP") and self._current().value in {
+            "+=",
+            "-=",
+            "*=",
+            "/=",
+            "//=",
+            "%=",
+            "**=",
+            "@=",
+            "|=",
+            "&=",
+            "^=",
+            "<<=",
+            ">>=",
+        }
 
     def _parse_string_sequence(self) -> Expression:
         parts: List[Expression] = []
@@ -1050,6 +1498,12 @@ class Parser:
     def _match_comparison_op(self) -> Optional[str]:
         if self._at("OP") and self._current().value in {"==", "!=", "<", "<=", ">", ">="}:
             return self._advance().value
+        if self._peek_is_keyword("is"):
+            self._advance()
+            if self._peek_is_keyword("not"):
+                self._advance()
+                return "is not"
+            return "is"
         if self._peek_is_keyword("in"):
             self._advance()
             return "in"
@@ -1062,9 +1516,14 @@ class Parser:
     def _is_assignable(self, expr: Expression) -> bool:
         if isinstance(expr, (Name, Attribute, Subscript)):
             return True
-        if isinstance(expr, TupleLiteral):
+        if isinstance(expr, Starred):
+            return self._is_assignable(expr.target)
+        if isinstance(expr, (TupleLiteral, ListLiteral)):
             return all(self._is_assignable(element) for element in expr.elements)
         return False
+
+    def _is_simple_target(self, expr: Expression) -> bool:
+        return isinstance(expr, (Name, Attribute, Subscript))
 
     def _peek_is_keyword(self, value: str) -> bool:
         return self._at("KEYWORD", value)

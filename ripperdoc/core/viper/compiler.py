@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from ripperdoc.core.viper.ast_nodes import (
     AssignStmt,
+    AugAssignStmt,
+    AnnAssignStmt,
     Attribute,
+    AssignmentExpr,
+    AwaitExpr,
     BinaryOp,
     BreakStmt,
     Call,
     ClassDef,
     CompareOp,
+    ConditionalExpr,
     ContinueStmt,
     DictLiteral,
     DelStmt,
@@ -29,6 +34,7 @@ from ripperdoc.core.viper.ast_nodes import (
     ListLiteral,
     FormattedString,
     FormatField,
+    LambdaExpr,
     Literal,
     Module,
     MatchCase,
@@ -44,6 +50,7 @@ from ripperdoc.core.viper.ast_nodes import (
     StringText,
     TupleLiteral,
     TypeAliasStmt,
+    Parameter,
     UnaryOp,
     WhileStmt,
     WithStmt,
@@ -56,8 +63,9 @@ from ripperdoc.core.viper.ast_nodes import (
     PatternOr,
     PatternSequence,
     PatternWildcard,
+    Starred,
 )
-from ripperdoc.core.viper.bytecode import CodeObject, Instruction, Label
+from ripperdoc.core.viper.bytecode import CodeObject, Instruction, Label, ParamSpec
 from ripperdoc.core.viper.errors import ViperSyntaxError
 
 
@@ -103,10 +111,29 @@ class BytecodeCompiler:
         code = CodeObject(
             name=func.name,
             instructions=nested._instructions,
-            params=func.params,
+            params=[param.name for param in func.params],
+            param_spec=self._build_param_spec(func.params),
             is_module=False,
             is_generator=contains_yield,
             is_coroutine=func.is_async,
+        )
+        nested._resolve_labels(code)
+        return code
+
+    def _compile_lambda(self, expr: LambdaExpr) -> CodeObject:
+        nested = BytecodeCompiler()
+        nested._in_generator = False
+        nested._in_coroutine = False
+        nested._compile_expression(expr.body)
+        nested._emit("RETURN_VALUE", True, expr)
+        code = CodeObject(
+            name="<lambda>",
+            instructions=nested._instructions,
+            params=[param.name for param in expr.params],
+            param_spec=self._build_param_spec(expr.params),
+            is_module=False,
+            is_generator=False,
+            is_coroutine=False,
         )
         nested._resolve_labels(code)
         return code
@@ -139,6 +166,12 @@ class BytecodeCompiler:
         if isinstance(stmt, AssignStmt):
             self._compile_assignment(stmt)
             return
+        if isinstance(stmt, AugAssignStmt):
+            self._compile_augassign(stmt)
+            return
+        if isinstance(stmt, AnnAssignStmt):
+            self._compile_annassign(stmt)
+            return
         if isinstance(stmt, IfStmt):
             self._compile_if(stmt)
             return
@@ -156,8 +189,14 @@ class BytecodeCompiler:
             return
         if isinstance(stmt, FunctionDef):
             func_code = self.compile_function(stmt)
+            pos_defaults, kw_defaults = self._collect_param_defaults(stmt.params)
+            for expr in pos_defaults:
+                self._compile_expression(expr)
+            kw_default_names = [name for name, _ in kw_defaults]
+            for _, expr in kw_defaults:
+                self._compile_expression(expr)
             self._emit("LOAD_CONST", func_code, stmt)
-            self._emit("MAKE_FUNCTION", None, stmt)
+            self._emit("MAKE_FUNCTION", (len(pos_defaults), kw_default_names), stmt)
             self._emit("STORE_NAME", stmt.name, stmt)
             self._emit("LOAD_CONST", None, stmt)
             self._emit("SET_RESULT", None, stmt)
@@ -306,32 +345,125 @@ class BytecodeCompiler:
         self._mark(end_label)
 
     def _compile_assignment(self, stmt: AssignStmt) -> None:
-        target = stmt.target
-        if isinstance(target, TupleLiteral):
+        if len(stmt.targets) == 1:
             self._compile_expression(stmt.value)
-            self._compile_unpack_targets(target, stmt)
-        elif isinstance(target, Name):
-            self._compile_expression(stmt.value)
-            self._emit("STORE_NAME", target.identifier, stmt)
-        elif isinstance(target, Attribute):
-            self._compile_expression(target.value)
-            self._compile_expression(stmt.value)
-            self._emit("SET_ATTR", target.name, stmt)
-        elif isinstance(target, Subscript):
-            self._compile_expression(target.value)
-            self._compile_expression(target.index)
-            self._compile_expression(stmt.value)
-            self._emit("SET_SUBSCRIPT", None, stmt)
-        else:
-            raise ViperSyntaxError("Invalid assignment target", stmt.line, stmt.column)
+            self._compile_assign_target(stmt.targets[0], stmt)
+            self._emit("LOAD_CONST", None, stmt)
+            self._emit("SET_RESULT", None, stmt)
+            return
+
+        temp_name = self._new_temp_name("assign")
+        self._compile_expression(stmt.value)
+        self._emit("STORE_NAME", temp_name, stmt)
+        for target in stmt.targets:
+            self._emit("LOAD_NAME", temp_name, stmt)
+            self._compile_assign_target(target, stmt)
+        self._emit("DELETE_NAME", temp_name, stmt)
         self._emit("LOAD_CONST", None, stmt)
         self._emit("SET_RESULT", None, stmt)
 
+    def _compile_augassign(self, stmt: AugAssignStmt) -> None:
+        target = stmt.target
+        if isinstance(target, Name):
+            self._emit("LOAD_NAME", target.identifier, stmt)
+            self._compile_expression(stmt.value)
+            self._emit("BINARY_OP", stmt.op, stmt)
+            self._emit("STORE_NAME", target.identifier, stmt)
+            self._emit("LOAD_CONST", None, stmt)
+            self._emit("SET_RESULT", None, stmt)
+            return
+        if isinstance(target, Attribute):
+            obj_temp = self._new_temp_name("aug_obj")
+            val_temp = self._new_temp_name("aug_val")
+            self._compile_expression(target.value)
+            self._emit("STORE_NAME", obj_temp, stmt)
+            self._emit("LOAD_NAME", obj_temp, stmt)
+            self._emit("GET_ATTR", target.name, stmt)
+            self._compile_expression(stmt.value)
+            self._emit("BINARY_OP", stmt.op, stmt)
+            self._emit("STORE_NAME", val_temp, stmt)
+            self._emit("LOAD_NAME", obj_temp, stmt)
+            self._emit("LOAD_NAME", val_temp, stmt)
+            self._emit("SET_ATTR", target.name, stmt)
+            self._emit("DELETE_NAME", obj_temp, stmt)
+            self._emit("DELETE_NAME", val_temp, stmt)
+            self._emit("LOAD_CONST", None, stmt)
+            self._emit("SET_RESULT", None, stmt)
+            return
+        if isinstance(target, Subscript):
+            obj_temp = self._new_temp_name("aug_obj")
+            idx_temp = self._new_temp_name("aug_idx")
+            val_temp = self._new_temp_name("aug_val")
+            self._compile_expression(target.value)
+            self._emit("STORE_NAME", obj_temp, stmt)
+            self._compile_expression(target.index)
+            self._emit("STORE_NAME", idx_temp, stmt)
+            self._emit("LOAD_NAME", obj_temp, stmt)
+            self._emit("LOAD_NAME", idx_temp, stmt)
+            self._emit("GET_SUBSCRIPT", None, stmt)
+            self._compile_expression(stmt.value)
+            self._emit("BINARY_OP", stmt.op, stmt)
+            self._emit("STORE_NAME", val_temp, stmt)
+            self._emit("LOAD_NAME", obj_temp, stmt)
+            self._emit("LOAD_NAME", idx_temp, stmt)
+            self._emit("LOAD_NAME", val_temp, stmt)
+            self._emit("SET_SUBSCRIPT", None, stmt)
+            self._emit("DELETE_NAME", obj_temp, stmt)
+            self._emit("DELETE_NAME", idx_temp, stmt)
+            self._emit("DELETE_NAME", val_temp, stmt)
+            self._emit("LOAD_CONST", None, stmt)
+            self._emit("SET_RESULT", None, stmt)
+            return
+        raise ViperSyntaxError("Invalid assignment target", stmt.line, stmt.column)
+
+    def _compile_annassign(self, stmt: AnnAssignStmt) -> None:
+        if stmt.value is not None:
+            self._compile_expression(stmt.value)
+            self._compile_assign_target(stmt.target, stmt)
+        self._emit("LOAD_CONST", None, stmt)
+        self._emit("SET_RESULT", None, stmt)
+
+    def _compile_assign_target(self, target: Expression, stmt: AssignStmt | Statement) -> None:
+        if isinstance(target, (TupleLiteral, ListLiteral)):
+            self._compile_unpack_targets(target, stmt)
+            return
+        if isinstance(target, Name):
+            self._emit("STORE_NAME", target.identifier, stmt)
+            return
+        if isinstance(target, Attribute):
+            self._compile_expression(target.value)
+            self._emit("SWAP", None, stmt)
+            self._emit("SET_ATTR", target.name, stmt)
+            return
+        if isinstance(target, Subscript):
+            self._compile_expression(target.value)
+            self._compile_expression(target.index)
+            self._emit("ROT_THREE", None, stmt)
+            self._emit("SET_SUBSCRIPT", None, stmt)
+            return
+        if isinstance(target, Starred):
+            raise ViperSyntaxError("Invalid assignment target", stmt.line, stmt.column)
+        raise ViperSyntaxError("Invalid assignment target", stmt.line, stmt.column)
+
     def _compile_unpack_targets(self, target: Expression, node: AssignStmt) -> None:
-        if isinstance(target, TupleLiteral):
-            self._emit("UNPACK_SEQUENCE", len(target.elements), node)
+        if isinstance(target, (TupleLiteral, ListLiteral)):
+            starred_index = None
+            for index, element in enumerate(target.elements):
+                if isinstance(element, Starred):
+                    if starred_index is not None:
+                        raise ViperSyntaxError("Multiple starred targets in assignment", node.line, node.column)
+                    starred_index = index
+            if starred_index is None:
+                self._emit("UNPACK_SEQUENCE", len(target.elements), node)
+            else:
+                before = starred_index
+                after = len(target.elements) - starred_index - 1
+                self._emit("UNPACK_EX", (before, after), node)
             for element in target.elements:
                 self._compile_unpack_targets(element, node)
+            return
+        if isinstance(target, Starred):
+            self._compile_store_target(target.target, node)
             return
         if isinstance(target, Name):
             self._emit("STORE_NAME", target.identifier, node)
@@ -435,7 +567,17 @@ class BytecodeCompiler:
         self._emit("SET_RESULT", None, stmt)
 
     def _compile_import_from(self, stmt: ImportFromStmt) -> None:
-        module_name = stmt.module or ""
+        if stmt.module is None:
+            if stmt.is_star:
+                raise ViperSyntaxError("from . import * is not supported", stmt.line, stmt.column)
+            for alias in stmt.names:
+                self._emit("IMPORT_NAME", (alias.name, None, stmt.level), stmt)
+                target_name = alias.asname or alias.name
+                self._emit("STORE_NAME", target_name, stmt)
+            self._emit("LOAD_CONST", None, stmt)
+            self._emit("SET_RESULT", None, stmt)
+            return
+        module_name = stmt.module
         if stmt.is_star:
             fromlist = ["*"]
         else:
@@ -540,8 +682,11 @@ class BytecodeCompiler:
         class_code = self.compile_class(stmt)
         for base in stmt.bases:
             self._compile_expression(base)
+        for _, value in stmt.keywords:
+            self._compile_expression(value)
+        kwarg_names = [name for name, _ in stmt.keywords]
         self._emit("LOAD_CONST", class_code, stmt)
-        self._emit("MAKE_CLASS", (stmt.name, len(stmt.bases)), stmt)
+        self._emit("MAKE_CLASS", (stmt.name, len(stmt.bases), kwarg_names), stmt)
         for decorator in reversed(stmt.decorators):
             self._compile_expression(decorator)
             self._emit("SWAP", None, stmt)
@@ -589,6 +734,30 @@ class BytecodeCompiler:
         if isinstance(expr, Name):
             self._emit("LOAD_NAME", expr.identifier, expr)
             return
+        if isinstance(expr, AssignmentExpr):
+            self._compile_expression(expr.value)
+            self._emit("STORE_NAME", expr.target.identifier, expr)
+            self._emit("LOAD_NAME", expr.target.identifier, expr)
+            return
+        if isinstance(expr, AwaitExpr):
+            if not self._in_coroutine:
+                raise ViperSyntaxError("'await' outside async function", expr.line, expr.column)
+            self._compile_expression(expr.value)
+            self._emit("AWAIT", None, expr)
+            return
+        if isinstance(expr, LambdaExpr):
+            lambda_code = self._compile_lambda(expr)
+            pos_defaults, kw_defaults = self._collect_param_defaults(expr.params)
+            for default_expr in pos_defaults:
+                self._compile_expression(default_expr)
+            kw_default_names = [name for name, _ in kw_defaults]
+            for _, default_expr in kw_defaults:
+                self._compile_expression(default_expr)
+            self._emit("LOAD_CONST", lambda_code, expr)
+            self._emit("MAKE_FUNCTION", (len(pos_defaults), kw_default_names), expr)
+            return
+        if isinstance(expr, Starred):
+            raise ViperSyntaxError("Invalid starred expression", expr.line, expr.column)
         if isinstance(expr, Literal):
             self._emit("LOAD_CONST", expr.value, expr)
             return
@@ -596,20 +765,65 @@ class BytecodeCompiler:
             self._compile_formatted_string(expr)
             return
         if isinstance(expr, ListLiteral):
-            for element in expr.elements:
-                self._compile_expression(element)
-            self._emit("BUILD_LIST", len(expr.elements), expr)
+            if any(isinstance(element, Starred) for element in expr.elements):
+                flags: List[bool] = []
+                for element in expr.elements:
+                    if isinstance(element, Starred):
+                        self._compile_expression(element.target)
+                        flags.append(True)
+                    else:
+                        self._compile_expression(element)
+                        flags.append(False)
+                self._emit("BUILD_LIST_UNPACK", flags, expr)
+            else:
+                for element in expr.elements:
+                    self._compile_expression(element)
+                self._emit("BUILD_LIST", len(expr.elements), expr)
             return
         if isinstance(expr, TupleLiteral):
-            for element in expr.elements:
-                self._compile_expression(element)
-            self._emit("BUILD_TUPLE", len(expr.elements), expr)
+            if any(isinstance(element, Starred) for element in expr.elements):
+                flags = []
+                for element in expr.elements:
+                    if isinstance(element, Starred):
+                        self._compile_expression(element.target)
+                        flags.append(True)
+                    else:
+                        self._compile_expression(element)
+                        flags.append(False)
+                self._emit("BUILD_TUPLE_UNPACK", flags, expr)
+            else:
+                for element in expr.elements:
+                    self._compile_expression(element)
+                self._emit("BUILD_TUPLE", len(expr.elements), expr)
             return
         if isinstance(expr, DictLiteral):
-            for key, value in expr.items:
-                self._compile_expression(key)
-                self._compile_expression(value)
-            self._emit("BUILD_DICT", len(expr.items), expr)
+            if any(key is None for key, _ in expr.items):
+                flags: List[bool] = []
+                for key, value in expr.items:
+                    if key is None:
+                        self._compile_expression(value)
+                        flags.append(True)
+                    else:
+                        self._compile_expression(key)
+                        self._compile_expression(value)
+                        flags.append(False)
+                self._emit("BUILD_DICT_UNPACK", flags, expr)
+            else:
+                for key, value in expr.items:
+                    self._compile_expression(key)
+                    self._compile_expression(value)
+                self._emit("BUILD_DICT", len(expr.items), expr)
+            return
+        if isinstance(expr, ConditionalExpr):
+            else_label = Label()
+            end_label = Label()
+            self._compile_expression(expr.test)
+            self._emit("JUMP_IF_FALSE", else_label, expr)
+            self._compile_expression(expr.body)
+            self._emit("JUMP", end_label, expr)
+            self._mark(else_label)
+            self._compile_expression(expr.orelse)
+            self._mark(end_label)
             return
         if isinstance(expr, UnaryOp):
             self._compile_expression(expr.operand)
@@ -657,13 +871,54 @@ class BytecodeCompiler:
             self._compile_yield_from(expr)
             return
         if isinstance(expr, Call):
+            has_star_args = any(isinstance(arg, Starred) for arg in expr.args)
+            has_kw_unpack = any(name is None for name, _ in expr.kwargs)
+            if not has_star_args and not has_kw_unpack:
+                self._compile_expression(expr.func)
+                for arg in expr.args:
+                    self._compile_expression(arg)
+                for name, value in expr.kwargs:
+                    if name is None:
+                        raise ViperSyntaxError("Invalid keyword unpack", expr.line, expr.column)
+                    self._compile_expression(value)
+                kwarg_names = [name for name, _ in expr.kwargs if name is not None]
+                self._emit("CALL_FUNCTION", (len(expr.args), kwarg_names), expr)
+                return
             self._compile_expression(expr.func)
-            for arg in expr.args:
-                self._compile_expression(arg)
-            for _, value in expr.kwargs:
-                self._compile_expression(value)
-            kwarg_names = [name for name, _ in expr.kwargs]
-            self._emit("CALL_FUNCTION", (len(expr.args), kwarg_names), expr)
+            if expr.args:
+                if has_star_args:
+                    flags: List[bool] = []
+                    for arg in expr.args:
+                        if isinstance(arg, Starred):
+                            self._compile_expression(arg.target)
+                            flags.append(True)
+                        else:
+                            self._compile_expression(arg)
+                            flags.append(False)
+                    self._emit("BUILD_LIST_UNPACK", flags, expr)
+                else:
+                    for arg in expr.args:
+                        self._compile_expression(arg)
+                    self._emit("BUILD_LIST", len(expr.args), expr)
+            else:
+                self._emit("BUILD_LIST", 0, expr)
+            has_kwargs = False
+            if expr.kwargs:
+                flags = []
+                for name, value in expr.kwargs:
+                    if name is None:
+                        self._compile_expression(value)
+                        flags.append(True)
+                    else:
+                        self._emit("LOAD_CONST", name, expr)
+                        self._compile_expression(value)
+                        flags.append(False)
+                if any(flags):
+                    self._emit("BUILD_DICT_UNPACK", flags, expr)
+                else:
+                    self._emit("BUILD_DICT", len(expr.kwargs), expr)
+                has_kwargs = True
+            self._emit("CALL_FUNCTION_EX", has_kwargs, expr)
             return
         if isinstance(expr, Attribute):
             self._compile_expression(expr.value)
@@ -777,6 +1032,53 @@ class BytecodeCompiler:
             raise ViperSyntaxError("Unsupported format spec", 0, 0)
         self._emit("BUILD_STRING", part_count, None)
 
+    def _build_param_spec(self, params: List[Parameter]) -> ParamSpec:
+        posonly: List[str] = []
+        pos_or_kw: List[str] = []
+        kwonly: List[str] = []
+        vararg: Optional[str] = None
+        varkw: Optional[str] = None
+        for param in params:
+            if param.kind == "posonly":
+                posonly.append(param.name)
+            elif param.kind == "poskw":
+                pos_or_kw.append(param.name)
+            elif param.kind == "kwonly":
+                kwonly.append(param.name)
+            elif param.kind == "varpos":
+                vararg = param.name
+            elif param.kind == "varkw":
+                varkw = param.name
+        return ParamSpec(
+            posonly=posonly,
+            pos_or_kw=pos_or_kw,
+            kwonly=kwonly,
+            vararg=vararg,
+            varkw=varkw,
+        )
+
+    def _collect_param_defaults(
+        self, params: List[Parameter]
+    ) -> Tuple[List[Expression], List[Tuple[str, Expression]]]:
+        positional = [param for param in params if param.kind in {"posonly", "poskw"}]
+        pos_defaults: List[Expression] = []
+        for param in reversed(positional):
+            if param.default is None:
+                break
+            pos_defaults.insert(0, param.default)
+        cutoff = len(positional) - len(pos_defaults)
+        for param in positional[:cutoff]:
+            if param.default is not None:
+                raise ViperSyntaxError(
+                    "Non-default argument follows default argument", param.line, param.column
+                )
+        kw_defaults = [
+            (param.name, param.default)
+            for param in params
+            if param.kind == "kwonly" and param.default is not None
+        ]
+        return pos_defaults, kw_defaults
+
     def _new_temp_name(self, prefix: str) -> str:
         name = f"__viper_{prefix}_{self._temp_counter}"
         self._temp_counter += 1
@@ -836,6 +1138,16 @@ def _contains_yield(statements: List[Statement]) -> bool:
     def expr_has_yield(expr: Expression) -> bool:
         if isinstance(expr, (YieldExpr, YieldFromExpr)):
             return True
+        if isinstance(expr, AssignmentExpr):
+            return expr_has_yield(expr.value)
+        if isinstance(expr, Starred):
+            return expr_has_yield(expr.target)
+        if isinstance(expr, ConditionalExpr):
+            return (
+                expr_has_yield(expr.test)
+                or expr_has_yield(expr.body)
+                or expr_has_yield(expr.orelse)
+            )
         if isinstance(expr, UnaryOp):
             return expr_has_yield(expr.operand)
         if isinstance(expr, BinaryOp):
@@ -860,7 +1172,10 @@ def _contains_yield(statements: List[Statement]) -> bool:
         if isinstance(expr, TupleLiteral):
             return any(expr_has_yield(e) for e in expr.elements)
         if isinstance(expr, DictLiteral):
-            return any(expr_has_yield(k) or expr_has_yield(v) for k, v in expr.items)
+            return any(
+                (k is not None and expr_has_yield(k)) or expr_has_yield(v)
+                for k, v in expr.items
+            )
         if isinstance(expr, FormattedString):
             for part in expr.parts:
                 if isinstance(part, FormatField):
@@ -878,7 +1193,15 @@ def _contains_yield(statements: List[Statement]) -> bool:
         if isinstance(stmt, ExpressionStmt):
             return expr_has_yield(stmt.expression)
         if isinstance(stmt, AssignStmt):
+            return any(expr_has_yield(t) for t in stmt.targets) or expr_has_yield(stmt.value)
+        if isinstance(stmt, AugAssignStmt):
             return expr_has_yield(stmt.target) or expr_has_yield(stmt.value)
+        if isinstance(stmt, AnnAssignStmt):
+            return (
+                expr_has_yield(stmt.target)
+                or expr_has_yield(stmt.annotation)
+                or (stmt.value is not None and expr_has_yield(stmt.value))
+            )
         if isinstance(stmt, IfStmt):
             return (
                 expr_has_yield(stmt.test)

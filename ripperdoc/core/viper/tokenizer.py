@@ -38,15 +38,34 @@ KEYWORDS = {
     "and",
     "or",
     "not",
+    "is",
     "as",
     "from",
     "with",
+    "await",
+    "lambda",
     "True",
     "False",
     "None",
 }
 
 MULTI_CHAR_OPERATORS = {
+    ":=",
+    "+=",
+    "-=",
+    "*=",
+    "/=",
+    "//=",
+    "%=",
+    "**=",
+    "@=",
+    "|=",
+    "&=",
+    "^=",
+    "<<=",
+    ">>=",
+    "<<",
+    ">>",
     "==",
     "!=",
     "<=",
@@ -63,6 +82,9 @@ SINGLE_CHAR_OPERATORS = {
     "%",
     "@",
     "|",
+    "&",
+    "^",
+    "~",
     "<",
     ">",
     "=",
@@ -154,11 +176,17 @@ class Tokenizer:
                 continue
 
             if ch == "#":
+                comment_col = col
+                start = i
                 while i < length and src[i] != "\n":
                     i += 1
                     col += 1
+                if not at_line_start:
+                    comment = src[start + 1 : i].lstrip()
+                    if comment.startswith("type:"):
+                        value = comment[len("type:") :].strip()
+                        tokens.append(Token("TYPE_COMMENT", value, line, comment_col))
                 continue
-
             if ch == "\n":
                 if paren_level == 0:
                     tokens.append(Token("NEWLINE", "", line, col))
@@ -486,7 +514,7 @@ class Tokenizer:
         return source[start:idx], idx
 
     def _read_operator(self, source: str, start: int) -> str | None:
-        for op in MULTI_CHAR_OPERATORS:
+        for op in sorted(MULTI_CHAR_OPERATORS, key=len, reverse=True):
             if source.startswith(op, start):
                 return op
         if source[start] in SINGLE_CHAR_OPERATORS:

@@ -43,8 +43,8 @@ def run_file(path: Path, *, show_disassembly: bool = False) -> int:
     if show_disassembly:
         click.echo(disassemble(code))
         click.echo("")
-    vm = Interpreter()
-    result = vm.execute(code)
+    vm = Interpreter(base_path=path.parent)
+    result = vm.execute(code, source_path=path)
     if result.value is not None:
         click.echo(f"Result: {result.value!r}")
     return 0

@@ -20,8 +20,28 @@ class ExpressionStmt:
 
 @dataclass
 class AssignStmt:
-    target: Expression
+    targets: List[Expression]
     value: Expression
+    type_comment: Optional[str]
+    line: int
+    column: int
+
+
+@dataclass
+class AugAssignStmt:
+    target: Expression
+    op: str
+    value: Expression
+    line: int
+    column: int
+
+
+@dataclass
+class AnnAssignStmt:
+    target: Expression
+    annotation: Expression
+    value: Optional[Expression]
+    type_comment: Optional[str]
     line: int
     column: int
 
@@ -57,9 +77,30 @@ class ForStmt:
 
 
 @dataclass
+class TypeParam:
+    name: str
+    kind: str
+    bound: Optional["Expression"]
+    default: Optional["Expression"]
+    line: int
+    column: int
+
+
+@dataclass
+class Parameter:
+    name: str
+    kind: str
+    default: Optional["Expression"]
+    line: int
+    column: int
+
+
+@dataclass
 class ClassDef:
     name: str
     bases: List[Expression]
+    keywords: List[Tuple[str, Expression]]
+    type_params: List[TypeParam]
     body: List[Statement]
     decorators: List[Expression]
     line: int
@@ -86,7 +127,8 @@ class WithStmt:
 @dataclass
 class FunctionDef:
     name: str
-    params: List[str]
+    params: List[Parameter]
+    type_params: List["TypeParam"]
     body: List[Statement]
     is_async: bool
     line: int
@@ -167,6 +209,7 @@ class DelStmt:
 @dataclass
 class TypeAliasStmt:
     name: str
+    type_params: List["TypeParam"]
     value: Expression
     line: int
     column: int
@@ -215,6 +258,21 @@ class Name:
 
 
 @dataclass
+class AssignmentExpr:
+    target: Name
+    value: Expression
+    line: int
+    column: int
+
+
+@dataclass
+class Starred:
+    target: Expression
+    line: int
+    column: int
+
+
+@dataclass
 class Literal:
     value: Any
     line: int
@@ -230,7 +288,7 @@ class ListLiteral:
 
 @dataclass
 class DictLiteral:
-    items: List[Tuple[Expression, Expression]]
+    items: List[Tuple[Optional[Expression], Expression]]
     line: int
     column: int
 
@@ -278,6 +336,30 @@ class UnaryOp:
 
 
 @dataclass
+class AwaitExpr:
+    value: Expression
+    line: int
+    column: int
+
+
+@dataclass
+class LambdaExpr:
+    params: List[Parameter]
+    body: Expression
+    line: int
+    column: int
+
+
+@dataclass
+class ConditionalExpr:
+    test: Expression
+    body: Expression
+    orelse: Expression
+    line: int
+    column: int
+
+
+@dataclass
 class BinaryOp:
     left: Expression
     op: str
@@ -313,7 +395,7 @@ class YieldFromExpr:
 class Call:
     func: Expression
     args: List[Expression]
-    kwargs: List[Tuple[str, Expression]]
+    kwargs: List[Tuple[Optional[str], Expression]]
     line: int
     column: int
 
@@ -397,6 +479,8 @@ class MatchStmt:
 Statement = Union[
     ExpressionStmt,
     AssignStmt,
+    AugAssignStmt,
+    AnnAssignStmt,
     IfStmt,
     WhileStmt,
     ForStmt,
@@ -421,12 +505,17 @@ Statement = Union[
 
 Expression = Union[
     Name,
+    AssignmentExpr,
+    Starred,
     Literal,
     ListLiteral,
     DictLiteral,
     TupleLiteral,
     FormattedString,
     UnaryOp,
+    AwaitExpr,
+    LambdaExpr,
+    ConditionalExpr,
     BinaryOp,
     CompareOp,
     YieldExpr,

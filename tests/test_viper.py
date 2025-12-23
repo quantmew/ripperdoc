@@ -23,6 +23,14 @@ def _run_with_compile(code: str, globals_dict=None):
     return vm.execute(compiled)
 
 
+def _run_file(path, globals_dict=None):
+    tokens = tokenize(path.read_text(encoding="utf-8"))
+    module = parse(tokens)
+    compiled = compile_module(module)
+    vm = Interpreter(globals=globals_dict, base_path=path.parent)
+    return vm.execute(compiled, source_path=path)
+
+
 def test_tokenizer_indentation_tokens():
     code = """
 value = 1
@@ -63,6 +71,25 @@ value
     assert result.value == 7
 
 
+def test_lambda_expression():
+    code = """
+inc = lambda x: x + 1
+inc(2)
+"""
+    result = run(code)
+    assert result.value == 3
+
+
+def test_lambda_closure():
+    code = """
+base = 3
+adder = lambda x: x + base
+adder(4)
+"""
+    result = run(code)
+    assert result.value == 7
+
+
 def test_short_circuit_and_or_not():
     code = """
 value = 0 and unknown
@@ -84,6 +111,35 @@ value
 """
     result = run(code)
     assert result.value is True
+
+
+def test_await_in_async_function():
+    code = """
+async def inner():
+    return 5
+
+async def outer():
+    return await inner()
+
+result = outer()
+"""
+    result = run(code)
+
+    async def _run(coro):
+        return await coro
+
+    assert asyncio.run(_run(result.globals["result"])) == 5
+
+
+def test_await_outside_async_raises():
+    code = """
+async def inner():
+    return 1
+
+await inner()
+"""
+    with pytest.raises(ViperSyntaxError):
+        run(code)
 
 
 def test_compare_chain():
@@ -342,6 +398,88 @@ value
 """
     result = run(code)
     assert result.value == 5
+
+
+def test_function_params_posonly_kwonly_kwargs():
+    code = """
+def combine(a, /, b, *, c, **kw):
+    return a, b, c, kw
+value = combine(1, 2, c=3, d=4)
+value
+"""
+    result = run(code)
+    assert result.value == (1, 2, 3, {"d": 4})
+
+
+def test_varargs_and_kwargs_binding():
+    code = """
+def pack(*args, **kwargs):
+    return args, kwargs
+value = pack(1, 2, a=3)
+value
+"""
+    result = run(code)
+    assert result.value == ((1, 2), {"a": 3})
+
+
+def test_posonly_keyword_error():
+    code = """
+def add(a, /, b):
+    return a + b
+add(a=1, b=2)
+"""
+    with pytest.raises(ViperRuntimeError):
+        run(code)
+
+
+def test_kwonly_missing_error():
+    code = """
+def add(*, value):
+    return value
+add()
+"""
+    with pytest.raises(ViperRuntimeError):
+        run(code)
+
+
+def test_call_and_literal_unpacking():
+    code = """
+def add(a, b, c):
+    return a + b + c
+values = [1, 2]
+data = {"c": 3}
+result = add(*values, **data)
+combo = [0, *values, 3]
+mapping = {"a": 1}
+merged = {**mapping, "b": 2}
+result, combo, merged
+"""
+    result = run(code)
+    assert result.value == (6, [0, 1, 2, 3], {"a": 1, "b": 2})
+
+
+def test_tuple_unpack_and_conditional_is_unary():
+    code = """
+values = [1, 2]
+result = (*values, 3)
+a = []
+b = a
+c = []
+value = (1 if True else 2, a is b, a is not c, ~1)
+result, value
+"""
+    result = run(code)
+    assert result.value == ((1, 2, 3), (1, True, True, -2))
+
+
+def test_lambda_params_defaults_and_kwonly():
+    code = """
+adder = lambda x, /, y=2, *, z=3: x + y + z
+result = adder(1, z=4)
+result
+"""
+    result = run(code)
+    assert result.value == 7
 
 
 def test_positional_after_keyword_is_error():
@@ -784,6 +922,85 @@ value
 """
     result = run(code)
     assert result.value == 4.0
+
+
+def test_local_module_imports(tmp_path):
+    module_path = tmp_path / "util.vp"
+    module_path.write_text(
+        """
+value = 5
+""",
+        encoding="utf-8",
+    )
+    main_path = tmp_path / "main.vp"
+    main_path.write_text(
+        """
+import util
+result = util.value
+result
+""",
+        encoding="utf-8",
+    )
+    result = _run_file(main_path)
+    assert result.value == 5
+
+    main_path.write_text(
+        """
+from util import value
+value
+""",
+        encoding="utf-8",
+    )
+    result = _run_file(main_path)
+    assert result.value == 5
+
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    rel_mod = package_dir / "mod.vp"
+    rel_mod.write_text(
+        """
+answer = 42
+""",
+        encoding="utf-8",
+    )
+    rel_main = package_dir / "main.vp"
+    rel_main.write_text(
+        """
+from .mod import answer
+answer
+""",
+        encoding="utf-8",
+    )
+    result = _run_file(rel_main)
+    assert result.value == 42
+
+
+def test_circular_import_detection(tmp_path):
+    mod_a = tmp_path / "a.vp"
+    mod_b = tmp_path / "b.vp"
+    mod_a.write_text(
+        """
+import b
+value = 1
+""",
+        encoding="utf-8",
+    )
+    mod_b.write_text(
+        """
+import a
+value = 2
+""",
+        encoding="utf-8",
+    )
+    main_path = tmp_path / "main.vp"
+    main_path.write_text(
+        """
+import a
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ViperRuntimeError):
+        _run_file(main_path)
 
 
 def test_global_and_nonlocal():
