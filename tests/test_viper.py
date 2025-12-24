@@ -142,6 +142,30 @@ await inner()
         run(code)
 
 
+def test_async_with_statement():
+    events = []
+
+    class AsyncContext:
+        async def __aenter__(self):
+            events.append("enter")
+            return 5
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append("exit")
+            return False
+
+    ctx = AsyncContext()
+    code = """
+async def use():
+    async with ctx as value:
+        return value
+result = use()
+"""
+    result = run(code, globals={"ctx": ctx})
+    assert asyncio.run(result.globals["result"]) == 5
+    assert events == ["enter", "exit"]
+
+
 def test_compare_chain():
     code = """
 value = 1 < 2 < 3
@@ -177,6 +201,18 @@ result
 """
     result = run(code)
     assert result.value == [1, -1, 1, -1]
+
+
+def test_for_loop_star_target():
+    code = """
+values = [(1, 2, 3), (4, 5)]
+result = []
+for *rest in values:
+    result = result + [rest]
+result
+"""
+    result = run(code)
+    assert result.value == [[1, 2, 3], [4, 5]]
 
 
 def test_slice_subscript():
@@ -262,6 +298,37 @@ result
     result = run(code, globals={"left": left, "right": right})
     assert result.value == 5
     assert events == ["enter-2", "enter-3", "exit-3", "exit-2"]
+
+
+def test_with_statement_unpack_and_targets():
+    class DummyContext:
+        def __init__(self, value):
+            self.value = value
+
+        def __enter__(self):
+            return self.value
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class Box:
+        def __init__(self):
+            self.value = 0
+
+    ctx = DummyContext((1, 2, 3, 4))
+    box = Box()
+    store = {"x": 0}
+    code = """
+with ctx as (a, b, *rest):
+    result = (a, b, rest)
+with ctx as box.value:
+    pass
+with ctx as store["x"]:
+    pass
+result, box.value, store["x"]
+"""
+    result = run(code, globals={"ctx": ctx, "box": box, "store": store})
+    assert result.value == ((1, 2, [3, 4]), (1, 2, 3, 4), (1, 2, 3, 4))
 
 
 def test_class_definition_and_method_binding():
@@ -396,6 +463,33 @@ result
 """
     result = run(code, globals={"Boom": Boom})
     assert result.value == "again"
+
+
+def test_except_star_basic_and_mixed_error():
+    class Boom(Exception):
+        pass
+
+    code = """
+try:
+    raise Boom("fail")
+except* Boom:
+    result = "handled"
+result
+"""
+    result = run(code, globals={"Boom": Boom})
+    assert result.value == "handled"
+
+    code = """
+try:
+    raise Boom("fail")
+except* Boom:
+    result = "handled"
+except Boom:
+    result = "plain"
+result
+"""
+    with pytest.raises(ViperSyntaxError):
+        run(code, globals={"Boom": Boom})
 
 
 def test_assert_statement():
@@ -1169,6 +1263,20 @@ result
     assert result.value == "red"
 
 
+def test_match_case_guard_selects_case():
+    code = """
+value = 2
+match value:
+    case x if x < 0:
+        result = "neg"
+    case x if x == 2:
+        result = "two"
+result
+"""
+    result = run(code)
+    assert result.value == "two"
+
+
 def test_match_pattern_semantics_errors():
     code = """
 value = {"a": 1, "b": 2}
@@ -1298,6 +1406,33 @@ value = add()
     result = run(code)
     assert asyncio.run(result.globals["value"]) == 3
 
+    class AsyncCounter:
+        def __init__(self, values):
+            self._values = list(values)
+            self._index = 0
+
+        def __aiter__(self):
+            self._index = 0
+            return self
+
+        async def __anext__(self):
+            if self._index >= len(self._values):
+                raise StopAsyncIteration
+            value = self._values[self._index]
+            self._index += 1
+            return value
+
+    code = """
+async def total():
+    result = 0
+    async for item in counter:
+        result = result + item
+    return result
+value = total()
+"""
+    result = run(code, globals={"counter": AsyncCounter([1, 2])})
+    assert asyncio.run(result.globals["value"]) == 3
+
     code = """
 async def total():
     result = 0
@@ -1307,4 +1442,5 @@ async def total():
 value = total()
 """
     result = run(code)
-    assert asyncio.run(result.globals["value"]) == 3
+    with pytest.raises(ViperRuntimeError):
+        asyncio.run(result.globals["value"])

@@ -448,6 +448,10 @@ class BytecodeCompiler:
         if isinstance(target, (TupleLiteral, ListLiteral)):
             self._compile_unpack_targets(target, stmt)
             return
+        if isinstance(target, Starred):
+            self._emit("UNPACK_EX", (0, 0), stmt)
+            self._compile_assign_target(target.target, stmt)
+            return
         if isinstance(target, Name):
             self._emit("STORE_NAME", target.identifier, stmt)
             return
@@ -462,8 +466,6 @@ class BytecodeCompiler:
             self._emit("ROT_THREE", None, stmt)
             self._emit("SET_SUBSCRIPT", None, stmt)
             return
-        if isinstance(target, Starred):
-            raise ViperSyntaxError("Invalid assignment target", stmt.line, stmt.column)
         raise ViperSyntaxError("Invalid assignment target", stmt.line, stmt.column)
 
     def _compile_unpack_targets(self, target: Expression, node: AssignStmt) -> None:
@@ -546,13 +548,21 @@ class BytecodeCompiler:
         self._emit("LOAD_CONST", None, stmt)
         self._emit("SET_RESULT", None, stmt)
         self._compile_expression(stmt.iterable)
-        self._emit("BUILD_ITER", None, stmt)
+        if stmt.is_async:
+            if not self._in_coroutine:
+                raise ViperSyntaxError("'async for' outside async function", stmt.line, stmt.column)
+            self._emit("BUILD_AITER", None, stmt)
+        else:
+            self._emit("BUILD_ITER", None, stmt)
         start_label = Label()
         end_label = Label()
         else_label = end_label if stmt.else_body is None else Label()
         self._loop_stack.append(LoopContext(start=start_label, end=end_label))
         self._mark(start_label)
-        self._emit("FOR_ITER", else_label, stmt)
+        if stmt.is_async:
+            self._emit("FOR_AITER", else_label, stmt)
+        else:
+            self._emit("FOR_ITER", else_label, stmt)
         self._compile_store_target(stmt.target, stmt)
         self._compile_statements(stmt.body)
         self._emit("JUMP", start_label, stmt)
@@ -565,18 +575,24 @@ class BytecodeCompiler:
     def _compile_with(self, stmt: WithStmt) -> None:
         self._emit("LOAD_CONST", None, stmt)
         self._emit("SET_RESULT", None, stmt)
+        if stmt.is_async and not self._in_coroutine:
+            raise ViperSyntaxError("'async with' outside async function", stmt.line, stmt.column)
         for item in stmt.items:
             self._compile_expression(item.context_expr)
-            self._emit("WITH_ENTER", None, item)
+            if stmt.is_async:
+                self._emit("ASYNC_WITH_ENTER", None, item)
+            else:
+                self._emit("WITH_ENTER", None, item)
             if item.target is None:
                 self._emit("POP_TOP", None, item)
-            elif isinstance(item.target, Name):
-                self._emit("STORE_NAME", item.target.identifier, item)
             else:
-                raise ViperSyntaxError("Invalid with-item target", item.line, item.column)
+                self._compile_assign_target(item.target, stmt)
         self._compile_statements(stmt.body)
         for item in reversed(stmt.items):
-            self._emit("WITH_EXIT", None, item)
+            if stmt.is_async:
+                self._emit("ASYNC_WITH_EXIT", None, item)
+            else:
+                self._emit("WITH_EXIT", None, item)
 
     def _compile_import(self, stmt: ImportStmt) -> None:
         for alias in stmt.names:
@@ -647,9 +663,6 @@ class BytecodeCompiler:
         self._emit("SET_RESULT", None, stmt)
 
     def _compile_match(self, stmt: MatchStmt) -> None:
-        for case in stmt.cases:
-            if case.guard is not None:
-                raise ViperSyntaxError("Match guards are not supported", case.line, case.column)
         subject_name = self._new_temp_name("match_subject")
         cleanup_label = Label()
         self._compile_expression(stmt.subject)
@@ -697,6 +710,15 @@ class BytecodeCompiler:
             self._emit("GET_SUBSCRIPT", None, case)
             self._emit("STORE_NAME", name, case)
         self._emit("DELETE_NAME", bindings_name, case)
+        if case.guard is not None:
+            guard_fail = Label()
+            self._compile_expression(case.guard)
+            self._emit("JUMP_IF_FALSE", guard_fail, case)
+            self._compile_statements(case.body)
+            self._emit("JUMP", cleanup_label, case)
+            self._mark(guard_fail)
+            self._emit("JUMP", fail_label, case)
+            return
         self._compile_statements(case.body)
         self._emit("JUMP", cleanup_label, case)
 
@@ -718,6 +740,10 @@ class BytecodeCompiler:
         self._emit("SET_RESULT", None, stmt)
 
     def _compile_store_target(self, target: Expression, stmt: Statement) -> None:
+        if isinstance(target, Starred):
+            self._emit("UNPACK_EX", (0, 0), stmt)
+            self._compile_store_target(target.target, stmt)
+            return
         if isinstance(target, Name):
             self._emit("STORE_NAME", target.identifier, stmt)
             return
@@ -733,9 +759,7 @@ class BytecodeCompiler:
             self._emit("SET_SUBSCRIPT", None, stmt)
             return
         if isinstance(target, TupleLiteral) or isinstance(target, ListLiteral):
-            self._emit("UNPACK_SEQUENCE", len(target.elements), stmt)
-            for element in target.elements:
-                self._compile_store_target(element, stmt)
+            self._compile_unpack_targets(target, stmt)
             return
         raise ViperSyntaxError("Invalid for-loop target", stmt.line, stmt.column)
 
@@ -748,11 +772,21 @@ class BytecodeCompiler:
         def _walk(index: int) -> None:
             gen = generators[index]
             self._compile_expression(gen.iterable)
-            self._emit("BUILD_ITER", None, node)
+            if gen.is_async:
+                if not self._in_coroutine:
+                    raise ViperSyntaxError(
+                        "'async for' outside async function", node.line, node.column
+                    )
+                self._emit("BUILD_AITER", None, node)
+            else:
+                self._emit("BUILD_ITER", None, node)
             start_label = Label()
             end_label = Label()
             self._mark(start_label)
-            self._emit("FOR_ITER", end_label, node)
+            if gen.is_async:
+                self._emit("FOR_AITER", end_label, node)
+            else:
+                self._emit("FOR_ITER", end_label, node)
             self._compile_store_target(gen.target, node)
             for if_expr in gen.ifs:
                 self._compile_expression(if_expr)

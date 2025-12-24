@@ -14,6 +14,7 @@ _JUMP_OPS = {
     "JUMP_IF_FALSE_KEEP",
     "JUMP_IF_TRUE_KEEP",
     "FOR_ITER",
+    "FOR_AITER",
     "SETUP_EXCEPT",
     "SETUP_FINALLY",
 }

@@ -956,8 +956,16 @@ class Parser:
             )
         if not self._peek_is_keyword("except"):
             raise ViperSyntaxError("Expected 'except' or 'finally' in try statement", token.line, token.column)
+        is_star = self._peek_next_is("OP", "*")
         while self._peek_is_keyword("except"):
-            handlers.append(self._parse_except_handler())
+            if self._peek_next_is("OP", "*") != is_star:
+                mixed_token = self._current()
+                raise ViperSyntaxError(
+                    "Cannot mix except and except* handlers",
+                    mixed_token.line,
+                    mixed_token.column,
+                )
+            handlers.append(self._parse_except_handler(is_star=is_star))
         if self._peek_is_keyword("else"):
             self._advance()
             self._expect("OP", ":")
@@ -975,18 +983,23 @@ class Parser:
             column=token.column,
         )
 
-    def _parse_except_handler(self) -> ExceptHandler:
+    def _parse_except_handler(self, *, is_star: bool) -> ExceptHandler:
         token = self._expect("KEYWORD", "except")
-        if self._at("OP", ":"):
+        if is_star:
+            self._expect("OP", "*")
+        if not is_star and self._at("OP", ":"):
             self._advance()
             body = self._parse_block()
             return ExceptHandler(
                 type=None,
                 name=None,
                 body=body,
+                is_star=False,
                 line=token.line,
                 column=token.column,
             )
+        if is_star and self._at("OP", ":"):
+            raise ViperSyntaxError("Expected exception type after 'except*'", token.line, token.column)
         exc_type = self._parse_expression(allow_tuple=False)
         exprs = [exc_type]
         while self._match("OP", ","):
@@ -1010,6 +1023,7 @@ class Parser:
             type=exc_type,
             name=name,
             body=body,
+            is_star=is_star,
             line=token.line,
             column=token.column,
         )
@@ -1083,20 +1097,10 @@ class Parser:
         )
 
     def _parse_for_target(self) -> Expression:
-        first = self._parse_target_item()
-        if not self._match("OP", ","):
-            return first
-        elements = [first]
-        while True:
-            if self._peek_is_keyword("in"):
-                break
-            elements.append(self._parse_target_item())
-            if not self._match("OP", ","):
-                break
-        return TupleLiteral(elements=elements, line=first.line, column=first.column)
-
-    def _parse_target_item(self) -> Expression:
-        return self._parse_postfix()
+        target = self._parse_star_targets(end_keyword="in")
+        if not self._is_assignable(target):
+            raise ViperSyntaxError("Invalid for-loop target", target.line, target.column)
+        return target
 
     def _parse_decorators(self) -> List[Expression]:
         decorators: List[Expression] = []
@@ -1202,13 +1206,27 @@ class Parser:
         target: Optional[Expression] = None
         if self._peek_is_keyword("as"):
             self._advance()
-            name_token = self._expect("NAME")
-            target = Name(
-                identifier=name_token.value,
-                line=name_token.line,
-                column=name_token.column,
-            )
+            target = self._parse_star_target()
         return WithItem(context_expr=expr, target=target, line=expr.line, column=expr.column)
+
+    def _parse_star_target(self) -> Expression:
+        target = self._parse_assignment_target()
+        if not self._is_assignable(target):
+            raise ViperSyntaxError("Invalid assignment target", target.line, target.column)
+        return target
+
+    def _parse_star_targets(self, *, end_keyword: str) -> Expression:
+        first = self._parse_star_target()
+        if not self._match("OP", ","):
+            return first
+        elements = [first]
+        while True:
+            if self._peek_is_keyword(end_keyword):
+                break
+            elements.append(self._parse_star_target())
+            if not self._match("OP", ","):
+                break
+        return TupleLiteral(elements=elements, line=first.line, column=first.column)
 
     def _parse_block(self) -> List[Statement]:
         self._expect("NEWLINE")

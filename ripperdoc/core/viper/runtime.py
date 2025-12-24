@@ -262,10 +262,16 @@ class Frame:
     global_names: set[str] = field(default_factory=set)
     nonlocal_names: set[str] = field(default_factory=set)
     awaiting_send: bool = False
-    with_stack: List[Any] = field(default_factory=list)
+    with_stack: List["WithExit"] = field(default_factory=list)
     try_stack: List["TryHandler"] = field(default_factory=list)
     pending_exception: Optional[BaseException] = None
     last_exception: Optional[BaseException] = None
+
+
+@dataclass
+class WithExit:
+    func: Any
+    is_async: bool
 
 
 @dataclass
@@ -668,6 +674,9 @@ class VirtualMachine:
                 elif op == "BUILD_ITER":
                     iterable = frame.stack.pop()
                     frame.stack.append(self._build_iter(iterable, instr))
+                elif op == "BUILD_AITER":
+                    iterable = frame.stack.pop()
+                    frame.stack.append(self._build_aiter(iterable, instr))
                 elif op == "FOR_ITER":
                     iterator = frame.stack[-1]
                     try:
@@ -677,11 +686,31 @@ class VirtualMachine:
                         frame.ip = int(instr.arg)
                     else:
                         frame.stack.append(item)
+                elif op == "FOR_AITER":
+                    iterator = frame.stack[-1]
+                    try:
+                        awaitable = self._get_anext(iterator, instr)
+                    except StopAsyncIteration:
+                        frame.stack.pop()
+                        frame.ip = int(instr.arg)
+                    else:
+                        try:
+                            item = self._await_value(awaitable, instr)
+                        except StopAsyncIteration:
+                            frame.stack.pop()
+                            frame.ip = int(instr.arg)
+                        else:
+                            frame.stack.append(item)
                 elif op == "WITH_ENTER":
                     manager = frame.stack.pop()
                     frame.stack.append(self._with_enter(manager, frame, instr))
                 elif op == "WITH_EXIT":
                     self._with_exit(frame, instr)
+                elif op == "ASYNC_WITH_ENTER":
+                    manager = frame.stack.pop()
+                    frame.stack.append(self._async_with_enter(manager, frame, instr))
+                elif op == "ASYNC_WITH_EXIT":
+                    self._async_with_exit(frame, instr)
                 elif op == "SETUP_EXCEPT":
                     frame.try_stack.append(
                         TryHandler(
@@ -1370,23 +1399,23 @@ class VirtualMachine:
             raise ViperRuntimeError(
                 "Context manager __enter__ failed", instr.line, instr.column
             ) from exc
-        frame.with_stack.append(exit_func)
+        frame.with_stack.append(WithExit(func=exit_func, is_async=False))
         return entered
 
     def _with_exit(self, frame: Frame, instr: Instruction) -> None:
         if not frame.with_stack:
             raise ViperRuntimeError("Context manager stack underflow", instr.line, instr.column)
-        exit_func = frame.with_stack.pop()
         try:
-            exit_func(None, None, None)
+            exit_entry = frame.with_stack.pop()
+            self._call_with_exit(exit_entry, None, None, instr)
         except Exception as exc:  # noqa: BLE001
             raise ViperRuntimeError("Context manager exit failed", instr.line, instr.column) from exc
 
     def _close_with_stack(self, frame: Frame, instr: Instruction) -> None:
         while frame.with_stack:
-            exit_func = frame.with_stack.pop()
             try:
-                exit_func(None, None, None)
+                exit_entry = frame.with_stack.pop()
+                self._call_with_exit(exit_entry, None, None, instr)
             except Exception as exc:  # noqa: BLE001
                 raise ViperRuntimeError("Context manager exit failed", instr.line, instr.column) from exc
 
@@ -1395,9 +1424,9 @@ class VirtualMachine:
             return
         exc_type = type(exc)
         while frame.with_stack:
-            exit_func = frame.with_stack.pop()
+            exit_entry = frame.with_stack.pop()
             try:
-                exit_func(exc_type, exc, None)
+                self._call_with_exit(exit_entry, exc_type, exc, instr)
             except Exception:
                 continue
 
@@ -1406,11 +1435,53 @@ class VirtualMachine:
     ) -> None:
         exc_type = type(exc)
         while len(frame.with_stack) > target_depth:
-            exit_func = frame.with_stack.pop()
+            exit_entry = frame.with_stack.pop()
             try:
-                exit_func(exc_type, exc, None)
+                self._call_with_exit(exit_entry, exc_type, exc, instr)
             except Exception:
                 continue
+
+    def _async_with_enter(self, manager: Any, frame: Frame, instr: Instruction) -> Any:
+        try:
+            enter = getattr(manager, "__aenter__")
+            exit_func = getattr(manager, "__aexit__")
+        except Exception as exc:  # noqa: BLE001
+            raise ViperRuntimeError(
+                "Context manager missing __aenter__ or __aexit__", instr.line, instr.column
+            ) from exc
+        if not callable(enter) or not callable(exit_func):
+            raise ViperRuntimeError(
+                "Context manager missing __aenter__ or __aexit__", instr.line, instr.column
+            )
+        try:
+            entered = self._await_value(enter(), instr)
+        except Exception as exc:  # noqa: BLE001
+            raise ViperRuntimeError(
+                "Context manager __aenter__ failed", instr.line, instr.column
+            ) from exc
+        frame.with_stack.append(WithExit(func=exit_func, is_async=True))
+        return entered
+
+    def _async_with_exit(self, frame: Frame, instr: Instruction) -> None:
+        if not frame.with_stack:
+            raise ViperRuntimeError("Context manager stack underflow", instr.line, instr.column)
+        exit_entry = frame.with_stack.pop()
+        try:
+            self._call_with_exit(exit_entry, None, None, instr)
+        except Exception as exc:  # noqa: BLE001
+            raise ViperRuntimeError("Context manager exit failed", instr.line, instr.column) from exc
+
+    def _call_with_exit(
+        self,
+        exit_entry: WithExit,
+        exc_type: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        instr: Instruction,
+    ) -> None:
+        if exit_entry.is_async:
+            self._await_value(exit_entry.func(exc_type, exc, None), instr)
+        else:
+            exit_entry.func(exc_type, exc, None)
 
     def _get_attr(self, obj: Any, name: str, instr: Instruction) -> Any:
         try:
@@ -1441,6 +1512,30 @@ class VirtualMachine:
             return iter(iterable)
         except Exception as exc:  # noqa: BLE001
             raise ViperRuntimeError("Object is not iterable", instr.line, instr.column) from exc
+
+    def _build_aiter(self, iterable: Any, instr: Instruction) -> Any:
+        try:
+            if hasattr(iterable, "__aiter__"):
+                iterator = iterable.__aiter__()
+                if hasattr(iterator, "__await__"):
+                    iterator = self._await_value(iterator, instr)
+                return iterator
+            if hasattr(iterable, "__anext__"):
+                return iterable
+        except StopAsyncIteration:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ViperRuntimeError("Object is not async iterable", instr.line, instr.column) from exc
+        raise ViperRuntimeError("Object is not async iterable", instr.line, instr.column)
+
+    def _get_anext(self, iterator: Any, instr: Instruction) -> Any:
+        try:
+            anext = getattr(iterator, "__anext__")
+        except Exception as exc:  # noqa: BLE001
+            raise ViperRuntimeError("Object is not async iterable", instr.line, instr.column) from exc
+        if not callable(anext):
+            raise ViperRuntimeError("Object is not async iterable", instr.line, instr.column)
+        return anext()
 
     def _apply_conversion(self, conversion: Optional[str], value: Any, instr: Instruction) -> Any:
         try:

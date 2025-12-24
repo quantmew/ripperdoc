@@ -233,6 +233,7 @@ class ExceptHandler:
     type: Optional["Expression"]
     name: Optional[str]
     body: List["Statement"]
+    is_star: bool
     line: int
     column: int
 
