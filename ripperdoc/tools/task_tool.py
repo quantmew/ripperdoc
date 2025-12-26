@@ -270,6 +270,30 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             "- If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.\n"
             f'- If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple {task_tool_name} tool use content blocks. For example, if you need to launch both a code-reviewer agent and a test-runner agent in parallel, send a single message with both tool calls.\n'
             "\n"
+            "## Programmatic Agent Usage\n\n"
+            "For the 'programmatic' agent type, use the `code` field (NOT `prompt`) with Python code:\n"
+            "- Use ctx.tool_call() for tool calls (synchronous, no await needed)\n"
+            "- tool_call() returns a **dict**, access fields via `result[\"field_name\"]`\n"
+            "- Use ctx.log() for progress, ctx.set_result() for final output\n\n"
+            "<programmatic_example>\n"
+            "Task(\n"
+            '  subagent_type="programmatic",\n'
+            '  code="""\n'
+            "# Search for Python files and count lines\n"
+            'glob_result = ctx.tool_call(\"Glob\", {\"pattern\": \"**/*.py\"})\n'
+            'ctx.log(f\"Found {glob_result[\'count\']} files\")\n'
+            "\n"
+            "total_lines = 0\n"
+            'for f in glob_result[\"matches\"][:10]:\n'
+            '    read_result = ctx.tool_call(\"Read\", {\"file_path\": f})\n'
+            "    if read_result:\n"
+            '        total_lines += read_result[\"line_count\"]\n'
+            "\n"
+            'ctx.set_result({\"files\": glob_result[\"count\"], \"total_lines\": total_lines})\n'
+            '"""\n'
+            ")\n"
+            "</programmatic_example>\n"
+            "\n"
             "Example usage:\n"
             "\n"
             "<example_agent_descriptions>\n"
@@ -335,6 +359,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 result=False,
                 message="subagent_type is required when starting a new agent.",
             )
+
+        # All agents require prompt field
         if not input_data.prompt or not input_data.prompt.strip():
             return ValidationResult(
                 result=False,
@@ -495,19 +521,36 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             )
 
         available_tools = list(self._available_tools_provider())
-        agent_tools, missing_tools = resolve_agent_tools(target_agent, available_tools, self.name)
-        if not agent_tools:
-            raise ValueError(
-                f"Agent '{target_agent.agent_type}' has no usable tools. "
-                f"Missing or unknown tools: {', '.join(missing_tools) if missing_tools else 'none'}"
-            )
 
-        # Type conversion: List[object] -> List[Tool[Any, Any]]
+        # Type conversion helper
         from ripperdoc.core.tool import Tool
 
-        typed_agent_tools: List[Tool[Any, Any]] = [
-            tool for tool in agent_tools if isinstance(tool, Tool)
-        ]
+        # Special handling for ExecuteCode tool - it wraps other tools
+        if "ExecuteCode" in target_agent.tools:
+            from ripperdoc.tools.execute_code_tool import ExecuteCodeTool
+
+            # Get all available tools (excluding Task tool itself) for ExecuteCode to use
+            all_tools: Dict[str, Tool[Any, Any]] = {}
+            for tool in available_tools:
+                if isinstance(tool, Tool) and hasattr(tool, "name") and tool.name != self.name:
+                    all_tools[tool.name] = tool
+
+            execute_code_tool = ExecuteCodeTool(
+                tools=all_tools,
+                working_directory=os.getcwd(),
+            )
+            typed_agent_tools: List[Tool[Any, Any]] = [execute_code_tool]
+            missing_tools: List[str] = []
+        else:
+            agent_tools, missing_tools = resolve_agent_tools(
+                target_agent, available_tools, self.name
+            )
+            if not agent_tools:
+                raise ValueError(
+                    f"Agent '{target_agent.agent_type}' has no usable tools. "
+                    f"Missing or unknown tools: {', '.join(missing_tools) if missing_tools else 'none'}"
+                )
+            typed_agent_tools = [tool for tool in agent_tools if isinstance(tool, Tool)]
 
         agent_system_prompt = self._build_agent_prompt(target_agent, typed_agent_tools)
         parent_history = (

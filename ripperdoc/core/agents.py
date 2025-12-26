@@ -199,6 +199,12 @@ PLAN_AGENT_PROMPT = (
 )
 
 
+PROGRAMMATIC_AGENT_PROMPT = (
+    "You write and execute Python code to accomplish tasks efficiently. "
+    "Use the ExecuteCode tool to run your code. After execution, summarize the results."
+)
+
+
 def _built_in_agents() -> List[AgentDefinition]:
     return [
         AgentDefinition(
@@ -249,6 +255,19 @@ def _built_in_agents() -> List[AgentDefinition]:
             system_prompt=PLAN_AGENT_PROMPT,
             location=AgentLocation.BUILT_IN,
             color="blue",
+            model=None,
+        ),
+        AgentDefinition(
+            agent_type="programmatic",
+            when_to_use=(
+                "Agent that writes and executes Python code for efficient batch operations. "
+                "Use when you need to: (1) process many files in a loop, (2) filter or transform data, "
+                "(3) perform complex conditional logic, (4) aggregate results, or (5) reduce token usage."
+            ),
+            tools=["ExecuteCode"],
+            system_prompt=PROGRAMMATIC_AGENT_PROMPT,
+            location=AgentLocation.BUILT_IN,
+            color="magenta",
             model=None,
         ),
     ]
