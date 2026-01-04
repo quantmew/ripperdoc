@@ -82,7 +82,8 @@ result = [i * 2 for i in range(10)]
     def test_blocks_other_forbidden_imports(self):
         """Test that forbidden imports without mocks are blocked."""
         # These modules don't have mocks and should be blocked
-        for module in ["socket", "http", "urllib", "pickle", "multiprocessing"]:
+        # Note: socket, glob, tempfile now have mocks
+        for module in ["http", "urllib", "pickle", "multiprocessing"]:
             code = f"import {module}"
             errors = validate_code(code)
             assert len(errors) > 0, f"Module {module} should be blocked"
@@ -498,7 +499,7 @@ shutil.copy("/a", "/b")
         assert "PermissionError" in result.error
 
     async def test_pathlib_read_blocked(self):
-        """Test that pathlib file operations are blocked."""
+        """Test that pathlib file operations require Read tool."""
         code = """
 from pathlib import Path
 p = Path("/etc/passwd")
@@ -510,7 +511,9 @@ p.read_text()
             tool_context=MagicMock(spec=ToolUseContext),
         )
         assert result.success is False
-        assert "PermissionError" in result.error
+        # Path.read_text() now calls the Read tool, so if tool is not available
+        # it raises ValueError about the tool not being available
+        assert "Read" in result.error and "not available" in result.error
 
     async def test_pathlib_safe_operations_work(self):
         """Test that pathlib safe operations work."""
@@ -566,19 +569,27 @@ ctx.set_result(results)
         assert result.result["isabs_true"] is True
         assert result.result["isabs_false"] is False
 
-    async def test_os_path_filesystem_blocked(self):
-        """Test that os.path filesystem access functions are blocked or return False."""
+    async def test_os_path_filesystem_needs_glob_tool(self):
+        """Test that os.path.exists/isfile/isdir require Glob tool."""
         code = """
 import os
+# These now call Glob tool - will fail without tool
+os.path.exists("/some/path")
+"""
+        result = await execute_programmatic_code(
+            code=code,
+            tools={},
+            tool_context=MagicMock(spec=ToolUseContext),
+        )
+        assert result.success is False
+        assert "Glob" in result.error and "not available" in result.error
 
-# These should return False (no filesystem access)
-results = {
-    "exists": os.path.exists("/some/path"),
-    "isfile": os.path.isfile("/some/path"),
-    "isdir": os.path.isdir("/some/path"),
-    "islink": os.path.islink("/some/path"),
-}
-ctx.set_result(results)
+    async def test_os_path_islink_returns_false(self):
+        """Test that os.path.islink returns False (not supported)."""
+        code = """
+import os
+# islink returns False (symlink detection not supported)
+ctx.set_result({"islink": os.path.islink("/some/path")})
 """
         result = await execute_programmatic_code(
             code=code,
@@ -586,9 +597,6 @@ ctx.set_result(results)
             tool_context=MagicMock(spec=ToolUseContext),
         )
         assert result.success is True
-        assert result.result["exists"] is False
-        assert result.result["isfile"] is False
-        assert result.result["isdir"] is False
         assert result.result["islink"] is False
 
     async def test_os_fspath_works(self):

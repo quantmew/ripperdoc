@@ -17,97 +17,26 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ripperdoc.utils.log import get_logger
 
+# Import mock modules from dedicated package
+from ripperdoc.core.programmatic_mocks import (
+    FORBIDDEN_MODULES,
+    ALLOWED_MODULES,
+    MOCK_MODULES,
+    MOCK_SYS,
+    MOCK_SUBPROCESS,
+    MOCK_SHUTIL,
+    MOCK_IO,
+    MOCK_TEMPFILE,
+    MOCK_SOCKET,
+    create_dynamic_mock_os,
+    create_dynamic_mock_glob,
+    create_dynamic_mock_pathlib,
+)
+
 if TYPE_CHECKING:
     from ripperdoc.core.tool import Tool, ToolUseContext
 
 logger = get_logger()
-
-
-# Modules that are forbidden in programmatic execution
-FORBIDDEN_MODULES = frozenset({
-    "os",
-    "sys",
-    "subprocess",
-    "shutil",
-    "pathlib",  # Direct file access
-    "io",  # Direct file I/O
-    "builtins",
-    "__builtins__",
-    "importlib",
-    "ctypes",
-    "socket",
-    "http",
-    "urllib",
-    "requests",
-    "httpx",
-    "aiohttp",
-    "ftplib",
-    "smtplib",
-    "telnetlib",
-    "pickle",
-    "marshal",
-    "shelve",
-    "dbm",
-    "sqlite3",
-    "multiprocessing",
-    "threading",
-    "concurrent",
-    "signal",
-    "resource",
-    "pty",
-    "tty",
-    "termios",
-    "fcntl",
-    "mmap",
-    "code",
-    "codeop",
-    "compile",
-    "exec",
-    "eval",
-    "open",
-    "file",
-    "input",
-    "raw_input",
-})
-
-# Allowed safe modules for data processing
-ALLOWED_MODULES = frozenset({
-    "json",
-    "re",
-    "math",
-    "statistics",
-    "collections",
-    "itertools",
-    "functools",
-    "operator",
-    "string",
-    "textwrap",
-    "difflib",
-    "datetime",
-    "time",  # Only time.time(), not system calls
-    "copy",
-    "pprint",
-    "typing",
-    "dataclasses",
-    "enum",
-    "abc",
-    "numbers",
-    "decimal",
-    "fractions",
-    "random",
-    "hashlib",
-    "hmac",
-    "base64",
-    "binascii",
-    "html",
-    "xml",
-    "csv",
-    "configparser",
-    "uuid",
-    "fnmatch",
-    "glob",  # Pattern matching only, not file access
-    "asyncio",
-})
 
 
 class SecurityViolationError(Exception):
@@ -118,666 +47,6 @@ class SecurityViolationError(Exception):
 class ExecutionTimeoutError(Exception):
     """Raised when code execution exceeds the timeout."""
     pass
-
-
-# ============================================================================
-# Mock modules for dangerous system modules
-# These allow code to import os/sys/subprocess without errors,
-# but all operations are no-ops or return safe dummy values
-# ============================================================================
-
-
-class MockPath:
-    """Mock path object that returns safe values."""
-
-    def __init__(self, path: str = ""):
-        self._path = str(path)
-
-    def __str__(self) -> str:
-        return self._path
-
-    def __repr__(self) -> str:
-        return f"MockPath({self._path!r})"
-
-    def __truediv__(self, other: Any) -> "MockPath":
-        return MockPath(f"{self._path}/{other}")
-
-    @property
-    def name(self) -> str:
-        """Return the final component of the path."""
-        parts = self._path.rstrip("/").split("/")
-        return parts[-1] if parts else ""
-
-    @property
-    def suffix(self) -> str:
-        """Return the file extension."""
-        name = self.name
-        if "." in name:
-            return name[name.rfind("."):]
-        return ""
-
-    @property
-    def suffixes(self) -> List[str]:
-        """Return a list of the path's file extensions."""
-        name = self.name
-        if "." not in name:
-            return []
-        parts = name.split(".")
-        return ["." + p for p in parts[1:]]
-
-    @property
-    def stem(self) -> str:
-        """Return the final component minus the suffix."""
-        name = self.name
-        if "." in name:
-            return name[:name.rfind(".")]
-        return name
-
-    @property
-    def parent(self) -> "MockPath":
-        """Return the parent path."""
-        parts = self._path.rstrip("/").split("/")
-        if len(parts) > 1:
-            return MockPath("/".join(parts[:-1]))
-        return MockPath("")
-
-    @property
-    def parts(self) -> tuple:
-        """Return path components."""
-        if not self._path:
-            return ()
-        parts = self._path.split("/")
-        if self._path.startswith("/"):
-            return ("/",) + tuple(p for p in parts if p)
-        return tuple(p for p in parts if p)
-
-    def exists(self) -> bool:
-        return False
-
-    def is_file(self) -> bool:
-        return False
-
-    def is_dir(self) -> bool:
-        return False
-
-    def is_absolute(self) -> bool:
-        return self._path.startswith("/")
-
-    def joinpath(self, *args: Any) -> "MockPath":
-        """Join path components."""
-        result = self._path
-        for arg in args:
-            result = f"{result}/{arg}"
-        return MockPath(result)
-
-    def with_suffix(self, suffix: str) -> "MockPath":
-        """Return path with a different suffix."""
-        stem = self.stem
-        parent = str(self.parent)
-        if parent:
-            return MockPath(f"{parent}/{stem}{suffix}")
-        return MockPath(f"{stem}{suffix}")
-
-    def with_name(self, name: str) -> "MockPath":
-        """Return path with a different name."""
-        parent = str(self.parent)
-        if parent:
-            return MockPath(f"{parent}/{name}")
-        return MockPath(name)
-
-    def read_text(self, *args: Any, **kwargs: Any) -> str:
-        raise PermissionError("Use ctx.tool_call('Read', {'file_path': ...}) instead")
-
-    def write_text(self, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Write', {'file_path': ...}) instead")
-
-    def read_bytes(self, *args: Any, **kwargs: Any) -> bytes:
-        raise PermissionError("Use ctx.tool_call('Read', {'file_path': ...}) instead")
-
-    def write_bytes(self, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Write', {'file_path': ...}) instead")
-
-    def open(self, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Read', {'file_path': ...}) instead")
-
-    def mkdir(self, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    def rmdir(self, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    def unlink(self, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    def rename(self, *args: Any, **kwargs: Any) -> "MockPath":
-        raise PermissionError("File operations not allowed")
-
-    def iterdir(self, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Glob', {'pattern': '*'}) instead")
-
-    def glob(self, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Glob', {'pattern': ...}) instead")
-
-    def rglob(self, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Glob', {'pattern': '**/*'}) instead")
-
-
-class MockEnviron(dict):
-    """Mock os.environ that returns empty values."""
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return default
-
-    def __getitem__(self, key: str) -> str:
-        raise KeyError(key)
-
-    def __contains__(self, key: object) -> bool:
-        return False
-
-
-class MockOsPathModule:
-    """Mock os.path module that provides real path utilities but blocks filesystem access."""
-
-    # Import the real os.path for safe computational functions
-    import os.path as _real_path
-
-    # Safe computational functions - use real implementations
-    join = staticmethod(_real_path.join)
-    split = staticmethod(_real_path.split)
-    splitext = staticmethod(_real_path.splitext)
-    splitdrive = staticmethod(_real_path.splitdrive)
-    basename = staticmethod(_real_path.basename)
-    dirname = staticmethod(_real_path.dirname)
-    normpath = staticmethod(_real_path.normpath)
-    normcase = staticmethod(_real_path.normcase)
-    isabs = staticmethod(_real_path.isabs)
-    commonpath = staticmethod(_real_path.commonpath)
-    commonprefix = staticmethod(_real_path.commonprefix)
-    relpath = staticmethod(_real_path.relpath)
-
-    # Path separator constants
-    sep = _real_path.sep
-    altsep = _real_path.altsep
-    extsep = _real_path.extsep
-    pardir = _real_path.pardir
-    curdir = _real_path.curdir
-    defpath = _real_path.defpath
-    devnull = _real_path.devnull
-
-    # Filesystem access functions - return safe defaults or block
-    @staticmethod
-    def exists(path: Any) -> bool:
-        """Always returns False (no filesystem access)."""
-        return False
-
-    @staticmethod
-    def isfile(path: Any) -> bool:
-        """Always returns False (no filesystem access)."""
-        return False
-
-    @staticmethod
-    def isdir(path: Any) -> bool:
-        """Always returns False (no filesystem access)."""
-        return False
-
-    @staticmethod
-    def islink(path: Any) -> bool:
-        """Always returns False (no filesystem access)."""
-        return False
-
-    @staticmethod
-    def ismount(path: Any) -> bool:
-        """Always returns False (no filesystem access)."""
-        return False
-
-    @staticmethod
-    def lexists(path: Any) -> bool:
-        """Always returns False (no filesystem access)."""
-        return False
-
-    @staticmethod
-    def getsize(path: Any) -> int:
-        """Blocked - use Read tool instead."""
-        raise PermissionError("Use ctx.tool_call('Read', ...) to get file info")
-
-    @staticmethod
-    def getmtime(path: Any) -> float:
-        """Blocked - no filesystem access."""
-        raise PermissionError("Filesystem access not allowed")
-
-    @staticmethod
-    def getatime(path: Any) -> float:
-        """Blocked - no filesystem access."""
-        raise PermissionError("Filesystem access not allowed")
-
-    @staticmethod
-    def getctime(path: Any) -> float:
-        """Blocked - no filesystem access."""
-        raise PermissionError("Filesystem access not allowed")
-
-    @staticmethod
-    def realpath(path: Any) -> str:
-        """Returns path as-is (no symlink resolution)."""
-        return str(path)
-
-    @staticmethod
-    def abspath(path: Any) -> str:
-        """Returns path as-is (no cwd access)."""
-        import os.path as _real_path
-        # Use normpath to clean up the path, but don't prepend cwd
-        p = str(path)
-        if _real_path.isabs(p):
-            return _real_path.normpath(p)
-        return p
-
-    @staticmethod
-    def expanduser(path: Any) -> str:
-        """Returns path as-is (no user info access)."""
-        return str(path)
-
-    @staticmethod
-    def expandvars(path: Any) -> str:
-        """Returns path as-is (no env var access)."""
-        return str(path)
-
-
-class MockOsModule:
-    """Mock os module that provides safe utilities but blocks dangerous operations."""
-
-    # Import real os module for safe constants
-    import os as _real_os
-
-    # Safe constants - use real values
-    sep = _real_os.sep
-    altsep = _real_os.altsep
-    linesep = _real_os.linesep
-    name = _real_os.name
-    curdir = _real_os.curdir
-    pardir = _real_os.pardir
-    extsep = _real_os.extsep
-    devnull = _real_os.devnull
-
-    # Use the mock path module
-    path = MockOsPathModule
-
-    # Mock environ
-    environ: Dict[str, str] = MockEnviron()  # type: ignore[assignment]
-
-    # Safe utility functions
-    @staticmethod
-    def fspath(path: Any) -> str:
-        """Return the string representation of a path."""
-        if hasattr(path, "__fspath__"):
-            return str(path.__fspath__())
-        return str(path)
-
-    @staticmethod
-    def fsencode(filename: Any) -> bytes:
-        """Encode filename to bytes."""
-        import os as _real_os
-        return _real_os.fsencode(str(filename))
-
-    @staticmethod
-    def fsdecode(filename: Any) -> str:
-        """Decode filename to string."""
-        import os as _real_os
-        if isinstance(filename, bytes):
-            return _real_os.fsdecode(filename)
-        return str(filename)
-
-    @staticmethod
-    def getcwd() -> str:
-        """Returns a mock working directory."""
-        return "/mock/working/directory"
-
-    @staticmethod
-    def getenv(key: str, default: Any = None) -> Any:
-        """Always returns default (no env access)."""
-        return default
-
-    # Blocked functions - filesystem operations
-    @staticmethod
-    def listdir(path: Any = ".") -> list:
-        raise PermissionError("Use ctx.tool_call('Glob', {'pattern': '*'}) instead")
-
-    @staticmethod
-    def scandir(path: Any = ".") -> Any:
-        raise PermissionError("Use ctx.tool_call('Glob', {'pattern': '*'}) instead")
-
-    @staticmethod
-    def stat(path: Any, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Filesystem access not allowed")
-
-    @staticmethod
-    def lstat(path: Any, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Filesystem access not allowed")
-
-    @staticmethod
-    def access(path: Any, mode: int, *args: Any, **kwargs: Any) -> bool:
-        raise PermissionError("Filesystem access not allowed")
-
-    # Blocked functions - command execution
-    @staticmethod
-    def system(cmd: str) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def popen(cmd: str, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawn(mode: int, path: Any, *args: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawnl(mode: int, path: Any, *args: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawnle(mode: int, path: Any, *args: Any, **kwargs: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawnlp(mode: int, file: Any, *args: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawnlpe(mode: int, file: Any, *args: Any, **kwargs: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawnv(mode: int, path: Any, args: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawnve(mode: int, path: Any, args: Any, env: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawnvp(mode: int, file: Any, args: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def spawnvpe(mode: int, file: Any, args: Any, env: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def execl(path: Any, *args: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def execle(path: Any, *args: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def execlp(file: Any, *args: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def execlpe(file: Any, *args: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def execv(path: Any, args: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def execve(path: Any, args: Any, env: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def execvp(file: Any, args: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def execvpe(file: Any, args: Any, env: Any) -> None:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    # Blocked functions - file operations
-    @staticmethod
-    def remove(path: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def unlink(path: Any, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def rmdir(path: Any, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def removedirs(name: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def mkdir(path: Any, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def makedirs(name: Any, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def rename(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def renames(old: Any, new: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def replace(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def link(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def symlink(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def readlink(path: Any, *args: Any, **kwargs: Any) -> str:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def chmod(path: Any, mode: int, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def chown(path: Any, uid: int, gid: int, *args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def chdir(path: Any) -> None:
-        raise PermissionError("Directory operations not allowed")
-
-    @staticmethod
-    def chroot(path: Any) -> None:
-        raise PermissionError("Directory operations not allowed")
-
-    @staticmethod
-    def walk(top: Any, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Glob', {'pattern': '**/*'}) instead")
-
-    @staticmethod
-    def fwalk(top: Any, *args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Glob', {'pattern': '**/*'}) instead")
-
-    # Blocked functions - file descriptor operations
-    @staticmethod
-    def open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Read', ...) instead")
-
-    @staticmethod
-    def close(fd: int) -> None:
-        raise PermissionError("File descriptor operations not allowed")
-
-    @staticmethod
-    def read(fd: int, n: int) -> bytes:
-        raise PermissionError("Use ctx.tool_call('Read', ...) instead")
-
-    @staticmethod
-    def write(fd: int, data: bytes) -> int:
-        raise PermissionError("Use ctx.tool_call('Write', ...) instead")
-
-
-class MockSysModule:
-    """Mock sys module that provides safe dummy values."""
-
-    version = "3.12.0 (mock)"
-    version_info = (3, 12, 0, "final", 0)
-    platform = "linux"
-    executable = "/usr/bin/python3"
-    prefix = "/usr"
-    exec_prefix = "/usr"
-    path: List[str] = ["/mock/path"]
-    modules: Dict[str, Any] = {}
-    argv: List[str] = ["script.py"]
-    stdin = None
-    stdout = None
-    stderr = None
-    maxsize = 2**63 - 1
-
-    @staticmethod
-    def exit(code: int = 0) -> None:
-        raise PermissionError("sys.exit() is not allowed in programmatic code")
-
-    @staticmethod
-    def getrecursionlimit() -> int:
-        return 1000
-
-    @staticmethod
-    def setrecursionlimit(limit: int) -> None:
-        pass  # No-op
-
-
-class MockSubprocessModule:
-    """Mock subprocess module that blocks all execution."""
-
-    PIPE = -1
-    STDOUT = -2
-    DEVNULL = -3
-
-    class CompletedProcess:
-        def __init__(self) -> None:
-            self.returncode = 0
-            self.stdout = b""
-            self.stderr = b""
-
-    @staticmethod
-    def run(*args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def call(*args: Any, **kwargs: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def check_call(*args: Any, **kwargs: Any) -> int:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def check_output(*args: Any, **kwargs: Any) -> bytes:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-    @staticmethod
-    def Popen(*args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Bash', {'command': ...}) instead")
-
-
-class MockShutilModule:
-    """Mock shutil module that blocks file operations."""
-
-    @staticmethod
-    def copy(*args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def copy2(*args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def copytree(*args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def move(*args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def rmtree(*args: Any, **kwargs: Any) -> None:
-        raise PermissionError("File operations not allowed")
-
-    @staticmethod
-    def which(cmd: str) -> Optional[str]:
-        return None
-
-
-class MockPathlibModule:
-    """Mock pathlib module."""
-
-    Path = MockPath
-    PurePath = MockPath
-    PosixPath = MockPath
-    WindowsPath = MockPath
-
-
-class MockIoModule:
-    """Mock io module that blocks file operations."""
-
-    @staticmethod
-    def open(*args: Any, **kwargs: Any) -> Any:
-        raise PermissionError("Use ctx.tool_call('Read', {'file_path': ...}) instead")
-
-    class StringIO:
-        def __init__(self, initial: str = "") -> None:
-            self._buffer = initial
-
-        def write(self, s: str) -> int:
-            self._buffer += s
-            return len(s)
-
-        def read(self) -> str:
-            return self._buffer
-
-        def getvalue(self) -> str:
-            return self._buffer
-
-    class BytesIO:
-        def __init__(self, initial: bytes = b"") -> None:
-            self._buffer = initial
-
-        def write(self, b: bytes) -> int:
-            self._buffer += b
-            return len(b)
-
-        def read(self) -> bytes:
-            return self._buffer
-
-        def getvalue(self) -> bytes:
-            return self._buffer
-
-
-# Create singleton instances of mock modules
-MOCK_OS = MockOsModule()
-MOCK_SYS = MockSysModule()
-MOCK_SUBPROCESS = MockSubprocessModule()
-MOCK_SHUTIL = MockShutilModule()
-MOCK_PATHLIB = MockPathlibModule()
-MOCK_IO = MockIoModule()
-
-# Mapping of forbidden module names to their mock replacements
-MOCK_MODULES: Dict[str, Any] = {
-    "os": MOCK_OS,
-    "sys": MOCK_SYS,
-    "subprocess": MOCK_SUBPROCESS,
-    "shutil": MOCK_SHUTIL,
-    "pathlib": MOCK_PATHLIB,
-    "io": MOCK_IO,
-}
 
 
 @dataclass
@@ -1285,46 +554,69 @@ def _wrap_in_function(code: str) -> str:
     return wrapped
 
 
-def _safe_import(
-    name: str,
-    globals_dict: Optional[Dict[str, Any]] = None,
-    locals_dict: Optional[Dict[str, Any]] = None,
-    fromlist: tuple = (),
-    level: int = 0,
+def _create_safe_import(
+    ctx: "ProgrammaticContext",
+    dynamic_os: Any,
+    dynamic_glob: Any,
+    dynamic_pathlib: Any,
 ) -> Any:
-    """Safe import function that only allows whitelisted modules.
+    """Create a safe import function with access to dynamic mock modules.
 
-    For dangerous modules (os, sys, subprocess, etc.), returns mock modules
-    that provide safe dummy values or raise PermissionError on dangerous operations.
+    This factory creates an import function that:
+    - Returns mock modules for dangerous modules (os, sys, subprocess, etc.)
+    - Returns dynamic mocks that can call Glob tool for filesystem operations
+    - Blocks forbidden modules
+    - Allows safe modules like json, re, math, etc.
     """
-    # Get the top-level module name
-    top_module = name.split(".")[0]
+    def _safe_import(
+        name: str,
+        globals_dict: Optional[Dict[str, Any]] = None,
+        locals_dict: Optional[Dict[str, Any]] = None,
+        fromlist: tuple = (),
+        level: int = 0,
+    ) -> Any:
+        """Safe import function that only allows whitelisted modules."""
+        # Get the top-level module name
+        top_module = name.split(".")[0]
 
-    # Check if this is a mock-able forbidden module
-    if top_module in MOCK_MODULES:
-        logger.debug(
-            "[programmatic] Returning mock module for: %s",
-            top_module,
-        )
-        return MOCK_MODULES[top_module]
+        # Special cases for dynamic mocks with ctx access
+        if top_module == "os":
+            logger.debug("[programmatic] Returning dynamic mock os module")
+            return dynamic_os
+        if top_module == "glob":
+            logger.debug("[programmatic] Returning dynamic mock glob module")
+            return dynamic_glob
+        if top_module == "pathlib":
+            logger.debug("[programmatic] Returning dynamic mock pathlib module")
+            return dynamic_pathlib
 
-    # For other forbidden modules without mocks, raise error
-    if top_module in FORBIDDEN_MODULES:
-        raise ImportError(
-            f"Import of forbidden module: {top_module}. "
-            f"Use ctx.tool_call() for I/O operations."
-        )
+        # Check if this is a mock-able forbidden module
+        if top_module in MOCK_MODULES:
+            logger.debug(
+                "[programmatic] Returning mock module for: %s",
+                top_module,
+            )
+            return MOCK_MODULES[top_module]
 
-    # For unrecognized modules, raise error
-    if top_module not in ALLOWED_MODULES:
-        raise ImportError(
-            f"Import of unrecognized module: {top_module}. "
-            f"Use ctx.tool_call() for I/O operations."
-        )
+        # For other forbidden modules without mocks, raise error
+        if top_module in FORBIDDEN_MODULES:
+            raise ImportError(
+                f"Import of forbidden module: {top_module}. "
+                f"Use ctx.tool_call() for I/O operations."
+            )
 
-    # Import the allowed module using the real __import__
-    import builtins
-    return builtins.__import__(name, globals_dict, locals_dict, fromlist, level)
+        # For unrecognized modules, raise error
+        if top_module not in ALLOWED_MODULES:
+            raise ImportError(
+                f"Import of unrecognized module: {top_module}. "
+                f"Use ctx.tool_call() for I/O operations."
+            )
+
+        # Import the allowed module using the real __import__
+        import builtins
+        return builtins.__import__(name, globals_dict, locals_dict, fromlist, level)
+
+    return _safe_import
 
 
 def _build_safe_globals(ctx: ProgrammaticContext) -> Dict[str, Any]:
@@ -1348,6 +640,14 @@ def _build_safe_globals(ctx: ProgrammaticContext) -> Dict[str, Any]:
     import base64
     import uuid
     import fnmatch
+
+    # Create dynamic mocks with ctx access for filesystem operations
+    dynamic_os = create_dynamic_mock_os(ctx)
+    dynamic_glob = create_dynamic_mock_glob(ctx)
+    dynamic_pathlib = create_dynamic_mock_pathlib(ctx)
+
+    # Create safe import function with access to dynamic mocks
+    safe_import = _create_safe_import(ctx, dynamic_os, dynamic_glob, dynamic_pathlib)
 
     # Safe builtins
     safe_builtins = {
@@ -1406,7 +706,7 @@ def _build_safe_globals(ctx: ProgrammaticContext) -> Dict[str, Any]:
         "zip": zip,
 
         # Import function (restricted)
-        "__import__": _safe_import,
+        "__import__": safe_import,
 
         # Exceptions
         "Exception": Exception,
@@ -1460,10 +760,14 @@ def _build_safe_globals(ctx: ProgrammaticContext) -> Dict[str, Any]:
         # Mock modules (safe replacements for dangerous modules)
         # These allow code like "import os" to work without errors,
         # but dangerous operations will raise PermissionError
-        "os": MOCK_OS,
+        # Use dynamic mocks that can call Glob tool for filesystem operations
+        "os": dynamic_os,
         "sys": MOCK_SYS,
         "subprocess": MOCK_SUBPROCESS,
         "shutil": MOCK_SHUTIL,
-        "pathlib": MOCK_PATHLIB,
+        "pathlib": dynamic_pathlib,
         "io": MOCK_IO,
+        "glob": dynamic_glob,
+        "tempfile": MOCK_TEMPFILE,
+        "socket": MOCK_SOCKET,
     }
