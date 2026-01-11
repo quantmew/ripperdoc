@@ -147,17 +147,16 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
     stats.latest_session = max(s.updated_at for s in recent_summaries)
     stats.total_days = (stats.latest_session - stats.earliest_session).days + 1
 
-    # Calculate longest session
+    # Calculate longest session and activity patterns in single pass
+    active_dates: List[datetime] = []
+    date_set: set[str] = set()
+
     for summary in recent_summaries:
+        # Longest session
         duration = summary.updated_at - summary.created_at
         if duration > stats.longest_session_duration:
             stats.longest_session_duration = duration
 
-    # Activity patterns
-    active_dates: List[datetime] = []
-    date_set = set()
-
-    for summary in recent_summaries:
         # Track dates
         date_str = summary.updated_at.date().isoformat()
         if date_str not in date_set:
@@ -165,15 +164,13 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
             active_dates.append(summary.updated_at)
 
         # Hourly activity
-        hour = summary.updated_at.hour
-        stats.hourly_activity[hour] += 1
+        stats.hourly_activity[summary.updated_at.hour] += 1
 
         # Daily activity (for heatmap)
         stats.daily_activity[date_str] += 1
 
         # Weekday activity
-        weekday = summary.updated_at.weekday()
-        stats.weekday_activity[weekday] += 1
+        stats.weekday_activity[summary.updated_at.weekday()] += 1
 
     # Active days
     stats.active_days = len(date_set)
@@ -197,6 +194,9 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
             with session_file.open("r", encoding="utf-8") as fh:
                 for line in fh:
                     if not line.strip():
+                        continue
+                    # Quick string check before full JSON parse
+                    if '"type":"assistant"' not in line and '"type": "assistant"' not in line:
                         continue
                     try:
                         entry = json.loads(line)
