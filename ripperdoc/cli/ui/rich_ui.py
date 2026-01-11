@@ -124,6 +124,7 @@ class RichUI:
         self.query_context: Optional[QueryContext] = None
         self._current_tool: Optional[str] = None
         self._should_exit: bool = False
+        self._last_ctrl_c_time: float = 0.0  # Track Ctrl+C timing for double-press exit
         self.command_list = list_slash_commands()
         self._custom_command_list = list_custom_commands()
         self._prompt_session: Optional[PromptSession] = None
@@ -1096,6 +1097,45 @@ class RichUI:
             """Insert newline on Alt+Enter."""
             event.current_buffer.insert_text("\n")
 
+        # Capture self for use in Ctrl+C handler closure
+        ui_instance = self
+
+        @key_bindings.add("c-c")
+        def _(event: Any) -> None:
+            """Handle Ctrl+C: first press clears input, second press exits."""
+            import time as time_module
+
+            buf = event.current_buffer
+            current_text = buf.text
+            current_time = time_module.time()
+
+            # Check if this is a double Ctrl+C (within 1.5 seconds)
+            if current_time - ui_instance._last_ctrl_c_time < 1.5:
+                # Double Ctrl+C - exit
+                buf.reset()
+                raise KeyboardInterrupt()
+
+            # First Ctrl+C - save to history and clear
+            ui_instance._last_ctrl_c_time = current_time
+
+            if current_text.strip():
+                # Save current input to history before clearing
+                try:
+                    event.app.current_buffer.history.append_string(current_text)
+                except (AttributeError, TypeError, ValueError):
+                    pass
+
+            # Print hint message in clean terminal context, then clear buffer
+            from prompt_toolkit.application import run_in_terminal
+
+            def _print_hint() -> None:
+                print("\n\033[2mPress Ctrl+C again to exit, or continue typing.\033[0m")
+
+            run_in_terminal(_print_hint)
+
+            # Clear the buffer after printing
+            buf.reset()
+
         self._prompt_session = PromptSession(
             completer=combined_completer,
             complete_style=CompleteStyle.COLUMN,
@@ -1117,7 +1157,8 @@ class RichUI:
         console.print(create_status_bar())
         console.print()
         console.print(
-            "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. Press Alt+Enter for newline. Press ESC to interrupt a running query.[/dim]\n"
+            "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. "
+            "Press Alt+Enter for newline. Press ESC to interrupt. Press Ctrl+C twice to exit.[/dim]\n"
         )
 
         session = self.get_prompt_session()
@@ -1182,14 +1223,28 @@ class RichUI:
                     console.print()  # Add spacing between interactions
 
                 except KeyboardInterrupt:
+                    # Handle Ctrl+C: first press during query aborts it,
+                    # double press exits the CLI
+                    current_time = time.time()
+
                     # Signal abort to cancel running queries
                     if self.query_context:
                         abort_controller = getattr(self.query_context, "abort_controller", None)
                         if abort_controller is not None:
                             abort_controller.set()
-                    console.print("\n[yellow]Goodbye![/yellow]")
-                    exit_reason = "prompt_input_exit"
-                    break
+
+                    # Check if this is a double Ctrl+C (within 1.5 seconds)
+                    if current_time - self._last_ctrl_c_time < 1.5:
+                        console.print("\n[yellow]Goodbye![/yellow]")
+                        exit_reason = "prompt_input_exit"
+                        break
+
+                    # First Ctrl+C - just abort the query and continue
+                    self._last_ctrl_c_time = current_time
+                    console.print(
+                        "\n[dim]Query interrupted. Press Ctrl+C again to exit.[/dim]"
+                    )
+                    continue
                 except EOFError:
                     console.print("\n[yellow]Goodbye![/yellow]")
                     exit_reason = "prompt_input_exit"
