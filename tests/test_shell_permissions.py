@@ -359,21 +359,36 @@ async def test_bash_tool_validate_input_blocks_unavailable_sandbox():
 
 
 @pytest.mark.asyncio
-async def test_bash_tool_validate_input_blocks_dangerous_commands():
-    """Dangerous shell commands should be blocked by validate_input."""
+async def test_bash_tool_check_permissions_asks_for_dangerous_commands():
+    """Dangerous shell commands should trigger permission check via check_permissions."""
     tool = BashTool()
+    cwd = safe_get_cwd()
 
     # Test command substitution
     input_data = BashToolInput(command="echo $(whoami)")
-    result = await tool.validate_input(input_data, None)
-    assert result.result is False
-    assert "command substitution" in (result.message or "").lower()
+    decision = await tool.check_permissions(
+        input_data,
+        {
+            "allowed_rules": set(),
+            "denied_rules": set(),
+            "allowed_working_directories": {cwd},
+        },
+    )
+    assert getattr(decision, "behavior", None) == "ask"
+    assert "command substitution" in (getattr(decision, "message", "") or "").lower()
 
     # Test eval
     input_data = BashToolInput(command="eval 'echo hello'")
-    result = await tool.validate_input(input_data, None)
-    assert result.result is False
-    assert "eval" in (result.message or "").lower()
+    decision = await tool.check_permissions(
+        input_data,
+        {
+            "allowed_rules": set(),
+            "denied_rules": set(),
+            "allowed_working_directories": {cwd},
+        },
+    )
+    assert getattr(decision, "behavior", None) == "ask"
+    assert "eval" in (getattr(decision, "message", "") or "").lower()
 
 
 @pytest.mark.asyncio

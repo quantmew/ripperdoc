@@ -396,15 +396,9 @@ build projects, run tests, and interact with the file system."""
                     result=False, message="This command cannot be run in background"
                 )
 
-        validation = validate_shell_command(input_data.command)
-        if validation.behavior == "ask":
-            # In yolo mode, allow shell metacharacters
-            if context and hasattr(context, 'yolo_mode') and context.yolo_mode \
-               and "shell metacharacters" in validation.message:
-                # Allow commands with shell metacharacters in yolo mode
-                return ValidationResult(result=True)
-            return ValidationResult(result=False, message=validation.message)
-
+        # Note: Security validation (shell metacharacters, destructive commands, etc.)
+        # is handled in check_permissions() via evaluate_shell_command_permissions().
+        # validate_input() should only perform format/parameter validation.
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: BashToolOutput) -> str:
