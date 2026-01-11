@@ -210,3 +210,41 @@ def test_bash_permissions_apply_denies_from_all_scopes(tmp_path: Path, isolated_
 
     assert global_denied.result is False
     assert local_denied.result is False
+
+
+@pytest.mark.asyncio
+async def test_mixed_format_rules_in_permission_checker(tmp_path: Path):
+    """Test that permission checker handles both legacy and glob format rules."""
+    from ripperdoc.core.config import save_project_config, ProjectConfig
+    from ripperdoc.core.permissions import make_permission_checker
+    from ripperdoc.tools.bash_tool import BashTool, BashToolInput
+
+    # Setup config with mixed rule formats
+    config = ProjectConfig(
+        bash_allow_rules=[
+            "git:*",          # Legacy format
+            "npm *",          # Glob format
+            "* --version",    # Glob format
+        ]
+    )
+    save_project_config(config, tmp_path)
+
+    can_use_tool = make_permission_checker(
+        project_path=tmp_path,
+        yolo_mode=False,
+        prompt_fn=lambda _: "1"  # Auto-approve
+    )
+
+    tool = BashTool()
+
+    # Test legacy format rule
+    result = await can_use_tool(tool, BashToolInput(command="git status"))
+    assert result.result is True
+
+    # Test glob format rule
+    result = await can_use_tool(tool, BashToolInput(command="npm install"))
+    assert result.result is True
+
+    # Test glob pattern matching
+    result = await can_use_tool(tool, BashToolInput(command="python --version"))
+    assert result.result is True

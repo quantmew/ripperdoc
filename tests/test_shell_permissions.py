@@ -746,3 +746,274 @@ class TestEdgeCases:
         """Whitespace-only strings should be safe."""
         result = validate_shell_command("   \t  ")
         assert result.behavior == "passthrough"
+
+
+# =============================================================================
+# Flexible Wildcard Matching Tests
+# =============================================================================
+
+
+class TestFlexibleWildcardMatching:
+    """Tests for new flexible wildcard matching with glob patterns."""
+
+    def test_legacy_prefix_wildcard_still_works(self):
+        """Legacy prefix:* format should continue to work."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("git status", "git:*") is True
+        assert match_rule("git commit -m test", "git:*") is True
+        assert match_rule("npm install", "git:*") is False
+        assert match_rule("npm install", "npm:*") is True
+
+    def test_star_at_end(self):
+        """Patterns with * at end should match."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("npm install", "npm *") is True
+        assert match_rule("npm start", "npm *") is True
+        assert match_rule("npm test --coverage", "npm *") is True
+        assert match_rule("git status", "npm *") is False
+
+    def test_star_at_beginning(self):
+        """Patterns with * at beginning should match."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("npm install", "* install") is True
+        assert match_rule("pip install", "* install") is True
+        assert match_rule("apt install", "* install") is True
+        assert match_rule("npm start", "* install") is False
+
+    def test_star_in_middle(self):
+        """Patterns with * in middle should match."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("git push main", "git * main") is True
+        assert match_rule("git pull main", "git * main") is True
+        assert match_rule("git fetch main", "git * main") is True
+        assert match_rule("git push origin", "git * main") is False
+        assert match_rule("git main", "git * main") is False
+
+    def test_star_anywhere_in_command(self):
+        """* should match content anywhere in command."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("ls -lh", "*h*") is True
+        assert match_rule("grep -h pattern", "* -h *") is True
+        assert match_rule("command --help", "*help*") is True
+        assert match_rule("ls -la", "*h*") is False
+
+    def test_multiple_stars(self):
+        """Multiple * wildcards should work."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("git push origin main", "git * origin *") is True
+        assert match_rule("git pull origin main", "git * origin *") is True
+        assert match_rule("npm run test --coverage", "npm * test *") is True
+        assert match_rule("git push main", "git * origin *") is False
+
+    def test_question_mark_wildcard(self):
+        """? should match exactly one character."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("git rm", "git ??") is True
+        assert match_rule("git mv", "git ??") is True
+        assert match_rule("git add", "git ??") is False  # "add" is 3 chars
+        assert match_rule("git status", "git ??") is False  # "status" is 6 chars
+
+    def test_bracket_character_set(self):
+        """[seq] should match any character in the set."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        # Match npm or pip install
+        assert match_rule("npm install", "[np]* install") is True
+        assert match_rule("pip install", "[np]* install") is True
+        assert match_rule("apt install", "[np]* install") is False
+
+        # Match git or got
+        assert match_rule("git status", "g[io]t status") is True
+        assert match_rule("got status", "g[io]t status") is True
+        assert match_rule("gxt status", "g[io]t status") is False
+
+    def test_negated_character_set(self):
+        """[!seq] should match any character NOT in the set."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("git status", "[!n]* status") is True  # starts with 'g', not 'n'
+        assert match_rule("npm status", "[!n]* status") is False  # starts with 'n'
+
+    def test_exact_match_still_works(self):
+        """Exact matching without wildcards should still work."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("git status", "git status") is True
+        assert match_rule("git status", "git commit") is False
+        assert match_rule("npm install express", "npm install express") is True
+
+    def test_legacy_and_glob_coexistence(self):
+        """Both legacy and glob formats should work together."""
+        from ripperdoc.utils.permissions.tool_permission_utils import (
+            match_rule,
+            evaluate_shell_command_permissions,
+        )
+        from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+
+        # Mix of legacy and new format rules
+        allowed_rules = {
+            "git:*",           # Legacy format
+            "npm *",           # Glob format
+            "* --help",        # Glob format
+        }
+
+        cwd = safe_get_cwd()
+
+        # Test git commands (legacy rule)
+        decision = evaluate_shell_command_permissions(
+            type("Req", (), {"command": "git status"}),
+            allowed_rules=allowed_rules,
+            denied_rules=set(),
+            allowed_working_dirs={cwd},
+        )
+        assert decision.behavior == "allow"
+
+        # Test npm commands (glob rule)
+        decision = evaluate_shell_command_permissions(
+            type("Req", (), {"command": "npm install"}),
+            allowed_rules=allowed_rules,
+            denied_rules=set(),
+            allowed_working_dirs={cwd},
+        )
+        assert decision.behavior == "allow"
+
+        # Test --help pattern (glob rule)
+        decision = evaluate_shell_command_permissions(
+            type("Req", (), {"command": "python --help"}),
+            allowed_rules=allowed_rules,
+            denied_rules=set(),
+            allowed_working_dirs={cwd},
+        )
+        assert decision.behavior == "allow"
+
+    def test_rule_suggestions_include_both_formats(self):
+        """Rule suggestions should include both legacy and glob formats."""
+        from ripperdoc.utils.permissions.tool_permission_utils import _collect_rule_suggestions
+
+        suggestions = _collect_rule_suggestions("git status")
+        rule_contents = [s.rule_content for s in suggestions]
+
+        # Should include exact, legacy prefix, and glob format
+        assert "git status" in rule_contents  # Exact
+        assert "git:*" in rule_contents  # Legacy
+        assert "git *" in rule_contents  # Glob
+
+    def test_edge_cases(self):
+        """Edge cases should be handled correctly."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        # Empty command
+        assert match_rule("", "git *") is False
+        assert match_rule("", "*") is False
+
+        # Whitespace
+        assert match_rule("  git status  ", "git *") is True  # Trimmed
+
+        # Special characters in commands
+        assert match_rule("echo 'hello world'", "echo *") is True
+        assert match_rule("grep 'pattern' file.txt", "grep *") is True
+
+    def test_case_sensitivity(self):
+        """Matching should be case-sensitive (Unix default)."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        assert match_rule("git status", "git *") is True
+        assert match_rule("GIT status", "git *") is False  # Different case
+        assert match_rule("Git Status", "git *") is False  # Different case
+
+    def test_performance_with_many_rules(self):
+        """Should handle many rules efficiently."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        # Create many rules
+        rules = [f"cmd{i}:*" for i in range(100)]  # Legacy format
+        rules.extend([f"tool{i} *" for i in range(100)])  # Glob format
+
+        # Should match quickly
+        for rule in rules:
+            match_rule("cmd50 test", rule)  # Won't match most, but should be fast
+
+    def test_deny_rules_with_globs(self):
+        """Deny rules should work with glob patterns."""
+        from ripperdoc.utils.permissions.tool_permission_utils import evaluate_shell_command_permissions
+        from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+
+        cwd = safe_get_cwd()
+
+        # Deny all rm commands
+        decision = evaluate_shell_command_permissions(
+            type("Req", (), {"command": "rm -rf /tmp/test"}),
+            allowed_rules=set(),
+            denied_rules={"rm *"},
+            allowed_working_dirs={cwd},
+        )
+        assert decision.behavior == "deny"
+
+        # Deny all commands with --force
+        decision = evaluate_shell_command_permissions(
+            type("Req", (), {"command": "git push --force"}),
+            allowed_rules=set(),
+            denied_rules={"* --force"},
+            allowed_working_dirs={cwd},
+        )
+        assert decision.behavior == "deny"
+
+    def test_wildcard_rules_do_not_match_shell_operators(self):
+        """Wildcard rules should NOT match commands with shell operators for security."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        # Legacy prefix format should not match with &&
+        assert match_rule("git status && rm -rf /", "git:*") is False
+        assert match_rule("git status && git commit", "git:*") is False
+
+        # Glob format should not match with &&
+        assert match_rule("git status && rm -rf /", "git *") is False
+        assert match_rule("npm install && npm start", "npm *") is False
+
+        # Should not match with ||
+        assert match_rule("cmd1 || cmd2", "cmd1:*") is False
+        assert match_rule("cmd1 || cmd2", "cmd1 *") is False
+
+        # Should not match with semicolon
+        assert match_rule("echo hi; rm -rf /", "echo:*") is False
+        assert match_rule("echo hi; rm -rf /", "echo *") is False
+
+        # Should not match with pipe
+        assert match_rule("ls | grep foo", "ls:*") is False
+        assert match_rule("ls | grep foo", "ls *") is False
+
+        # Commands WITHOUT operators should still match
+        assert match_rule("git status", "git:*") is True
+        assert match_rule("git status", "git *") is True
+        assert match_rule("npm install express", "npm *") is True
+
+    def test_exact_match_still_allows_shell_operators(self):
+        """Exact match rules should still work with shell operators (user explicitly approved)."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        # Exact match should allow operators (user explicitly specified the full command)
+        assert match_rule("git status && git commit", "git status && git commit") is True
+        assert match_rule("npm install && npm start", "npm install && npm start") is True
+        assert match_rule("ls | grep foo", "ls | grep foo") is True
+        assert match_rule("cmd1 || cmd2", "cmd1 || cmd2") is True
+        assert match_rule("echo hi; echo bye", "echo hi; echo bye") is True
+
+    def test_operators_in_quotes_are_safe_for_wildcards(self):
+        """Operators inside quotes should not prevent wildcard matching."""
+        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+
+        # Operators in single quotes should be treated as literal strings
+        assert match_rule("echo 'foo && bar'", "echo *") is True
+        assert match_rule("grep 'pattern || other'", "grep *") is True
+        assert match_rule("echo 'command; other'", "echo:*") is True
+
+        # Operators in double quotes should also be safe
+        assert match_rule('echo "foo && bar"', "echo *") is True
+        assert match_rule('grep "pattern || other"', "grep *") is True
