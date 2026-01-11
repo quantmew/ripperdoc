@@ -104,12 +104,14 @@ class RichUI:
         show_full_thinking: Optional[bool] = None,
         session_id: Optional[str] = None,
         log_file_path: Optional[Path] = None,
+        allowed_tools: Optional[List[str]] = None,
     ):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self.console = console
         self.yolo_mode = yolo_mode
         self.verbose = verbose
+        self.allowed_tools = allowed_tools
         self.conversation_messages: List[ConversationMessage] = []
         self._saved_conversation: Optional[List[ConversationMessage]] = None
         self.query_context: Optional[QueryContext] = None
@@ -351,8 +353,8 @@ class RichUI:
                 self.display_message("Ripperdoc", text)
 
     def get_default_tools(self) -> list:
-        """Get the default set of tools."""
-        return get_default_tools()
+        """Get the default set of tools, filtered by allowed_tools if specified."""
+        return get_default_tools(allowed_tools=self.allowed_tools)
 
     def display_message(
         self,
@@ -1333,6 +1335,7 @@ def main_rich(
     show_full_thinking: Optional[bool] = None,
     session_id: Optional[str] = None,
     log_file_path: Optional[Path] = None,
+    allowed_tools: Optional[List[str]] = None,
 ) -> None:
     """Main entry point for Rich interface."""
 
@@ -1347,6 +1350,7 @@ def main_rich(
         show_full_thinking=show_full_thinking,
         session_id=session_id,
         log_file_path=log_file_path,
+        allowed_tools=allowed_tools,
     )
     ui.run()
 

@@ -17,7 +17,7 @@ from ripperdoc.core.config import (
     get_project_config,
 )
 from ripperdoc.cli.ui.wizard import check_onboarding
-from ripperdoc.core.default_tools import get_default_tools
+from ripperdoc.core.default_tools import get_default_tools, BUILTIN_TOOL_NAMES
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
@@ -44,6 +44,42 @@ from rich.markup import escape
 
 console = Console()
 logger = get_logger()
+
+
+def parse_tools_option(tools_arg: Optional[str]) -> Optional[List[str]]:
+    """Parse the --tools argument.
+
+    Args:
+        tools_arg: The raw tools argument from CLI.
+
+    Returns:
+        None for default (all tools), empty list for "" (no tools),
+        or a list of tool names for filtering.
+    """
+    if tools_arg is None:
+        return None  # Use all default tools
+
+    tools_arg = tools_arg.strip()
+
+    if tools_arg == "":
+        return []  # Disable all tools
+
+    if tools_arg.lower() == "default":
+        return None  # Use all default tools
+
+    # Parse comma-separated list
+    tool_names = [name.strip() for name in tools_arg.split(",") if name.strip()]
+
+    # Validate tool names
+    invalid_tools = [name for name in tool_names if name not in BUILTIN_TOOL_NAMES]
+    if invalid_tools:
+        logger.warning(
+            "[cli] Unknown tools specified: %s. Available tools: %s",
+            ", ".join(invalid_tools),
+            ", ".join(BUILTIN_TOOL_NAMES),
+        )
+
+    return tool_names if tool_names else None
 
 
 async def run_query(
@@ -252,6 +288,15 @@ async def run_query(
     help="Show full reasoning content instead of truncated preview",
 )
 @click.option("-p", "--prompt", type=str, help="Direct prompt (non-interactive)")
+@click.option(
+    "--tools",
+    type=str,
+    default=None,
+    help=(
+        'Specify the list of available tools. Use "" to disable all tools, '
+        '"default" to use all tools, or specify tool names (e.g. "Bash,Edit,Read").'
+    ),
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -260,6 +305,7 @@ def cli(
     verbose: bool,
     show_full_thinking: Optional[bool],
     prompt: Optional[str],
+    tools: Optional[str],
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
@@ -298,15 +344,22 @@ def cli(
     get_project_config(project_path)
 
     yolo_mode = yolo
+    # Parse --tools option
+    allowed_tools = parse_tools_option(tools)
     logger.debug(
         "[cli] Configuration initialized",
-        extra={"session_id": session_id, "yolo_mode": yolo_mode, "verbose": verbose},
+        extra={
+            "session_id": session_id,
+            "yolo_mode": yolo_mode,
+            "verbose": verbose,
+            "allowed_tools": allowed_tools,
+        },
     )
 
     # If prompt is provided, run directly
     if prompt:
-        tools = get_default_tools()
-        asyncio.run(run_query(prompt, tools, yolo_mode, verbose, session_id=session_id))
+        tool_list = get_default_tools(allowed_tools=allowed_tools)
+        asyncio.run(run_query(prompt, tool_list, yolo_mode, verbose, session_id=session_id))
         return
 
     # If no command specified, start interactive REPL with Rich interface
@@ -320,6 +373,7 @@ def cli(
             show_full_thinking=show_full_thinking,
             session_id=session_id,
             log_file_path=log_file,
+            allowed_tools=allowed_tools,
         )
         return
 
