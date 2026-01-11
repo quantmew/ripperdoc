@@ -12,6 +12,7 @@ import os
 import threading
 import time
 import uuid
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -42,13 +43,228 @@ class BackgroundTask:
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
-_tasks: Dict[str, BackgroundTask] = {}
-_tasks_lock = threading.Lock()
-_background_loop: Optional[asyncio.AbstractEventLoop] = None
-_background_thread: Optional[threading.Thread] = None
-_loop_lock = threading.Lock()
-_shutdown_registered = False
 DEFAULT_TASK_TTL_SEC = float(os.getenv("RIPPERDOC_BASH_TASK_TTL_SEC", "3600"))
+
+
+class BackgroundShellManager:
+    """Manager for background shell tasks with proper lifecycle control.
+
+    This class encapsulates all global state for background shell management,
+    providing better testability and proper resource cleanup.
+    """
+
+    _instance: Optional["BackgroundShellManager"] = None
+    _instance_lock = threading.Lock()
+
+    def __init__(self) -> None:
+        """Initialize the manager. Use get_instance() for singleton access."""
+        self._tasks: Dict[str, BackgroundTask] = {}
+        self._tasks_lock = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
+        self._loop_lock = threading.Lock()
+        self._shutdown_event = threading.Event()
+        self._shutdown_registered = False
+        self._is_shutting_down = False
+
+    @classmethod
+    def get_instance(cls) -> "BackgroundShellManager":
+        """Get or create the singleton instance."""
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Reset the singleton instance. Useful for testing.
+
+        This method shuts down the current instance and clears it,
+        allowing a fresh instance to be created on next access.
+        """
+        with cls._instance_lock:
+            if cls._instance is not None:
+                cls._instance.shutdown()
+                cls._instance = None
+
+    @classmethod
+    def _set_instance_for_testing(cls, instance: Optional["BackgroundShellManager"]) -> None:
+        """Set a custom instance for testing purposes."""
+        with cls._instance_lock:
+            cls._instance = instance
+
+    @property
+    def tasks(self) -> Dict[str, BackgroundTask]:
+        """Access to tasks dict (for internal use)."""
+        return self._tasks
+
+    @property
+    def tasks_lock(self) -> threading.Lock:
+        """Access to tasks lock (for internal use)."""
+        return self._tasks_lock
+
+    def ensure_loop(self) -> asyncio.AbstractEventLoop:
+        """Create (or return) a dedicated loop for background processes."""
+        if self._loop and self._loop.is_running():
+            return self._loop
+
+        with self._loop_lock:
+            if self._loop and self._loop.is_running():
+                return self._loop
+
+            loop = asyncio.new_event_loop()
+            ready = threading.Event()
+            shutdown_event = self._shutdown_event
+
+            def _run_loop() -> None:
+                asyncio.set_event_loop(loop)
+                ready.set()
+                try:
+                    loop.run_forever()
+                finally:
+                    # Ensure cleanup happens even if loop is stopped abruptly
+                    shutdown_event.set()
+
+            # Use non-daemon thread to ensure atexit handlers can complete
+            thread = threading.Thread(
+                target=_run_loop,
+                name="ripperdoc-bg-loop",
+                daemon=False,  # Non-daemon for proper shutdown
+            )
+            thread.start()
+            ready.wait()
+
+            self._loop = loop
+            self._thread = thread
+            self._register_shutdown_hook()
+            return loop
+
+    def _register_shutdown_hook(self) -> None:
+        """Register atexit handler for cleanup."""
+        if self._shutdown_registered:
+            return
+
+        # Use weakref to avoid preventing garbage collection
+        manager_ref = weakref.ref(self)
+
+        def _shutdown_callback() -> None:
+            manager = manager_ref()
+            if manager is not None:
+                manager.shutdown()
+
+        atexit.register(_shutdown_callback)
+        self._shutdown_registered = True
+
+    def submit_to_loop(self, coro: Any) -> concurrent.futures.Future:
+        """Run a coroutine on the background loop and return a thread-safe future."""
+        loop = self.ensure_loop()
+        return asyncio.run_coroutine_threadsafe(coro, loop)
+
+    def shutdown(self) -> None:
+        """Stop background tasks/loop to avoid resource leaks."""
+        if self._is_shutting_down:
+            return
+        self._is_shutting_down = True
+
+        loop = self._loop
+        thread = self._thread
+
+        if not loop or loop.is_closed():
+            self._loop = None
+            self._thread = None
+            self._is_shutting_down = False
+            return
+
+        try:
+            if loop.is_running():
+                try:
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self._shutdown_loop_async(loop), loop
+                    )
+                    fut.result(timeout=5)  # Increased timeout for proper cleanup
+                except (RuntimeError, TimeoutError, concurrent.futures.TimeoutError):
+                    logger.debug("Failed to cleanly shutdown background loop", exc_info=True)
+                try:
+                    loop.call_soon_threadsafe(loop.stop)
+                except (RuntimeError, OSError):
+                    logger.debug("Failed to stop background loop", exc_info=True)
+            else:
+                # If loop isn't running, try to run cleanup synchronously
+                try:
+                    loop.run_until_complete(self._shutdown_loop_async(loop))
+                except RuntimeError:
+                    pass  # Loop may already be closed
+        finally:
+            if thread and thread.is_alive():
+                thread.join(timeout=3)  # Increased timeout
+            with contextlib.suppress(Exception):
+                if not loop.is_closed():
+                    loop.close()
+            self._loop = None
+            self._thread = None
+            self._shutdown_event.set()
+            self._is_shutting_down = False
+
+    async def _shutdown_loop_async(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Drain running background processes before stopping the loop."""
+        with self._tasks_lock:
+            tasks = list(self._tasks.values())
+            self._tasks.clear()
+
+        for task in tasks:
+            try:
+                task.killed = True
+                with contextlib.suppress(ProcessLookupError):
+                    task.process.kill()
+                try:
+                    with contextlib.suppress(ProcessLookupError):
+                        await asyncio.wait_for(task.process.wait(), timeout=1.5)
+                except asyncio.TimeoutError:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        task.process.kill()
+                    with contextlib.suppress(asyncio.TimeoutError, ProcessLookupError):
+                        await asyncio.wait_for(task.process.wait(), timeout=0.5)
+                task.exit_code = task.process.returncode or -1
+            except (OSError, RuntimeError, asyncio.CancelledError) as exc:
+                if not isinstance(exc, asyncio.CancelledError):
+                    _safe_log_exception(
+                        "Error shutting down background task",
+                        task_id=task.id,
+                        command=task.command,
+                    )
+            finally:
+                await _finalize_reader_tasks(task.reader_tasks)
+                task.done_event.set()
+
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks(loop) if t is not current]
+        for pending_task in pending:
+            pending_task.cancel()
+        if pending:
+            with contextlib.suppress(Exception):
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        with contextlib.suppress(Exception):
+            await loop.shutdown_asyncgens()
+
+
+# Module-level functions that delegate to the singleton manager
+# These maintain backward compatibility with existing code
+
+def _get_manager() -> BackgroundShellManager:
+    """Get the singleton manager instance."""
+    return BackgroundShellManager.get_instance()
+
+
+def _get_tasks_lock() -> threading.Lock:
+    """Get the tasks lock from the manager."""
+    return _get_manager().tasks_lock
+
+
+def _get_tasks() -> Dict[str, BackgroundTask]:
+    """Get the tasks dict from the manager."""
+    return _get_manager().tasks
 
 
 def _safe_log_exception(message: str, **extra: Any) -> None:
@@ -61,49 +277,12 @@ def _safe_log_exception(message: str, **extra: Any) -> None:
 
 def _ensure_background_loop() -> asyncio.AbstractEventLoop:
     """Create (or return) a dedicated loop for background processes."""
-    global _background_loop, _background_thread
-
-    if _background_loop and _background_loop.is_running():
-        return _background_loop
-
-    with _loop_lock:
-        if _background_loop and _background_loop.is_running():
-            return _background_loop
-
-        loop = asyncio.new_event_loop()
-        ready = threading.Event()
-
-        def _run_loop() -> None:
-            asyncio.set_event_loop(loop)
-            ready.set()
-            loop.run_forever()
-
-        thread = threading.Thread(
-            target=_run_loop,
-            name="ripperdoc-bg-loop",
-            daemon=True,
-        )
-        thread.start()
-        ready.wait()
-
-        _background_loop = loop
-        _background_thread = thread
-        _register_shutdown_hook()
-        return loop
-
-
-def _register_shutdown_hook() -> None:
-    global _shutdown_registered
-    if _shutdown_registered:
-        return
-    atexit.register(shutdown_background_shell)
-    _shutdown_registered = True
+    return _get_manager().ensure_loop()
 
 
 def _submit_to_background_loop(coro: Any) -> concurrent.futures.Future:
     """Run a coroutine on the background loop and return a thread-safe future."""
-    loop = _ensure_background_loop()
-    return asyncio.run_coroutine_threadsafe(coro, loop)
+    return _get_manager().submit_to_loop(coro)
 
 
 async def _pump_stream(stream: asyncio.StreamReader, sink: List[str]) -> None:
@@ -114,7 +293,7 @@ async def _pump_stream(stream: asyncio.StreamReader, sink: List[str]) -> None:
             if not chunk:
                 break
             text = chunk.decode("utf-8", errors="replace")
-            with _tasks_lock:
+            with _get_tasks_lock():
                 sink.append(text)
     except (OSError, RuntimeError, asyncio.CancelledError) as exc:
         if isinstance(exc, asyncio.CancelledError):
@@ -149,15 +328,15 @@ async def _monitor_task(task: BackgroundTask) -> None:
             await asyncio.wait_for(task.process.wait(), timeout=task.timeout)
         else:
             await task.process.wait()
-        with _tasks_lock:
+        with _get_tasks_lock():
             task.exit_code = task.process.returncode
     except asyncio.TimeoutError:
         logger.warning(f"Background task {task.id} timed out after {task.timeout}s: {task.command}")
-        with _tasks_lock:
+        with _get_tasks_lock():
             task.timed_out = True
         task.process.kill()
         await task.process.wait()
-        with _tasks_lock:
+        with _get_tasks_lock():
             task.exit_code = -1
     except asyncio.CancelledError:
         return
@@ -168,7 +347,7 @@ async def _monitor_task(task: BackgroundTask) -> None:
             exc,
             extra={"task_id": task.id, "command": task.command},
         )
-        with _tasks_lock:
+        with _get_tasks_lock():
             task.exit_code = -1
     finally:
         # Ensure readers are finished before marking done.
@@ -198,8 +377,8 @@ async def _start_background_command(
         start_time=_loop_time(),
         timeout=timeout,
     )
-    with _tasks_lock:
-        _tasks[task_id] = record
+    with _get_tasks_lock():
+        _get_tasks()[task_id] = record
 
     # Start stream pumps and monitor task.
     if process.stdout:
@@ -249,11 +428,12 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
 
     If consume is True, buffered stdout/stderr are cleared after reading.
     """
-    with _tasks_lock:
-        if task_id not in _tasks:
+    tasks = _get_tasks()
+    with _get_tasks_lock():
+        if task_id not in tasks:
             raise KeyError(f"No background task found with id '{task_id}'")
 
-        task = _tasks[task_id]
+        task = tasks[task_id]
         stdout = "".join(task.stdout_chunks)
         stderr = "".join(task.stderr_chunks)
 
@@ -279,8 +459,9 @@ async def kill_background_task(task_id: str) -> bool:
     KILL_WAIT_SECONDS = 2.0
 
     async def _kill(task_id: str) -> bool:
-        with _tasks_lock:
-            task = _tasks.get(task_id)
+        tasks = _get_tasks()
+        with _get_tasks_lock():
+            task = tasks.get(task_id)
             if not task:
                 return False
 
@@ -298,7 +479,7 @@ async def kill_background_task(task_id: str) -> bool:
                     task.process.kill()
                 await asyncio.wait_for(task.process.wait(), timeout=1.0)
 
-            with _tasks_lock:
+            with _get_tasks_lock():
                 task.exit_code = task.process.returncode or -1
             return True
         finally:
@@ -312,8 +493,8 @@ async def kill_background_task(task_id: str) -> bool:
 def list_background_tasks() -> List[str]:
     """Return known background task ids."""
     _prune_background_tasks()
-    with _tasks_lock:
-        return list(_tasks.keys())
+    with _get_tasks_lock():
+        return list(_get_tasks().keys())
 
 
 def _prune_background_tasks(max_age_seconds: Optional[float] = None) -> int:
@@ -323,89 +504,30 @@ def _prune_background_tasks(max_age_seconds: Optional[float] = None) -> int:
         return 0
     now = _loop_time()
     removed = 0
-    with _tasks_lock:
-        for task_id, task in list(_tasks.items()):
+    tasks = _get_tasks()
+    with _get_tasks_lock():
+        for task_id, task in list(tasks.items()):
             if task.exit_code is None:
                 continue
             age = (now - task.start_time) if task.start_time else 0.0
             if age > ttl:
-                _tasks.pop(task_id, None)
+                tasks.pop(task_id, None)
                 removed += 1
     return removed
 
 
-async def _shutdown_loop(loop: asyncio.AbstractEventLoop) -> None:
-    """Drain running background processes before stopping the loop."""
-    with _tasks_lock:
-        tasks = list(_tasks.values())
-        _tasks.clear()
-
-    for task in tasks:
-        try:
-            task.killed = True
-            with contextlib.suppress(ProcessLookupError):
-                task.process.kill()
-            try:
-                with contextlib.suppress(ProcessLookupError):
-                    await asyncio.wait_for(task.process.wait(), timeout=1.5)
-            except asyncio.TimeoutError:
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    task.process.kill()
-                with contextlib.suppress(asyncio.TimeoutError, ProcessLookupError):
-                    await asyncio.wait_for(task.process.wait(), timeout=0.5)
-            task.exit_code = task.process.returncode or -1
-        except (OSError, RuntimeError, asyncio.CancelledError) as exc:
-            if not isinstance(exc, asyncio.CancelledError):
-                _safe_log_exception(
-                    "Error shutting down background task",
-                    task_id=task.id,
-                    command=task.command,
-                )
-        finally:
-            await _finalize_reader_tasks(task.reader_tasks)
-            task.done_event.set()
-
-    current = asyncio.current_task()
-    pending = [t for t in asyncio.all_tasks(loop) if t is not current]
-    for pending_task in pending:
-        pending_task.cancel()
-    if pending:
-        with contextlib.suppress(Exception):
-            await asyncio.gather(*pending, return_exceptions=True)
-
-    with contextlib.suppress(Exception):
-        await loop.shutdown_asyncgens()
-
-
 def shutdown_background_shell() -> None:
-    """Stop background tasks/loop to avoid asyncio 'Event loop is closed' warnings."""
-    global _background_loop, _background_thread
+    """Stop background tasks/loop to avoid asyncio 'Event loop is closed' warnings.
 
-    loop = _background_loop
-    thread = _background_thread
+    This function maintains backward compatibility by delegating to the manager.
+    """
+    _get_manager().shutdown()
 
-    if not loop or loop.is_closed():
-        _background_loop = None
-        _background_thread = None
-        return
 
-    try:
-        if loop.is_running():
-            try:
-                fut = asyncio.run_coroutine_threadsafe(_shutdown_loop(loop), loop)
-                fut.result(timeout=3)
-            except (RuntimeError, TimeoutError, concurrent.futures.TimeoutError):
-                logger.debug("Failed to cleanly shutdown background loop", exc_info=True)
-            try:
-                loop.call_soon_threadsafe(loop.stop)
-            except (RuntimeError, OSError):
-                logger.debug("Failed to stop background loop", exc_info=True)
-        else:
-            loop.run_until_complete(_shutdown_loop(loop))
-    finally:
-        if thread and thread.is_alive():
-            thread.join(timeout=2)
-        with contextlib.suppress(Exception):
-            loop.close()
-        _background_loop = None
-        _background_thread = None
+def reset_background_shell_for_testing() -> None:
+    """Reset all background shell state. Useful for testing.
+
+    This function shuts down the current manager instance and clears it,
+    allowing a fresh instance to be created on next access.
+    """
+    BackgroundShellManager.reset_instance()

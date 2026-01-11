@@ -8,7 +8,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, TypeVar, Generic, Union
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation
-from ripperdoc.utils.file_watch import FileSnapshot
+from ripperdoc.utils.file_watch import FileCacheType
 from ripperdoc.utils.log import get_logger
 
 
@@ -41,9 +41,10 @@ class ToolUseContext(BaseModel):
     verbose: bool = False
     permission_checker: Optional[Any] = None
     read_file_timestamps: Dict[str, float] = Field(default_factory=dict)
-    # SkipValidation prevents Pydantic from copying the dict during validation,
-    # ensuring Read and Edit tools share the same cache instance
-    file_state_cache: Annotated[Dict[str, FileSnapshot], SkipValidation] = Field(
+    # SkipValidation prevents Pydantic from copying the cache during validation,
+    # ensuring Read and Edit tools share the same cache instance.
+    # FileCacheType supports both Dict[str, FileSnapshot] and BoundedFileCache.
+    file_state_cache: Annotated[FileCacheType, SkipValidation] = Field(
         default_factory=dict
     )
     conversation_messages: Annotated[Optional[List[Any]], SkipValidation] = Field(

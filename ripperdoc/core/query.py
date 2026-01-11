@@ -43,7 +43,11 @@ from ripperdoc.core.query_utils import (
 from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.context_length_errors import detect_context_length_error
-from ripperdoc.utils.file_watch import ChangedFileNotice, FileSnapshot, detect_changed_files
+from ripperdoc.utils.file_watch import (
+    BoundedFileCache,
+    ChangedFileNotice,
+    detect_changed_files,
+)
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
@@ -555,6 +559,14 @@ def _apply_skill_context_updates(
 class QueryContext:
     """Context for a query session."""
 
+    # Thresholds for memory warnings
+    MESSAGE_COUNT_WARNING_THRESHOLD = int(
+        os.getenv("RIPPERDOC_MESSAGE_WARNING_THRESHOLD", "500")
+    )
+    MESSAGE_COUNT_CRITICAL_THRESHOLD = int(
+        os.getenv("RIPPERDOC_MESSAGE_CRITICAL_THRESHOLD", "1000")
+    )
+
     def __init__(
         self,
         tools: List[Tool[Any, Any]],
@@ -565,6 +577,8 @@ class QueryContext:
         pause_ui: Optional[Callable[[], None]] = None,
         resume_ui: Optional[Callable[[], None]] = None,
         stop_hook: str = "stop",
+        file_cache_max_entries: int = 500,
+        file_cache_max_memory_mb: float = 50.0,
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
@@ -572,11 +586,16 @@ class QueryContext:
         self.model = model
         self.verbose = verbose
         self.abort_controller = asyncio.Event()
-        self.file_state_cache: Dict[str, FileSnapshot] = {}
+        # Use BoundedFileCache instead of plain Dict to prevent unbounded growth
+        self.file_state_cache: BoundedFileCache = BoundedFileCache(
+            max_entries=file_cache_max_entries,
+            max_memory_mb=file_cache_max_memory_mb,
+        )
         self.pause_ui = pause_ui
         self.resume_ui = resume_ui
         self.stop_hook = stop_hook
         self.stop_hook_active = False
+        self._last_message_warning_count = 0
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -595,6 +614,44 @@ class QueryContext:
     def all_tools(self) -> List[Tool[Any, Any]]:
         """Return all known tools (active + deferred)."""
         return self.tool_registry.all_tools
+
+    def check_message_count(self, message_count: int) -> None:
+        """Check message count and log warnings if thresholds are exceeded.
+
+        This helps detect potential memory issues in long sessions.
+        """
+        if message_count >= self.MESSAGE_COUNT_CRITICAL_THRESHOLD:
+            if self._last_message_warning_count < self.MESSAGE_COUNT_CRITICAL_THRESHOLD:
+                logger.warning(
+                    "[query] Critical: Message history is very large. "
+                    "Consider compacting or starting a new session.",
+                    extra={
+                        "message_count": message_count,
+                        "threshold": self.MESSAGE_COUNT_CRITICAL_THRESHOLD,
+                        "file_cache_stats": self.file_state_cache.stats(),
+                    },
+                )
+                self._last_message_warning_count = message_count
+        elif message_count >= self.MESSAGE_COUNT_WARNING_THRESHOLD:
+            # Only warn once per threshold crossing
+            if self._last_message_warning_count < self.MESSAGE_COUNT_WARNING_THRESHOLD:
+                logger.info(
+                    "[query] Message history growing large; automatic compaction may trigger soon",
+                    extra={
+                        "message_count": message_count,
+                        "threshold": self.MESSAGE_COUNT_WARNING_THRESHOLD,
+                        "file_cache_stats": self.file_state_cache.stats(),
+                    },
+                )
+                self._last_message_warning_count = message_count
+
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """Return memory usage statistics for monitoring."""
+        return {
+            "file_cache": self.file_state_cache.stats(),
+            "tool_count": len(self.tool_registry.all_tools),
+            "active_tool_count": len(self.tool_registry.active_tools),
+        }
 
 
 async def query_llm(
@@ -1217,6 +1274,9 @@ async def query(
     # do not interfere with the loop or normalization.
     messages = list(messages)
 
+    # Check initial message count for memory warnings
+    query_context.check_message_count(len(messages))
+
     for iteration in range(1, MAX_QUERY_ITERATIONS + 1):
         result = IterationResult()
 
@@ -1239,6 +1299,10 @@ async def query(
             messages = messages + [result.assistant_message] + result.tool_results  # type: ignore[operator]
         else:
             messages = messages + result.tool_results  # type: ignore[operator]
+
+        # Check message count after each iteration for memory warnings
+        query_context.check_message_count(len(messages))
+
         logger.debug(
             f"[query] Continuing loop with {len(messages)} messages after tools; "
             f"tool_results_count={len(result.tool_results)}"

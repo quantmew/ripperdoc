@@ -3,9 +3,11 @@
 Allows the AI to edit files by replacing text.
 """
 
+import contextlib
 import os
+import tempfile
 from pathlib import Path
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, Generator, List, Optional, TextIO
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
@@ -20,7 +22,40 @@ from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.file_watch import record_snapshot
 from ripperdoc.utils.path_ignore import check_path_for_tool
 
+# Import fcntl for file locking on Unix systems
+try:
+    import fcntl
+
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
+
 logger = get_logger()
+
+
+@contextlib.contextmanager
+def _file_lock(file_handle: TextIO, exclusive: bool = True) -> Generator[None, None, None]:
+    """Acquire a file lock, with fallback for systems without fcntl.
+
+    Args:
+        file_handle: An open file handle to lock
+        exclusive: If True, acquire exclusive lock; otherwise shared lock
+
+    Yields:
+        None
+    """
+    if not HAS_FCNTL:
+        # On Windows or systems without fcntl, skip locking
+        yield
+        return
+
+    lock_type = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+    try:
+        fcntl.flock(file_handle.fileno(), lock_type)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(file_handle.fileno(), fcntl.LOCK_UN)
 
 
 class FileEditToolInput(BaseModel):
@@ -180,57 +215,112 @@ match exactly (including whitespace and indentation)."""
     async def call(
         self, input_data: FileEditToolInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
-        """Edit the file."""
+        """Edit the file with TOCTOU protection."""
+
+        abs_file_path = os.path.abspath(input_data.file_path)
+        file_state_cache = getattr(context, "file_state_cache", {})
+        file_snapshot = file_state_cache.get(abs_file_path)
 
         try:
-            # Read the file
-            with open(input_data.file_path, "r", encoding="utf-8") as f:
-                content = f.read()
+            # Open file with exclusive lock to prevent concurrent modifications
+            # Use r+ mode to get a file handle we can lock before reading
+            with open(abs_file_path, "r+", encoding="utf-8") as f:
+                with _file_lock(f, exclusive=True):
+                    # Re-check mtime AFTER acquiring lock to close TOCTOU window
+                    # This is the key fix: validate mtime while holding the lock
+                    if file_snapshot:
+                        try:
+                            current_mtime = os.fstat(f.fileno()).st_mtime
+                            if current_mtime > file_snapshot.timestamp:
+                                output = FileEditToolOutput(
+                                    file_path=input_data.file_path,
+                                    replacements_made=0,
+                                    success=False,
+                                    message="File has been modified since read, either by the user "
+                                    "or by a linter. Read it again before attempting to edit it.",
+                                )
+                                yield ToolResult(
+                                    data=output,
+                                    result_for_assistant=self.render_result_for_assistant(output),
+                                )
+                                return
+                        except OSError:
+                            pass  # fstat failed, proceed anyway
 
-            # Check if old_string exists
-            if input_data.old_string not in content:
-                output = FileEditToolOutput(
-                    file_path=input_data.file_path,
-                    replacements_made=0,
-                    success=False,
-                    message=f"String not found in file: {input_data.file_path}",
-                )
-                yield ToolResult(
-                    data=output, result_for_assistant=self.render_result_for_assistant(output)
-                )
-                return
+                    # Read content while holding the lock
+                    content = f.read()
 
-            # Count occurrences
-            occurrence_count = content.count(input_data.old_string)
+                    # Check if old_string exists
+                    if input_data.old_string not in content:
+                        output = FileEditToolOutput(
+                            file_path=input_data.file_path,
+                            replacements_made=0,
+                            success=False,
+                            message=f"String not found in file: {input_data.file_path}",
+                        )
+                        yield ToolResult(
+                            data=output,
+                            result_for_assistant=self.render_result_for_assistant(output),
+                        )
+                        return
 
-            # Check for ambiguity if not replace_all
-            if not input_data.replace_all and occurrence_count > 1:
-                output = FileEditToolOutput(
-                    file_path=input_data.file_path,
-                    replacements_made=0,
-                    success=False,
-                    message=f"String appears {occurrence_count} times in file. "
-                    f"Either provide a unique string or use replace_all=true",
-                )
-                yield ToolResult(
-                    data=output, result_for_assistant=self.render_result_for_assistant(output)
-                )
-                return
+                    # Count occurrences
+                    occurrence_count = content.count(input_data.old_string)
 
-            # Perform replacement
-            if input_data.replace_all:
-                new_content = content.replace(input_data.old_string, input_data.new_string)
-                replacements = occurrence_count
-            else:
-                new_content = content.replace(input_data.old_string, input_data.new_string, 1)
-                replacements = 1
+                    # Check for ambiguity if not replace_all
+                    if not input_data.replace_all and occurrence_count > 1:
+                        output = FileEditToolOutput(
+                            file_path=input_data.file_path,
+                            replacements_made=0,
+                            success=False,
+                            message=f"String appears {occurrence_count} times in file. "
+                            f"Either provide a unique string or use replace_all=true",
+                        )
+                        yield ToolResult(
+                            data=output,
+                            result_for_assistant=self.render_result_for_assistant(output),
+                        )
+                        return
 
-            # Write the file
-            with open(input_data.file_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
+                    # Perform replacement
+                    if input_data.replace_all:
+                        new_content = content.replace(input_data.old_string, input_data.new_string)
+                        replacements = occurrence_count
+                    else:
+                        new_content = content.replace(
+                            input_data.old_string, input_data.new_string, 1
+                        )
+                        replacements = 1
 
-            # Use absolute path to ensure consistency with validation lookup
-            abs_file_path = os.path.abspath(input_data.file_path)
+                    # Atomic write: write to temp file then rename
+                    # This ensures the file is either fully written or not at all
+                    file_dir = os.path.dirname(abs_file_path)
+                    try:
+                        # Create temp file in same directory to ensure same filesystem
+                        fd, temp_path = tempfile.mkstemp(
+                            dir=file_dir, prefix=".ripperdoc_edit_", suffix=".tmp"
+                        )
+                        try:
+                            with os.fdopen(fd, "w", encoding="utf-8") as temp_f:
+                                temp_f.write(new_content)
+                            # Preserve original file permissions
+                            original_stat = os.fstat(f.fileno())
+                            os.chmod(temp_path, original_stat.st_mode)
+                            # Atomic replace (works on Unix, best-effort on Windows)
+                            os.replace(temp_path, abs_file_path)
+                        except Exception:
+                            # Clean up temp file on failure
+                            with contextlib.suppress(OSError):
+                                os.unlink(temp_path)
+                            raise
+                    except OSError:
+                        # Fallback to in-place write if atomic write fails
+                        # (e.g., cross-filesystem issues)
+                        f.seek(0)
+                        f.truncate()
+                        f.write(new_content)
+
+            # Record the new snapshot after successful edit
             try:
                 record_snapshot(
                     abs_file_path,
