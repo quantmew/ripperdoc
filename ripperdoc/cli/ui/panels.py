@@ -55,6 +55,7 @@ def print_shortcuts(console: Console) -> None:
     pairs: List[Tuple[str, str]] = [
         ("? for shortcuts", "! for bash mode"),
         ("/ for commands", "@ for file mention"),
+        ("Alt+Enter for newline", "Enter to submit"),
     ]
     console.print("[dim]Shortcuts[/dim]")
     for left, right in pairs:

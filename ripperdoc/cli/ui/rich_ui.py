@@ -1054,12 +1054,18 @@ class RichUI:
             else:
                 buf.start_completion(select_first=True)
 
+        @key_bindings.add("escape", "enter")
+        def _(event: Any) -> None:
+            """Insert newline on Alt+Enter."""
+            event.current_buffer.insert_text("\n")
+
         self._prompt_session = PromptSession(
             completer=combined_completer,
             complete_style=CompleteStyle.COLUMN,
             complete_while_typing=True,
             history=InMemoryHistory(),
             key_bindings=key_bindings,
+            multiline=True,
         )
         return self._prompt_session
 
@@ -1074,7 +1080,7 @@ class RichUI:
         console.print(create_status_bar())
         console.print()
         console.print(
-            "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. Press ESC to interrupt a running query.[/dim]\n"
+            "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. Press Alt+Enter for newline. Press ESC to interrupt a running query.[/dim]\n"
         )
 
         session = self.get_prompt_session()
