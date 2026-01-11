@@ -26,7 +26,11 @@ from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.utils.messages import create_user_message
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.core.permissions import make_permission_checker
-from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.session_history import (
+    SessionHistory,
+    list_session_summaries,
+    load_session_messages,
+)
 from ripperdoc.utils.mcp import (
     load_mcp_servers_async,
     format_mcp_instructions,
@@ -88,6 +92,9 @@ async def run_query(
     yolo_mode: bool = False,
     verbose: bool = False,
     session_id: Optional[str] = None,
+    custom_system_prompt: Optional[str] = None,
+    append_system_prompt: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> None:
     """Run a single query and print the response."""
 
@@ -98,6 +105,9 @@ async def run_query(
             "verbose": verbose,
             "session_id": session_id,
             "prompt_length": len(prompt),
+            "model": model,
+            "has_custom_system_prompt": custom_system_prompt is not None,
+            "has_append_system_prompt": append_system_prompt is not None,
         },
     )
     if prompt:
@@ -133,7 +143,9 @@ async def run_query(
     session_history.append(messages[0])
 
     # Create query context
-    query_context = QueryContext(tools=tools, yolo_mode=yolo_mode, verbose=verbose)
+    query_context = QueryContext(
+        tools=tools, yolo_mode=yolo_mode, verbose=verbose, model=model or "main"
+    )
 
     session_start_time = time.time()
     try:
@@ -177,13 +189,27 @@ async def run_query(
         if prompt_hook_contexts:
             additional_instructions.extend(prompt_hook_contexts)
 
-        system_prompt = build_system_prompt(
-            tools,
-            prompt,
-            context,
-            additional_instructions=additional_instructions or None,
-            mcp_instructions=mcp_instructions,
-        )
+        # Build system prompt based on options:
+        # - custom_system_prompt: replaces the default entirely
+        # - append_system_prompt: appends to the default system prompt
+        if custom_system_prompt:
+            # Complete replacement
+            system_prompt = custom_system_prompt
+            # Still append if both are provided
+            if append_system_prompt:
+                system_prompt = f"{system_prompt}\n\n{append_system_prompt}"
+        else:
+            # Build default with optional append
+            all_instructions = list(additional_instructions) if additional_instructions else []
+            if append_system_prompt:
+                all_instructions.append(append_system_prompt)
+            system_prompt = build_system_prompt(
+                tools,
+                prompt,
+                context,
+                additional_instructions=all_instructions or None,
+                mcp_instructions=mcp_instructions,
+            )
 
         # Run the query
         try:
@@ -297,6 +323,31 @@ async def run_query(
         '"default" to use all tools, or specify tool names (e.g. "Bash,Edit,Read").'
     ),
 )
+@click.option(
+    "--system-prompt",
+    type=str,
+    default=None,
+    help="System prompt to use for the session (replaces default).",
+)
+@click.option(
+    "--append-system-prompt",
+    type=str,
+    default=None,
+    help="Additional instructions to append to the system prompt.",
+)
+@click.option(
+    "--model",
+    type=str,
+    default=None,
+    help="Model profile for the current session.",
+)
+@click.option(
+    "-c",
+    "--continue",
+    "continue_session",
+    is_flag=True,
+    help="Continue the most recent conversation in the current directory.",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -306,6 +357,10 @@ def cli(
     show_full_thinking: Optional[bool],
     prompt: Optional[str],
     tools: Optional[str],
+    system_prompt: Optional[str],
+    append_system_prompt: Optional[str],
+    model: Optional[str],
+    continue_session: bool,
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
@@ -346,6 +401,28 @@ def cli(
     yolo_mode = yolo
     # Parse --tools option
     allowed_tools = parse_tools_option(tools)
+
+    # Handle --continue option: load the most recent session
+    resume_messages = None
+    if continue_session:
+        summaries = list_session_summaries(project_path)
+        if summaries:
+            most_recent = summaries[0]
+            session_id = most_recent.session_id
+            resume_messages = load_session_messages(project_path, session_id)
+            logger.info(
+                "[cli] Continuing session",
+                extra={
+                    "session_id": session_id,
+                    "message_count": len(resume_messages),
+                    "last_prompt": most_recent.last_prompt,
+                },
+            )
+            console.print(f"[dim]Continuing session: {most_recent.last_prompt}[/dim]")
+        else:
+            logger.warning("[cli] No previous sessions found to continue")
+            console.print("[yellow]No previous sessions found in this directory.[/yellow]")
+
     logger.debug(
         "[cli] Configuration initialized",
         extra={
@@ -353,13 +430,28 @@ def cli(
             "yolo_mode": yolo_mode,
             "verbose": verbose,
             "allowed_tools": allowed_tools,
+            "model": model,
+            "has_system_prompt": system_prompt is not None,
+            "has_append_system_prompt": append_system_prompt is not None,
+            "continue_session": continue_session,
         },
     )
 
     # If prompt is provided, run directly
     if prompt:
         tool_list = get_default_tools(allowed_tools=allowed_tools)
-        asyncio.run(run_query(prompt, tool_list, yolo_mode, verbose, session_id=session_id))
+        asyncio.run(
+            run_query(
+                prompt,
+                tool_list,
+                yolo_mode,
+                verbose,
+                session_id=session_id,
+                custom_system_prompt=system_prompt,
+                append_system_prompt=append_system_prompt,
+                model=model,
+            )
+        )
         return
 
     # If no command specified, start interactive REPL with Rich interface
@@ -374,6 +466,10 @@ def cli(
             session_id=session_id,
             log_file_path=log_file,
             allowed_tools=allowed_tools,
+            custom_system_prompt=system_prompt,
+            append_system_prompt=append_system_prompt,
+            model=model,
+            resume_messages=resume_messages,
         )
         return
 

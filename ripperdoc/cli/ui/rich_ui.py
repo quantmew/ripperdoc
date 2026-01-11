@@ -105,6 +105,10 @@ class RichUI:
         session_id: Optional[str] = None,
         log_file_path: Optional[Path] = None,
         allowed_tools: Optional[List[str]] = None,
+        custom_system_prompt: Optional[str] = None,
+        append_system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        resume_messages: Optional[List[Any]] = None,
     ):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -112,6 +116,9 @@ class RichUI:
         self.yolo_mode = yolo_mode
         self.verbose = verbose
         self.allowed_tools = allowed_tools
+        self.custom_system_prompt = custom_system_prompt
+        self.append_system_prompt = append_system_prompt
+        self.model = model or "main"
         self.conversation_messages: List[ConversationMessage] = []
         self._saved_conversation: Optional[List[ConversationMessage]] = None
         self.query_context: Optional[QueryContext] = None
@@ -195,6 +202,17 @@ class RichUI:
             },
         )
         self._run_session_start("startup")
+
+        # Handle resume_messages if provided (for --continue)
+        if resume_messages:
+            self.conversation_messages = list(resume_messages)
+            logger.info(
+                "[ui] Resumed conversation with messages",
+                extra={
+                    "session_id": self.session_id,
+                    "message_count": len(resume_messages),
+                },
+            )
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Properties for backward compatibility with interrupt handler
@@ -462,13 +480,27 @@ class RichUI:
         if hook_instructions:
             additional_instructions.extend([text for text in hook_instructions if text])
 
-        system_prompt = build_system_prompt(
-            self.query_context.tools if self.query_context else [],
-            user_input,
-            context,
-            additional_instructions=additional_instructions or None,
-            mcp_instructions=mcp_instructions,
-        )
+        # Build system prompt based on options:
+        # - custom_system_prompt: replaces the default entirely
+        # - append_system_prompt: appends to the default system prompt
+        if self.custom_system_prompt:
+            # Complete replacement
+            system_prompt = self.custom_system_prompt
+            # Still append if both are provided
+            if self.append_system_prompt:
+                system_prompt = f"{system_prompt}\n\n{self.append_system_prompt}"
+        else:
+            # Build default with optional append
+            all_instructions = list(additional_instructions) if additional_instructions else []
+            if self.append_system_prompt:
+                all_instructions.append(self.append_system_prompt)
+            system_prompt = build_system_prompt(
+                self.query_context.tools if self.query_context else [],
+                user_input,
+                context,
+                additional_instructions=all_instructions or None,
+                mcp_instructions=mcp_instructions,
+            )
 
         return system_prompt, context
 
@@ -738,7 +770,10 @@ class RichUI:
         # Initialize or reset query context
         if not self.query_context:
             self.query_context = QueryContext(
-                tools=self.get_default_tools(), yolo_mode=self.yolo_mode, verbose=self.verbose
+                tools=self.get_default_tools(),
+                yolo_mode=self.yolo_mode,
+                verbose=self.verbose,
+                model=self.model,
             )
         else:
             abort_controller = getattr(self.query_context, "abort_controller", None)
@@ -1336,6 +1371,10 @@ def main_rich(
     session_id: Optional[str] = None,
     log_file_path: Optional[Path] = None,
     allowed_tools: Optional[List[str]] = None,
+    custom_system_prompt: Optional[str] = None,
+    append_system_prompt: Optional[str] = None,
+    model: Optional[str] = None,
+    resume_messages: Optional[List[Any]] = None,
 ) -> None:
     """Main entry point for Rich interface."""
 
@@ -1351,6 +1390,10 @@ def main_rich(
         session_id=session_id,
         log_file_path=log_file_path,
         allowed_tools=allowed_tools,
+        custom_system_prompt=custom_system_prompt,
+        append_system_prompt=append_system_prompt,
+        model=model,
+        resume_messages=resume_messages,
     )
     ui.run()
 
