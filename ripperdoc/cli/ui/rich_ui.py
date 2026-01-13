@@ -90,11 +90,6 @@ console = Console()
 logger = get_logger()
 
 
-# Legacy aliases for backward compatibility with tests
-_extract_tool_ids_from_message = extract_tool_ids_from_message
-_get_complete_tool_pairs_tail = get_complete_tool_pairs_tail
-
-
 class RichUI:
     """Rich-based UI for Ripperdoc."""
 

@@ -685,7 +685,6 @@ async def query_llm(
         AssistantMessage with the model's response
     """
     request_timeout = request_timeout or DEFAULT_REQUEST_TIMEOUT_SEC
-    request_timeout = request_timeout or DEFAULT_REQUEST_TIMEOUT_SEC
     model_profile = resolve_model_profile(model)
 
     # Normalize messages based on protocol family (Anthropic allows tool blocks; OpenAI-style prefers text-only)
@@ -936,7 +935,7 @@ async def _run_query_iteration(
     )
 
     # Stream LLM response
-    progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue()
+    progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue(maxsize=1000)
 
     async def _stream_progress(chunk: str) -> None:
         if not chunk:
