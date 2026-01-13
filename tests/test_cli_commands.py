@@ -52,7 +52,8 @@ def test_todos_command_lists_items(tmp_path, monkeypatch):
 
 def test_tasks_command_no_tasks(tmp_path, monkeypatch):
     """Tasks command should render an empty state when nothing is running."""
-    monkeypatch.setattr(background_shell, "_tasks", {})
+    # Clear all tasks
+    background_shell._get_tasks().clear()
 
     ui = _DummyUI(Console(record=True, width=80), tmp_path)
     tasks_command.handler(ui, "")
@@ -63,7 +64,8 @@ def test_tasks_command_no_tasks(tmp_path, monkeypatch):
 
 def test_tasks_command_lists_tasks(tmp_path, monkeypatch):
     """Tasks command should list background tasks without needing an event loop."""
-    monkeypatch.setattr(background_shell, "_tasks", {})
+    # Clear all tasks first
+    background_shell._get_tasks().clear()
     start_time = background_shell._loop_time()
 
     dummy_process = type("P", (), {"returncode": 0})()
@@ -74,7 +76,7 @@ def test_tasks_command_lists_tasks(tmp_path, monkeypatch):
         start_time=start_time,
     )
     task.exit_code = 0
-    background_shell._tasks[task.id] = task
+    background_shell._get_tasks()[task.id] = task
 
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
     tasks_command.handler(ui, "")
@@ -83,3 +85,6 @@ def test_tasks_command_lists_tasks(tmp_path, monkeypatch):
     assert "bash_abcd" in output
     assert "echo hello" in output
     assert "completed" in output or "running" in output
+
+    # Clean up
+    background_shell._get_tasks().clear()

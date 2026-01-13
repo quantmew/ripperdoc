@@ -41,7 +41,6 @@ from ripperdoc.utils.output_utils import (
     truncate_output,
 )
 from ripperdoc.utils.permissions.path_validation_utils import validate_shell_command_paths
-from ripperdoc.utils.permissions.shell_command_validation import validate_shell_command
 from ripperdoc.utils.permissions.tool_permission_utils import (
     evaluate_shell_command_permissions,
     is_command_read_only,
@@ -341,9 +340,8 @@ build projects, run tests, and interact with the file system."""
             allow_rules,
             deny_rules,
             allowed_dirs,
-            command_injection_detected=False,
-            injection_detector=lambda cmd: validate_shell_command(cmd).behavior != "passthrough",
-            read_only_detector=lambda cmd, detector: is_command_read_only(cmd),
+            # danger_detector uses default: validate_shell_command(cmd).behavior != "passthrough"
+            # read_only_detector uses default: _is_command_read_only
         )
 
         # Background executions need an explicit confirmation even if heuristics

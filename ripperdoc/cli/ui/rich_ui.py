@@ -67,6 +67,7 @@ from ripperdoc.utils.mcp import (
     shutdown_mcp_runtime,
 )
 from ripperdoc.utils.lsp import shutdown_lsp_manager
+from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.session_history import SessionHistory
 from ripperdoc.utils.memory import build_memory_instructions
@@ -1298,6 +1299,17 @@ class RichUI:
                     # pragma: no cover - defensive shutdown
                     logger.warning(
                         "[ui] Failed to shut down MCP runtime cleanly: %s: %s",
+                        type(exc).__name__,
+                        exc,
+                        extra={"session_id": self.session_id},
+                    )
+
+                # Shutdown background shell manager to clean up any background tasks
+                try:
+                    shutdown_background_shell(force=True)
+                except (OSError, RuntimeError) as exc:
+                    logger.debug(
+                        "[ui] Failed to shut down background shell cleanly: %s: %s",
                         type(exc).__name__,
                         exc,
                         extra={"session_id": self.session_id},

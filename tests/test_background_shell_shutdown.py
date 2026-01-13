@@ -34,8 +34,8 @@ def test_shutdown_waits_for_background_process():
             process=proc,
             start_time=background_shell._loop_time(),
         )
-        with background_shell._tasks_lock:
-            background_shell._tasks[task.id] = task
+        with background_shell._get_tasks_lock():
+            background_shell._get_tasks()[task.id] = task
         return proc, task
 
     proc, task = asyncio.run_coroutine_threadsafe(_add_task(), loop).result(timeout=2)
@@ -45,8 +45,8 @@ def test_shutdown_waits_for_background_process():
     assert proc.killed
     assert proc.wait_calls >= 1
     assert task.done_event.is_set()
-    assert background_shell._background_loop is None
-    assert background_shell._tasks == {}
+    # After shutdown, tasks should be cleared
+    assert background_shell._get_tasks() == {}
 
 
 def test_shutdown_ignores_missing_process(monkeypatch):
@@ -76,8 +76,8 @@ def test_shutdown_ignores_missing_process(monkeypatch):
             process=proc,
             start_time=background_shell._loop_time(),
         )
-        with background_shell._tasks_lock:
-            background_shell._tasks[task.id] = task
+        with background_shell._get_tasks_lock():
+            background_shell._get_tasks()[task.id] = task
         return proc, task
 
     proc, task = asyncio.run_coroutine_threadsafe(_add_task(), loop).result(timeout=2)
@@ -87,4 +87,4 @@ def test_shutdown_ignores_missing_process(monkeypatch):
     assert proc.kill_calls >= 1
     assert proc.wait_calls >= 1
     assert task.done_event.is_set()
-    assert background_shell._tasks == {}
+    assert background_shell._get_tasks() == {}

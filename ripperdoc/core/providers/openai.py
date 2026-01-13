@@ -300,9 +300,10 @@ class OpenAIClient(ProviderClient):
                     if getattr(chunk, "usage", None):
                         streamed_usage.update(openai_usage_tokens(chunk.usage))
 
-                    if not getattr(chunk, "choices", None):
+                    choices = getattr(chunk, "choices", None)
+                    if not choices or len(choices) == 0:
                         continue
-                    delta = getattr(chunk.choices[0], "delta", None)
+                    delta = getattr(choices[0], "delta", None)
                     if not delta:
                         continue
 
@@ -486,23 +487,32 @@ class OpenAIClient(ProviderClient):
                 )
             finish_reason = "stream"
         else:
-            choice = openai_response.choices[0]
-            content_blocks = content_blocks_from_openai_choice(choice, tool_mode)
-            finish_reason = cast(Optional[str], getattr(choice, "finish_reason", None))
-            message_obj = getattr(choice, "message", None) or choice
-            reasoning_content = getattr(message_obj, "reasoning_content", None)
-            if reasoning_content:
-                response_metadata["reasoning_content"] = reasoning_content
-            reasoning_field = getattr(message_obj, "reasoning", None)
-            if reasoning_field:
-                response_metadata["reasoning"] = reasoning_field
-                if "reasoning_content" not in response_metadata and isinstance(
-                    reasoning_field, str
-                ):
-                    response_metadata["reasoning_content"] = reasoning_field
-            reasoning_details = getattr(message_obj, "reasoning_details", None)
-            if reasoning_details:
-                response_metadata["reasoning_details"] = reasoning_details
+            response_choices = getattr(openai_response, "choices", None)
+            if not response_choices or len(response_choices) == 0:
+                logger.warning(
+                    "[openai_client] Empty choices in response",
+                    extra={"model": model_profile.model},
+                )
+                content_blocks = [{"type": "text", "text": ""}]
+                finish_reason = "error"
+            else:
+                choice = response_choices[0]
+                content_blocks = content_blocks_from_openai_choice(choice, tool_mode)
+                finish_reason = cast(Optional[str], getattr(choice, "finish_reason", None))
+                message_obj = getattr(choice, "message", None) or choice
+                reasoning_content = getattr(message_obj, "reasoning_content", None)
+                if reasoning_content:
+                    response_metadata["reasoning_content"] = reasoning_content
+                reasoning_field = getattr(message_obj, "reasoning", None)
+                if reasoning_field:
+                    response_metadata["reasoning"] = reasoning_field
+                    if "reasoning_content" not in response_metadata and isinstance(
+                        reasoning_field, str
+                    ):
+                        response_metadata["reasoning_content"] = reasoning_field
+                reasoning_details = getattr(message_obj, "reasoning_details", None)
+                if reasoning_details:
+                    response_metadata["reasoning_details"] = reasoning_details
 
         if can_stream:
             if stream_reasoning_text:

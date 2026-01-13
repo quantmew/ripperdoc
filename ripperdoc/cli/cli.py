@@ -37,6 +37,7 @@ from ripperdoc.utils.mcp import (
     shutdown_mcp_runtime,
 )
 from ripperdoc.utils.lsp import shutdown_lsp_manager
+from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 
@@ -295,6 +296,15 @@ async def run_query(
             )
         await shutdown_mcp_runtime()
         await shutdown_lsp_manager()
+        # Shutdown background shell manager
+        try:
+            shutdown_background_shell(force=True)
+        except (OSError, RuntimeError) as exc:
+            logger.debug(
+                "[cli] Failed to shut down background shell: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
         logger.debug("[cli] Shutdown MCP runtime", extra={"session_id": session_id})
 
 

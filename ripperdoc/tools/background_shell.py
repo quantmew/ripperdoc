@@ -161,9 +161,16 @@ class BackgroundShellManager:
         loop = self.ensure_loop()
         return asyncio.run_coroutine_threadsafe(coro, loop)
 
-    def shutdown(self) -> None:
-        """Stop background tasks/loop to avoid resource leaks."""
+    def shutdown(self, force: bool = False) -> None:
+        """Stop background tasks/loop to avoid resource leaks.
+
+        Args:
+            force: If True, use minimal timeouts for faster exit.
+        """
         if self._is_shutting_down:
+            # If already shutting down and force is requested, just mark done
+            if force:
+                self._shutdown_event.set()
             return
         self._is_shutting_down = True
 
@@ -176,13 +183,17 @@ class BackgroundShellManager:
             self._is_shutting_down = False
             return
 
+        # Use shorter timeouts for faster exit
+        async_timeout = 0.5 if force else 2.0
+        join_timeout = 0.5 if force else 1.0
+
         try:
             if loop.is_running():
                 try:
                     fut = asyncio.run_coroutine_threadsafe(
-                        self._shutdown_loop_async(loop), loop
+                        self._shutdown_loop_async(loop, force=force), loop
                     )
-                    fut.result(timeout=5)  # Increased timeout for proper cleanup
+                    fut.result(timeout=async_timeout)
                 except (RuntimeError, TimeoutError, concurrent.futures.TimeoutError):
                     logger.debug("Failed to cleanly shutdown background loop", exc_info=True)
                 try:
@@ -192,12 +203,15 @@ class BackgroundShellManager:
             else:
                 # If loop isn't running, try to run cleanup synchronously
                 try:
-                    loop.run_until_complete(self._shutdown_loop_async(loop))
+                    loop.run_until_complete(self._shutdown_loop_async(loop, force=force))
                 except RuntimeError:
                     pass  # Loop may already be closed
         finally:
             if thread and thread.is_alive():
-                thread.join(timeout=3)  # Increased timeout
+                thread.join(timeout=join_timeout)
+                # If thread is still alive after timeout, don't block further
+                if thread.is_alive():
+                    logger.debug("Background thread did not stop in time, continuing shutdown")
             with contextlib.suppress(Exception):
                 if not loop.is_closed():
                     loop.close()
@@ -206,11 +220,22 @@ class BackgroundShellManager:
             self._shutdown_event.set()
             self._is_shutting_down = False
 
-    async def _shutdown_loop_async(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Drain running background processes before stopping the loop."""
+    async def _shutdown_loop_async(
+        self, loop: asyncio.AbstractEventLoop, force: bool = False
+    ) -> None:
+        """Drain running background processes before stopping the loop.
+
+        Args:
+            loop: The event loop to shutdown.
+            force: If True, use minimal timeouts for faster exit.
+        """
         with self._tasks_lock:
             tasks = list(self._tasks.values())
             self._tasks.clear()
+
+        # Use shorter timeouts when force is True
+        wait_timeout = 0.3 if force else 1.5
+        kill_timeout = 0.2 if force else 0.5
 
         for task in tasks:
             try:
@@ -219,12 +244,12 @@ class BackgroundShellManager:
                     task.process.kill()
                 try:
                     with contextlib.suppress(ProcessLookupError):
-                        await asyncio.wait_for(task.process.wait(), timeout=1.5)
+                        await asyncio.wait_for(task.process.wait(), timeout=wait_timeout)
                 except asyncio.TimeoutError:
                     with contextlib.suppress(ProcessLookupError, PermissionError):
                         task.process.kill()
                     with contextlib.suppress(asyncio.TimeoutError, ProcessLookupError):
-                        await asyncio.wait_for(task.process.wait(), timeout=0.5)
+                        await asyncio.wait_for(task.process.wait(), timeout=kill_timeout)
                 task.exit_code = task.process.returncode or -1
             except (OSError, RuntimeError, asyncio.CancelledError) as exc:
                 if not isinstance(exc, asyncio.CancelledError):
@@ -234,7 +259,7 @@ class BackgroundShellManager:
                         command=task.command,
                     )
             finally:
-                await _finalize_reader_tasks(task.reader_tasks)
+                await _finalize_reader_tasks(task.reader_tasks, timeout=0.3 if force else 1.0)
                 task.done_event.set()
 
         current = asyncio.current_task()
@@ -516,12 +541,15 @@ def _prune_background_tasks(max_age_seconds: Optional[float] = None) -> int:
     return removed
 
 
-def shutdown_background_shell() -> None:
+def shutdown_background_shell(force: bool = False) -> None:
     """Stop background tasks/loop to avoid asyncio 'Event loop is closed' warnings.
 
     This function maintains backward compatibility by delegating to the manager.
+
+    Args:
+        force: If True, use minimal timeouts for faster exit.
     """
-    _get_manager().shutdown()
+    _get_manager().shutdown(force=force)
 
 
 def reset_background_shell_for_testing() -> None:

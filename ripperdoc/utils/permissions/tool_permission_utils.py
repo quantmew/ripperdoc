@@ -289,18 +289,33 @@ def evaluate_shell_command_permissions(
     denied_rules: Iterable[str],
     allowed_working_dirs: Set[str] | None = None,
     *,
-    command_injection_detected: bool = False,
-    injection_detector: Callable[[str], bool] | None = None,
+    danger_detector: Callable[[str], bool] | None = None,
     read_only_detector: Callable[[str, Callable[[str], bool]], bool] | None = None,
 ) -> PermissionDecision:
-    """Evaluate whether a bash command should be allowed."""
+    """Evaluate whether a bash command should be allowed.
+
+    Args:
+        tool_request: The tool request containing the command.
+        allowed_rules: Rules that allow commands.
+        denied_rules: Rules that deny commands.
+        allowed_working_dirs: Allowed working directories.
+        danger_detector: Callable that returns True if command contains dangerous
+            shell patterns (injection, destructive commands, etc.).
+        read_only_detector: Callable that returns True if command is read-only.
+
+    Returns:
+        PermissionDecision indicating whether the command should be allowed.
+    """
     command = tool_request.command if hasattr(tool_request, "command") else str(tool_request)
     trimmed_command = command.strip()
     allowed_working_dirs = allowed_working_dirs or {safe_get_cwd()}
-    injection_detector = injection_detector or (
+    danger_detector = danger_detector or (
         lambda cmd: validate_shell_command(cmd).behavior != "passthrough"
     )
     read_only_detector = read_only_detector or _is_command_read_only
+
+    # Detect dangerous patterns once, reuse the result
+    has_dangerous_patterns = danger_detector(trimmed_command)
 
     merged_denied = _merge_rules(denied_rules)
     merged_allowed = _merge_rules(allowed_rules)
@@ -362,11 +377,10 @@ def evaluate_shell_command_permissions(
             merged_allowed,
             merged_denied,
             allowed_working_dirs,
-            command_injection_detected=command_injection_detected,
-            injection_detector=injection_detector,
+            danger_detector=danger_detector,
             read_only_detector=read_only_detector,
         )
-        right_read_only = read_only_detector(right_command, injection_detector)
+        right_read_only = read_only_detector(right_command, danger_detector)
 
         if left_result.behavior == "deny":
             return left_result
@@ -390,7 +404,7 @@ def evaluate_shell_command_permissions(
             rule_suggestions=_collect_rule_suggestions(trimmed_command),
         )
 
-    if read_only_detector(trimmed_command, injection_detector) and not command_injection_detected:
+    if read_only_detector(trimmed_command, danger_detector) and not has_dangerous_patterns:
         return PermissionDecision(
             behavior="allow",
             updated_input=tool_request,

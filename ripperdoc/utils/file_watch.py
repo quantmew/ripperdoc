@@ -109,11 +109,10 @@ class BoundedFileCache:
         with self._lock:
             new_size = value.memory_size()
 
-            # If key exists, remove old entry first
-            if key in self._cache:
-                old_size = self._cache[key].memory_size()
-                self._current_memory -= old_size
-                del self._cache[key]
+            # If key exists, remove old entry first (atomic pop to avoid TOCTOU)
+            old_value = self._cache.pop(key, None)
+            if old_value is not None:
+                self._current_memory -= old_value.memory_size()
 
             # Evict entries if needed (memory limit)
             while self._current_memory + new_size > self._max_memory_bytes and self._cache:
@@ -129,9 +128,10 @@ class BoundedFileCache:
 
     def __delitem__(self, key: str) -> None:
         with self._lock:
-            if key in self._cache:
-                self._current_memory -= self._cache[key].memory_size()
-                del self._cache[key]
+            # Use atomic pop to avoid TOCTOU between check and delete
+            old_value = self._cache.pop(key, None)
+            if old_value is not None:
+                self._current_memory -= old_value.memory_size()
 
     def _evict_oldest(self) -> None:
         """Evict the least recently used entry. Must be called with lock held."""
@@ -160,6 +160,28 @@ class BoundedFileCache:
             value = self._cache.pop(key)
             self._current_memory -= value.memory_size()
             return value
+
+    def setdefault(self, key: str, default: FileSnapshot) -> FileSnapshot:
+        """Atomically get or set a snapshot.
+
+        If key exists, return its value (and mark as recently used).
+        If key doesn't exist, set it to default and return default.
+        This provides a thread-safe get-or-create operation.
+        """
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
+            # Key doesn't exist - add it
+            new_size = default.memory_size()
+            # Evict if needed
+            while self._current_memory + new_size > self._max_memory_bytes and self._cache:
+                self._evict_oldest()
+            while len(self._cache) >= self._max_entries:
+                self._evict_oldest()
+            self._cache[key] = default
+            self._current_memory += new_size
+            return default
 
     def clear(self) -> None:
         """Remove all entries from the cache."""
