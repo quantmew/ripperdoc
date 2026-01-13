@@ -995,11 +995,14 @@ async def _run_query_iteration(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                # Don't cancel assistant_task here - it should only be cancelled
+                # through abort_controller in the main loop
+                if task is not assistant_task:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
             if abort_waiter in done:
                 continue
             if assistant_task in done:
