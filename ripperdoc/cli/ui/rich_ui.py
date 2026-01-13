@@ -1037,7 +1037,7 @@ class RichUI:
             def __init__(self, project_path: Path):
                 self.project_path = project_path
 
-            def get_completions(self, document: Any, complete_event: Any) -> Iterable[Completion]:
+            def get_completions(self, document: Any, _complete_event: Any) -> Iterable[Completion]:
                 text = document.text_before_cursor
                 if not text.startswith("/"):
                     return

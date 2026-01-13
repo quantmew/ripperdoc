@@ -326,8 +326,9 @@ def _parse_agent_file(
         return None, f"Failed to read agent file {path}: {exc}"
 
     frontmatter, body = _split_frontmatter(text)
-    if "__error__" in frontmatter:
-        return None, str(frontmatter["__error__"])
+    error = frontmatter.get("__error__")
+    if error is not None:
+        return None, str(error)
 
     agent_name = frontmatter.get("name")
     description = frontmatter.get("description")
