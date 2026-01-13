@@ -313,12 +313,31 @@ match exactly (including whitespace and indentation)."""
                             with contextlib.suppress(OSError):
                                 os.unlink(temp_path)
                             raise
-                    except OSError:
+                    except OSError as atomic_error:
                         # Fallback to in-place write if atomic write fails
                         # (e.g., cross-filesystem issues)
+                        # Re-verify file hasn't changed before fallback write (TOCTOU protection)
+                        f.seek(0)
+                        current_content = f.read()
+                        if current_content != content:
+                            output = FileEditToolOutput(
+                                file_path=input_data.file_path,
+                                replacements_made=0,
+                                success=False,
+                                message="File was modified during atomic write fallback. Please retry.",
+                            )
+                            yield ToolResult(
+                                data=output,
+                                result_for_assistant=self.render_result_for_assistant(output),
+                            )
+                            return
                         f.seek(0)
                         f.truncate()
                         f.write(new_content)
+                        logger.debug(
+                            "[file_edit_tool] Atomic write failed, used fallback: %s",
+                            atomic_error,
+                        )
 
             # Record the new snapshot after successful edit
             try:

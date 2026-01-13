@@ -158,7 +158,7 @@ class BoundedFileCache:
             if key not in self._cache:
                 return default
             value = self._cache.pop(key)
-            self._current_memory -= value.memory_size()
+            self._current_memory = max(0, self._current_memory - value.memory_size())
             return value
 
     def setdefault(self, key: str, default: FileSnapshot) -> FileSnapshot:

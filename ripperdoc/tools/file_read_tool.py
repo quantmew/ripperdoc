@@ -22,6 +22,10 @@ from ripperdoc.utils.path_ignore import check_path_for_tool
 
 logger = get_logger()
 
+# Maximum file size to read (default 50MB, configurable via env)
+MAX_FILE_SIZE_MB = float(os.getenv("RIPPERDOC_MAX_READ_FILE_SIZE_MB", "50"))
+MAX_FILE_SIZE_BYTES = int(MAX_FILE_SIZE_MB * 1024 * 1024)
+
 
 class FileReadToolInput(BaseModel):
     """Input schema for FileReadTool."""
@@ -140,6 +144,22 @@ and limit to read only a portion of the file."""
         """Read the file."""
 
         try:
+            # Check file size before reading to prevent memory exhaustion
+            file_size = os.path.getsize(input_data.file_path)
+            if file_size > MAX_FILE_SIZE_BYTES:
+                error_output = FileReadToolOutput(
+                    content=f"File too large to read: {file_size / (1024*1024):.1f}MB exceeds limit of {MAX_FILE_SIZE_MB}MB. Use offset and limit parameters to read portions.",
+                    file_path=input_data.file_path,
+                    line_count=0,
+                    offset=0,
+                    limit=None,
+                )
+                yield ToolResult(
+                    data=error_output,
+                    result_for_assistant=f"Error: File {input_data.file_path} is too large ({file_size / (1024*1024):.1f}MB). Maximum size is {MAX_FILE_SIZE_MB}MB. Use offset and limit to read portions.",
+                )
+                return
+
             with open(input_data.file_path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 

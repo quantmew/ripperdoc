@@ -376,6 +376,7 @@ async def _run_concurrent_tool_uses(
     """Drain multiple tool generators concurrently and stream outputs."""
     if not generators:
         return
+        yield  # Make this a proper async generator that yields nothing
 
     queue: asyncio.Queue[Optional[Union[UserMessage, ProgressMessage]]] = asyncio.Queue()
 
@@ -1014,7 +1015,8 @@ async def _run_query_iteration(
         if residual:
             yield residual
 
-    assert assistant_message is not None
+    if assistant_message is None:
+        raise RuntimeError("assistant_message was unexpectedly None after LLM query")
     result.assistant_message = assistant_message
 
     # Check for abort
@@ -1085,7 +1087,8 @@ async def _run_query_iteration(
             tool_results.append(missing_msg)
             yield missing_msg
             continue
-        assert tool is not None
+        if tool is None:
+            raise RuntimeError(f"Tool '{tool_name}' resolved to None unexpectedly")
 
         try:
             parsed_input = tool.input_schema(**tool_input)

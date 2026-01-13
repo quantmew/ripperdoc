@@ -382,6 +382,43 @@ build projects, run tests, and interact with the file system."""
                 result=False, message="Sandbox mode requested but not available."
             )
 
+        # Validate shell_executable if provided
+        if input_data.shell_executable:
+            shell_path = Path(input_data.shell_executable)
+            # Must be an absolute path
+            if not shell_path.is_absolute():
+                return ValidationResult(
+                    result=False,
+                    message=f"shell_executable must be an absolute path: {input_data.shell_executable}",
+                )
+            # Must exist and be a file
+            if not shell_path.exists():
+                return ValidationResult(
+                    result=False,
+                    message=f"shell_executable not found: {input_data.shell_executable}",
+                )
+            if not shell_path.is_file():
+                return ValidationResult(
+                    result=False,
+                    message=f"shell_executable is not a file: {input_data.shell_executable}",
+                )
+            # Must be executable
+            if not os.access(shell_path, os.X_OK):
+                return ValidationResult(
+                    result=False,
+                    message=f"shell_executable is not executable: {input_data.shell_executable}",
+                )
+            # Must be in a safe system directory or match known shell patterns
+            safe_dirs = {"/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"}
+            shell_name = shell_path.name.lower()
+            known_shells = {"bash", "sh", "zsh", "fish", "dash", "ksh", "tcsh", "csh"}
+            parent_dir = str(shell_path.parent)
+            if parent_dir not in safe_dirs and shell_name not in known_shells:
+                return ValidationResult(
+                    result=False,
+                    message=f"shell_executable must be a known shell in a standard location: {input_data.shell_executable}",
+                )
+
         # Note: Path validation for sensitive directories (cd/find to /usr, /etc, etc.)
         # is now handled in check_permissions() to allow user confirmation for read-only ops.
 
