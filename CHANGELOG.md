@@ -5,6 +5,35 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.10] - 2026-01-14
+
+### Added
+- **LSP tool integration** - Add Language Server Protocol support for code intelligence queries (goToDefinition, findReferences, hover, etc.)
+- **Session statistics and heatmap** - Visualize session activity patterns with statistics panel and heatmap visualization
+- **Bounded file cache** - Implement memory-managed file snapshot caching with size limits
+- **Enhanced CLI options** - Add `--tools` filter for limiting available tools, custom system prompts, and model selection
+- **Double Ctrl+C exit** - Implement improved exit handling with double Ctrl+C functionality
+- **Quickstart guide** - Add comprehensive quickstart documentation for new users
+- **Background agent execution** - Support for running agents in background mode
+- **Flexible permission patterns** - Enhanced permission system with wildcard matching and glob patterns
+- **New keyboard shortcuts** - Additional keyboard shortcuts for improved user interaction
+
+### Changed
+- **UI rendering improvements** - Replace Rich Status with Live+Spinner for cleaner terminal output
+- **Permission system refactor** - Update shell command validation to use permission checks
+- **Model pointer simplification** - Reduce model pointer system from 4 to 2 pointers for better performance
+- **Session statistics optimization** - Consolidate longest session and activity patterns calculation
+- **Agent management enhancements** - Improved session tracking and hooks integration
+- **Permission rule integration** - Better global/local rule management in permission system
+
+### Fixed
+- **Assistant task cancellation** - Prevent unnecessary cancellation of assistant_task during query iteration
+- **Bounded file cache memory** - Ensure memory size does not go negative and improve reasoning preview logic
+- **Error handling improvements** - Enhanced validation in tools and better memory management
+- **Code quality issues** - Resolve ruff and mypy code quality problems
+- **Legacy code cleanup** - Remove outdated code and optimize query queue handling
+- **LSP error handling** - Improve error handling for Language Server Protocol operations
+
 ## [0.2.9] - 2025-12-20
 
 ### Added
@@ -126,6 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple command execution
 - Basic project navigation
 
+[0.2.10]: https://github.com/quantmew/Ripperdoc/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/quantmew/Ripperdoc/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/quantmew/Ripperdoc/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/quantmew/Ripperdoc/compare/v0.2.6...v0.2.7
