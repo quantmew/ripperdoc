@@ -988,23 +988,20 @@ async def _run_query_iteration(
             progress = progress_queue.get_nowait()
         except asyncio.QueueEmpty:
             waiter = asyncio.create_task(progress_queue.get())
-            # Use timeout to periodically check abort_controller during LLM request
+            abort_waiter = asyncio.create_task(query_context.abort_controller.wait())
             done, pending = await asyncio.wait(
-                {assistant_task, waiter},
+                {assistant_task, waiter, abort_waiter},
                 return_when=asyncio.FIRST_COMPLETED,
-                timeout=0.1,  # Check abort_controller every 100ms
             )
-            if not done:
-                # Timeout - cancel waiter and continue loop to check abort_controller
-                waiter.cancel()
+            for task in pending:
+                task.cancel()
                 try:
-                    await waiter
+                    await task
                 except asyncio.CancelledError:
                     pass
+            if abort_waiter in done:
                 continue
             if assistant_task in done:
-                for task in pending:
-                    task.cancel()
                 assistant_message = await assistant_task
                 break
             progress = waiter.result()

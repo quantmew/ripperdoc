@@ -112,7 +112,7 @@ class BoundedFileCache:
             # If key exists, remove old entry first (atomic pop to avoid TOCTOU)
             old_value = self._cache.pop(key, None)
             if old_value is not None:
-                self._current_memory -= old_value.memory_size()
+                self._current_memory = max(0, self._current_memory - old_value.memory_size())
 
             # Evict entries if needed (memory limit)
             while self._current_memory + new_size > self._max_memory_bytes and self._cache:
@@ -131,13 +131,13 @@ class BoundedFileCache:
             # Use atomic pop to avoid TOCTOU between check and delete
             old_value = self._cache.pop(key, None)
             if old_value is not None:
-                self._current_memory -= old_value.memory_size()
+                self._current_memory = max(0, self._current_memory - old_value.memory_size())
 
     def _evict_oldest(self) -> None:
         """Evict the least recently used entry. Must be called with lock held."""
         if self._cache:
             oldest_key, oldest_value = self._cache.popitem(last=False)
-            self._current_memory -= oldest_value.memory_size()
+            self._current_memory = max(0, self._current_memory - oldest_value.memory_size())
             self._eviction_count += 1
             logger.debug(
                 "[file_cache] Evicted entry due to cache limits",
