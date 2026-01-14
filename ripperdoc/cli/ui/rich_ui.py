@@ -1154,7 +1154,7 @@ class RichUI:
         console.print()
         console.print(
             "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. "
-            "Press Alt+Enter for newline. Press ESC to interrupt. Press Ctrl+C twice to exit.[/dim]\n"
+            "Press Alt+Enter for newline. Press ESC to interrupt.[/dim]\n"
         )
 
         session = self.get_prompt_session()

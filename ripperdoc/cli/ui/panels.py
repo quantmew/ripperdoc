@@ -23,7 +23,7 @@ def create_welcome_panel() -> Panel:
 Ripperdoc is an AI-powered coding assistant that helps with software development tasks.
 You can read files, edit code, run commands, and help with various programming tasks.
 
-[dim]Type your questions below. Press Ctrl+C to exit.[/dim]
+[dim]Type your questions below. Press Ctrl+C twice to exit.[/dim]
 """
 
     return Panel(

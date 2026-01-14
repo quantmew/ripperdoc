@@ -34,6 +34,7 @@ class BackgroundTask:
     process: asyncio.subprocess.Process
     start_time: float
     timeout: Optional[float] = None
+    end_time: Optional[float] = None
     stdout_chunks: List[str] = field(default_factory=list)
     stderr_chunks: List[str] = field(default_factory=list)
     exit_code: Optional[int] = None
@@ -251,6 +252,7 @@ class BackgroundShellManager:
                     with contextlib.suppress(asyncio.TimeoutError, ProcessLookupError):
                         await asyncio.wait_for(task.process.wait(), timeout=kill_timeout)
                 task.exit_code = task.process.returncode or -1
+                task.end_time = task.end_time or _loop_time()
             except (OSError, RuntimeError, asyncio.CancelledError) as exc:
                 if not isinstance(exc, asyncio.CancelledError):
                     _safe_log_exception(
@@ -355,6 +357,7 @@ async def _monitor_task(task: BackgroundTask) -> None:
             await task.process.wait()
         with _get_tasks_lock():
             task.exit_code = task.process.returncode
+            task.end_time = task.end_time or _loop_time()
     except asyncio.TimeoutError:
         logger.warning(f"Background task {task.id} timed out after {task.timeout}s: {task.command}")
         with _get_tasks_lock():
@@ -363,6 +366,7 @@ async def _monitor_task(task: BackgroundTask) -> None:
         await task.process.wait()
         with _get_tasks_lock():
             task.exit_code = -1
+            task.end_time = task.end_time or _loop_time()
     except asyncio.CancelledError:
         return
     except (OSError, RuntimeError, ProcessLookupError) as exc:
@@ -374,6 +378,7 @@ async def _monitor_task(task: BackgroundTask) -> None:
         )
         with _get_tasks_lock():
             task.exit_code = -1
+            task.end_time = task.end_time or _loop_time()
     finally:
         # Ensure readers are finished before marking done.
         await _finalize_reader_tasks(task.reader_tasks)
@@ -453,6 +458,7 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
 
     If consume is True, buffered stdout/stderr are cleared after reading.
     """
+    now = _loop_time()
     tasks = _get_tasks()
     with _get_tasks_lock():
         if task_id not in tasks:
@@ -461,6 +467,14 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
         task = tasks[task_id]
         stdout = "".join(task.stdout_chunks)
         stderr = "".join(task.stderr_chunks)
+
+        finished = task.exit_code is not None or task.killed or task.timed_out
+        if finished and task.end_time is None:
+            task.end_time = now
+        duration_ms = (
+            ((task.end_time or now) - task.start_time) * 1000.0 if task.start_time else None
+        )
+        age_ms = (now - task.start_time) * 1000.0 if task.start_time else None
 
         if consume:
             task.stdout_chunks.clear()
@@ -475,7 +489,8 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
             "exit_code": task.exit_code,
             "timed_out": task.timed_out,
             "killed": task.killed,
-            "duration_ms": (_loop_time() - task.start_time) * 1000.0,
+            "duration_ms": duration_ms,
+            "age_ms": age_ms,
         }
 
 
@@ -506,6 +521,7 @@ async def kill_background_task(task_id: str) -> bool:
 
             with _get_tasks_lock():
                 task.exit_code = task.process.returncode or -1
+                task.end_time = task.end_time or _loop_time()
             return True
         finally:
             await _finalize_reader_tasks(task.reader_tasks)

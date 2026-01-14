@@ -100,13 +100,14 @@ def _list_tasks(ui: Any) -> bool:
     table.add_column("ID", style="cyan", no_wrap=True)
     table.add_column("Status", style="magenta", no_wrap=True)
     table.add_column("Command", style="white")
-    table.add_column("Duration", style="dim", no_wrap=True)
+    table.add_column("Runtime", style="dim", no_wrap=True)
+    table.add_column("Age", style="dim", no_wrap=True)
 
     for task_id in sorted(task_ids):
         try:
             status = get_background_status(task_id, consume=False)
         except (KeyError, ValueError, RuntimeError, OSError) as exc:
-            table.add_row(escape(task_id), "[red]error[/]", escape(str(exc)), "-")
+            table.add_row(escape(task_id), "[red]error[/]", escape(str(exc)), "-", "-")
             logger.warning(
                 "[tasks_cmd] Failed to read background task status: %s: %s",
                 type(exc).__name__,
@@ -122,6 +123,7 @@ def _list_tasks(ui: Any) -> bool:
             _format_status(status),
             escape(command_display),
             _format_duration(status.get("duration_ms")),
+            _format_duration(status.get("age_ms")),
         )
 
     console.print(
@@ -210,7 +212,8 @@ def _show_task(ui: Any, task_id: str) -> bool:
     details.add_row("ID", escape(task_id))
     details.add_row("Status", _format_status(status))
     details.add_row("Command", escape(status.get("command") or ""))
-    details.add_row("Duration", _format_duration(status.get("duration_ms")))
+    details.add_row("Runtime", _format_duration(status.get("duration_ms")))
+    details.add_row("Age", _format_duration(status.get("age_ms")))
     exit_code = status.get("exit_code")
     details.add_row("Exit code", str(exit_code) if exit_code is not None else "running")
 

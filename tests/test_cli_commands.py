@@ -85,6 +85,8 @@ def test_tasks_command_lists_tasks(tmp_path, monkeypatch):
     assert "bash_abcd" in output
     assert "echo hello" in output
     assert "completed" in output or "running" in output
+    assert "Runtime" in output
+    assert "Age" in output
 
     # Clean up
     background_shell._get_tasks().clear()
