@@ -4,6 +4,7 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 """
 
 import asyncio
+import difflib
 import json
 import sys
 import time
@@ -88,6 +89,19 @@ ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
 console = Console()
 logger = get_logger()
+
+
+def _suggest_slash_commands(name: str, project_path: Optional[Path]) -> List[str]:
+    """Return close matching slash commands for a mistyped name."""
+    if not name:
+        return []
+    seen = set()
+    candidates: List[str] = []
+    for command_name, _cmd in slash_command_completions(project_path):
+        if command_name not in seen:
+            candidates.append(command_name)
+            seen.add(command_name)
+    return difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
 
 
 class RichUI:
@@ -1023,7 +1037,14 @@ class RichUI:
             # Return the expanded content to be processed as a query
             return expanded_content
 
-        self.console.print(f"[red]Unknown command: {escape(command_name)}[/red]")
+        suggestions = _suggest_slash_commands(command_name, self.project_path)
+        hint = ""
+        if suggestions:
+            hint = " [dim]Did you mean "
+            hint += ", ".join(f"/{escape(s)}" for s in suggestions)
+            hint += "?[/dim]"
+
+        self.console.print(f"[red]Unknown command: {escape(command_name)}[/red]{hint}")
         return True
 
     def get_prompt_session(self) -> PromptSession:
