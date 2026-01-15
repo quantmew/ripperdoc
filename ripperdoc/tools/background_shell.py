@@ -14,7 +14,7 @@ import time
 import uuid
 import weakref
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import atexit
 
@@ -42,6 +42,7 @@ class BackgroundTask:
     timed_out: bool = False
     reader_tasks: List[asyncio.Task] = field(default_factory=list)
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
+    completion_callbacks: List[Callable[["BackgroundTask"], None]] = field(default_factory=list)
 
 
 DEFAULT_TASK_TTL_SEC = float(os.getenv("RIPPERDOC_BASH_TASK_TTL_SEC", "3600"))
@@ -263,6 +264,7 @@ class BackgroundShellManager:
             finally:
                 await _finalize_reader_tasks(task.reader_tasks, timeout=0.3 if force else 1.0)
                 task.done_event.set()
+                _run_completion_callbacks(task)
 
         current = asyncio.current_task()
         pending = [t for t in asyncio.all_tasks(loop) if t is not current]
@@ -348,6 +350,21 @@ async def _finalize_reader_tasks(reader_tasks: List[asyncio.Task], timeout: floa
         await asyncio.gather(*reader_tasks, return_exceptions=True)
 
 
+def _run_completion_callbacks(task: BackgroundTask) -> None:
+    """Invoke completion callbacks safely for a finished task."""
+    if not task.completion_callbacks:
+        return
+    for callback in list(task.completion_callbacks):
+        try:
+            callback(task)
+        except Exception:
+            logger.debug(
+                "Background task completion callback failed",
+                exc_info=True,
+                extra={"task_id": task.id, "command": task.command},
+            )
+
+
 async def _monitor_task(task: BackgroundTask) -> None:
     """Wait for a background process to finish or timeout, then mark status."""
     try:
@@ -383,10 +400,14 @@ async def _monitor_task(task: BackgroundTask) -> None:
         # Ensure readers are finished before marking done.
         await _finalize_reader_tasks(task.reader_tasks)
         task.done_event.set()
+        _run_completion_callbacks(task)
 
 
 async def _start_background_command(
-    command: str, timeout: Optional[float] = None, shell_executable: Optional[str] = None
+    command: str,
+    timeout: Optional[float] = None,
+    shell_executable: Optional[str] = None,
+    completion_callbacks: Optional[List[Callable[["BackgroundTask"], None]]] = None,
 ) -> str:
     """Launch a background shell command on the dedicated loop."""
     selected_shell = shell_executable or find_suitable_shell()
@@ -406,6 +427,7 @@ async def _start_background_command(
         process=process,
         start_time=_loop_time(),
         timeout=timeout,
+        completion_callbacks=list(completion_callbacks or []),
     )
     with _get_tasks_lock():
         _get_tasks()[task_id] = record
@@ -425,11 +447,16 @@ async def _start_background_command(
 
 
 async def start_background_command(
-    command: str, timeout: Optional[float] = None, shell_executable: Optional[str] = None
+    command: str,
+    timeout: Optional[float] = None,
+    shell_executable: Optional[str] = None,
+    completion_callbacks: Optional[List[Callable[["BackgroundTask"], None]]] = None,
 ) -> str:
     """Launch a background shell command and return its task id."""
     future = _submit_to_background_loop(
-        _start_background_command(command, timeout, shell_executable)
+        _start_background_command(
+            command, timeout, shell_executable, completion_callbacks=completion_callbacks
+        )
     )
     return await asyncio.wrap_future(future)
 

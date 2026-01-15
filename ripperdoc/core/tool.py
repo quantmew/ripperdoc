@@ -10,6 +10,7 @@ from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 from ripperdoc.utils.file_watch import FileCacheType
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.pending_messages import PendingMessageQueue
 
 
 logger = get_logger()
@@ -59,6 +60,10 @@ class ToolUseContext(BaseModel):
     # Plan mode control callback
     on_exit_plan_mode: Optional[Any] = Field(
         default=None, description="Callback invoked when exiting plan mode"
+    )
+    pending_message_queue: Annotated[Optional[PendingMessageQueue], SkipValidation] = Field(
+        default=None,
+        description="Queue for pending conversation messages (background notices or user interjections).",
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

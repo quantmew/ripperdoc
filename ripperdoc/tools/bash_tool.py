@@ -597,6 +597,7 @@ build projects, run tests, and interact with the file system."""
         sandbox_requested: bool,
         start_time: float,
         input_data: BashToolInput,
+        context: Optional[ToolUseContext] = None,
     ) -> Optional[BashToolOutput]:
         """Run a command in background mode.
 
@@ -615,15 +616,51 @@ build projects, run tests, and interact with the file system."""
             )
             return self._create_error_output(
                 effective_command, f"Failed to start background task: {str(e)}", sandbox_requested
-            )
+        )
 
         bg_timeout = (
             None
             if input_data.timeout is None
             else (timeout_seconds if timeout_seconds > 0 else None)
         )
+
+        completion_callbacks = None
+        queue = getattr(context, "pending_message_queue", None) if context else None
+        if queue is not None:
+
+            def _notify_completion(task: Any) -> None:
+                # Mirror status computation from background_shell._compute_status
+                if getattr(task, "killed", False):
+                    status = "killed"
+                elif getattr(task, "timed_out", False):
+                    status = "failed"
+                else:
+                    exit_code = getattr(task, "exit_code", None)
+                    status = "running" if exit_code is None else ("completed" if exit_code == 0 else "failed")
+                exit_code = getattr(task, "exit_code", None)
+                status_line = f"Background bash task {getattr(task, 'id', '')} finished with status: {status}"
+                if exit_code is not None:
+                    status_line += f" (exit code {exit_code})"
+                details = [
+                    status_line,
+                    f"Command: {effective_command}",
+                    "Use BashOutput with this task id to read stdout/stderr and continue.",
+                ]
+                queue.enqueue_text(
+                    "\n".join(details),
+                    metadata={
+                        "source": "background_bash",
+                        "background_task_id": getattr(task, "id", None),
+                    },
+                )
+
+            completion_callbacks = [_notify_completion]
+
         task_id = await start_background_command(
-            final_command, timeout=bg_timeout, shell_executable=resolved_shell
+            final_command,
+            timeout=bg_timeout,
+            shell_executable=resolved_shell,
+            completion_callbacks=completion_callbacks,
         )
 
         return BashToolOutput(
@@ -889,6 +926,7 @@ build projects, run tests, and interact with the file system."""
                     sandbox_requested,
                     start,
                     input_data,
+                    context,
                 )
                 if output:
                     yield ToolResult(

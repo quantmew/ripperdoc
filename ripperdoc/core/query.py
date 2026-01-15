@@ -48,6 +48,7 @@ from ripperdoc.utils.file_watch import (
     ChangedFileNotice,
     detect_changed_files,
 )
+from ripperdoc.utils.pending_messages import PendingMessageQueue
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
@@ -560,14 +561,6 @@ def _apply_skill_context_updates(
 class QueryContext:
     """Context for a query session."""
 
-    # Thresholds for memory warnings
-    MESSAGE_COUNT_WARNING_THRESHOLD = int(
-        os.getenv("RIPPERDOC_MESSAGE_WARNING_THRESHOLD", "500")
-    )
-    MESSAGE_COUNT_CRITICAL_THRESHOLD = int(
-        os.getenv("RIPPERDOC_MESSAGE_CRITICAL_THRESHOLD", "1000")
-    )
-
     def __init__(
         self,
         tools: List[Tool[Any, Any]],
@@ -580,6 +573,7 @@ class QueryContext:
         stop_hook: str = "stop",
         file_cache_max_entries: int = 500,
         file_cache_max_memory_mb: float = 50.0,
+        pending_message_queue: Optional[PendingMessageQueue] = None,
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
@@ -587,6 +581,9 @@ class QueryContext:
         self.model = model
         self.verbose = verbose
         self.abort_controller = asyncio.Event()
+        self.pending_message_queue: PendingMessageQueue = (
+            pending_message_queue if pending_message_queue is not None else PendingMessageQueue()
+        )
         # Use BoundedFileCache instead of plain Dict to prevent unbounded growth
         self.file_state_cache: BoundedFileCache = BoundedFileCache(
             max_entries=file_cache_max_entries,
@@ -596,7 +593,6 @@ class QueryContext:
         self.resume_ui = resume_ui
         self.stop_hook = stop_hook
         self.stop_hook_active = False
-        self._last_message_warning_count = 0
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -616,36 +612,6 @@ class QueryContext:
         """Return all known tools (active + deferred)."""
         return self.tool_registry.all_tools
 
-    def check_message_count(self, message_count: int) -> None:
-        """Check message count and log warnings if thresholds are exceeded.
-
-        This helps detect potential memory issues in long sessions.
-        """
-        if message_count >= self.MESSAGE_COUNT_CRITICAL_THRESHOLD:
-            if self._last_message_warning_count < self.MESSAGE_COUNT_CRITICAL_THRESHOLD:
-                logger.warning(
-                    "[query] Critical: Message history is very large. "
-                    "Consider compacting or starting a new session.",
-                    extra={
-                        "message_count": message_count,
-                        "threshold": self.MESSAGE_COUNT_CRITICAL_THRESHOLD,
-                        "file_cache_stats": self.file_state_cache.stats(),
-                    },
-                )
-                self._last_message_warning_count = message_count
-        elif message_count >= self.MESSAGE_COUNT_WARNING_THRESHOLD:
-            # Only warn once per threshold crossing
-            if self._last_message_warning_count < self.MESSAGE_COUNT_WARNING_THRESHOLD:
-                logger.info(
-                    "[query] Message history growing large; automatic compaction may trigger soon",
-                    extra={
-                        "message_count": message_count,
-                        "threshold": self.MESSAGE_COUNT_WARNING_THRESHOLD,
-                        "file_cache_stats": self.file_state_cache.stats(),
-                    },
-                )
-                self._last_message_warning_count = message_count
-
     def get_memory_stats(self) -> Dict[str, Any]:
         """Return memory usage statistics for monitoring."""
         return {
@@ -653,6 +619,14 @@ class QueryContext:
             "tool_count": len(self.tool_registry.all_tools),
             "active_tool_count": len(self.tool_registry.active_tools),
         }
+
+    def drain_pending_messages(self) -> List[UserMessage]:
+        """Drain queued messages waiting to be injected into the conversation."""
+        return self.pending_message_queue.drain()
+
+    def enqueue_user_message(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Queue a user-style message to inject once the current loop finishes."""
+        self.pending_message_queue.enqueue_text(text, metadata=metadata)
 
 
 async def query_llm(
@@ -1110,6 +1084,7 @@ async def _run_query_iteration(
                 abort_signal=query_context.abort_controller,
                 pause_ui=query_context.pause_ui,
                 resume_ui=query_context.resume_ui,
+                pending_message_queue=query_context.pending_message_queue,
             )
 
             validation = await tool.validate_input(parsed_input, tool_context)
@@ -1276,10 +1251,14 @@ async def query(
     # do not interfere with the loop or normalization.
     messages = list(messages)
 
-    # Check initial message count for memory warnings
-    query_context.check_message_count(len(messages))
-
     for iteration in range(1, MAX_QUERY_ITERATIONS + 1):
+        # Inject any pending messages queued by background events or user interjections
+        pending_messages = query_context.drain_pending_messages()
+        if pending_messages:
+            messages.extend(pending_messages)
+            for pending in pending_messages:
+                yield pending
+
         result = IterationResult()
 
         async for msg in _run_query_iteration(
@@ -1294,6 +1273,19 @@ async def query(
             yield msg
 
         if result.should_stop:
+            # Before stopping, check if new pending messages arrived during this iteration.
+            trailing_pending = query_context.drain_pending_messages()
+            if trailing_pending:
+                next_messages = (
+                    messages + [result.assistant_message] + result.tool_results
+                    if result.assistant_message is not None
+                    else messages + result.tool_results
+                )
+                next_messages = next_messages + trailing_pending  # type: ignore[operator]
+                for pending in trailing_pending:
+                    yield pending
+                messages = next_messages
+                continue
             return
 
         # Update messages for next iteration
@@ -1301,9 +1293,6 @@ async def query(
             messages = messages + [result.assistant_message] + result.tool_results  # type: ignore[operator]
         else:
             messages = messages + result.tool_results  # type: ignore[operator]
-
-        # Check message count after each iteration for memory warnings
-        query_context.check_message_count(len(messages))
 
         logger.debug(
             f"[query] Continuing loop with {len(messages)} messages after tools; "
