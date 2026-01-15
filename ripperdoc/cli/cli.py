@@ -98,7 +98,6 @@ async def run_query(
     model: Optional[str] = None,
 ) -> None:
     """Run a single query and print the response."""
-
     logger.info(
         "[cli] Running single prompt session",
         extra={
@@ -212,54 +211,36 @@ async def run_query(
                 mcp_instructions=mcp_instructions,
             )
 
-        # Run the query
+        # Run the query - collect final response text
+        final_response_parts: List[str] = []
         try:
             async for message in query(
                 messages, system_prompt, context, query_context, can_use_tool
             ):
                 if message.type == "assistant" and hasattr(message, "message"):
-                    # Print assistant message
+                    # Collect assistant message text for final output
                     if isinstance(message.message.content, str):
-                        console.print(
-                            Panel(
-                                Markdown(message.message.content),
-                                title="Ripperdoc",
-                                border_style="cyan",
-                                padding=(0, 1),
-                            )
-                        )
+                        final_response_parts.append(message.message.content)
                     else:
                         # Handle structured content
                         for block in message.message.content:
                             if isinstance(block, dict):
                                 if block.get("type") == "text":
-                                    console.print(
-                                        Panel(
-                                            Markdown(block["text"]),
-                                            title="Ripperdoc",
-                                            border_style="cyan",
-                                            padding=(0, 1),
-                                        )
-                                    )
+                                    final_response_parts.append(block["text"])
                             else:
                                 if hasattr(block, "type") and block.type == "text":
-                                    console.print(
-                                        Panel(
-                                            Markdown(block.text or ""),
-                                            title="Ripperdoc",
-                                            border_style="cyan",
-                                            padding=(0, 1),
-                                        )
-                                    )
+                                    final_response_parts.append(block.text or "")
 
-                elif message.type == "progress" and hasattr(message, "content"):
-                    # Print progress
-                    if verbose:
-                        console.print(f"[dim]Progress: {escape(str(message.content))}[/dim]")
+                # Skip progress messages entirely for -p mode
 
                 # Add message to history
                 messages.append(message)  # type: ignore[arg-type]
                 session_history.append(message)  # type: ignore[arg-type]
+
+            # Print final response as clean markdown (no panel, no decoration)
+            if final_response_parts:
+                final_text = "\n".join(final_response_parts)
+                console.print(Markdown(final_text))
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted by user[/yellow]")
@@ -412,6 +393,40 @@ def cli(
     # Parse --tools option
     allowed_tools = parse_tools_option(tools)
 
+    # Handle piped stdin input
+    # - With -p flag: Not applicable (prompt comes from -p argument)
+    # - Without -p: stdin becomes the initial query in interactive mode
+    initial_query: Optional[str] = None
+    if prompt is None and ctx.invoked_subcommand is None:
+        stdin_stream = click.get_text_stream("stdin")
+        try:
+            stdin_is_tty = stdin_stream.isatty()
+        except Exception:
+            stdin_is_tty = True
+
+        if not stdin_is_tty:
+            try:
+                stdin_data = stdin_stream.read()
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "[cli] Failed to read stdin for initial query: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={"session_id": session_id},
+                )
+            else:
+                trimmed = stdin_data.rstrip("\n")
+                if trimmed.strip():
+                    initial_query = trimmed
+                    logger.info(
+                        "[cli] Received initial query from stdin",
+                        extra={
+                            "session_id": session_id,
+                            "query_length": len(initial_query),
+                            "query_preview": initial_query[:200],
+                        },
+                    )
+
     # Handle --continue option: load the most recent session
     resume_messages = None
     if continue_session:
@@ -480,6 +495,7 @@ def cli(
             append_system_prompt=append_system_prompt,
             model=model,
             resume_messages=resume_messages,
+            initial_query=initial_query,
         )
         return
 

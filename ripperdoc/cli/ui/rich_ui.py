@@ -119,6 +119,7 @@ class RichUI:
         append_system_prompt: Optional[str] = None,
         model: Optional[str] = None,
         resume_messages: Optional[List[Any]] = None,
+        initial_query: Optional[str] = None,
     ):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -135,6 +136,7 @@ class RichUI:
         self._current_tool: Optional[str] = None
         self._should_exit: bool = False
         self._last_ctrl_c_time: float = 0.0  # Track Ctrl+C timing for double-press exit
+        self._initial_query = initial_query  # Query from piped stdin to auto-send on startup
         self.command_list = list_slash_commands()
         self._custom_command_list = list_custom_commands()
         self._prompt_session: Optional[PromptSession] = None
@@ -161,6 +163,7 @@ class RichUI:
         self._session_start_time = time.time()
         self._session_end_sent = False
         self._exit_reason: Optional[str] = None
+        self._using_tty_input = False  # Track if we're using /dev/tty for input
         hook_manager.set_transcript_path(str(self._session_history.path))
         self._permission_checker = (
             None if yolo_mode else make_permission_checker(self.project_path, yolo_mode=False)
@@ -772,9 +775,34 @@ class RichUI:
             output_token_est += delta_tokens
             spinner.update_tokens(output_token_est)
         else:
-            spinner.update_tokens(output_token_est, suffix=f"Working... {message.content}")
+            # Simplify spinner suffix for bash command progress to avoid clutter
+            suffix = self._simplify_progress_suffix(message.content)
+            spinner.update_tokens(output_token_est, suffix=suffix)
 
         return output_token_est
+
+    def _simplify_progress_suffix(self, content: str) -> str:
+        """Simplify progress message content for cleaner spinner display.
+
+        For bash command progress (format: "Running... (elapsed)\nstdout_preview"),
+        extract only the timing information to avoid cluttering the spinner with
+        multi-line stdout content that causes terminal wrapping issues.
+        """
+        if not isinstance(content, str):
+            return f"Working... {content}"
+
+        # Handle bash command progress: "Running... (10s)\nstdout..."
+        if content.startswith("Running..."):
+            # Extract just the "Running... (time)" part before any newline
+            first_line = content.split('\n', 1)[0]
+            return first_line
+
+        # For other progress messages, limit length to avoid terminal wrapping
+        max_length = 60
+        if len(content) > max_length:
+            return f"Working... {content[:max_length]}..."
+
+        return f"Working... {content}"
 
     async def process_query(self, user_input: str) -> None:
         """Process a user query and display the response."""
@@ -1153,6 +1181,34 @@ class RichUI:
             # Clear the buffer after printing
             buf.reset()
 
+        # If stdin is not a TTY (e.g., piped input), try to use /dev/tty for interactive input
+        # This allows the user to continue interacting after processing piped content
+        input_obj = None
+        if not sys.stdin.isatty():
+            # First check if /dev/tty exists and is accessible
+            try:
+                import os
+                if os.path.exists("/dev/tty"):
+                    from prompt_toolkit.input import create_input
+                    input_obj = create_input(always_prefer_tty=True)
+                    self._using_tty_input = True  # Mark that we're using /dev/tty
+                    logger.info(
+                        "[ui] Stdin is not a TTY, using /dev/tty for prompt input",
+                        extra={"session_id": self.session_id},
+                    )
+                else:
+                    logger.info(
+                        "[ui] Stdin is not a TTY and /dev/tty not available",
+                        extra={"session_id": self.session_id},
+                    )
+            except (OSError, RuntimeError, ValueError, ImportError) as exc:
+                logger.warning(
+                    "[ui] Failed to create TTY input: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={"session_id": self.session_id},
+                )
+
         self._prompt_session = PromptSession(
             completer=combined_completer,
             complete_style=CompleteStyle.COLUMN,
@@ -1160,6 +1216,7 @@ class RichUI:
             history=InMemoryHistory(),
             key_bindings=key_bindings,
             multiline=True,
+            input=input_obj,
         )
         return self._prompt_session
 
@@ -1186,6 +1243,30 @@ class RichUI:
 
         exit_reason = "other"
         try:
+            # Process initial query from piped stdin if provided
+            if self._initial_query:
+                console.print(f"> {self._initial_query}")
+                logger.info(
+                    "[ui] Processing initial query from stdin",
+                    extra={
+                        "session_id": self.session_id,
+                        "prompt_length": len(self._initial_query),
+                        "prompt_preview": self._initial_query[:200],
+                    },
+                )
+                console.print()  # Add spacing before response
+
+                # Use _run_async instead of _run_async_with_esc_interrupt for piped stdin
+                # since there's no TTY for ESC key detection
+                self._run_async(self.process_query(self._initial_query))
+
+                logger.info(
+                    "[ui] Initial query completed successfully",
+                    extra={"session_id": self.session_id},
+                )
+                console.print()  # Add spacing after response
+                self._initial_query = None  # Clear after processing
+
             while not self._should_exit:
                 try:
                     # Get user input
@@ -1226,16 +1307,20 @@ class RichUI:
                             "prompt_preview": user_input[:200],
                         },
                     )
-                    interrupted = self._run_async_with_esc_interrupt(self.process_query(user_input))
 
-                    if interrupted:
-                        console.print(
-                            "\n[red]■ Conversation interrupted[/red] · [dim]Tell the model what to do differently.[/dim]"
-                        )
-                        logger.info(
-                            "[ui] Query interrupted by ESC key",
-                            extra={"session_id": self.session_id},
-                        )
+                    # When using /dev/tty input, disable ESC interrupt to avoid conflicts
+                    if self._using_tty_input:
+                        self._run_async(self.process_query(user_input))
+                    else:
+                        interrupted = self._run_async_with_esc_interrupt(self.process_query(user_input))
+                        if interrupted:
+                            console.print(
+                                "\n[red]■ Conversation interrupted[/red] · [dim]Tell the model what to do differently.[/dim]"
+                            )
+                            logger.info(
+                                "[ui] Query interrupted by ESC key",
+                                extra={"session_id": self.session_id},
+                            )
 
                     console.print()  # Add spacing between interactions
 
@@ -1458,8 +1543,14 @@ def main_rich(
     append_system_prompt: Optional[str] = None,
     model: Optional[str] = None,
     resume_messages: Optional[List[Any]] = None,
+    initial_query: Optional[str] = None,
 ) -> None:
-    """Main entry point for Rich interface."""
+    """Main entry point for Rich interface.
+
+    Args:
+        initial_query: If provided, automatically send this query after starting the session.
+                      Used for piped stdin input (e.g., `echo "query" | ripperdoc`).
+    """
 
     # Ensure onboarding is complete
     if not check_onboarding_rich():
@@ -1477,6 +1568,7 @@ def main_rich(
         append_system_prompt=append_system_prompt,
         model=model,
         resume_messages=resume_messages,
+        initial_query=initial_query,
     )
     ui.run()
 

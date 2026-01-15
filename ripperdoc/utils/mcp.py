@@ -6,6 +6,7 @@ import asyncio
 import contextvars
 import json
 import shlex
+import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -17,12 +18,13 @@ from ripperdoc.utils.token_estimation import estimate_tokens
 
 logger = get_logger()
 
+
 try:
     import mcp.types as mcp_types  # type: ignore[import-not-found]
     from mcp.client.session import ClientSession  # type: ignore[import-not-found]
     from mcp.client.sse import sse_client  # type: ignore[import-not-found]
     from mcp.client.stdio import StdioServerParameters, stdio_client  # type: ignore[import-not-found]
-    from mcp.client.streamable_http import streamablehttp_client  # type: ignore[import-not-found]
+    from mcp.client.streamable_http import streamable_http_client  # type: ignore[import-not-found]
 
     MCP_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):  # pragma: no cover - handled gracefully at runtime
@@ -217,6 +219,14 @@ class McpRuntime:
         self.sessions: Dict[str, ClientSession] = {}
         self.servers: List[McpServerInfo] = []
         self._closed = False
+        # Track MCP streams for proper cleanup ordering
+        # We need to close write streams BEFORE exiting the stdio_client context
+        # to allow the internal tasks to exit cleanly
+        self._mcp_write_streams: List[Any] = []
+        # Track the underlying async generators from @asynccontextmanager wrappers
+        # These need to be explicitly closed after exit stack cleanup to prevent
+        # shutdown_asyncgens() from trying to close them in a different task
+        self._raw_async_generators: List[Any] = []
 
     async def connect(self, configs: Dict[str, McpServerInfo]) -> List[McpServerInfo]:
         logger.info(
@@ -281,19 +291,25 @@ class McpRuntime:
             if config.type in ("sse", "sse-ide"):
                 if not config.url:
                     raise ValueError("SSE MCP server requires a 'url'.")
-                read_stream, write_stream = await self._exit_stack.enter_async_context(
-                    sse_client(config.url, headers=config.headers or None)
-                )
+                cm = sse_client(config.url, headers=config.headers or None)
+                # Track the underlying async generator for explicit cleanup
+                if hasattr(cm, "gen"):
+                    self._raw_async_generators.append(cm.gen)
+                read_stream, write_stream = await self._exit_stack.enter_async_context(cm)
+                self._mcp_write_streams.append(write_stream)
             elif config.type in ("http", "streamable-http"):
                 if not config.url:
                     raise ValueError("HTTP MCP server requires a 'url'.")
-                read_stream, write_stream, _ = await self._exit_stack.enter_async_context(
-                    streamablehttp_client(
-                        url=config.url,
-                        headers=config.headers or None,
-                        terminate_on_close=True,
-                    )
+                cm = streamable_http_client(
+                    url=config.url,
+                    headers=config.headers or None,
+                    terminate_on_close=True,
                 )
+                # Track the underlying async generator for explicit cleanup
+                if hasattr(cm, "gen"):
+                    self._raw_async_generators.append(cm.gen)
+                read_stream, write_stream, _ = await self._exit_stack.enter_async_context(cm)
+                self._mcp_write_streams.append(write_stream)
             else:
                 if not config.command:
                     raise ValueError("Stdio MCP server requires a 'command'.")
@@ -303,9 +319,12 @@ class McpRuntime:
                     env=config.env or None,
                     cwd=self.project_path,
                 )
-                read_stream, write_stream = await self._exit_stack.enter_async_context(
-                    stdio_client(stdio_params)
-                )
+                cm = stdio_client(stdio_params)
+                # Track the underlying async generator for explicit cleanup
+                if hasattr(cm, "gen"):
+                    self._raw_async_generators.append(cm.gen)
+                read_stream, write_stream = await self._exit_stack.enter_async_context(cm)
+                self._mcp_write_streams.append(write_stream)
 
             if read_stream is None or write_stream is None:
                 raise ValueError("Failed to create read/write streams for MCP server")
@@ -392,17 +411,39 @@ class McpRuntime:
             "[mcp] Shutting down MCP runtime",
             extra={"project_path": str(self.project_path), "session_count": len(self.sessions)},
         )
+
+        # CRITICAL: Close all MCP write streams FIRST to signal internal tasks to stop.
+        for write_stream in self._mcp_write_streams:
+            try:
+                await write_stream.aclose()
+            except BaseException:  # pragma: no cover
+                pass
+        self._mcp_write_streams.clear()
+
+        # Small delay to allow internal tasks to notice stream closure and exit
+        await asyncio.sleep(0.1)
+
+        # CRITICAL: Close the raw async generators BEFORE the exit stack cleanup.
+        # This prevents asyncio's shutdown_asyncgens() from trying to close them
+        # later, which would cause the "cancel scope in different task" error.
+        for gen in self._raw_async_generators:
+            try:
+                await gen.aclose()
+            except BaseException:  # pragma: no cover
+                pass
+        self._raw_async_generators.clear()
+
+        # Now close the exit stack
         try:
             await self._exit_stack.aclose()
         except BaseException as exc:  # pragma: no cover - defensive shutdown
-            # Swallow noisy ExceptionGroups from stdio_client cancel scopes during exit.
             logger.debug(
-                "[mcp] Suppressed MCP shutdown error",
+                "[mcp] Suppressed MCP shutdown error during exit_stack.aclose()",
                 extra={"error": str(exc), "project_path": str(self.project_path)},
             )
-        finally:
-            self.sessions.clear()
-            self.servers.clear()
+
+        self.sessions.clear()
+        self.servers.clear()
 
 
 _runtime_var: contextvars.ContextVar[Optional[McpRuntime]] = contextvars.ContextVar(
@@ -453,6 +494,29 @@ async def ensure_mcp_runtime(project_path: Optional[Path] = None) -> McpRuntime:
     # Keep a module-level reference so sync callers that hop event loops can reuse it.
     global _global_runtime
     _global_runtime = runtime
+
+    # Install custom exception handler to suppress MCP asyncgen cleanup errors.
+    # These errors occur due to anyio cancel scope issues when stdio_client async
+    # generators are finalized by Python's asyncgen hooks. The errors are harmless
+    # but noisy, so we suppress them here.
+    loop = asyncio.get_running_loop()
+    original_handler = loop.get_exception_handler()
+
+    def mcp_exception_handler(loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
+        asyncgen = context.get("asyncgen")
+        # Suppress MCP stdio_client asyncgen cleanup errors
+        if asyncgen and "stdio_client" in str(asyncgen):
+            logger.debug("[mcp] Suppressed asyncgen cleanup error for stdio_client")
+            return
+        # Call original handler for other errors
+        if original_handler:
+            original_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(mcp_exception_handler)
+    logger.debug("[mcp] Installed custom exception handler for asyncgen cleanup")
+
     return runtime
 
 
