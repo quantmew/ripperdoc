@@ -42,7 +42,7 @@ class StructuredFormatter(logging.Formatter):
     """Formatter with ISO timestamps and context."""
 
     def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
-        timestamp = datetime.utcfromtimestamp(record.created)
+        timestamp = datetime.fromtimestamp(record.created, datetime.UTC)
         return timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     def format(self, record: logging.LogRecord) -> str:
