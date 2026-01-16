@@ -355,19 +355,51 @@ def cli(
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
+    cwd_changed: Optional[str] = None
 
     # Set working directory
     if cwd:
         import os
 
         os.chdir(cwd)
-        logger.debug(
-            "[cli] Changed working directory via --cwd",
-            extra={"cwd": cwd, "session_id": session_id},
-        )
+        cwd_changed = cwd
 
     project_path = Path.cwd()
+
+    # Handle --continue option: load the most recent session
+    resume_messages = None
+    most_recent = None
+    if continue_session:
+        summaries = list_session_summaries(project_path)
+        if summaries:
+            most_recent = summaries[0]
+            session_id = most_recent.session_id
+            resume_messages = load_session_messages(project_path, session_id)
+            console.print(f"[dim]Continuing session: {most_recent.last_prompt}[/dim]")
+        else:
+            console.print("[yellow]No previous sessions found in this directory.[/yellow]")
+
     log_file = enable_session_file_logging(project_path, session_id)
+
+    if cwd_changed:
+        logger.debug(
+            "[cli] Changed working directory via --cwd",
+            extra={"cwd": cwd_changed, "session_id": session_id},
+        )
+
+    if most_recent:
+        logger.info(
+            "[cli] Continuing session",
+            extra={
+                "session_id": session_id,
+                "message_count": len(resume_messages) if resume_messages else 0,
+                "last_prompt": most_recent.last_prompt,
+                "log_file": str(log_file),
+            },
+        )
+    elif continue_session:
+        logger.warning("[cli] No previous sessions found to continue")
+
     logger.info(
         "[cli] Starting CLI invocation",
         extra={
@@ -426,27 +458,6 @@ def cli(
                             "query_preview": initial_query[:200],
                         },
                     )
-
-    # Handle --continue option: load the most recent session
-    resume_messages = None
-    if continue_session:
-        summaries = list_session_summaries(project_path)
-        if summaries:
-            most_recent = summaries[0]
-            session_id = most_recent.session_id
-            resume_messages = load_session_messages(project_path, session_id)
-            logger.info(
-                "[cli] Continuing session",
-                extra={
-                    "session_id": session_id,
-                    "message_count": len(resume_messages),
-                    "last_prompt": most_recent.last_prompt,
-                },
-            )
-            console.print(f"[dim]Continuing session: {most_recent.last_prompt}[/dim]")
-        else:
-            logger.warning("[cli] No previous sessions found to continue")
-            console.print("[yellow]No previous sessions found in this directory.[/yellow]")
 
     logger.debug(
         "[cli] Configuration initialized",
