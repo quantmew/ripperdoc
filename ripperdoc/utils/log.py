@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -42,7 +42,7 @@ class StructuredFormatter(logging.Formatter):
     """Formatter with ISO timestamps and context."""
 
     def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
-        timestamp = datetime.fromtimestamp(record.created, datetime.UTC)
+        timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc)
         return timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     def format(self, record: logging.LogRecord) -> str:

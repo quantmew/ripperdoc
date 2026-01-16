@@ -78,6 +78,33 @@ def _normalize_glob_for_grep(glob_pattern: str) -> str:
     return glob_pattern.split("/")[-1] or glob_pattern
 
 
+_GREP_SUPPORTS_PCRE: Optional[bool] = None
+
+
+def _grep_supports_pcre() -> bool:
+    """Detect if the system grep supports -P (Perl regex), caching the result."""
+    global _GREP_SUPPORTS_PCRE
+    if _GREP_SUPPORTS_PCRE is not None:
+        return _GREP_SUPPORTS_PCRE
+
+    if shutil.which("grep") is None:
+        _GREP_SUPPORTS_PCRE = False
+        return _GREP_SUPPORTS_PCRE
+
+    try:
+        proc = subprocess.run(
+            ["grep", "-P", ""],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        _GREP_SUPPORTS_PCRE = proc.returncode in (0, 1)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        _GREP_SUPPORTS_PCRE = False
+
+    return _GREP_SUPPORTS_PCRE
+
+
 class GrepToolInput(BaseModel):
     """Input schema for GrepTool."""
 
@@ -238,6 +265,16 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         try:
             search_path = input_data.path or "."
 
+            async def _run_search(command: List[str]) -> Tuple[int, str, str]:
+                """Execute the search command and return decoded output."""
+                process = await asyncio.create_subprocess_exec(
+                    *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                stdout_text = stdout.decode("utf-8", errors="ignore") if stdout else ""
+                stderr_text = stderr.decode("utf-8", errors="ignore") if stderr else ""
+                return process.returncode, stdout_text, stderr_text
+
             use_ripgrep = shutil.which("rg") is not None
             pattern = input_data.pattern
 
@@ -263,7 +300,8 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 cmd.append(search_path)
             else:
                 # Fallback to grep (note: grep --include matches basenames only)
-                cmd = ["grep", "-r", "--color=never", "-P"]
+                use_pcre = _grep_supports_pcre()
+                cmd = ["grep", "-r", "--color=never", "-P" if use_pcre else "-E"]
 
                 if input_data.case_insensitive:
                     cmd.append("-i")
@@ -285,20 +323,44 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
 
                 cmd.append(search_path)
 
-            # Run grep asynchronously
-            process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
+            returncode, stdout_text, stderr_text = await _run_search(cmd)
+            fallback_attempted = False
 
-            stdout, stderr = await process.communicate()
-            returncode = process.returncode
+            if returncode not in (0, 1):
+                if not use_ripgrep and "-P" in cmd:
+                    # BSD grep lacks -P; retry with extended regex before surfacing the error.
+                    fallback_attempted = True
+                    cmd = [flag if flag != "-P" else "-E" for flag in cmd]
+                    returncode, stdout_text, stderr_text = await _run_search(cmd)
+
+                if returncode not in (0, 1):
+                    error_msg = stderr_text.strip() or f"grep exited with status {returncode}"
+                    logger.warning(
+                        "[grep_tool] Grep command failed",
+                        extra={
+                            "pattern": input_data.pattern,
+                            "path": input_data.path,
+                            "returncode": returncode,
+                            "stderr": error_msg,
+                            "fallback_to_E": fallback_attempted,
+                        },
+                    )
+                    error_output = GrepToolOutput(
+                        matches=[],
+                        pattern=input_data.pattern,
+                        total_files=0,
+                        total_matches=0,
+                        output_mode=input_data.output_mode,
+                        head_limit=input_data.head_limit,
+                    )
+                    yield ToolResult(data=error_output, result_for_assistant=f"Grep error: {error_msg}")
+                    return
 
             # Parse output
             matches: List[GrepMatch] = []
             total_matches = 0
             total_files = 0
             omitted_results = 0
-            stdout_text = stdout.decode("utf-8", errors="ignore") if stdout else ""
             lines = [line for line in stdout_text.split("\n") if line]
 
             if returncode in (0, 1):  # 0 = matches found, 1 = no matches (ripgrep/grep)

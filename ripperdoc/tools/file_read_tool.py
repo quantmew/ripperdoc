@@ -22,9 +22,12 @@ from ripperdoc.utils.path_ignore import check_path_for_tool
 
 logger = get_logger()
 
-# Maximum file size to read (default 50MB, configurable via env)
-MAX_FILE_SIZE_MB = float(os.getenv("RIPPERDOC_MAX_READ_FILE_SIZE_MB", "50"))
-MAX_FILE_SIZE_BYTES = int(MAX_FILE_SIZE_MB * 1024 * 1024)
+# Maximum file size to read (default 256KB, aligned with Claude Code official limit)
+# Can be overridden via env var in bytes
+MAX_FILE_SIZE_BYTES = int(os.getenv("RIPPERDOC_MAX_READ_FILE_SIZE_BYTES", "262144"))  # 256KB
+
+# Maximum lines to read when no limit is specified (default 2000 lines)
+MAX_READ_LINES = int(os.getenv("RIPPERDOC_MAX_READ_LINES", "2000"))
 
 
 class FileReadToolInput(BaseModel):
@@ -79,6 +82,7 @@ and limit to read only a portion of the file."""
             "Read a file from the local filesystem.\n\n"
             "Usage:\n"
             "- The file_path parameter must be an absolute path (not relative).\n"
+            "- Files larger than 256KB or with more than 2000 lines require using offset and limit parameters.\n"
             "- By default, the entire file is read. You can optionally specify a line offset and limit (handy for long files); offset is zero-based and output line numbers start at 1.\n"
             "- Lines longer than 2000 characters are truncated in the output.\n"
             "- Results are returned with cat -n style numbering: spaces + line number + tab, then the file content.\n"
@@ -147,8 +151,10 @@ and limit to read only a portion of the file."""
             # Check file size before reading to prevent memory exhaustion
             file_size = os.path.getsize(input_data.file_path)
             if file_size > MAX_FILE_SIZE_BYTES:
+                size_kb = file_size / 1024
+                limit_kb = MAX_FILE_SIZE_BYTES / 1024
                 error_output = FileReadToolOutput(
-                    content=f"File too large to read: {file_size / (1024*1024):.1f}MB exceeds limit of {MAX_FILE_SIZE_MB}MB. Use offset and limit parameters to read portions.",
+                    content=f"File too large to read: {size_kb:.1f}KB exceeds limit of {limit_kb:.0f}KB. Use offset and limit parameters to read portions.",
                     file_path=input_data.file_path,
                     line_count=0,
                     offset=0,
@@ -156,7 +162,7 @@ and limit to read only a portion of the file."""
                 )
                 yield ToolResult(
                     data=error_output,
-                    result_for_assistant=f"Error: File {input_data.file_path} is too large ({file_size / (1024*1024):.1f}MB). Maximum size is {MAX_FILE_SIZE_MB}MB. Use offset and limit to read portions.",
+                    result_for_assistant=f"Error: File {input_data.file_path} is too large ({size_kb:.1f}KB). Maximum size is {limit_kb:.0f}KB. Use offset and limit to read portions, e.g., Read(file_path='{input_data.file_path}', offset=0, limit=500).",
                 )
                 return
 
@@ -165,6 +171,22 @@ and limit to read only a portion of the file."""
 
             offset = input_data.offset or 0
             limit = input_data.limit
+            total_lines = len(lines)
+
+            # Check line count if no limit is specified (to prevent context overflow)
+            if limit is None and total_lines > MAX_READ_LINES:
+                error_output = FileReadToolOutput(
+                    content=f"File too large: {total_lines} lines exceeds limit of {MAX_READ_LINES} lines. Use offset and limit parameters to read portions.",
+                    file_path=input_data.file_path,
+                    line_count=total_lines,
+                    offset=0,
+                    limit=None,
+                )
+                yield ToolResult(
+                    data=error_output,
+                    result_for_assistant=f"Error: File {input_data.file_path} has {total_lines} lines, exceeding the limit of {MAX_READ_LINES} lines when reading without limit parameter. Use offset and limit to read portions, e.g., Read(file_path='{input_data.file_path}', offset=0, limit=500).",
+                )
+                return
 
             # Apply offset and limit
             if limit is not None:
