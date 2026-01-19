@@ -97,6 +97,68 @@ class McpServerConfig:
     # Optional instructions for the server
     instructions: Optional[str] = None
 
+
+@dataclass
+class AgentConfig:
+    """Programmatic configuration for a subagent.
+
+    Allows defining custom subagents without using markdown files.
+    """
+
+    # Description of when to use this agent (shown in Task tool)
+    description: str
+    # System prompt for the agent
+    prompt: str
+    # Tools available to this agent. Use ["*"] for all tools.
+    tools: Optional[List[str]] = None
+    # Model to use: 'sonnet', 'opus', 'haiku', or None to inherit
+    model: Optional[str] = None
+    # Display color for the agent
+    color: Optional[str] = None
+    # Whether to fork context for this agent
+    fork_context: bool = False
+
+
+# Type alias for hook callback functions
+# Hook callbacks receive event type, input data, and return a decision dict
+HookCallback = Callable[
+    [str, Dict[str, Any]],
+    Union[
+        Dict[str, Any],  # Sync return
+        Awaitable[Dict[str, Any]],  # Async return
+    ],
+]
+
+
+@dataclass
+class HookMatcher:
+    """Matcher configuration for a programmatic hook.
+
+    Defines when a hook should be triggered based on tool names or patterns.
+    """
+
+    # Callback function to execute
+    callback: HookCallback
+    # Tool name pattern to match (for PreToolUse/PostToolUse hooks)
+    tool_pattern: Optional[str] = None
+
+
+# Type alias for stderr callback
+StderrCallback = Callable[[str], None]
+
+
+class SettingSource(str, Enum):
+    """Sources for loading settings configuration.
+
+    Controls which settings files are loaded during session initialization.
+    """
+
+    USER = "user"        # ~/.ripperdoc/settings.json
+    PROJECT = "project"  # .ripperdoc/settings.json in project
+    LOCAL = "local"      # .ripperdoc.local/settings.json
+    ENV = "env"          # Environment variables
+
+
 MessageType = Union[UserMessage, AssistantMessage, ProgressMessage]
 PermissionChecker = Callable[
     [Tool[Any, Any], Any],
@@ -122,6 +184,27 @@ QueryRunner = Callable[
 _END_OF_STREAM = object()
 
 logger = get_logger()
+
+# Module-level registries for programmatic agents and hooks
+# These allow TaskTool and HookManager to access SDK-defined configurations
+_programmatic_agents: Dict[str, Any] = {}  # agent_type -> AgentDefinition
+_programmatic_hooks: Dict[str, List[HookMatcher]] = {}  # event_name -> List[HookMatcher]
+
+
+def get_programmatic_agents() -> Dict[str, Any]:
+    """Get programmatically registered agents."""
+    return _programmatic_agents
+
+
+def get_programmatic_hooks() -> Dict[str, List[HookMatcher]]:
+    """Get programmatically registered hooks."""
+    return _programmatic_hooks
+
+
+def clear_programmatic_registries() -> None:
+    """Clear all programmatic registries."""
+    _programmatic_agents.clear()
+    _programmatic_hooks.clear()
 
 
 def _coerce_to_path(path: Union[str, Path]) -> Path:
@@ -149,6 +232,19 @@ class RipperdocOptions:
         resume: Session ID to resume from.
         continue_conversation: Continue the most recent conversation.
         mcp_servers: Programmatic MCP server configurations.
+        agents: Programmatic subagent definitions (keyed by agent type name).
+        hooks: Programmatic hook callbacks (keyed by event name).
+        env: Environment variables to pass to subprocesses.
+        additional_directories: Extra directories the agent can access.
+        include_partial_messages: Include partial message events during streaming.
+        stderr: Callback for stderr output from subprocesses.
+        fork_session: Create a new session branch when resuming.
+        setting_sources: Which settings sources to load (user, project, local, env).
+        user: User identifier for the session.
+        permission_prompt_tool_name: MCP tool name for permission prompts.
+        settings: Path to custom settings file.
+        extra_args: Additional arguments to pass through.
+        max_buffer_size: Maximum buffer size for streaming responses.
     """
 
     tools: Optional[Sequence[Tool[Any, Any]]] = None
@@ -167,8 +263,28 @@ class RipperdocOptions:
     # Session management
     resume: Optional[str] = None
     continue_conversation: bool = False
+    fork_session: bool = False
     # MCP configuration
     mcp_servers: Optional[Dict[str, McpServerConfig]] = None
+    # Programmatic agents (key = agent type name)
+    agents: Optional[Dict[str, AgentConfig]] = None
+    # Programmatic hooks (key = event name like "PreToolUse", "PostToolUse", etc.)
+    hooks: Optional[Dict[str, List[HookMatcher]]] = None
+    # Environment variables for subprocesses
+    env: Optional[Dict[str, str]] = None
+    # Additional directories the agent can access
+    additional_directories: Optional[List[str]] = None
+    # Include partial messages during streaming
+    include_partial_messages: bool = False
+    # Stderr callback for subprocess output
+    stderr: Optional[StderrCallback] = None
+    # Low priority options
+    setting_sources: Optional[List[SettingSource]] = None
+    user: Optional[str] = None
+    permission_prompt_tool_name: Optional[str] = None
+    settings: Optional[Union[str, Path]] = None
+    extra_args: Optional[Dict[str, Optional[str]]] = None
+    max_buffer_size: Optional[int] = None
     # Deprecated: use permission_mode instead (kept for backward compatibility)
     yolo_mode: bool = False
 
@@ -276,6 +392,11 @@ class RipperdocClient:
         """Return the number of turns in the current session."""
         return self._turn_count
 
+    @property
+    def user(self) -> Optional[str]:
+        """Return the user identifier for this session."""
+        return self.options.user
+
     async def __aenter__(self) -> "RipperdocClient":
         await self.connect()
         return self
@@ -286,29 +407,35 @@ class RipperdocClient:
     def _load_resumed_session(self, project_path: Path) -> None:
         """Load history from a resumed or continued session."""
         session_id_to_load: Optional[str] = None
+        original_session_id: Optional[str] = None
 
         if self.options.resume:
             session_id_to_load = self.options.resume
+            original_session_id = self.options.resume
             logger.info(
                 "[sdk] Resuming session",
-                extra={"session_id": session_id_to_load},
+                extra={
+                    "session_id": session_id_to_load,
+                    "fork_session": self.options.fork_session,
+                },
             )
         elif self.options.continue_conversation:
             summaries = list_session_summaries(project_path)
             if summaries:
                 session_id_to_load = summaries[0].session_id
+                original_session_id = summaries[0].session_id
                 logger.info(
                     "[sdk] Continuing most recent session",
                     extra={
                         "session_id": session_id_to_load,
                         "last_prompt": summaries[0].last_prompt,
+                        "fork_session": self.options.fork_session,
                     },
                 )
             else:
                 logger.debug("[sdk] No previous session found to continue")
 
         if session_id_to_load:
-            self._session_id = session_id_to_load
             messages = load_session_messages(project_path, session_id_to_load)
             if messages:
                 self._history = list(messages)
@@ -316,14 +443,29 @@ class RipperdocClient:
                 self._turn_count = sum(
                     1 for m in messages if getattr(m, "type", None) == "user"
                 )
-                logger.info(
-                    "[sdk] Loaded session history",
-                    extra={
-                        "session_id": session_id_to_load,
-                        "message_count": len(messages),
-                        "turn_count": self._turn_count,
-                    },
-                )
+
+                # Handle fork_session: create a new session ID but keep the history
+                if self.options.fork_session:
+                    self._session_id = str(uuid.uuid4())
+                    logger.info(
+                        "[sdk] Forked session with new ID",
+                        extra={
+                            "original_session_id": original_session_id,
+                            "new_session_id": self._session_id,
+                            "message_count": len(messages),
+                            "turn_count": self._turn_count,
+                        },
+                    )
+                else:
+                    self._session_id = session_id_to_load
+                    logger.info(
+                        "[sdk] Loaded session history",
+                        extra={
+                            "session_id": session_id_to_load,
+                            "message_count": len(messages),
+                            "turn_count": self._turn_count,
+                        },
+                    )
 
     async def connect(self, prompt: Optional[str] = None) -> None:
         """Prepare the session and optionally send an initial prompt."""
@@ -341,6 +483,18 @@ class RipperdocClient:
             self._session_id = self._session_id or str(uuid.uuid4())
             hook_manager.set_session_id(self._session_id)
             hook_manager.set_llm_callback(build_hook_llm_callback())
+
+            # Set up environment variables if provided
+            if self.options.env:
+                self._setup_environment_variables()
+
+            # Load programmatic agents if configured
+            if self.options.agents:
+                self._register_programmatic_agents()
+
+            # Load programmatic hooks if configured
+            if self.options.hooks:
+                self._register_programmatic_hooks()
 
             # Load programmatic MCP servers if configured
             if self.options.mcp_servers:
@@ -361,6 +515,105 @@ class RipperdocClient:
 
         if prompt:
             await self.query(prompt)
+
+    def _setup_environment_variables(self) -> None:
+        """Set up environment variables for the session."""
+        if not self.options.env:
+            return
+
+        # Store original values for cleanup
+        if not hasattr(self, "_original_env"):
+            self._original_env: Dict[str, Optional[str]] = {}
+
+        for key, value in self.options.env.items():
+            self._original_env[key] = os.environ.get(key)
+            os.environ[key] = value
+
+        logger.info(
+            "[sdk] Set environment variables",
+            extra={"env_keys": list(self.options.env.keys())},
+        )
+
+    def _cleanup_environment_variables(self) -> None:
+        """Restore original environment variables."""
+        if not hasattr(self, "_original_env"):
+            return
+
+        for key, original_value in self._original_env.items():
+            if original_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = original_value
+
+        self._original_env.clear()
+
+    def _register_programmatic_agents(self) -> None:
+        """Register programmatic agent definitions."""
+        from ripperdoc.core.agents import (
+            AgentDefinition,
+            AgentLocation,
+            clear_agent_cache,
+            load_agent_definitions,
+        )
+
+        if not self.options.agents:
+            return
+
+        # Get current agents and inject programmatic ones
+        result = load_agent_definitions()
+        existing_types = {a.agent_type for a in result.active_agents}
+
+        # Convert AgentConfig to AgentDefinition
+        injected_count = 0
+        for agent_type, config in self.options.agents.items():
+            if agent_type in existing_types:
+                logger.warning(
+                    "[sdk] Programmatic agent overrides existing agent",
+                    extra={"agent_type": agent_type},
+                )
+
+            # Create agent definition
+            agent_def = AgentDefinition(
+                agent_type=agent_type,
+                when_to_use=config.description,
+                tools=config.tools or ["*"],
+                system_prompt=config.prompt,
+                location=AgentLocation.USER,  # Mark as user-defined
+                model=config.model,
+                color=config.color,
+                fork_context=config.fork_context,
+            )
+
+            # Store in a module-level registry for access by TaskTool
+            _programmatic_agents[agent_type] = agent_def
+            injected_count += 1
+
+        # Clear the cache to force reload with new agents
+        clear_agent_cache()
+
+        logger.info(
+            "[sdk] Registered programmatic agents",
+            extra={
+                "count": injected_count,
+                "agent_types": list(self.options.agents.keys()),
+            },
+        )
+
+    def _register_programmatic_hooks(self) -> None:
+        """Register programmatic hook callbacks."""
+        if not self.options.hooks:
+            return
+
+        # Store hooks for later execution
+        _programmatic_hooks.update(self.options.hooks)
+
+        logger.info(
+            "[sdk] Registered programmatic hooks",
+            extra={
+                "events": list(self.options.hooks.keys()),
+                "hook_count": sum(len(v) for v in self.options.hooks.values()),
+            },
+        )
 
     async def _load_programmatic_mcp_servers(self, project_path: Path) -> None:
         """Load MCP servers from programmatic configuration."""
@@ -407,6 +660,12 @@ class RipperdocClient:
                 await self._current_task
             except asyncio.CancelledError:
                 pass
+
+        # Clean up environment variables
+        self._cleanup_environment_variables()
+
+        # Clear programmatic registries
+        clear_programmatic_registries()
 
         if self._previous_cwd:
             os.chdir(self._previous_cwd)
