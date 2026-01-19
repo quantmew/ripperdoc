@@ -8,7 +8,7 @@ import sys
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from ripperdoc.utils.log import get_logger
 
@@ -230,7 +230,7 @@ class ChangedFileNotice:
 
 
 # Type alias for cache - supports both Dict and BoundedFileCache
-FileCacheType = Dict[str, FileSnapshot] | BoundedFileCache
+FileCacheType = Union[Dict[str, FileSnapshot], BoundedFileCache]
 
 
 def record_snapshot(

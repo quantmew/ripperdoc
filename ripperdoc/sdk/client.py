@@ -10,7 +10,9 @@ import asyncio
 import os
 import time
 import uuid
+import warnings
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import (
     Any,
@@ -44,11 +46,56 @@ from ripperdoc.utils.messages import (
     create_user_message,
 )
 from ripperdoc.utils.mcp import (
+    McpServerInfo,
     format_mcp_instructions,
     load_mcp_servers_async,
     shutdown_mcp_runtime,
 )
+from ripperdoc.utils.session_history import (
+    list_session_summaries,
+    load_session_messages,
+)
 from ripperdoc.utils.log import get_logger
+
+
+class PermissionMode(str, Enum):
+    """Permission mode for SDK operations.
+
+    - DEFAULT: Standard permission behavior, prompts for dangerous operations
+    - ACCEPT_EDITS: Auto-accept file edits without prompting
+    - BYPASS_PERMISSIONS: Bypass all permission checks (equivalent to yolo_mode)
+    - PLAN: Planning mode - no execution, only planning
+    """
+
+    DEFAULT = "default"
+    ACCEPT_EDITS = "acceptEdits"
+    BYPASS_PERMISSIONS = "bypassPermissions"
+    PLAN = "plan"
+
+
+@dataclass
+class McpServerConfig:
+    """Configuration for an MCP server.
+
+    Supports stdio, SSE, and HTTP server types.
+    """
+
+    # Server type: 'stdio', 'sse', or 'http'
+    type: str = "stdio"
+    # Command for stdio servers
+    command: Optional[str] = None
+    # Arguments for stdio servers
+    args: Optional[List[str]] = None
+    # URL for SSE/HTTP servers
+    url: Optional[str] = None
+    # Environment variables for stdio servers
+    env: Optional[Dict[str, str]] = None
+    # Headers for SSE/HTTP servers
+    headers: Optional[Dict[str, str]] = None
+    # Optional server description
+    description: Optional[str] = None
+    # Optional instructions for the server
+    instructions: Optional[str] = None
 
 MessageType = Union[UserMessage, AssistantMessage, ProgressMessage]
 PermissionChecker = Callable[
@@ -83,20 +130,61 @@ def _coerce_to_path(path: Union[str, Path]) -> Path:
 
 @dataclass
 class RipperdocOptions:
-    """Configuration for SDK usage."""
+    """Configuration for SDK usage.
+
+    Attributes:
+        tools: Custom tools to use instead of defaults.
+        allowed_tools: List of tool names to allow (whitelist).
+        disallowed_tools: List of tool names to disallow (blacklist).
+        permission_mode: Permission mode for operations. Defaults to DEFAULT.
+        verbose: Enable verbose output.
+        model: Model pointer to use. Defaults to "main".
+        max_thinking_tokens: Maximum tokens for thinking (0 = disabled).
+        max_turns: Maximum conversation turns before stopping. None = unlimited.
+        context: Additional context dictionary.
+        system_prompt: Custom system prompt (overrides default).
+        additional_instructions: Extra instructions to append to system prompt.
+        permission_checker: Custom function to check tool permissions.
+        cwd: Working directory for the session.
+        resume: Session ID to resume from.
+        continue_conversation: Continue the most recent conversation.
+        mcp_servers: Programmatic MCP server configurations.
+    """
 
     tools: Optional[Sequence[Tool[Any, Any]]] = None
     allowed_tools: Optional[Sequence[str]] = None
     disallowed_tools: Optional[Sequence[str]] = None
-    yolo_mode: bool = False
+    permission_mode: PermissionMode = PermissionMode.DEFAULT
     verbose: bool = False
     model: str = "main"
     max_thinking_tokens: int = 0
+    max_turns: Optional[int] = None
     context: Dict[str, str] = field(default_factory=dict)
     system_prompt: Optional[str] = None
     additional_instructions: Optional[Union[str, Sequence[str]]] = None
     permission_checker: Optional[PermissionChecker] = None
     cwd: Optional[Union[str, Path]] = None
+    # Session management
+    resume: Optional[str] = None
+    continue_conversation: bool = False
+    # MCP configuration
+    mcp_servers: Optional[Dict[str, McpServerConfig]] = None
+    # Deprecated: use permission_mode instead (kept for backward compatibility)
+    yolo_mode: bool = False
+
+    def __post_init__(self) -> None:
+        """Handle deprecated yolo_mode parameter."""
+        # If yolo_mode is explicitly set to True, apply permission_mode
+        if self.yolo_mode:
+            warnings.warn(
+                "yolo_mode is deprecated, use permission_mode=PermissionMode.BYPASS_PERMISSIONS instead",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            self.permission_mode = PermissionMode.BYPASS_PERMISSIONS
+        # If permission_mode is set to BYPASS_PERMISSIONS, sync yolo_mode
+        elif self.permission_mode == PermissionMode.BYPASS_PERMISSIONS:
+            object.__setattr__(self, "yolo_mode", True)
 
     def build_tools(self) -> List[Tool[Any, Any]]:
         """Create the tool set with allow/deny filters applied."""
@@ -168,6 +256,7 @@ class RipperdocClient:
         self._session_id: Optional[str] = None
         self._session_start_time: Optional[float] = None
         self._session_end_sent: bool = False
+        self._turn_count: int = 0
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -177,12 +266,64 @@ class RipperdocClient:
     def history(self) -> List[MessageType]:
         return list(self._history)
 
+    @property
+    def session_id(self) -> Optional[str]:
+        """Return the current session ID."""
+        return self._session_id
+
+    @property
+    def turn_count(self) -> int:
+        """Return the number of turns in the current session."""
+        return self._turn_count
+
     async def __aenter__(self) -> "RipperdocClient":
         await self.connect()
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:  # type: ignore[override]
         await self.disconnect()
+
+    def _load_resumed_session(self, project_path: Path) -> None:
+        """Load history from a resumed or continued session."""
+        session_id_to_load: Optional[str] = None
+
+        if self.options.resume:
+            session_id_to_load = self.options.resume
+            logger.info(
+                "[sdk] Resuming session",
+                extra={"session_id": session_id_to_load},
+            )
+        elif self.options.continue_conversation:
+            summaries = list_session_summaries(project_path)
+            if summaries:
+                session_id_to_load = summaries[0].session_id
+                logger.info(
+                    "[sdk] Continuing most recent session",
+                    extra={
+                        "session_id": session_id_to_load,
+                        "last_prompt": summaries[0].last_prompt,
+                    },
+                )
+            else:
+                logger.debug("[sdk] No previous session found to continue")
+
+        if session_id_to_load:
+            self._session_id = session_id_to_load
+            messages = load_session_messages(project_path, session_id_to_load)
+            if messages:
+                self._history = list(messages)
+                # Count turns (each user message is a turn)
+                self._turn_count = sum(
+                    1 for m in messages if getattr(m, "type", None) == "user"
+                )
+                logger.info(
+                    "[sdk] Loaded session history",
+                    extra={
+                        "session_id": session_id_to_load,
+                        "message_count": len(messages),
+                        "turn_count": self._turn_count,
+                    },
+                )
 
     async def connect(self, prompt: Optional[str] = None) -> None:
         """Prepare the session and optionally send an initial prompt."""
@@ -193,11 +334,21 @@ class RipperdocClient:
             self._connected = True
             project_path = _coerce_to_path(self.options.cwd or Path.cwd())
             hook_manager.set_project_dir(project_path)
+
+            # Handle resume/continue_conversation
+            self._load_resumed_session(project_path)
+
             self._session_id = self._session_id or str(uuid.uuid4())
             hook_manager.set_session_id(self._session_id)
             hook_manager.set_llm_callback(build_hook_llm_callback())
+
+            # Load programmatic MCP servers if configured
+            if self.options.mcp_servers:
+                await self._load_programmatic_mcp_servers(project_path)
+
             try:
-                result = await hook_manager.run_session_start_async("startup")
+                source = "resume" if (self.options.resume or self.options.continue_conversation) else "startup"
+                result = await hook_manager.run_session_start_async(source)
                 self._session_hook_contexts = self._collect_hook_contexts(result)
                 self._session_start_time = time.time()
                 self._session_end_sent = False
@@ -210,6 +361,40 @@ class RipperdocClient:
 
         if prompt:
             await self.query(prompt)
+
+    async def _load_programmatic_mcp_servers(self, project_path: Path) -> None:
+        """Load MCP servers from programmatic configuration."""
+        from ripperdoc.utils.mcp import McpRuntime, McpServerInfo, _runtime_var
+
+        if not self.options.mcp_servers:
+            return
+
+        # Convert McpServerConfig to McpServerInfo
+        configs: Dict[str, McpServerInfo] = {}
+        for name, config in self.options.mcp_servers.items():
+            configs[name] = McpServerInfo(
+                name=name,
+                type=config.type,
+                url=config.url,
+                description=config.description or "",
+                command=config.command,
+                args=config.args or [],
+                env=config.env or {},
+                headers=config.headers or {},
+                instructions=config.instructions,
+            )
+
+        # Create and connect MCP runtime
+        runtime = McpRuntime(project_path)
+        await runtime.connect(configs)
+        _runtime_var.set(runtime)
+        logger.info(
+            "[sdk] Loaded programmatic MCP servers",
+            extra={
+                "server_count": len(configs),
+                "servers": list(configs.keys()),
+            },
+        )
 
     async def disconnect(self) -> None:
         """Tear down the session and restore the working directory."""
@@ -259,6 +444,18 @@ class RipperdocClient:
         if not self._connected:
             await self.connect()
 
+        # Check max_turns limit
+        if self.options.max_turns is not None and self._turn_count >= self.options.max_turns:
+            error_message = create_assistant_message(
+                f"Maximum turns ({self.options.max_turns}) reached. "
+                "Create a new session to continue."
+            )
+            self._queue = asyncio.Queue()
+            await self._queue.put(error_message)
+            await self._queue.put(_END_OF_STREAM)
+            self._current_task = asyncio.create_task(asyncio.sleep(0))
+            return
+
         self._queue = asyncio.Queue()
 
         hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
@@ -279,16 +476,25 @@ class RipperdocClient:
         user_message = create_user_message(prompt)
         history = list(self._history) + [user_message]
         self._history.append(user_message)
+        self._turn_count += 1
 
         system_prompt = await self._build_system_prompt(prompt, hook_instructions)
         context = dict(self.options.context)
 
+        # Determine yolo_mode from permission_mode
+        yolo_mode = self.options.permission_mode in (
+            PermissionMode.BYPASS_PERMISSIONS,
+            PermissionMode.ACCEPT_EDITS,
+        )
+
         query_context = QueryContext(
             tools=self._tools,
             max_thinking_tokens=self.options.max_thinking_tokens,
-            yolo_mode=self.options.yolo_mode,
+            yolo_mode=yolo_mode,
             model=self.options.model,
             verbose=self.options.verbose,
+            max_turns=self.options.max_turns,
+            permission_mode=self.options.permission_mode.value,
         )
         self._current_context = query_context
 

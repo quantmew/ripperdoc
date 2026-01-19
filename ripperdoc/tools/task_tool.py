@@ -7,7 +7,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -39,7 +39,7 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 
-MessageType = UserMessage | AssistantMessage
+MessageType = Union[UserMessage, AssistantMessage]
 
 
 @dataclass

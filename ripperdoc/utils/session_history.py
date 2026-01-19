@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
@@ -19,7 +19,7 @@ from ripperdoc.utils.path_utils import project_storage_dir
 
 logger = get_logger()
 
-ConversationMessage = UserMessage | AssistantMessage | ProgressMessage
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
 
 @dataclass

@@ -574,6 +574,8 @@ class QueryContext:
         file_cache_max_entries: int = 500,
         file_cache_max_memory_mb: float = 50.0,
         pending_message_queue: Optional[PendingMessageQueue] = None,
+        max_turns: Optional[int] = None,
+        permission_mode: str = "default",
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
@@ -593,6 +595,8 @@ class QueryContext:
         self.resume_ui = resume_ui
         self.stop_hook = stop_hook
         self.stop_hook_active = False
+        self.max_turns = max_turns
+        self.permission_mode = permission_mode
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -1245,6 +1249,8 @@ async def query(
             "tool_count": len(query_context.tools),
             "yolo_mode": query_context.yolo_mode,
             "model_pointer": query_context.model,
+            "max_turns": query_context.max_turns,
+            "permission_mode": query_context.permission_mode,
         },
     )
     # Work on a copy so external mutations (e.g., UI appending messages while consuming)
