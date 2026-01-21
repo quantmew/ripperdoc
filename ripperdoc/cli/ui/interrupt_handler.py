@@ -10,6 +10,7 @@ import sys
 from typing import Any, Optional, Set
 
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.platform import is_windows
 
 logger = get_logger()
 
@@ -47,6 +48,11 @@ class InterruptHandler:
         """
         prev = self._esc_listener_paused
         self._esc_listener_paused = True
+
+        # Windows doesn't support termios
+        if is_windows():
+            return prev
+
         try:
             import termios
         except ImportError:
@@ -75,6 +81,13 @@ class InterruptHandler:
         Returns:
             True if an interrupt key was pressed.
         """
+        # Windows doesn't support termios/tty - use Ctrl+C instead
+        if is_windows():
+            # On Windows, just wait indefinitely - Ctrl+C is handled by OS
+            while self._esc_listener_active:
+                await asyncio.sleep(0.1)
+            return False
+
         import select
         import termios
         import tty

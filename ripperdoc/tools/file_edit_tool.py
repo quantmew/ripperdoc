@@ -19,16 +19,9 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.platform import HAS_FCNTL
 from ripperdoc.utils.file_watch import record_snapshot
 from ripperdoc.utils.path_ignore import check_path_for_tool
-
-# Import fcntl for file locking on Unix systems
-try:
-    import fcntl
-
-    HAS_FCNTL = True
-except ImportError:
-    HAS_FCNTL = False
 
 logger = get_logger()
 
@@ -48,6 +41,8 @@ def _file_lock(file_handle: TextIO, exclusive: bool = True) -> Generator[None, N
         # On Windows or systems without fcntl, skip locking
         yield
         return
+
+    import fcntl
 
     lock_type = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
     try:

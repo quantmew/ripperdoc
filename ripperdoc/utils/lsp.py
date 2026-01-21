@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlparse
 
 from ripperdoc.utils.git_utils import get_git_root, is_git_repository
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.platform import is_windows
 
 
 logger = get_logger()
@@ -102,7 +103,7 @@ def uri_to_path(uri: str) -> Optional[Path]:
     if parsed.scheme and parsed.scheme != "file":
         return None
     path = unquote(parsed.path)
-    if os.name == "nt" and re.match(r"^/[A-Za-z]:", path):
+    if is_windows() and re.match(r"^/[A-Za-z]:", path):
         path = path[1:]
     return Path(path)
 

@@ -18,6 +18,7 @@ from ripperdoc.utils.memory import (
     MEMORY_FILE_NAME,
     collect_all_memory_files,
 )
+from ripperdoc.utils.platform import is_windows
 
 from .base import SlashCommand
 
@@ -89,7 +90,7 @@ def _determine_editor_command() -> Optional[List[str]]:
             return shlex.split(value)
 
     candidates = ["code", "nano", "vim", "vi"]
-    if os.name == "nt":
+    if is_windows():
         candidates.insert(0, "notepad")
 
     for candidate in candidates:

@@ -12,12 +12,12 @@ import shutil
 from typing import Iterable, List
 
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.platform import is_windows
 
 logger = get_logger()
 
 # Common locations to probe if shutil.which misses an otherwise standard path.
 _COMMON_BIN_DIRS: tuple[str, ...] = ("/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin")
-_IS_WINDOWS = os.name == "nt"
 
 
 def _is_executable(path: str) -> bool:
@@ -93,7 +93,7 @@ def find_suitable_shell() -> str:
     current_is_bash = "bash" in current_shell
     current_is_zsh = "zsh" in current_shell
 
-    if not _IS_WINDOWS:
+    if not is_windows():
         if (current_is_bash or current_is_zsh) and _is_executable(current_shell):
             logger.debug("Using SHELL from environment: %s", current_shell)
             return current_shell
