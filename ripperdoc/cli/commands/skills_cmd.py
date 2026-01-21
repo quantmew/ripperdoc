@@ -53,21 +53,21 @@ def _handle(ui: Any, _: str) -> bool:
 
         if skill.allowed_tools:
             tools_str = ", ".join(escape(t) for t in skill.allowed_tools)
-            console.print(f"  [dim]Tools:[/dim] {tools_str}")
+            console.print(f"  Tools: {tools_str}")
 
         if skill.model:
-            console.print(f"  [dim]Model:[/dim] {escape(skill.model)}")
+            console.print(f"  Model: {escape(skill.model)}")
 
         if skill.max_thinking_tokens:
-            console.print(f"  [dim]Max thinking tokens:[/dim] {skill.max_thinking_tokens}")
+            console.print(f"  Max thinking tokens: {skill.max_thinking_tokens}")
 
         if skill.skill_type != "prompt":
-            console.print(f"  [dim]Type:[/dim] {escape(skill.skill_type)}")
+            console.print(f"  Type: {escape(skill.skill_type)}")
 
         if skill.disable_model_invocation:
             console.print(f"  [yellow]Model invocation disabled[/yellow]")
 
-        console.print(f"  [dim]Path:[/dim] {escape(str(skill.path))}", markup=False)
+        console.print(f"  Path: {escape(str(skill.path))}", markup=False)
 
     # Print project skills first (they have priority), then user skills
     if project_skills:

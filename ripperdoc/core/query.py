@@ -338,8 +338,10 @@ async def _execute_tools_in_parallel(
     items: List[Dict[str, Any]], tool_results: List[UserMessage]
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Run tool generators concurrently."""
-    generators = [call["generator"] for call in items if call.get("generator")]
-    async for message in _run_concurrent_tool_uses(generators, tool_results):
+    valid_items = [call for call in items if call.get("generator")]
+    generators = [call["generator"] for call in valid_items]
+    tool_names = [call.get("tool_name", "unknown") for call in valid_items]
+    async for message in _run_concurrent_tool_uses(generators, tool_names, tool_results):
         yield message
 
 
@@ -372,6 +374,7 @@ async def _run_tools_serially(
 
 async def _run_concurrent_tool_uses(
     generators: List[AsyncGenerator[Union[UserMessage, ProgressMessage], None]],
+    tool_names: List[str],
     tool_results: List[UserMessage],
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Drain multiple tool generators concurrently and stream outputs."""
@@ -384,6 +387,7 @@ async def _run_concurrent_tool_uses(
     async def _consume(
         gen: AsyncGenerator[Union[UserMessage, ProgressMessage], None],
         gen_index: int,
+        tool_name: str,
     ) -> Optional[Exception]:
         """Consume a tool generator and return any exception that occurred."""
         captured_exception: Optional[Exception] = None
@@ -398,7 +402,8 @@ async def _run_concurrent_tool_uses(
             # Capture exception for reporting to caller
             captured_exception = exc
             logger.warning(
-                "[query] Error while consuming tool generator %d: %s: %s",
+                "[query] Error while consuming tool '%s' (task %d): %s: %s",
+                tool_name,
                 gen_index,
                 type(exc).__name__,
                 exc,
@@ -407,7 +412,10 @@ async def _run_concurrent_tool_uses(
             await queue.put(None)
         return captured_exception
 
-    tasks = [asyncio.create_task(_consume(gen, i)) for i, gen in enumerate(generators)]
+    tasks = [
+        asyncio.create_task(_consume(gen, i, tool_names[i]))
+        for i, gen in enumerate(generators)
+    ]
     active = len(tasks)
 
     try:
@@ -422,21 +430,22 @@ async def _run_concurrent_tool_uses(
     finally:
         # Wait for all tasks and collect any exceptions
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        exceptions_found = []
+        exceptions_found: List[tuple[int, str, BaseException]] = []
         for i, result in enumerate(results):
             if isinstance(result, asyncio.CancelledError):
                 continue
             elif isinstance(result, Exception):
                 # Exception from gather itself (shouldn't happen with return_exceptions=True)
-                exceptions_found.append((i, result))
+                exceptions_found.append((i, tool_names[i], result))
             elif result is not None:
                 # Exception returned by _consume
-                exceptions_found.append((i, result))
+                exceptions_found.append((i, tool_names[i], result))
 
         # Log all exceptions for debugging
-        for i, exc in exceptions_found:
+        for i, name, exc in exceptions_found:
             logger.warning(
-                "[query] Concurrent tool task %d failed: %s: %s",
+                "[query] Concurrent tool '%s' (task %d) failed: %s: %s",
+                name,
                 i,
                 type(exc).__name__,
                 exc,
@@ -444,10 +453,12 @@ async def _run_concurrent_tool_uses(
 
         # Re-raise first exception if any occurred, so caller knows something failed
         if exceptions_found:
-            first_exc = exceptions_found[0][1]
+            first_name = exceptions_found[0][1]
+            first_exc = exceptions_found[0][2]
             logger.error(
-                "[query] %d tool(s) failed during concurrent execution, first error: %s",
+                "[query] %d tool(s) failed during concurrent execution, first error in '%s': %s",
                 len(exceptions_found),
+                first_name,
                 first_exc,
             )
 
@@ -1195,6 +1206,7 @@ async def _run_query_iteration(
 
             prepared_calls.append(
                 {
+                    "tool_name": tool_name,
                     "is_concurrency_safe": tool.is_concurrency_safe(),
                     "generator": _run_tool_use_generator(
                         tool,

@@ -54,20 +54,11 @@ pip install git+https://github.com/quantmew/ripperdoc.git
 或从源码安装：
 ```bash
 # 克隆仓库
-git clone <repository-url>
+git clone https://github.com/quantmew/ripperdoc.git
 cd ripperdoc
 
 # 从源码安装
 pip install -e .
-```
-
-### 配置
-
-设置 API 密钥作为环境变量：
-```bash
-export OPENAI_API_KEY="your-api-key-here"
-# 或用于 Anthropic Claude
-export ANTHROPIC_API_KEY="your-api-key-here"
 ```
 
 ## 使用
@@ -75,6 +66,8 @@ export ANTHROPIC_API_KEY="your-api-key-here"
 ### 交互模式（推荐）
 ```bash
 ripperdoc
+# 或使用短别名
+rd
 ```
 
 这将启动一个交互式会话，您可以：
@@ -82,6 +75,13 @@ ripperdoc
 - 请求代码修改
 - 执行命令
 - 导航和探索文件
+
+**选项：**
+- `--yolo` - 跳过权限提示（默认启用安全模式）
+- `--model <模型名>` - 指定模型（如 `claude-sonnet-4-20250514`、`gpt-4o`）
+- `--tools <工具列表>` - 过滤可用工具（逗号分隔，或 "" 表示禁用）
+- `--no-mcp` - 禁用 MCP 服务器集成
+- `--verbose` - 启用详细日志
 
 ### 快速开始
 
@@ -102,38 +102,67 @@ ripperdoc
 
 ### 安全模式权限
 
-安全模式是默认设置。使用 `--yolo` 跳过权限提示。选择 `a`/`always` 允许在当前会话中使用某个工具（不会跨会话持久化）。
+安全模式默认启用。收到提示时：
+- 输入 `y` 或 `yes` 允许单个操作
+- 输入 `a` 或 `always` 允许会话期间所有该类操作
+- 输入 `n` 或 `no` 拒绝操作
+
+使用 `--yolo` 标志跳过所有权限提示：
+```bash
+ripperdoc --yolo
+```
 
 ### Agent Skills
 
 用可复用的 Skill 包扩展 Ripperdoc：
 
-- 个人技能放在 `~/.ripperdoc/skills/<技能名>/SKILL.md`
-- 项目技能放在 `.ripperdoc/skills/<技能名>/SKILL.md`，可随仓库一起提交
-- 每个 `SKILL.md` 以 YAML 头开始：`name`、`description`，可选 `allowed-tools`、`model`、`max-thinking-tokens`、`disable-model-invocation`，正文写具体指令；相关文件可放在同目录
-- 通过 `Skill` 工具加载后，技能中的模型和思考预算提示会自动作用于当前会话
-- Ripperdoc 会在系统提示中列出技能名称和描述，匹配时通过 `Skill` 工具自动加载完整内容
+- **个人技能**：`~/.ripperdoc/skills/<技能名>/SKILL.md`
+- **项目技能**：`.ripperdoc/skills/<技能名>/SKILL.md`（可提交到 git）
+- 每个 `SKILL.md` 以 YAML 头开始：
+  - `name` - 技能标识符
+  - `description` - 技能功能描述
+  - `allowed-tools`（可选）- 限制技能可使用的工具
+  - `model`（可选）- 为该技能建议特定模型
+  - `max-thinking-tokens`（可选）- 控制思考预算
+  - `disable-model-invocation`（可选）- 不调用模型直接使用技能
+- 相关文件可放在 `SKILL.md` 同目录
+- 技能自动发现并通过 `Skill` 工具按需加载
+
+**内置技能**：PDF 处理（`pdf`）、PowerPoint（`pptx`）、Excel（`xlsx`）
 
 ## 示例
 
 ### 代码分析
 ```
 > 你能解释这个函数的作用吗？
+> 查找所有引用 `parse_config` 函数的地方
 ```
 
 ### 文件操作
 ```
 > 读取 main.py 文件并建议改进
+> 创建一个名为 UserProfile.tsx 的新组件
+> 更新所有导入以使用新的包结构
 ```
 
 ### 代码生成
 ```
 > 创建一个实现 REST API 客户端的新 Python 脚本
+> 为 auth 模块生成单元测试
+> 为数据库连接代码添加错误处理
 ```
 
 ### 项目导航
 ```
 > 显示项目中所有的 Python 文件
+> 找到用户认证逻辑的实现位置
+> 列出项目中所有 API 端点
+```
+
+### MCP 集成
+```
+> 有哪些可用的 MCP 服务器？
+> 查询 context7 文档中关于 React hooks 的内容
 ```
 
 ## 开发

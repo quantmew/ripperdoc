@@ -56,27 +56,22 @@ pip install git+https://github.com/quantmew/ripperdoc.git
 Or install from source:
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd Ripperdoc
+git clone https://github.com/quantmew/ripperdoc.git
+cd ripperdoc
 
 # Install from source
 pip install -e .
 ```
 
-### Configuration
 
-Set your API key as an environment variable:
-```bash
-export OPENAI_API_KEY="your-api-key-here"
-# or for Anthropic Claude
-export ANTHROPIC_API_KEY="your-api-key-here"
-```
 
 ## Usage
 
 ### Interactive Mode (Recommended)
 ```bash
 ripperdoc
+# or use the short alias
+rd
 ```
 
 This launches an interactive session where you can:
@@ -84,6 +79,13 @@ This launches an interactive session where you can:
 - Request code modifications
 - Execute commands
 - Navigate and explore files
+
+**Options:**
+- `--yolo` - Skip permission prompts (safe mode is on by default)
+- `--model <model_name>` - Specify a model (e.g., `claude-sonnet-4-20250514`, `gpt-4o`)
+- `--tools <tool_list>` - Filter available tools (comma-separated, or "" for none)
+- `--no-mcp` - Disable MCP server integration
+- `--verbose` - Enable verbose logging
 
 ### Python SDK (headless)
 
@@ -100,38 +102,67 @@ See the [examples/](examples/) directory for complete SDK usage examples.
 
 ### Safe Mode Permissions
 
-Safe mode is the default. Use `--yolo` to skip permission prompts. Choose `a`/`always` to allow a tool for the current session (not persisted across sessions).
+Safe mode is enabled by default. When prompted:
+- Type `y` or `yes` to allow a single operation
+- Type `a` or `always` to allow all operations of that type for the session
+- Type `n` or `no` to deny the operation
+
+Use `--yolo` flag to skip all permission prompts:
+```bash
+ripperdoc --yolo
+```
 
 ### Agent Skills
 
 Extend Ripperdoc with reusable Skill bundles:
 
-- Personal skills live in `~/.ripperdoc/skills/<skill-name>/SKILL.md`
-- Project skills live in `.ripperdoc/skills/<skill-name>/SKILL.md` and can be checked into git
-- Each `SKILL.md` starts with YAML frontmatter (`name`, `description`, optional `allowed-tools`, `model`, `max-thinking-tokens`, `disable-model-invocation`) followed by the instructions; add supporting files alongside it
-- Model and max-thinking-token hints from skills are applied automatically for the rest of the session after you load them with the `Skill` tool
-- Ripperdoc exposes skill names/descriptions in the system prompt and loads full content on demand via the `Skill` tool
+- **Personal skills**: `~/.ripperdoc/skills/<skill-name>/SKILL.md`
+- **Project skills**: `.ripperdoc/skills/<skill-name>/SKILL.md` (can be checked into git)
+- Each `SKILL.md` starts with YAML frontmatter:
+  - `name` - Skill identifier
+  - `description` - What the skill does
+  - `allowed-tools` (optional) - Restrict which tools the skill can use
+  - `model` (optional) - Suggest a specific model for this skill
+  - `max-thinking-tokens` (optional) - Control thinking budget
+  - `disable-model-invocation` (optional) - Use skill without calling the model
+- Add supporting files alongside `SKILL.md` as needed
+- Skills are auto-discovered and loaded on demand via the `Skill` tool
+
+**Built-in skills:** PDF manipulation (`pdf`), PowerPoint (`pptx`), Excel (`xlsx`)
 
 ## Examples
 
 ### Code Analysis
 ```
 > Can you explain what this function does?
+> Find all references to the `parse_config` function
 ```
 
 ### File Operations
 ```
 > Read the main.py file and suggest improvements
+> Create a new component called UserProfile.tsx
+> Update all imports to use the new package structure
 ```
 
 ### Code Generation
 ```
 > Create a new Python script that implements a REST API client
+> Generate unit tests for the auth module
+> Add error handling to the database connection code
 ```
 
 ### Project Navigation
 ```
 > Show me all the Python files in the project
+> Find where the user authentication logic is implemented
+> List all API endpoints in the project
+```
+
+### MCP Integration
+```
+> What MCP servers are available?
+> Query the context7 documentation for React hooks
 ```
 
 ## Development
