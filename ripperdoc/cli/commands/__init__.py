@@ -21,6 +21,7 @@ from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
 from .permissions_cmd import command as permissions_command
 from .resume_cmd import command as resume_command
+from .skills_cmd import command as skills_command
 from .stats_cmd import command as stats_command
 from .tasks_cmd import command as tasks_command
 from .status_cmd import command as status_command
@@ -64,6 +65,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     context_command,
     compact_command,
     resume_command,
+    skills_command,
     agents_command,
 ]
 
