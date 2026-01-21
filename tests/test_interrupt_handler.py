@@ -243,31 +243,107 @@ class TestInterruptKeys:
 class TestWindowsSpecificBehavior:
     """Tests for Windows-specific behavior."""
 
-    def test_listen_for_interrupt_key_on_windows(self, monkeypatch):
-        """On Windows, _listen_for_interrupt_key should handle gracefully."""
+    def test_listen_for_interrupt_key_on_windows_no_msvcrt(self, monkeypatch):
+        """On Windows without msvcrt, should handle gracefully."""
         # Mock platform as Windows
         monkeypatch.setattr("ripperdoc.cli.ui.interrupt_handler.is_windows", lambda: True)
+        # Mock msvcrt import to fail
+        monkeypatch.setattr("ripperdoc.cli.ui.interrupt_handler.msvcrt", None, raising=False)
 
         handler = InterruptHandler()
         handler._esc_listener_active = True
 
-        # Run the listener - should not raise
+        # Run the listener - should fallback to sleep loop
         async def run_listener():
             result = await handler._listen_for_interrupt_key()
-            # On Windows, should just wait indefinitely until listener is inactive
             return result
 
         async def test():
-            # Start listener and cancel it quickly
             task = asyncio.create_task(run_listener())
             await asyncio.sleep(0.05)
             handler._esc_listener_active = False
-            # The listener should exit
             result = await asyncio.wait_for(task, timeout=1.0)
             return result
 
         result = asyncio.run(test())
         assert result is False  # No interrupt detected
+
+    def test_listen_for_interrupt_key_on_windows_with_msvcrt(self, monkeypatch):
+        """On Windows with msvcrt, should use kbhit/getch for key detection."""
+        # Mock platform as Windows
+        monkeypatch.setattr("ripperdoc.cli.ui.interrupt_handler.is_windows", lambda: True)
+
+        # Create mock msvcrt module
+        mock_msvcrt = MagicMock()
+
+        handler = InterruptHandler()
+        handler._esc_listener_active = True
+
+        async def run_listener_with_interrupt():
+            """Simulate ESC key press after a short delay."""
+            async def trigger_esc():
+                await asyncio.sleep(0.05)
+                # Simulate ESC key being pressed
+                mock_msvcrt.kbhit.return_value = True
+                mock_msvcrt.getch.return_value = b'\x1b'
+
+            esc_task = asyncio.create_task(trigger_esc())
+            result = await handler._listen_for_interrupt_key()
+            await esc_task
+            return result
+
+        async def test():
+            # Patch the import to use our mock
+            import sys
+            old_modules = sys.modules.copy()
+            sys.modules['msvcrt'] = mock_msvcrt
+
+            try:
+                task = asyncio.create_task(run_listener_with_interrupt())
+                result = await asyncio.wait_for(task, timeout=1.0)
+                return result
+            finally:
+                sys.modules.clear()
+                sys.modules.update(old_modules)
+
+        result = asyncio.run(test())
+        assert result is True  # ESC key was detected
+
+    def test_listen_for_interrupt_key_windows_paused(self, monkeypatch):
+        """On Windows, paused state should be respected."""
+        monkeypatch.setattr("ripperdoc.cli.ui.interrupt_handler.is_windows", lambda: True)
+
+        mock_msvcrt = MagicMock()
+
+        handler = InterruptHandler()
+        handler._esc_listener_active = True
+        handler._esc_listener_paused = True  # Start paused
+
+        async def run_listener_paused():
+            # Even with key available, should not detect when paused
+            mock_msvcrt.kbhit.return_value = True
+            mock_msvcrt.getch.return_value = b'\x1b'
+
+            await asyncio.sleep(0.05)  # Give it time to NOT detect
+            handler._esc_listener_active = False
+            result = await handler._listen_for_interrupt_key()
+            return result
+
+        async def test():
+            import sys
+            old_modules = sys.modules.copy()
+            sys.modules['msvcrt'] = mock_msvcrt
+
+            try:
+                task = asyncio.create_task(run_listener_paused())
+                result = await asyncio.wait_for(task, timeout=1.0)
+                return result
+            finally:
+                sys.modules.clear()
+                sys.modules.update(old_modules)
+
+        result = asyncio.run(test())
+        assert result is False  # Should not detect when paused
 
 
 class TestCrossPlatformCompatibility:

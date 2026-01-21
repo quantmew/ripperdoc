@@ -81,11 +81,32 @@ class InterruptHandler:
         Returns:
             True if an interrupt key was pressed.
         """
-        # Windows doesn't support termios/tty - use Ctrl+C instead
         if is_windows():
-            # On Windows, just wait indefinitely - Ctrl+C is handled by OS
+            # Windows: use msvcrt for non-blocking key detection
+            try:
+                import msvcrt
+            except ImportError:
+                # Fallback: just wait - Ctrl+C is handled by OS
+                while self._esc_listener_active:
+                    await asyncio.sleep(0.1)
+                return False
+
             while self._esc_listener_active:
-                await asyncio.sleep(0.1)
+                if self._esc_listener_paused:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                # Check for key press in a thread to avoid blocking
+                def check_key() -> Optional[str]:
+                    if msvcrt.kbhit():
+                        return msvcrt.getch().decode('latin-1')
+                    return None
+
+                key = await asyncio.to_thread(check_key)
+                if key in INTERRUPT_KEYS:
+                    return True
+
+                await asyncio.sleep(0.02)
             return False
 
         import select
