@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from pathlib import PureWindowsPath
 from typing import Iterable, List
 
 from ripperdoc.utils.log import get_logger
@@ -149,9 +150,11 @@ def build_shell_command(shell_path: str, command: str) -> List[str]:
     For bash/zsh (including Git Bash), use -lc to run as login shell.
     For cmd.exe fallback, use /d /s /c.
     """
-
-    lower = shell_path.lower()
-    if lower.endswith("cmd.exe") or lower.endswith("\\cmd"):
+    # Use PureWindowsPath to correctly extract the shell name from the path.
+    # This handles both Windows-style (C:\\Windows\\System32\\cmd.exe) and Unix-style
+    # (/usr/bin/bash) paths, as well as simple names (cmd, bash) on any platform.
+    shell_name = PureWindowsPath(shell_path).name.lower()
+    if shell_name in ("cmd", "cmd.exe"):
         return [shell_path, "/d", "/s", "/c", command]
     return [shell_path, "-lc", command]
 
