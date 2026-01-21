@@ -381,7 +381,12 @@ async def _run_concurrent_tool_uses(
 
     queue: asyncio.Queue[Optional[Union[UserMessage, ProgressMessage]]] = asyncio.Queue()
 
-    async def _consume(gen: AsyncGenerator[Union[UserMessage, ProgressMessage], None]) -> None:
+    async def _consume(
+        gen: AsyncGenerator[Union[UserMessage, ProgressMessage], None],
+        gen_index: int,
+    ) -> Optional[Exception]:
+        """Consume a tool generator and return any exception that occurred."""
+        captured_exception: Optional[Exception] = None
         try:
             async for message in gen:
                 await queue.put(message)
@@ -389,16 +394,20 @@ async def _run_concurrent_tool_uses(
             raise  # Don't suppress cancellation
         except (StopAsyncIteration, GeneratorExit):
             pass  # Normal generator termination
-        except (RuntimeError, ValueError, TypeError) as exc:
+        except Exception as exc:
+            # Capture exception for reporting to caller
+            captured_exception = exc
             logger.warning(
-                "[query] Error while consuming tool generator: %s: %s",
+                "[query] Error while consuming tool generator %d: %s: %s",
+                gen_index,
                 type(exc).__name__,
                 exc,
             )
         finally:
             await queue.put(None)
+        return captured_exception
 
-    tasks = [asyncio.create_task(_consume(gen)) for gen in generators]
+    tasks = [asyncio.create_task(_consume(gen, i)) for i, gen in enumerate(generators)]
     active = len(tasks)
 
     try:
@@ -411,7 +420,36 @@ async def _run_concurrent_tool_uses(
                 tool_results.append(message)
             yield message
     finally:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait for all tasks and collect any exceptions
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        exceptions_found = []
+        for i, result in enumerate(results):
+            if isinstance(result, asyncio.CancelledError):
+                continue
+            elif isinstance(result, Exception):
+                # Exception from gather itself (shouldn't happen with return_exceptions=True)
+                exceptions_found.append((i, result))
+            elif result is not None:
+                # Exception returned by _consume
+                exceptions_found.append((i, result))
+
+        # Log all exceptions for debugging
+        for i, exc in exceptions_found:
+            logger.warning(
+                "[query] Concurrent tool task %d failed: %s: %s",
+                i,
+                type(exc).__name__,
+                exc,
+            )
+
+        # Re-raise first exception if any occurred, so caller knows something failed
+        if exceptions_found:
+            first_exc = exceptions_found[0][1]
+            logger.error(
+                "[query] %d tool(s) failed during concurrent execution, first error: %s",
+                len(exceptions_found),
+                first_exc,
+            )
 
 
 class ToolRegistry:
@@ -484,6 +522,9 @@ class ToolRegistry:
         """Activate deferred tools by name."""
         activated: List[str] = []
         missing: List[str] = []
+
+        # First pass: collect tools to activate (no mutations)
+        to_activate: List[str] = []
         for raw_name in names:
             name = (raw_name or "").strip()
             if not name:
@@ -492,12 +533,17 @@ class ToolRegistry:
                 continue
             tool = self._tool_map.get(name)
             if tool:
-                self._active.append(name)
-                self._active_set.add(name)
-                self._deferred.discard(name)
-                activated.append(name)
+                to_activate.append(name)
             else:
                 missing.append(name)
+
+        # Second pass: atomically update all data structures
+        if to_activate:
+            self._active.extend(to_activate)
+            self._active_set.update(to_activate)
+            self._deferred.difference_update(to_activate)
+            activated.extend(to_activate)
+
         return activated, missing
 
     def iter_named_tools(self) -> Iterable[tuple[str, Tool[Any, Any]]]:
@@ -920,15 +966,19 @@ async def _run_query_iteration(
         if not chunk:
             return
         try:
-            await progress_queue.put(
-                create_progress_message(
-                    tool_use_id="stream",
-                    sibling_tool_use_ids=set(),
-                    content=chunk,
-                )
+            msg = create_progress_message(
+                tool_use_id="stream",
+                sibling_tool_use_ids=set(),
+                content=chunk,
             )
-        except asyncio.QueueFull:
-            logger.warning("[query] Progress queue full, dropping chunk")
+            try:
+                progress_queue.put_nowait(msg)
+            except asyncio.QueueFull:
+                # Queue full - wait with timeout instead of dropping immediately
+                try:
+                    await asyncio.wait_for(progress_queue.put(msg), timeout=0.5)
+                except asyncio.TimeoutError:
+                    logger.warning("[query] Progress queue full after timeout, dropping chunk")
         except (RuntimeError, ValueError) as exc:
             logger.warning("[query] Failed to enqueue stream progress chunk: %s", exc)
 

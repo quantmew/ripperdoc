@@ -22,8 +22,33 @@ from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import HAS_FCNTL
 from ripperdoc.utils.file_watch import record_snapshot
 from ripperdoc.utils.path_ignore import check_path_for_tool
+from ripperdoc.tools.file_read_tool import detect_file_encoding
 
 logger = get_logger()
+
+
+def determine_edit_encoding(file_path: str, new_content: str) -> str:
+    """Determine encoding for editing a file.
+
+    Detects the file's current encoding and verifies the new content
+    can be encoded with it. Falls back to UTF-8 if needed.
+    """
+    detected_encoding, _ = detect_file_encoding(file_path)
+
+    if not detected_encoding:
+        return "utf-8"
+
+    # Verify new content can be encoded
+    try:
+        new_content.encode(detected_encoding)
+        return detected_encoding
+    except (UnicodeEncodeError, LookupError):
+        logger.info(
+            "New content cannot be encoded with %s, falling back to UTF-8 for %s",
+            detected_encoding,
+            file_path,
+        )
+        return "utf-8"
 
 
 @contextlib.contextmanager
@@ -216,31 +241,66 @@ match exactly (including whitespace and indentation)."""
         file_state_cache = getattr(context, "file_state_cache", {})
         file_snapshot = file_state_cache.get(abs_file_path)
 
+        # Detect file encoding before opening
+        file_encoding, _ = detect_file_encoding(abs_file_path)
+        if not file_encoding:
+            file_encoding = "utf-8"
+
         try:
             # Open file with exclusive lock to prevent concurrent modifications
             # Use r+ mode to get a file handle we can lock before reading
-            with open(abs_file_path, "r+", encoding="utf-8") as f:
+            #
+            # TOCTOU mitigation strategy:
+            # 1. Record mtime immediately after open (pre_lock_mtime)
+            # 2. Acquire exclusive lock
+            # 3. Check mtime again after lock (post_lock_mtime)
+            # 4. If pre != post, file was modified in the window between open and lock
+            # 5. Also validate against cached snapshot timestamp
+            with open(abs_file_path, "r+", encoding=file_encoding) as f:
+                # Record mtime immediately after open, before acquiring lock
+                try:
+                    pre_lock_mtime = os.fstat(f.fileno()).st_mtime
+                except OSError:
+                    pre_lock_mtime = None
+
                 with _file_lock(f, exclusive=True):
-                    # Re-check mtime AFTER acquiring lock to close TOCTOU window
-                    # This is the key fix: validate mtime while holding the lock
-                    if file_snapshot:
-                        try:
-                            current_mtime = os.fstat(f.fileno()).st_mtime
-                            if current_mtime > file_snapshot.timestamp:
-                                output = FileEditToolOutput(
-                                    file_path=input_data.file_path,
-                                    replacements_made=0,
-                                    success=False,
-                                    message="File has been modified since read, either by the user "
-                                    "or by a linter. Read it again before attempting to edit it.",
-                                )
-                                yield ToolResult(
-                                    data=output,
-                                    result_for_assistant=self.render_result_for_assistant(output),
-                                )
-                                return
-                        except OSError:
-                            pass  # fstat failed, proceed anyway
+                    # Check mtime after acquiring lock to detect modifications
+                    # during the window between open() and lock acquisition
+                    try:
+                        post_lock_mtime = os.fstat(f.fileno()).st_mtime
+                    except OSError:
+                        post_lock_mtime = None
+
+                    # Detect modification during open->lock window
+                    if pre_lock_mtime is not None and post_lock_mtime is not None:
+                        if post_lock_mtime > pre_lock_mtime:
+                            output = FileEditToolOutput(
+                                file_path=input_data.file_path,
+                                replacements_made=0,
+                                success=False,
+                                message="File was modified while acquiring lock. Please retry.",
+                            )
+                            yield ToolResult(
+                                data=output,
+                                result_for_assistant=self.render_result_for_assistant(output),
+                            )
+                            return
+
+                    # Validate against cached snapshot timestamp
+                    if file_snapshot and post_lock_mtime is not None:
+                        if post_lock_mtime > file_snapshot.timestamp:
+                            output = FileEditToolOutput(
+                                file_path=input_data.file_path,
+                                replacements_made=0,
+                                success=False,
+                                message="File has been modified since read, either by the user "
+                                "or by a linter. Read it again before attempting to edit it.",
+                            )
+                            yield ToolResult(
+                                data=output,
+                                result_for_assistant=self.render_result_for_assistant(output),
+                            )
+                            return
 
                     # Read content while holding the lock
                     content = f.read()
@@ -287,6 +347,19 @@ match exactly (including whitespace and indentation)."""
                         )
                         replacements = 1
 
+                    # Verify new content can be encoded with file's encoding
+                    # If not, fall back to UTF-8
+                    write_encoding = file_encoding
+                    try:
+                        new_content.encode(file_encoding)
+                    except (UnicodeEncodeError, LookupError):
+                        logger.info(
+                            "New content cannot be encoded with %s, using UTF-8 for %s",
+                            file_encoding,
+                            abs_file_path,
+                        )
+                        write_encoding = "utf-8"
+
                     # Atomic write: write to temp file then rename
                     # This ensures the file is either fully written or not at all
                     file_dir = os.path.dirname(abs_file_path)
@@ -296,7 +369,7 @@ match exactly (including whitespace and indentation)."""
                             dir=file_dir, prefix=".ripperdoc_edit_", suffix=".tmp"
                         )
                         try:
-                            with os.fdopen(fd, "w", encoding="utf-8") as temp_f:
+                            with os.fdopen(fd, "w", encoding=write_encoding) as temp_f:
                                 temp_f.write(new_content)
                             # Preserve original file permissions
                             original_stat = os.fstat(f.fileno())
@@ -340,6 +413,7 @@ match exactly (including whitespace and indentation)."""
                     abs_file_path,
                     new_content,
                     getattr(context, "file_state_cache", {}),
+                    encoding=write_encoding,
                 )
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(

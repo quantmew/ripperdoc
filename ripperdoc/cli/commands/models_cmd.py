@@ -160,7 +160,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             or getattr(config.model_pointers, "main", "") not in config.model_profiles
         )
         set_main_input = (
-            console.input(f"Set as main model? [{'Y' if default_set_main else 'y'}/N]: ")
+            console.input(f"Set as main model? ({'Y' if default_set_main else 'y'}/N): ")
             .strip()
             .lower()
         )

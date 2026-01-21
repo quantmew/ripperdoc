@@ -5,8 +5,9 @@ Allows the AI to read file contents.
 
 import os
 from pathlib import Path
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Tuple
 from pydantic import BaseModel, Field
+from charset_normalizer import from_bytes
 
 from ripperdoc.core.tool import (
     Tool,
@@ -21,6 +22,97 @@ from ripperdoc.utils.file_watch import record_snapshot
 from ripperdoc.utils.path_ignore import check_path_for_tool
 
 logger = get_logger()
+
+
+def detect_file_encoding(file_path: str) -> Tuple[Optional[str], float]:
+    """Detect file encoding using charset-normalizer.
+
+    Returns:
+        Tuple of (encoding, confidence). encoding is None if detection failed.
+    """
+    try:
+        with open(file_path, "rb") as f:
+            raw_data = f.read()
+        results = from_bytes(raw_data)
+
+        if not results:
+            return None, 0.0
+
+        best = results.best()
+        if not best:
+            return None, 0.0
+
+        # For Chinese content, prefer GB encodings over Big5/others
+        # charset-normalizer sometimes picks Big5 for simplified Chinese
+        if best.language == "Chinese":
+            gb_encodings = {"gb18030", "gbk", "gb2312"}
+            for result in results:
+                if result.encoding.lower() in gb_encodings:
+                    return result.encoding, 0.9
+
+        return best.encoding, 0.9
+    except (OSError, IOError) as e:
+        logger.warning("Failed to detect encoding for %s: %s", file_path, e)
+        return None, 0.0
+
+
+def read_file_with_encoding(file_path: str) -> Tuple[Optional[List[str]], str, Optional[str]]:
+    """Read file with proper encoding detection.
+
+    Returns:
+        Tuple of (lines, encoding_used, error_message).
+        If successful: (lines, encoding, None)
+        If failed: (None, "", error_message)
+    """
+    # First, try UTF-8 (most common)
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="strict") as f:
+            lines = f.readlines()
+        return lines, "utf-8", None
+    except UnicodeDecodeError:
+        pass
+
+    # UTF-8 failed, use charset-normalizer to detect encoding
+    detected_encoding, confidence = detect_file_encoding(file_path)
+
+    if detected_encoding:
+        try:
+            with open(file_path, "r", encoding=detected_encoding, errors="strict") as f:
+                lines = f.readlines()
+            logger.info(
+                "File %s decoded using detected encoding %s",
+                file_path,
+                detected_encoding,
+            )
+            return lines, detected_encoding, None
+        except (UnicodeDecodeError, LookupError) as e:
+            logger.warning(
+                "Failed to read %s with detected encoding %s: %s",
+                file_path,
+                detected_encoding,
+                e,
+            )
+
+    # Detection failed - try latin-1 as last resort (can decode any byte sequence)
+    try:
+        with open(file_path, "r", encoding="latin-1", errors="strict") as f:
+            lines = f.readlines()
+        logger.warning(
+            "File %s: encoding detection failed, using latin-1 fallback",
+            file_path,
+        )
+        return lines, "latin-1", None
+    except (UnicodeDecodeError, LookupError):
+        pass
+
+    # All attempts failed - return error
+    error_msg = (
+        f"Unable to determine file encoding. "
+        f"Detected: {detected_encoding or 'unknown'} (confidence: {confidence * 100:.0f}%). "
+        f"Tried fallback encodings: {', '.join(fallback_encodings)}. "
+        f"Please convert the file to UTF-8."
+    )
+    return None, "", error_msg
 
 # Maximum file size to read (default 256KB, aligned with Claude Code official limit)
 # Can be overridden via env var in bytes
@@ -166,8 +258,23 @@ and limit to read only a portion of the file."""
                 )
                 return
 
-            with open(input_data.file_path, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
+            # Detect and read file with proper encoding
+            lines, used_encoding, encoding_error = read_file_with_encoding(input_data.file_path)
+
+            if lines is None:
+                # Encoding detection failed - return warning to LLM
+                error_output = FileReadToolOutput(
+                    content=f"Encoding error: {encoding_error}",
+                    file_path=input_data.file_path,
+                    line_count=0,
+                    offset=0,
+                    limit=None,
+                )
+                yield ToolResult(
+                    data=error_output,
+                    result_for_assistant=f"Error: Cannot read file {input_data.file_path}. {encoding_error}",
+                )
+                return
 
             offset = input_data.offset or 0
             limit = input_data.limit
@@ -206,6 +313,7 @@ and limit to read only a portion of the file."""
                     getattr(context, "file_state_cache", {}),
                     offset=offset,
                     limit=limit,
+                    encoding=used_encoding,
                 )
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(

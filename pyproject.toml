@@ -36,6 +36,7 @@ dependencies = [
     "json_repair>=0.54.2",
     "tiktoken>=0.7.0",
     "google-genai>=0.3.0",
+    "charset-normalizer>=3.0.0",
 ]
 
 [project.optional-dependencies]

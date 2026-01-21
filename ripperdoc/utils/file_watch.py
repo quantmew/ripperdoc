@@ -27,6 +27,7 @@ class FileSnapshot:
     timestamp: float
     offset: int = 0
     limit: Optional[int] = None
+    encoding: str = "utf-8"
 
     def memory_size(self) -> int:
         """Estimate memory usage of this snapshot in bytes."""
@@ -240,6 +241,7 @@ def record_snapshot(
     *,
     offset: int = 0,
     limit: Optional[int] = None,
+    encoding: str = "utf-8",
 ) -> None:
     """Store the current contents and mtime for a file."""
     try:
@@ -247,12 +249,14 @@ def record_snapshot(
     except OSError:
         timestamp = 0.0
     cache[file_path] = FileSnapshot(
-        content=content, timestamp=timestamp, offset=offset, limit=limit
+        content=content, timestamp=timestamp, offset=offset, limit=limit, encoding=encoding
     )
 
 
-def _read_portion(file_path: str, offset: int, limit: Optional[int]) -> str:
-    with open(file_path, "r", encoding="utf-8", errors="replace") as handle:
+def _read_portion(
+    file_path: str, offset: int, limit: Optional[int], encoding: str = "utf-8"
+) -> str:
+    with open(file_path, "r", encoding=encoding, errors="replace") as handle:
         lines = handle.readlines()
     start = max(offset, 0)
     if limit is None:
@@ -304,7 +308,7 @@ def detect_changed_files(
             continue
 
         try:
-            new_content = _read_portion(file_path, snapshot.offset, snapshot.limit)
+            new_content = _read_portion(file_path, snapshot.offset, snapshot.limit, snapshot.encoding)
         except (
             OSError,
             IOError,

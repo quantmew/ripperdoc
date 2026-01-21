@@ -185,12 +185,6 @@ def format_todo_summary(todos: Sequence[TodoItem]) -> str:
         f"{stats['by_status']['completed']} completed)."
     )
 
-    next_item = get_next_actionable(todos)
-    if next_item:
-        summary += f" Next to tackle: {next_item.content} (id: {next_item.id}, status: {next_item.status})."
-    elif stats["total"] == 0:
-        summary += " No todos stored yet."
-
     return summary
 
 

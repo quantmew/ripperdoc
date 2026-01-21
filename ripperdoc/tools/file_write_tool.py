@@ -19,8 +19,46 @@ from ripperdoc.core.tool import (
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.file_watch import record_snapshot
 from ripperdoc.utils.path_ignore import check_path_for_tool
+from ripperdoc.tools.file_read_tool import detect_file_encoding
 
 logger = get_logger()
+
+
+def determine_write_encoding(file_path: str, content: str) -> str:
+    """Determine the best encoding to use for writing a file.
+
+    Strategy:
+    1. If file doesn't exist -> use UTF-8
+    2. If file exists -> detect its encoding using charset-normalizer
+    3. Verify content can be encoded with target encoding
+    4. If encoding fails (e.g., emoji in GBK) -> fall back to UTF-8
+
+    Returns:
+        The encoding to use for writing.
+    """
+    # Default to UTF-8 for new files
+    if not os.path.exists(file_path):
+        return "utf-8"
+
+    # Detect existing file's encoding
+    detected_encoding, _ = detect_file_encoding(file_path)
+
+    # If detection failed, use UTF-8
+    if not detected_encoding:
+        return "utf-8"
+
+    # Verify content can be encoded with detected encoding
+    try:
+        content.encode(detected_encoding)
+        return detected_encoding
+    except (UnicodeEncodeError, LookupError):
+        # Content can't be encoded (e.g., emoji in GBK), fall back to UTF-8
+        logger.info(
+            "Content cannot be encoded with %s, falling back to UTF-8 for %s",
+            detected_encoding,
+            file_path,
+        )
+        return "utf-8"
 
 
 class FileWriteToolInput(BaseModel):
@@ -155,11 +193,15 @@ NEVER write new files unless explicitly required by the user."""
         """Write the file."""
 
         try:
-            # Write the file
-            with open(input_data.file_path, "w", encoding="utf-8") as f:
+            # Determine encoding based on target file and content
+            file_path = os.path.abspath(input_data.file_path)
+            encoding = determine_write_encoding(file_path, input_data.content)
+
+            # Write the file with the appropriate encoding
+            with open(input_data.file_path, "w", encoding=encoding) as f:
                 f.write(input_data.content)
 
-            bytes_written = len(input_data.content.encode("utf-8"))
+            bytes_written = len(input_data.content.encode(encoding))
 
             # Use absolute path to ensure consistency with validation lookup
             abs_file_path = os.path.abspath(input_data.file_path)
@@ -168,6 +210,7 @@ NEVER write new files unless explicitly required by the user."""
                     abs_file_path,
                     input_data.content,
                     getattr(context, "file_state_cache", {}),
+                    encoding=encoding,
                 )
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(

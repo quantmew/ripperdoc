@@ -50,6 +50,7 @@ from ripperdoc.utils.sandbox_utils import create_sandbox_wrapper, is_sandbox_ava
 from ripperdoc.utils.safe_get_cwd import get_original_cwd, safe_get_cwd
 from ripperdoc.utils.shell_utils import build_shell_command, find_suitable_shell
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.platform import IS_WINDOWS
 
 logger = get_logger()
 
@@ -1059,35 +1060,56 @@ build projects, run tests, and interact with the file system."""
         finally:
             self._current_is_read_only = previous_read_only
             if sandbox_cleanup:
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(OSError, IOError, PermissionError):
                     sandbox_cleanup()
 
     async def _force_kill_process(
         self, process: asyncio.subprocess.Process, grace_seconds: float = KILL_GRACE_SECONDS
     ) -> None:
-        """Attempt to terminate a process group and avoid hanging waits."""
+        """Attempt to terminate a process group and avoid hanging waits.
+
+        Platform differences:
+        - Unix: Uses killpg with SIGTERM/SIGKILL to terminate process groups
+        - Windows: Uses process.terminate()/kill() which sends appropriate signals
+        """
         if process.returncode is not None:
             return
 
         def _terminate() -> None:
-            if hasattr(os, "killpg"):
-                os.killpg(process.pid, signal.SIGTERM)
+            if IS_WINDOWS:
+                # Windows: use process.terminate() which is cross-platform
+                process.terminate()
+            elif hasattr(os, "killpg"):
+                # Unix: terminate the entire process group
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError, OSError):
+                    # Fallback to single process termination
+                    process.terminate()
             else:
                 process.terminate()
 
         def _kill() -> None:
-            if hasattr(os, "killpg"):
-                os.killpg(process.pid, signal.SIGKILL)
+            if IS_WINDOWS:
+                # Windows: use process.kill() which forcefully terminates
+                process.kill()
+            elif hasattr(os, "killpg") and hasattr(signal, "SIGKILL"):
+                # Unix: forcefully kill the entire process group
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
+                    # Fallback to single process kill
+                    process.kill()
             else:
                 process.kill()
 
-        with contextlib.suppress(ProcessLookupError, PermissionError):
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
             _terminate()
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(process.wait(), timeout=grace_seconds)
             return
 
-        with contextlib.suppress(ProcessLookupError, PermissionError):
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
             _kill()
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(process.wait(), timeout=grace_seconds)

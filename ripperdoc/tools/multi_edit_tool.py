@@ -20,6 +20,7 @@ from ripperdoc.core.tool import (
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.file_watch import record_snapshot
+from ripperdoc.tools.file_read_tool import detect_file_encoding
 
 logger = get_logger()
 
@@ -341,10 +342,18 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
 
         existing = file_path.exists()
         original_content = ""
+        file_encoding = "utf-8"
+
+        # Detect file encoding if file exists
+        if existing:
+            detected_encoding, _ = detect_file_encoding(str(file_path))
+            if detected_encoding:
+                file_encoding = detected_encoding
+
         try:
             if existing:
-                original_content = file_path.read_text(encoding="utf-8")
-        except (OSError, IOError, PermissionError) as exc:
+                original_content = file_path.read_text(encoding=file_encoding)
+        except (OSError, IOError, PermissionError, UnicodeDecodeError) as exc:
             # pragma: no cover - unlikely permission issue
             logger.warning(
                 "[multi_edit_tool] Error reading file before edits: %s: %s",
@@ -396,13 +405,27 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
 
         # Ensure parent exists (validated earlier) and write the file.
         file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Verify content can be encoded, fall back to UTF-8 if needed
+        write_encoding = file_encoding
         try:
-            file_path.write_text(updated_content, encoding="utf-8")
+            updated_content.encode(file_encoding)
+        except (UnicodeEncodeError, LookupError):
+            logger.info(
+                "New content cannot be encoded with %s, using UTF-8 for %s",
+                file_encoding,
+                str(file_path),
+            )
+            write_encoding = "utf-8"
+
+        try:
+            file_path.write_text(updated_content, encoding=write_encoding)
             try:
                 record_snapshot(
                     str(file_path),
                     updated_content,
                     getattr(context, "file_state_cache", {}),
+                    encoding=write_encoding,
                 )
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(
