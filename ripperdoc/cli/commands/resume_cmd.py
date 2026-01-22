@@ -132,6 +132,7 @@ command = SlashCommand(
     name="resume",
     description="Resume a previous session conversation",
     handler=_handle,
+    aliases=("sessions",),
 )
 
 

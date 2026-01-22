@@ -1304,7 +1304,7 @@ class RichUI:
         console.print()
         console.print(
             "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. "
-            "Press Alt+Enter for newline. Press Tab (empty input) to toggle thinking mode. "
+            "Press Alt+Enter for newline. Press Tab to toggle thinking mode. "
             "Press ESC to interrupt.[/dim]\n"
         )
 

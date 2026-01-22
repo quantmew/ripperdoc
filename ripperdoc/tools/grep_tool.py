@@ -94,12 +94,14 @@ def _grep_supports_pcre() -> bool:
     try:
         proc = subprocess.run(
             ["grep", "-P", ""],
+            stdin=subprocess.DEVNULL,  # Fix: prevent waiting for stdin
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             check=False,
+            timeout=15,  # Safety timeout
         )
         _GREP_SUPPORTS_PCRE = proc.returncode in (0, 1)
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError, subprocess.TimeoutExpired):
         _GREP_SUPPORTS_PCRE = False
 
     return _GREP_SUPPORTS_PCRE
@@ -261,21 +263,27 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         self, input_data: GrepToolInput, _context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Search for the pattern."""
+        logger.debug("[grep_tool] call ENTER: pattern='%s' path='%s'", input_data.pattern, input_data.path)
 
         try:
             search_path = input_data.path or "."
 
             async def _run_search(command: List[str]) -> Tuple[int, str, str]:
                 """Execute the search command and return decoded output."""
+                logger.debug("[grep_tool] _run_search: BEFORE create_subprocess_exec, cmd=%s", command[:5])
                 process = await asyncio.create_subprocess_exec(
                     *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
+                logger.debug("[grep_tool] _run_search: AFTER create_subprocess_exec, pid=%s", process.pid)
+                logger.debug("[grep_tool] _run_search: BEFORE communicate()")
                 stdout, stderr = await process.communicate()
+                logger.debug("[grep_tool] _run_search: AFTER communicate(), returncode=%s", process.returncode)
                 stdout_text = stdout.decode("utf-8", errors="ignore") if stdout else ""
                 stderr_text = stderr.decode("utf-8", errors="ignore") if stderr else ""
                 return process.returncode, stdout_text, stderr_text
 
             use_ripgrep = shutil.which("rg") is not None
+            logger.debug("[grep_tool] use_ripgrep=%s", use_ripgrep)
             pattern = input_data.pattern
 
             if use_ripgrep:
@@ -300,8 +308,11 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 cmd.append(search_path)
             else:
                 # Fallback to grep (note: grep --include matches basenames only)
+                logger.debug("[grep_tool] Using grep fallback, checking PCRE support...")
                 use_pcre = _grep_supports_pcre()
+                logger.debug("[grep_tool] PCRE support check done: use_pcre=%s", use_pcre)
                 cmd = ["grep", "-r", "--color=never", "-P" if use_pcre else "-E"]
+                logger.debug("[grep_tool] Building grep command...")
 
                 if input_data.case_insensitive:
                     cmd.append("-i")
@@ -323,7 +334,9 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
 
                 cmd.append(search_path)
 
+            logger.debug("[grep_tool] BEFORE _run_search, cmd=%s", cmd)
             returncode, stdout_text, stderr_text = await _run_search(cmd)
+            logger.debug("[grep_tool] AFTER _run_search, returncode=%s, stdout_len=%d", returncode, len(stdout_text))
             fallback_attempted = False
 
             if returncode not in (0, 1):

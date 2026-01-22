@@ -214,6 +214,11 @@ async def _run_tool_use_generator(
     context: Dict[str, str],
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Execute a single tool_use and yield progress/results."""
+    logger.debug(
+        "[query] _run_tool_use_generator ENTER: tool='%s' tool_use_id=%s",
+        tool_name,
+        tool_use_id,
+    )
     # Get tool input as dict for hooks
     tool_input_dict = (
         parsed_input.model_dump()
@@ -265,7 +270,13 @@ async def _run_tool_use_generator(
     tool_output = None
 
     try:
+        logger.debug("[query] _run_tool_use_generator: BEFORE tool.call() for '%s'", tool_name)
         async for output in tool.call(parsed_input, tool_context):
+            logger.debug(
+                "[query] _run_tool_use_generator: tool='%s' yielded output type=%s",
+                tool_name,
+                type(output).__name__,
+            )
             if isinstance(output, ToolProgress):
                 yield create_progress_message(
                     tool_use_id=tool_use_id,
@@ -284,7 +295,9 @@ async def _run_tool_use_generator(
                     f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
                     f"result_len={len(result_content)}"
                 )
+        logger.debug("[query] _run_tool_use_generator: AFTER tool.call() loop for '%s'", tool_name)
     except CancelledError:
+        logger.debug("[query] _run_tool_use_generator: tool='%s' CANCELLED", tool_name)
         raise  # Don't suppress task cancellation
     except (RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as exc:
         logger.warning(
@@ -309,6 +322,8 @@ async def _run_tool_use_generator(
     if post_result.should_block:
         reason = post_result.block_reason or post_result.stop_reason or "Blocked by hook."
         yield create_user_message(f"PostToolUse hook blocked: {reason}")
+
+    logger.debug("[query] _run_tool_use_generator DONE: tool='%s' tool_use_id=%s", tool_name, tool_use_id)
 
 
 def _group_tool_calls_by_concurrency(prepared_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -341,11 +356,18 @@ async def _execute_tools_in_parallel(
     items: List[Dict[str, Any]], tool_results: List[UserMessage]
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Run tool generators concurrently."""
+    logger.debug("[query] _execute_tools_in_parallel ENTER: %d items", len(items))
     valid_items = [call for call in items if call.get("generator")]
     generators = [call["generator"] for call in valid_items]
     tool_names = [call.get("tool_name", "unknown") for call in valid_items]
+    logger.debug(
+        "[query] _execute_tools_in_parallel: %d valid generators, tools=%s",
+        len(generators),
+        tool_names,
+    )
     async for message in _run_concurrent_tool_uses(generators, tool_names, tool_results):
         yield message
+    logger.debug("[query] _execute_tools_in_parallel DONE")
 
 
 async def _run_tools_concurrently(
@@ -381,7 +403,13 @@ async def _run_concurrent_tool_uses(
     tool_results: List[UserMessage],
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Drain multiple tool generators concurrently and stream outputs."""
+    logger.debug(
+        "[query] _run_concurrent_tool_uses ENTER: %d generators, tools=%s",
+        len(generators),
+        tool_names,
+    )
     if not generators:
+        logger.debug("[query] _run_concurrent_tool_uses: no generators, returning")
         return
         yield  # Make this a proper async generator that yields nothing
 
@@ -393,13 +421,37 @@ async def _run_concurrent_tool_uses(
         tool_name: str,
     ) -> Optional[Exception]:
         """Consume a tool generator and return any exception that occurred."""
+        logger.debug(
+            "[query] _consume START: tool='%s' index=%d gen=%s",
+            tool_name,
+            gen_index,
+            type(gen).__name__,
+        )
         captured_exception: Optional[Exception] = None
+        message_count = 0
         try:
+            logger.debug("[query] _consume: entering async for loop for '%s'", tool_name)
             async for message in gen:
+                message_count += 1
+                msg_type = type(message).__name__
+                logger.debug(
+                    "[query] _consume: tool='%s' received message #%d type=%s",
+                    tool_name,
+                    message_count,
+                    msg_type,
+                )
                 await queue.put(message)
+                logger.debug("[query] _consume: tool='%s' put message to queue", tool_name)
+            logger.debug(
+                "[query] _consume: tool='%s' async for loop finished, total messages=%d",
+                tool_name,
+                message_count,
+            )
         except asyncio.CancelledError:
+            logger.debug("[query] _consume: tool='%s' was CANCELLED", tool_name)
             raise  # Don't suppress cancellation
         except (StopAsyncIteration, GeneratorExit):
+            logger.debug("[query] _consume: tool='%s' StopAsyncIteration/GeneratorExit", tool_name)
             pass  # Normal generator termination
         except Exception as exc:
             # Capture exception for reporting to caller
@@ -412,24 +464,36 @@ async def _run_concurrent_tool_uses(
                 exc,
             )
         finally:
+            logger.debug("[query] _consume FINALLY: tool='%s' putting None to queue", tool_name)
             await queue.put(None)
+            logger.debug("[query] _consume DONE: tool='%s' messages=%d", tool_name, message_count)
         return captured_exception
 
+    logger.debug("[query] _run_concurrent_tool_uses: creating %d tasks", len(generators))
     tasks = [
         asyncio.create_task(_consume(gen, i, tool_names[i]))
         for i, gen in enumerate(generators)
     ]
     active = len(tasks)
+    logger.debug("[query] _run_concurrent_tool_uses: %d tasks created, entering while loop", active)
 
     try:
         while active:
+            logger.debug("[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active)
             message = await queue.get()
+            logger.debug(
+                "[query] _run_concurrent_tool_uses: got message type=%s, active=%d",
+                type(message).__name__ if message else "None",
+                active,
+            )
             if message is None:
                 active -= 1
+                logger.debug("[query] _run_concurrent_tool_uses: None received, active now=%d", active)
                 continue
             if isinstance(message, UserMessage):
                 tool_results.append(message)
             yield message
+        logger.debug("[query] _run_concurrent_tool_uses: while loop finished, all tools done")
     finally:
         # Wait for all tasks and collect any exceptions
         results = await asyncio.gather(*tasks, return_exceptions=True)
