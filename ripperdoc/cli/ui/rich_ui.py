@@ -17,9 +17,11 @@ from rich.markup import escape
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, merge_completers
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.shortcuts.prompt import CompleteStyle
+from prompt_toolkit.styles import Style
 
 from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.default_tools import get_default_tools
@@ -164,6 +166,7 @@ class RichUI:
         self._session_end_sent = False
         self._exit_reason: Optional[str] = None
         self._using_tty_input = False  # Track if we're using /dev/tty for input
+        self._thinking_mode_enabled = False  # Toggle for extended thinking mode
         hook_manager.set_transcript_path(str(self._session_history.path))
         self._permission_checker = (
             None if yolo_mode else make_permission_checker(self.project_path, yolo_mode=False)
@@ -243,6 +246,56 @@ class RichUI:
     @_esc_listener_paused.setter
     def _esc_listener_paused(self, value: bool) -> None:
         self._interrupt_handler._esc_listener_paused = value
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Thinking mode toggle
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    def _supports_thinking_mode(self) -> bool:
+        """Check if the current model supports extended thinking mode."""
+        from ripperdoc.core.query import infer_thinking_mode
+        from ripperdoc.core.config import ProviderType
+
+        model_profile = get_profile_for_pointer("main")
+        if not model_profile:
+            return False
+        # Anthropic natively supports thinking mode
+        if model_profile.provider == ProviderType.ANTHROPIC:
+            return True
+        # For other providers, check if we can infer a thinking mode
+        return infer_thinking_mode(model_profile) is not None
+
+    def _toggle_thinking_mode(self) -> None:
+        """Toggle thinking mode on/off. Status is shown in rprompt."""
+        if not self._supports_thinking_mode():
+            self.console.print(
+                "[yellow]Current model does not support thinking mode.[/yellow]"
+            )
+            return
+        self._thinking_mode_enabled = not self._thinking_mode_enabled
+
+    def _get_thinking_tokens(self) -> int:
+        """Get the thinking tokens budget based on current mode."""
+        if not self._thinking_mode_enabled:
+            return 0
+        config = get_global_config()
+        return config.default_thinking_tokens
+
+    def _get_prompt(self) -> str:
+        """Generate the input prompt."""
+        return "> "
+
+    def _get_rprompt(self) -> Union[str, FormattedText]:
+        """Generate the right prompt with thinking mode status."""
+        if not self._supports_thinking_mode():
+            return ""
+        if self._thinking_mode_enabled:
+            return FormattedText([
+                ('class:rprompt-on', '⚡ Thinking'),
+            ])
+        return FormattedText([
+            ('class:rprompt-off', 'Thinking: off'),
+        ])
 
     def _context_usage_lines(
         self, breakdown: Any, model_label: str, auto_compact_enabled: bool
@@ -810,6 +863,7 @@ class RichUI:
         if not self.query_context:
             self.query_context = QueryContext(
                 tools=self.get_default_tools(),
+                max_thinking_tokens=self._get_thinking_tokens(),
                 yolo_mode=self.yolo_mode,
                 verbose=self.verbose,
                 model=self.model,
@@ -818,6 +872,8 @@ class RichUI:
             abort_controller = getattr(self.query_context, "abort_controller", None)
             if abort_controller is not None:
                 abort_controller.clear()
+            # Update thinking tokens in case user toggled thinking mode
+            self.query_context.max_thinking_tokens = self._get_thinking_tokens()
         self.query_context.stop_hook_active = False
 
         logger.info(
@@ -1130,8 +1186,18 @@ class RichUI:
 
         @key_bindings.add("tab")
         def _(event: Any) -> None:
-            """Use Tab to accept the highlighted completion when visible."""
+            """Toggle thinking mode when input is empty; otherwise handle completion."""
             buf = event.current_buffer
+            # If input is empty, toggle thinking mode
+            if not buf.text.strip():
+                from prompt_toolkit.application import run_in_terminal
+
+                def _toggle() -> None:
+                    ui_instance._toggle_thinking_mode()
+
+                run_in_terminal(_toggle)
+                return
+            # Otherwise, handle completion as usual
             if buf.complete_state and buf.complete_state.current_completion:
                 buf.apply_completion(buf.complete_state.current_completion)
             else:
@@ -1209,6 +1275,10 @@ class RichUI:
                     extra={"session_id": self.session_id},
                 )
 
+        prompt_style = Style.from_dict({
+            'rprompt-on': 'fg:ansicyan bold',
+            'rprompt-off': 'fg:ansibrightblack',
+        })
         self._prompt_session = PromptSession(
             completer=combined_completer,
             complete_style=CompleteStyle.COLUMN,
@@ -1217,6 +1287,8 @@ class RichUI:
             key_bindings=key_bindings,
             multiline=True,
             input=input_obj,
+            style=prompt_style,
+            rprompt=self._get_rprompt,
         )
         return self._prompt_session
 
@@ -1232,7 +1304,8 @@ class RichUI:
         console.print()
         console.print(
             "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. "
-            "Press Alt+Enter for newline. Press ESC to interrupt.[/dim]\n"
+            "Press Alt+Enter for newline. Press Tab (empty input) to toggle thinking mode. "
+            "Press ESC to interrupt.[/dim]\n"
         )
 
         session = self.get_prompt_session()
@@ -1269,8 +1342,8 @@ class RichUI:
 
             while not self._should_exit:
                 try:
-                    # Get user input
-                    user_input = session.prompt("> ")
+                    # Get user input with dynamic prompt
+                    user_input = session.prompt(self._get_prompt())
 
                     if not user_input.strip():
                         continue

@@ -80,10 +80,18 @@ def _effort_from_tokens(max_thinking_tokens: int) -> Optional[str]:
 
 
 def _detect_openai_vendor(model_profile: ModelProfile) -> str:
-    """Best-effort vendor hint for OpenAI-compatible endpoints."""
+    """Best-effort vendor hint for OpenAI-compatible endpoints.
+
+    If thinking_mode is explicitly set to "none" or "disabled", returns "none"
+    to skip all thinking protocol handling.
+    """
     override = getattr(model_profile, "thinking_mode", None)
     if isinstance(override, str) and override.strip():
-        return override.strip().lower()
+        mode = override.strip().lower()
+        # Allow explicit disable of thinking protocol
+        if mode in ("disabled", "off"):
+            return "none"
+        return mode
     base = (model_profile.api_base or "").lower()
     name = (model_profile.model or "").lower()
     if "openrouter.ai" in base:
@@ -106,21 +114,25 @@ def _build_thinking_kwargs(
     extra_body: Dict[str, Any] = {}
     top_level: Dict[str, Any] = {}
     vendor = _detect_openai_vendor(model_profile)
+
+    # Skip thinking protocol if explicitly disabled
+    if vendor == "none":
+        return extra_body, top_level
+
     effort = _effort_from_tokens(max_thinking_tokens)
 
     if vendor == "deepseek":
         if max_thinking_tokens != 0:
             extra_body["thinking"] = {"type": "enabled"}
     elif vendor == "qwen":
+        # Only send enable_thinking when explicitly enabling thinking mode
+        # Some qwen-compatible APIs don't support this parameter
         if max_thinking_tokens > 0:
             extra_body["enable_thinking"] = True
-        elif max_thinking_tokens == 0:
-            extra_body["enable_thinking"] = False
     elif vendor == "openrouter":
+        # Only send reasoning when explicitly enabling thinking mode
         if max_thinking_tokens > 0:
             extra_body["reasoning"] = {"max_tokens": max_thinking_tokens}
-        elif max_thinking_tokens == 0:
-            extra_body["reasoning"] = {"effort": "none"}
     elif vendor == "gemini_openai":
         google_cfg: Dict[str, Any] = {}
         if max_thinking_tokens > 0:
@@ -420,12 +432,13 @@ class OpenAIClient(ProviderClient):
             )
 
             if (
-                can_stream_text
+                can_stream
                 and not collected_text
                 and not streamed_tool_calls
                 and not streamed_tool_text
+                and not stream_reasoning_text
             ):
-                logger.debug(
+                logger.warning(
                     "[openai_client] Streaming returned no content; retrying without stream",
                     extra={"model": model_profile.model},
                 )
@@ -450,6 +463,30 @@ class OpenAIClient(ProviderClient):
         if not can_stream and (
             not openai_response or not getattr(openai_response, "choices", None)
         ):
+            # Check for non-standard error response (e.g., iflow returns HTTP 200 with error JSON)
+            error_msg = (
+                getattr(openai_response, "msg", None)
+                or getattr(openai_response, "message", None)
+                or getattr(openai_response, "error", None)
+            )
+            error_status = getattr(openai_response, "status", None)
+            if error_msg or error_status:
+                error_text = f"API Error: {error_msg or 'Unknown error'}"
+                if error_status:
+                    error_text = f"API Error ({error_status}): {error_msg or 'Unknown error'}"
+                logger.error(
+                    "[openai_client] Non-standard error response from API",
+                    extra={
+                        "model": model_profile.model,
+                        "error_status": error_status,
+                        "error_msg": error_msg,
+                    },
+                )
+                return ProviderResponse.create_error(
+                    error_code="api_error",
+                    error_message=error_text,
+                    duration_ms=duration_ms,
+                )
             logger.warning(
                 "[openai_client] No choices returned from OpenAI response",
                 extra={"model": model_profile.model},

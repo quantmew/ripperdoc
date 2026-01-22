@@ -141,6 +141,8 @@ class GlobalConfig(BaseModel):
     show_full_thinking: bool = Field(default=False)
     auto_compact_enabled: bool = True
     context_token_limit: Optional[int] = None
+    # Default thinking tokens budget when thinking mode is enabled (0 = disabled by default)
+    default_thinking_tokens: int = Field(default=10240)
 
     # User-level permission rules (applied globally)
     user_allow_rules: list[str] = Field(default_factory=list)

@@ -86,6 +86,9 @@ def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
     # Use explicit config if set
     explicit_mode = model_profile.thinking_mode
     if explicit_mode:
+        # "none", "disabled", "off" means thinking is explicitly disabled
+        if explicit_mode.lower() in ("disabled", "off"):
+            return None
         return explicit_mode
 
     # Auto-detect based on API base and model name
