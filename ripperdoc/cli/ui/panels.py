@@ -13,23 +13,27 @@ from rich import box
 
 from ripperdoc import __version__
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
+from ripperdoc.core.theme import theme_color
 
 
 def create_welcome_panel() -> Panel:
     """Create a welcome panel for the CLI startup."""
-    welcome_content = """
-[bold cyan]Welcome to Ripperdoc![/bold cyan]
+    primary = theme_color("primary")
+    muted = theme_color("text_secondary")
+
+    welcome_content = f"""
+[bold {primary}]Welcome to Ripperdoc![/bold {primary}]
 
 Ripperdoc is an AI-powered coding assistant that helps with software development tasks.
 You can read files, edit code, run commands, and help with various programming tasks.
 
-[dim]Type your questions below. Press Ctrl+C twice to exit.[/dim]
+[{muted}]Type your questions below. Press Ctrl+C twice to exit.[/{muted}]
 """
 
     return Panel(
         welcome_content,
         title=f"Ripperdoc v{__version__}",
-        border_style="cyan",
+        border_style=theme_color("border"),
         box=box.ROUNDED,
         padding=(1, 2),
     )
@@ -41,11 +45,11 @@ def create_status_bar() -> Text:
     model_name = profile.model if profile else "Not configured"
 
     status_text = Text()
-    status_text.append("Ripperdoc", style="bold cyan")
+    status_text.append("Ripperdoc", style=f"bold {theme_color('primary')}")
     status_text.append(" • ")
-    status_text.append(model_name, style="dim")
+    status_text.append(model_name, style=theme_color("text_secondary"))
     status_text.append(" • ")
-    status_text.append("Ready", style="green")
+    status_text.append("Ready", style=theme_color("secondary"))
 
     return status_text
 
@@ -57,7 +61,8 @@ def print_shortcuts(console: Console) -> None:
         ("/ for commands", "@ for file mention"),
         ("Alt+Enter for newline", "Enter to submit"),
     ]
-    console.print("[dim]Shortcuts[/dim]")
+    muted = theme_color("text_secondary")
+    console.print(f"[{muted}]Shortcuts[/{muted}]")
     for left, right in pairs:
         left_text = f"  {left}".ljust(32)
         right_text = f"{right}" if right else ""

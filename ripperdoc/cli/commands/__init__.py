@@ -25,6 +25,7 @@ from .skills_cmd import command as skills_command
 from .stats_cmd import command as stats_command
 from .tasks_cmd import command as tasks_command
 from .status_cmd import command as status_command
+from .themes_cmd import command as themes_command
 from .todos_cmd import command as todos_command
 from .tools_cmd import command as tools_command
 
@@ -67,6 +68,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     resume_command,
     skills_command,
     agents_command,
+    themes_command,
 ]
 
 COMMAND_REGISTRY: Dict[str, SlashCommand] = _build_registry(ALL_COMMANDS)

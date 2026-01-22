@@ -25,6 +25,7 @@ from prompt_toolkit.styles import Style
 
 from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.default_tools import get_default_tools
+from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
@@ -188,6 +189,12 @@ class RichUI:
             self.show_full_thinking = config.show_full_thinking
         else:
             self.show_full_thinking = show_full_thinking
+
+        # Initialize theme from config
+        theme_manager = get_theme_manager()
+        theme_name = getattr(config, "theme", None) or "dark"
+        if not theme_manager.set_theme(theme_name):
+            theme_manager.set_theme("dark")  # Fallback to default
 
         # Initialize component handlers
         self._message_display = MessageDisplay(

@@ -6,6 +6,8 @@ from rich.live import Live
 from rich.text import Text
 from rich.spinner import Spinner as RichSpinner
 
+from ripperdoc.core.theme import theme_color
+
 
 class Spinner:
     """Lightweight spinner wrapper that plays nicely with other console output."""
@@ -14,9 +16,9 @@ class Spinner:
         self.console = console
         self.text = text
         self.spinner = spinner
-        self._style = "cyan"
+        self._style = theme_color("spinner")
         self._live: Optional[Live] = None
-        # Blue spinner for clearer visual separation in the terminal (icon + text)
+        # Spinner color from theme for visual separation in the terminal
         self._renderable: RichSpinner = RichSpinner(
             spinner, text=Text(self.text, style=self._style), style=self._style
         )
