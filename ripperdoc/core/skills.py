@@ -278,6 +278,7 @@ def build_skill_summary(skills: Sequence[SkillDefinition]) -> str:
     lines = [
         "# Skills",
         "Skills extend your capabilities with reusable instructions stored in SKILL.md files.",
+        "IMPORTANT: To use a skill, you MUST call the Skill tool. Do NOT read SKILL.md files directly with Read, Glob, Grep, or Bash commands.",
         'Call the Skill tool with {"skill": "<name>"} to load a skill when it matches the user request.',
         "Available skills:",
     ]

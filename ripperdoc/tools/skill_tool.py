@@ -131,6 +131,33 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             )
         return ValidationResult(result=True)
 
+    def _list_skill_files(self, base_dir: Path, max_depth: int = 2) -> List[str]:
+        """List documentation files in the skill directory (excluding SKILL.md)."""
+        files: List[str] = []
+        doc_extensions = {".md", ".txt", ".rst", ".json", ".yaml", ".yml"}
+
+        def scan_dir(dir_path: Path, depth: int, prefix: str = "") -> None:
+            if depth > max_depth or not dir_path.exists():
+                return
+            try:
+                entries = sorted(dir_path.iterdir())
+            except PermissionError:
+                return
+
+            for entry in entries:
+                # Skip hidden files/directories and SKILL.md
+                if entry.name.startswith(".") or entry.name == "SKILL.md":
+                    continue
+                rel_path = f"{prefix}{entry.name}"
+                if entry.is_dir():
+                    files.append(f"{rel_path}/")
+                    scan_dir(entry, depth + 1, f"{rel_path}/")
+                elif entry.suffix.lower() in doc_extensions:
+                    files.append(rel_path)
+
+        scan_dir(base_dir, 0)
+        return files
+
     def _render_result(self, skill: SkillDefinition) -> str:
         allowed = ", ".join(skill.allowed_tools) if skill.allowed_tools else "no specific limit"
         model_hint = f"\nModel hint: {skill.model}" if skill.model else ""
@@ -139,6 +166,17 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             if skill.max_thinking_tokens is not None
             else ""
         )
+
+        # List available documentation files in skill directory
+        skill_files = self._list_skill_files(skill.base_dir)
+        files_section = ""
+        if skill_files:
+            files_list = "\n".join(f"  - {f}" for f in skill_files)
+            files_section = (
+                f"\n\nAvailable documentation files in skill directory (use Read tool to access when needed):\n"
+                f"{files_list}"
+            )
+
         lines = [
             f"Skill loaded: {skill.name} ({skill.location.value})",
             f"Description: {skill.description}",
@@ -147,7 +185,8 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             "SKILL.md content:",
             skill.content,
         ]
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        return result + files_section
 
     def _to_output(self, skill: SkillDefinition) -> SkillToolOutput:
         return SkillToolOutput(
@@ -192,6 +231,17 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             if output.max_thinking_tokens is not None
             else ""
         )
+
+        # List available documentation files in skill directory
+        skill_files = self._list_skill_files(Path(output.base_dir))
+        files_section = ""
+        if skill_files:
+            files_list = "\n".join(f"  - {f}" for f in skill_files)
+            files_section = (
+                f"\n\nAvailable documentation files in skill directory (use Read tool to access when needed):\n"
+                f"{files_list}"
+            )
+
         return (
             f"Skill loaded: {output.skill} ({output.location})\n"
             f"Description: {output.description}\n"
@@ -199,6 +249,7 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             f"Allowed tools (if specified): {allowed}{model_hint}{max_tokens}\n"
             "SKILL.md content:\n"
             f"{output.content}"
+            f"{files_section}"
         )
 
     def render_tool_use_message(self, input_data: SkillToolInput, verbose: bool = False) -> str:  # noqa: ARG002
