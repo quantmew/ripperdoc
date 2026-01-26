@@ -69,12 +69,15 @@ class Spinner:
         """Start the spinner if not already running."""
         if self._live is not None:
             return
+        # Clear any residual content on current line before starting
+        self._clear_line()
         self._renderable.text = Text(self._fit_to_terminal(self.text), style=self._style)
         self._live = Live(
             self._renderable,
             console=self.console,
             transient=True,  # Remove spinner line when stopped to avoid layout glitches
             refresh_per_second=12,
+            vertical_overflow="ellipsis",  # Prevent multi-line overflow issues
         )
         self._live.start()
 
@@ -128,4 +131,16 @@ class Spinner:
             yield
         finally:
             if was_running:
+                # Ensure all output is flushed and cursor is on a clean line
+                # before restarting the spinner
+                try:
+                    # Flush console buffer
+                    self.console.file.flush()
+                    # Clear any partial line content to prevent spinner
+                    # from appearing on the same line as previous output
+                    if self.console.is_terminal:
+                        sys.stdout.write(_CLEAR_LINE)
+                        sys.stdout.flush()
+                except Exception:
+                    pass
                 self.start()
