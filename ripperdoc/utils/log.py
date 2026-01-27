@@ -11,6 +11,33 @@ from typing import Any, Optional
 from ripperdoc.utils.path_utils import sanitize_project_path
 
 
+class SpinnerSafeStreamHandler(logging.StreamHandler):
+    """StreamHandler that clears the current line before ERROR/WARNING messages.
+
+    This prevents log messages from appearing after a spinner's text,
+    which would cause formatting issues.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record, clearing the line first for ERROR/WARNING."""
+        try:
+            msg = self.format(record)
+            stream = self.stream
+
+            # Clear the current line before ERROR/WARNING to avoid spinner interference
+            if record.levelno >= logging.ERROR:
+                # Use \r to return to start, then clear with spaces, then \r again
+                stream.write("\r" + " " * 100 + "\r")
+            elif record.levelno >= logging.WARNING:
+                # Also clear for WARNING
+                stream.write("\r" + " " * 100 + "\r")
+
+            stream.write(msg + self.terminator)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
 _LOG_RECORD_FIELDS = {
     "name",
     "msg",
@@ -74,7 +101,7 @@ class RipperdocLogger:
 
         # Avoid adding duplicate handlers if an existing logger is reused.
         if not self.logger.handlers:
-            console_handler = logging.StreamHandler(sys.stderr)
+            console_handler = SpinnerSafeStreamHandler(sys.stderr)
             console_handler.setLevel(level)
             console_formatter = logging.Formatter("%(levelname)s: %(message)s")
             console_handler.setFormatter(console_formatter)

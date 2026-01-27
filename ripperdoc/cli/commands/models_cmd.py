@@ -155,6 +155,24 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         context_prompt += "): "
         context_window = parse_int(context_prompt, context_window_default)
 
+        # Vision support prompt
+        supports_vision_default = existing_profile.supports_vision if existing_profile else None
+        supports_vision = None
+        vision_default_display = "auto" if supports_vision_default is None else ("yes" if supports_vision_default else "no")
+        supports_vision_input = (
+            console.input(f"Supports vision (images)? [{vision_default_display}] (Y/n/auto): ")
+            .strip()
+            .lower()
+        )
+        if supports_vision_input in ("y", "yes"):
+            supports_vision = True
+        elif supports_vision_input in ("n", "no"):
+            supports_vision = False
+        elif supports_vision_input in ("auto", ""):
+            supports_vision = None
+        else:
+            supports_vision = supports_vision_default
+
         default_set_main = (
             not config.model_profiles
             or getattr(config.model_pointers, "main", "") not in config.model_profiles
@@ -175,6 +193,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             temperature=temperature,
             context_window=context_window,
             auth_token=auth_token,
+            supports_vision=supports_vision,
         )
 
         try:
@@ -276,6 +295,25 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             existing_profile.context_window,
         )
 
+        # Vision support prompt
+        vision_default_display = "auto" if existing_profile.supports_vision is None else ("yes" if existing_profile.supports_vision else "no")
+        supports_vision_input = (
+            console.input(f"Supports vision (images)? [{vision_default_display}] (Y/n/auto/C=clear): ")
+            .strip()
+            .lower()
+        )
+        supports_vision = None
+        if supports_vision_input in ("y", "yes"):
+            supports_vision = True
+        elif supports_vision_input in ("n", "no"):
+            supports_vision = False
+        elif supports_vision_input in ("c", "clear", "-"):
+            supports_vision = None
+        elif supports_vision_input in ("auto", ""):
+            supports_vision = existing_profile.supports_vision
+        else:
+            supports_vision = existing_profile.supports_vision
+
         updated_profile = ModelProfile(
             provider=provider,
             model=model_name,
@@ -285,6 +323,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             temperature=temperature,
             context_window=context_window,
             auth_token=auth_token,
+            supports_vision=supports_vision,
         )
 
         try:
@@ -415,6 +454,16 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             )
         if profile.openai_tool_mode:
             console.print(f"      openai_tool_mode: {profile.openai_tool_mode}", markup=False)
+        if profile.thinking_mode:
+            console.print(f"      thinking_mode: {profile.thinking_mode}", markup=False)
+        # Display vision support
+        if profile.supports_vision is None:
+            vision_display = "auto-detect"
+        elif profile.supports_vision:
+            vision_display = "yes"
+        else:
+            vision_display = "no"
+        console.print(f"      supports_vision: {vision_display}", markup=False)
     pointer_labels = ", ".join(f"{p}->{v or '-'}" for p, v in pointer_map.items())
     console.print(f"[dim]Pointers: {escape(pointer_labels)}[/dim]")
     return True

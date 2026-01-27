@@ -35,6 +35,10 @@ class MessageContent(BaseModel):
     name: Optional[str] = None
     input: Optional[Dict[str, object]] = None
     is_error: Optional[bool] = None
+    # Image/vision content fields
+    source_type: Optional[str] = None  # "base64", "url", "file"
+    media_type: Optional[str] = None  # "image/jpeg", "image/png", etc.
+    image_data: Optional[str] = None  # base64-encoded image data or URL
 
 
 def _content_block_to_api(block: MessageContent) -> Dict[str, Any]:
@@ -73,6 +77,15 @@ def _content_block_to_api(block: MessageContent) -> Dict[str, Any]:
         if getattr(block, "is_error", None) is not None:
             result["is_error"] = block.is_error
         return result
+    if block_type == "image":
+        return {
+            "type": "image",
+            "source": {
+                "type": getattr(block, "source_type", None) or "base64",
+                "media_type": getattr(block, "media_type", None) or "image/jpeg",
+                "data": getattr(block, "image_data", None) or "",
+            },
+        }
     # Default to text block
     return {
         "type": "text",
@@ -123,6 +136,17 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
             "role": "tool",
             "tool_call_id": tool_call_id,
             "content": getattr(block, "text", None) or getattr(block, "content", None) or "",
+        }
+    if block_type == "image":
+        # OpenAI uses data URL format for images
+        media_type = getattr(block, "media_type", None) or "image/jpeg"
+        image_data = getattr(block, "image_data", None) or ""
+        data_url = f"data:{media_type};base64,{image_data}"
+        return {
+            "type": "image_url",
+            "image_url": {
+                "url": data_url
+            },
         }
     # Fallback text message
     return {
@@ -454,33 +478,85 @@ def normalize_messages_for_api(
             meta = _msg_metadata(msg)
             if isinstance(user_content, list):
                 if protocol == "openai":
-                    # Map each block to an OpenAI-style message
-                    openai_msgs: List[Dict[str, Any]] = []
-                    for block in user_content:
-                        block_type = getattr(block, "type", None)
-                        if block_type == "tool_result":
-                            tool_results_seen += 1
-                            # Skip tool_result blocks that lack a preceding tool_use
-                            tool_id = getattr(block, "tool_use_id", None) or getattr(
-                                block, "id", None
-                            )
-                            if not tool_id:
-                                skipped_tool_results_no_call += 1
-                                continue
-                            call_pos = tool_use_positions.get(tool_id)
-                            if call_pos is None or call_pos >= msg_index:
-                                skipped_tool_results_no_call += 1
-                                continue
-                        mapped = _content_block_to_openai(block)
-                        if mapped:
-                            openai_msgs.append(mapped)
-                    if meta and openai_msgs:
-                        for candidate in openai_msgs:
-                            for key in ("reasoning_content", "reasoning_details", "reasoning"):
-                                if key in meta and meta[key] is not None:
-                                    candidate[key] = meta[key]
-                    normalized.extend(openai_msgs)
-                    continue
+                    # Check if this message contains images
+                    has_images = any(
+                        getattr(block, "type", None) == "image" for block in user_content
+                    )
+                    has_text_only = all(
+                        getattr(block, "type", None) in ("text", "image", "tool_result")
+                        for block in user_content
+                    )
+
+                    # If message has images or only text/images (no tool_result), use content array format
+                    if has_images or (has_text_only and not any(
+                        getattr(block, "type", None) == "tool_result" for block in user_content
+                    )):
+                        content_array: List[Dict[str, Any]] = []
+                        for block in user_content:
+                            block_type = getattr(block, "type", None)
+                            if block_type == "image":
+                                content_array.append(_content_block_to_openai(block))
+                            elif block_type == "text":
+                                content_array.append({
+                                    "type": "text",
+                                    "text": getattr(block, "text", "") or "",
+                                })
+                            elif block_type == "tool_result":
+                                # Handle tool_result separately
+                                tool_results_seen += 1
+                                tool_id = getattr(block, "tool_use_id", None) or getattr(
+                                    block, "id", None
+                                )
+                                if not tool_id:
+                                    skipped_tool_results_no_call += 1
+                                    continue
+                                call_pos = tool_use_positions.get(tool_id)
+                                if call_pos is None or call_pos >= msg_index:
+                                    skipped_tool_results_no_call += 1
+                                    continue
+                                mapped = _content_block_to_openai(block)
+                                if mapped:
+                                    normalized.append(mapped)
+
+                        if content_array:
+                            user_msg: Dict[str, Any] = {
+                                "role": "user",
+                                "content": content_array,
+                            }
+                            if meta:
+                                for key in ("reasoning_content", "reasoning_details", "reasoning"):
+                                    if key in meta and meta[key] is not None:
+                                        user_msg[key] = meta[key]
+                            normalized.append(user_msg)
+                        continue
+                    else:
+                        # Original behavior for tool_result messages
+                        openai_msgs: List[Dict[str, Any]] = []
+                        for block in user_content:
+                            block_type = getattr(block, "type", None)
+                            if block_type == "tool_result":
+                                tool_results_seen += 1
+                                # Skip tool_result blocks that lack a preceding tool_use
+                                tool_id = getattr(block, "tool_use_id", None) or getattr(
+                                    block, "id", None
+                                )
+                                if not tool_id:
+                                    skipped_tool_results_no_call += 1
+                                    continue
+                                call_pos = tool_use_positions.get(tool_id)
+                                if call_pos is None or call_pos >= msg_index:
+                                    skipped_tool_results_no_call += 1
+                                    continue
+                            mapped = _content_block_to_openai(block)
+                            if mapped:
+                                openai_msgs.append(mapped)
+                        if meta and openai_msgs:
+                            for candidate in openai_msgs:
+                                for key in ("reasoning_content", "reasoning_details", "reasoning"):
+                                    if key in meta and meta[key] is not None:
+                                        candidate[key] = meta[key]
+                        normalized.extend(openai_msgs)
+                        continue
                 api_blocks = []
                 for block in user_content:
                     if getattr(block, "type", None) == "tool_result":

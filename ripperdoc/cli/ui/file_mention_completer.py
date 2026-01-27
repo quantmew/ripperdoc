@@ -10,6 +10,7 @@ from typing import Any, Iterable, List, Set
 from prompt_toolkit.completion import Completer, Completion
 
 from ripperdoc.utils.path_ignore import should_skip_path, IgnoreFilter
+from ripperdoc.utils.image_utils import is_image_file
 
 
 class FileMentionCompleter(Completer):
@@ -28,8 +29,32 @@ class FileMentionCompleter(Completer):
         self.project_path = project_path
         self.ignore_filter = ignore_filter
 
+    def _should_skip_for_completion(self, item: Path) -> bool:
+        """Check if an item should be skipped during completion.
+
+        Image files are never skipped since we support image input.
+
+        Args:
+            item: Path to check
+
+        Returns:
+            True if the item should be skipped
+        """
+        # Don't skip image files (we support them now)
+        if item.is_file() and is_image_file(item):
+            return False
+        # Use the project's ignore filter for other files
+        return should_skip_path(
+            item,
+            self.project_path,
+            ignore_filter=self.ignore_filter,
+            skip_hidden=True,
+        )
+
     def _collect_files_recursive(self, root_dir: Path, max_depth: int = 5) -> List[Path]:
         """Recursively collect all files from root_dir, respecting ignore rules.
+
+        Note: Image files are NOT filtered out since we support image input.
 
         Args:
             root_dir: Directory to search from
@@ -46,13 +71,13 @@ class FileMentionCompleter(Completer):
 
             try:
                 for item in current_dir.iterdir():
-                    # Use the project's ignore filter to skip files
-                    if should_skip_path(
-                        item,
-                        self.project_path,
-                        ignore_filter=self.ignore_filter,
-                        skip_hidden=True,
-                    ):
+                    # Don't skip image files (we support them now)
+                    if item.is_file() and is_image_file(item):
+                        files.append(item)
+                        continue
+
+                    # Use the project's ignore filter to skip other files
+                    if self._should_skip_for_completion(item):
                         continue
 
                     if item.is_file():
@@ -122,7 +147,12 @@ class FileMentionCompleter(Completer):
                                     display_path += "/"
 
                                 # Right side: show type only
-                                meta = "📁 directory" if item.is_dir() else "📄 file"
+                                meta = "📁 directory"
+                                if item.is_file():
+                                    if is_image_file(item):
+                                        meta = "🖼️ image"
+                                    else:
+                                        meta = "📄 file"
 
                                 _add_match(display_path, item, meta, 0)
                             except ValueError:
@@ -152,7 +182,12 @@ class FileMentionCompleter(Completer):
                                         display_path += "/"
 
                                     # Right side: show type only
-                                    meta = "📁 directory" if item.is_dir() else "📄 file"
+                                    meta = "📁 directory"
+                                    if item.is_file():
+                                        if is_image_file(item):
+                                            meta = "🖼️ image"
+                                        else:
+                                            meta = "📄 file"
 
                                     _add_match(display_path, item, meta, 0)
                                 except ValueError:
@@ -177,7 +212,12 @@ class FileMentionCompleter(Completer):
                                 display_path += "/"
 
                             # Right side: show type only
-                            meta = "📁 directory" if item.is_dir() else "📄 file"
+                            meta = "📁 directory"
+                            if item.is_file():
+                                if is_image_file(item):
+                                    meta = "🖼️ image"
+                                else:
+                                    meta = "📄 file"
                             _add_match(display_path, item, meta, 0)
                         except ValueError:
                             continue
@@ -206,7 +246,12 @@ class FileMentionCompleter(Completer):
                             if item.is_dir():
                                 display_path += "/"
 
-                            meta = "📁 directory" if item.is_dir() else "📄 file"
+                            meta = "📁 directory"
+                            if item.is_file():
+                                if is_image_file(item):
+                                    meta = "🖼️ image"
+                                else:
+                                    meta = "📄 file"
                             _add_match(display_path, item, meta, score)
 
                     # If the query exactly matches a directory, also surface its children for quicker drilling
@@ -226,7 +271,12 @@ class FileMentionCompleter(Completer):
                                 display_path = str(rel_path)
                                 if item.is_dir():
                                     display_path += "/"
-                                meta = "📁 directory" if item.is_dir() else "📄 file"
+                                meta = "📁 directory"
+                                if item.is_file():
+                                    if is_image_file(item):
+                                        meta = "🖼️ image"
+                                    else:
+                                        meta = "📄 file"
                                 _add_match(display_path, item, meta, 400)
                             except ValueError:
                                 continue
@@ -267,7 +317,7 @@ class FileMentionCompleter(Completer):
             for display_path, item, meta, score in matches:
                 yield Completion(
                     display_path,
-                    start_position=-(len(query) + 1),  # +1 to include the @ symbol
+                    start_position=-len(query),
                     display=display_path,
                     display_meta=meta,
                 )

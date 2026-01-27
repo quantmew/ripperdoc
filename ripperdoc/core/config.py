@@ -94,6 +94,63 @@ def api_base_env_candidates(provider: ProviderType) -> list[str]:
     ]
 
 
+# Known vision-enabled model patterns for auto-detection
+VISION_ENABLED_MODELS = {
+    # Anthropic Claude models
+    "claude-3-5-sonnet",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-sonnet-20240620",
+    "claude-3-5-haiku",
+    "claude-3-5-haiku-20241022",
+    "claude-3-opus",
+    "claude-3-opus-20240229",
+    "claude-3-sonnet",
+    "claude-3-sonnet-20240229",
+    "claude-3-haiku",
+    "claude-3-haiku-20240307",
+    # OpenAI models
+    "gpt-4o",
+    "gpt-4o-2024-08-06",
+    "gpt-4o-mini",
+    "gpt-4o-mini-2024-07-18",
+    "gpt-4-turbo",
+    "gpt-4-turbo-2024-04-09",
+    "gpt-4",
+    "gpt-4-0314",
+    "gpt-4-vision-preview",
+    "chatgpt-4o-latest",
+    # Google Gemini models
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-2.0-flash-thinking-exp",
+    "gemini-exp-1206",
+    "gemini-pro-vision",
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-001",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-001",
+    # Alibaba Qwen models (vision)
+    "qwen-vl-max",
+    "qwen-vl-plus",
+    "qwen-vl-plus-latest",
+    "qwen2-vl-72b-instruct",
+    "qwen-vl-chat",
+    "qwen-vl-7b-chat",
+    # DeepSeek models (some support vision)
+    "deepseek-vl",
+    "deepseek-vl-chat",
+    # Other vision models
+    "glm-4v",
+    "glm-4v-plus",
+    "minivision-3b",
+    "internvl2",
+}
+
+
 class ModelProfile(BaseModel):
     """Configuration for a specific AI model."""
 
@@ -113,9 +170,29 @@ class ModelProfile(BaseModel):
     # Optional override for thinking protocol handling (e.g., "deepseek", "openrouter",
     # "qwen", "gemini_openai", "openai"). When unset, provider heuristics are used.
     thinking_mode: Optional[str] = None
+    # Vision support flag. None = auto-detect based on model name, True/False = override.
+    supports_vision: Optional[bool] = None
     # Pricing (USD per 1M tokens). Leave as 0 to skip cost calculation.
     input_cost_per_million_tokens: float = 0.0
     output_cost_per_million_tokens: float = 0.0
+
+
+def model_supports_vision(model_profile: ModelProfile) -> bool:
+    """Detect whether a model supports vision/image input.
+
+    Args:
+        model_profile: The model profile to check
+
+    Returns:
+        True if the model supports vision capabilities, False otherwise
+    """
+    # If explicitly configured, use the config value
+    if model_profile.supports_vision is not None:
+        return model_profile.supports_vision
+
+    # Auto-detect based on model name
+    model_name = model_profile.model.lower()
+    return any(pattern in model_name for pattern in VISION_ENABLED_MODELS)
 
 
 class ModelPointers(BaseModel):
