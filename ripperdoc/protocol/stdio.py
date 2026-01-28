@@ -38,6 +38,22 @@ from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.log import get_logger
+from ripperdoc.protocol.models import (
+    ControlResponseMessage,
+    ControlResponseSuccess,
+    ControlResponseError,
+    AssistantStreamMessage,
+    UserStreamMessage,
+    AssistantMessageData,
+    UserMessageData,
+    ResultMessage,
+    UsageInfo,
+    MCPServerInfo,
+    InitializeResponseData,
+    PermissionResponseAllow,
+    PermissionResponseDeny,
+    model_to_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +100,11 @@ class StdioProtocolHandler:
             message: The message dictionary to write.
         """
         json_data = json.dumps(message, ensure_ascii=False)
+        msg_type = message.get("type", "unknown")
+        logger.debug(f"[stdio] Writing message: type={msg_type}, json_length={len(json_data)}")
         sys.stdout.write(json_data + "\n")
         sys.stdout.flush()
+        logger.debug(f"[stdio] Flushed message: type={msg_type}")
 
     async def _write_control_response(
         self,
@@ -101,24 +120,19 @@ class StdioProtocolHandler:
             error: The error message (for failure).
         """
         if error:
-            response_data = {
-                "subtype": "error",
-                "request_id": request_id,
-                "error": error,
-            }
+            response_data = ControlResponseError(
+                request_id=request_id,
+                error=error,
+            )
         else:
-            response_data = {
-                "subtype": "success",
-                "request_id": request_id,
-                "response": response,
-            }
+            response_data = ControlResponseSuccess(
+                request_id=request_id,
+                response=response,
+            )
 
-        message = {
-            "type": "control_response",
-            "response": response_data,
-        }
+        message = ControlResponseMessage(response=response_data)
 
-        await self._write_message(message)
+        await self._write_message(model_to_dict(message))
 
     async def _write_message_stream(
         self,
@@ -296,22 +310,20 @@ class StdioProtocolHandler:
             skill_result = load_all_skills(self._project_path)
             agent_names = [s.name for s in skill_result.skills] if skill_result.skills else []
 
+            init_response = InitializeResponseData(
+                session_id=self._session_id or "",
+                system_prompt=system_prompt,
+                tools=[t.name for t in tools],
+                mcp_servers=[MCPServerInfo(name=s.name) for s in servers] if servers else [],
+                slash_commands=[],
+                agents=agent_names,
+                skills=[],
+                plugins=[],
+            )
+
             await self._write_control_response(
                 request_id,
-                response={
-                    "session_id": self._session_id,
-                    "system_prompt": system_prompt,
-                    "tools": [t.name for t in tools],
-                    "mcp_servers": [{"name": s.name} for s in servers] if servers else [],
-                    # Additional fields for Claude SDK compatibility
-                    "slash_commands": [],  # TODO: Implement slash commands
-                    "apiKeySource": "none",
-                    "claude_code_version": "0.1.0",  # Ripperdoc SDK version
-                    "output_style": "default",
-                    "agents": agent_names,
-                    "skills": [],  # Skills are now in agents
-                    "plugins": [],
-                }
+                response=model_to_dict(init_response),
             )
 
         except Exception as e:
@@ -426,6 +438,7 @@ class StdioProtocolHandler:
                 # Run the query and stream messages
                 context: dict[str, Any] = {}
 
+                logger.debug("[stdio] Starting query() async iteration")
                 async for message in query(
                     messages,
                     system_prompt,
@@ -433,6 +446,7 @@ class StdioProtocolHandler:
                     self._query_context,
                     self._can_use_tool,
                 ):
+                    logger.debug(f"[stdio] Received message of type: {getattr(message, 'type', 'unknown')}")
                     num_turns += 1
 
                     # Filter out progress messages (internal implementation detail)
@@ -487,6 +501,7 @@ class StdioProtocolHandler:
                     messages.append(message)  # type: ignore[arg-type]
                     session_history.append(message)  # type: ignore[arg-type]
 
+                logger.debug("[stdio] Query loop ended, building usage info")
                 # Calculate cost (simplified model - can be made more accurate with model-specific pricing)
                 # Using approximate pricing: $3/M input tokens, $15/M output tokens
                 # This is a rough estimate - actual pricing depends on the model used
@@ -497,70 +512,72 @@ class StdioProtocolHandler:
                     (total_output_tokens * cost_per_million_output / 1_000_000)
                 )
 
-                # Build usage dict
-                usage_dict = {
-                    "input_tokens": total_input_tokens,
-                    "cache_creation_input_tokens": total_cache_creation_tokens,
-                    "cache_read_input_tokens": total_cache_read_tokens,
-                    "output_tokens": total_output_tokens,
-                } if (total_input_tokens or total_output_tokens) else None
+                logger.debug("[stdio] Building usage info")
+                # Build usage info
+                usage_info = None
+                if total_input_tokens or total_output_tokens:
+                    usage_info = UsageInfo(
+                        input_tokens=total_input_tokens,
+                        cache_creation_input_tokens=total_cache_creation_tokens,
+                        cache_read_input_tokens=total_cache_read_tokens,
+                        output_tokens=total_output_tokens,
+                    )
 
                 # Send result message
+                logger.debug("[stdio] Creating ResultMessage")
                 duration_ms = int((time.time() - start_time) * 1000)
                 duration_api_ms = duration_ms  # Using total duration for now
 
-                result_message = {
-                    "type": "result",
-                    "subtype": "result",
-                    "duration_ms": duration_ms,
-                    "duration_api_ms": duration_api_ms,
-                    "is_error": is_error,
-                    "num_turns": num_turns,
-                    "session_id": self._session_id or "",
-                    # Optional fields for SDK compatibility
-                    "total_cost_usd": round(total_cost_usd, 8) if total_cost_usd > 0 else None,
-                    "usage": usage_dict,
-                    "result": final_result_text,  # Include final response text
-                    "structured_output": None,
-                }
+                result_message = ResultMessage(
+                    duration_ms=duration_ms,
+                    duration_api_ms=duration_api_ms,
+                    is_error=is_error,
+                    num_turns=num_turns,
+                    session_id=self._session_id or "",
+                    total_cost_usd=round(total_cost_usd, 8) if total_cost_usd > 0 else None,
+                    usage=usage_info,
+                    result=final_result_text,
+                    structured_output=None,
+                )
 
-                await self._write_message_stream(result_message)
+                logger.debug("[stdio] Sending ResultMessage")
+                await self._write_message_stream(model_to_dict(result_message))
+                logger.debug("[stdio] ResultMessage sent")
 
             except KeyboardInterrupt:
                 is_error = True
                 # Send error result message for SDK compatibility
-                await self._write_message_stream({
-                    "type": "result",
-                    "subtype": "result",
-                    "duration_ms": int((time.time() - start_time) * 1000),
-                    "duration_api_ms": 0,
-                    "is_error": True,
-                    "num_turns": num_turns,
-                    "session_id": self._session_id or "",
-                    "total_cost_usd": None,
-                    "usage": None,
-                    "result": "Interrupted by user",
-                    "structured_output": None,
-                })
+                result_message = ResultMessage(
+                    duration_ms=int((time.time() - start_time) * 1000),
+                    duration_api_ms=0,
+                    is_error=True,
+                    num_turns=num_turns,
+                    session_id=self._session_id or "",
+                    total_cost_usd=None,
+                    usage=None,
+                    result="Interrupted by user",
+                    structured_output=None,
+                )
+                await self._write_message_stream(model_to_dict(result_message))
             except Exception as e:
                 is_error = True
                 logger.error(f"Query error: {e}", exc_info=True)
                 # Send error result message for SDK compatibility
-                await self._write_message_stream({
-                    "type": "result",
-                    "subtype": "result",
-                    "duration_ms": int((time.time() - start_time) * 1000),
-                    "duration_api_ms": 0,
-                    "is_error": True,
-                    "num_turns": num_turns,
-                    "session_id": self._session_id or "",
-                    "total_cost_usd": None,
-                    "usage": None,
-                    "result": str(e),
-                    "structured_output": None,
-                })
+                result_message = ResultMessage(
+                    duration_ms=int((time.time() - start_time) * 1000),
+                    duration_api_ms=0,
+                    is_error=True,
+                    num_turns=num_turns,
+                    session_id=self._session_id or "",
+                    total_cost_usd=None,
+                    usage=None,
+                    result=str(e),
+                    structured_output=None,
+                )
+                await self._write_message_stream(model_to_dict(result_message))
 
             # Run session end hooks
+            logger.debug("[stdio] Running session end hooks")
             try:
                 duration = time.time() - start_time
                 await hook_manager.run_session_end_async(
@@ -568,6 +585,7 @@ class StdioProtocolHandler:
                     duration_seconds=duration,
                     message_count=len(messages),
                 )
+                logger.debug("[stdio] Session end hooks completed")
             except Exception as e:
                 logger.warning(f"Session end hook failed: {e}")
 
@@ -608,30 +626,48 @@ class StdioProtocolHandler:
                                 if block_dict:
                                     content_blocks.append(block_dict)
 
-            result = {
-                "type": "assistant",
-                "message": {
-                    "content": content_blocks,
-                    "model": getattr(message, "model", "main"),
-                },
-                "parent_tool_use_id": getattr(message, "parent_tool_use_id", None),
-            }
-            # Sanitize to ensure JSON serializable
-            return self._sanitize_for_json(result)  # type: ignore
+            stream_message = AssistantStreamMessage(
+                message=AssistantMessageData(
+                    content=content_blocks,
+                    model=getattr(message, "model", "main"),
+                ),
+                parent_tool_use_id=getattr(message, "parent_tool_use_id", None),
+            )
+            return model_to_dict(stream_message)
 
         elif msg_type == "user":
             msg_content = getattr(message, "message", None)
             content = getattr(msg_content, "content", "") if msg_content else ""
 
-            result = {
-                "type": "user",
-                "message": {"content": content},
-                "uuid": getattr(message, "uuid", None),
-                "parent_tool_use_id": getattr(message, "parent_tool_use_id", None),
-                "tool_use_result": self._sanitize_for_json(getattr(message, "tool_use_result", None)),
-            }
-            # Sanitize to ensure JSON serializable
-            return self._sanitize_for_json(result)  # type: ignore
+            # If content is a list of MessageContent objects (e.g., tool results),
+            # convert it to a string for the SDK format
+            if isinstance(content, list):
+                # For tool results, the content is a list of MessageContent objects.
+                # Convert to a string representation. For tool_result types, use empty string
+                # since the actual result data is in tool_use_result field.
+                content_str = ""
+                for block in content:
+                    if isinstance(block, dict):
+                        block_type = block.get("type", "")
+                        if block_type == "text" and block.get("text"):
+                            content_str = block.get("text", "")
+                            break
+                    elif hasattr(block, "type"):
+                        block_type = getattr(block, "type", "")
+                        if block_type == "text" and getattr(block, "text", None):
+                            content_str = getattr(block, "text", "")
+                            break
+                        # For tool_result types, we typically use empty string
+                        # since the data is in tool_use_result field
+                content = content_str
+
+            stream_message = UserStreamMessage(
+                message=UserMessageData(content=content),
+                uuid=getattr(message, "uuid", None),
+                parent_tool_use_id=getattr(message, "parent_tool_use_id", None),
+                tool_use_result=self._sanitize_for_json(getattr(message, "tool_use_result", None)),
+            )
+            return model_to_dict(stream_message)
 
         else:
             # Unknown message type - return None to skip
@@ -917,20 +953,20 @@ class StdioProtocolHandler:
                 from ripperdoc_agent_sdk.types import PermissionResultAllow
 
                 if isinstance(result, PermissionResultAllow):
+                    perm_response = PermissionResponseAllow(
+                        updatedInput=result.updated_input or tool_input,
+                    )
                     await self._write_control_response(
                         request_id,
-                        response={
-                            "decision": "allow",
-                            "updatedInput": result.updated_input or tool_input,
-                        }
+                        response=model_to_dict(perm_response),
                     )
                 else:
+                    perm_response = PermissionResponseDeny(
+                        message=result.message if hasattr(result, "message") else "",
+                    )
                     await self._write_control_response(
                         request_id,
-                        response={
-                            "decision": "deny",
-                            "message": result.message if hasattr(result, "message") else "",
-                        }
+                        response=model_to_dict(perm_response),
                     )
             except Exception as e:
                 logger.error(f"Error in permission check: {e}")
@@ -940,12 +976,12 @@ class StdioProtocolHandler:
                 )
         else:
             # No permission checker, allow by default
+            perm_response = PermissionResponseAllow(
+                updatedInput=tool_input,
+            )
             await self._write_control_response(
                 request_id,
-                response={
-                    "decision": "allow",
-                    "updatedInput": tool_input,
-                }
+                response=model_to_dict(perm_response),
             )
 
     async def run(self) -> None:

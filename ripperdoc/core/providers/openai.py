@@ -263,6 +263,15 @@ class OpenAIClient(ProviderClient):
         )
 
         logger.debug(
+            "[openai_client] Starting API request",
+            extra={
+                "model": model_profile.model,
+                "api_base": model_profile.api_base,
+                "request_timeout": request_timeout,
+            },
+        )
+
+        logger.debug(
             "[openai_client] Request parameters",
             extra={
                 "model": model_profile.model,
@@ -569,7 +578,7 @@ class OpenAIClient(ProviderClient):
             },
         )
 
-        logger.info(
+        logger.debug(
             "[openai_client] Response received",
             extra={
                 "model": model_profile.model,

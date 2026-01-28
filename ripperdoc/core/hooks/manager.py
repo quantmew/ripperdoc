@@ -510,10 +510,14 @@ class HookManager:
         stop_sequence: Optional[str] = None,
     ) -> HookResult:
         """Run Stop hooks asynchronously."""
+        logger.debug("[hook_manager] run_stop_async ENTER")
         hooks = self._get_hooks(HookEvent.STOP)
+        logger.debug(f"[hook_manager] run_stop_async: got {len(hooks)} hooks")
         if not hooks:
+            logger.debug("[hook_manager] run_stop_async: no hooks, returning empty HookResult")
             return HookResult([])
 
+        logger.debug("[hook_manager] run_stop_async: creating StopInput")
         input_data = StopInput(
             stop_hook_active=stop_hook_active,
             reason=reason,
@@ -524,7 +528,9 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
+        logger.debug("[hook_manager] run_stop_async: calling executor.execute_hooks_async")
         outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        logger.debug("[hook_manager] run_stop_async: execute_hooks_async returned")
         return HookResult(outputs)
 
     # --- Subagent Stop ---

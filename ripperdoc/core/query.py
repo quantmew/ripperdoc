@@ -1014,7 +1014,7 @@ async def _run_query_iteration(
     Yields:
         Messages (progress, assistant, tool results) as they are generated
     """
-    logger.debug(f"[query] Iteration {iteration}/{MAX_QUERY_ITERATIONS}")
+    logger.info(f"[query] Starting iteration {iteration}/{MAX_QUERY_ITERATIONS}")
 
     # Check for file changes at the start of each iteration
     change_notices = detect_changed_files(query_context.file_state_cache)
@@ -1074,6 +1074,8 @@ async def _run_query_iteration(
             stream=True,
         )
     )
+
+    logger.debug("[query] Created query_llm task, waiting for response...")
 
     assistant_message: Optional[AssistantMessage] = None
 
@@ -1149,8 +1151,10 @@ async def _run_query_iteration(
     )
 
     if not tool_use_blocks:
-        logger.debug("[query] No tool_use blocks; returning response to user.")
+        logger.debug("[query] No tool_use blocks; running stop hook and returning response to user.")
         stop_hook = query_context.stop_hook
+        logger.debug(f"[query] stop_hook={stop_hook}, stop_hook_active={query_context.stop_hook_active}")
+        logger.debug("[query] BEFORE calling hook_manager.run_stop_async")
         stop_result = (
             await hook_manager.run_subagent_stop_async(
                 stop_hook_active=query_context.stop_hook_active
@@ -1158,10 +1162,14 @@ async def _run_query_iteration(
             if stop_hook == "subagent"
             else await hook_manager.run_stop_async(stop_hook_active=query_context.stop_hook_active)
         )
+        logger.debug("[query] AFTER calling hook_manager.run_stop_async")
+        logger.debug("[query] Checking additional_context")
         if stop_result.additional_context:
             _append_hook_context(context, f"{stop_hook}:context", stop_result.additional_context)
+        logger.debug("[query] Checking system_message")
         if stop_result.system_message:
             _append_hook_context(context, f"{stop_hook}:system", stop_result.system_message)
+        logger.debug("[query] Checking should_block")
         if stop_result.should_block:
             reason = stop_result.block_reason or stop_result.stop_reason or "Blocked by hook."
             result.tool_results = [create_user_message(f"{stop_hook} hook blocked: {reason}")]
@@ -1170,6 +1178,7 @@ async def _run_query_iteration(
             query_context.stop_hook_active = True
             result.should_stop = False
             return
+        logger.debug("[query] Setting should_stop=True and returning")
         query_context.stop_hook_active = False
         result.should_stop = True
         return
