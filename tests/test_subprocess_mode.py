@@ -38,46 +38,6 @@ from ripperdoc.sdk.types import (
 )
 
 
-class TestSubprocessModeOptions:
-    """Test subprocess mode options in ClaudeAgentOptions."""
-
-    def test_use_subprocess_default_is_false(self) -> None:
-        """Default value of use_subprocess should be False."""
-        options = ClaudeAgentOptions()
-        assert options.use_subprocess is False
-
-    def test_use_subprocess_can_be_enabled(self) -> None:
-        """use_subprocess can be set to True."""
-        options = ClaudeAgentOptions(use_subprocess=True)
-        assert options.use_subprocess is True
-
-    def test_cli_path_default_is_none(self) -> None:
-        """Default value of cli_path should be None."""
-        options = ClaudeAgentOptions()
-        assert options.cli_path is None
-
-    def test_cli_path_can_be_set(self) -> None:
-        """cli_path can be set to a string or Path."""
-        options = ClaudeAgentOptions(cli_path="/path/to/ripperdoc")
-        assert options.cli_path == "/path/to/ripperdoc"
-
-        options2 = ClaudeAgentOptions(cli_path=Path("/another/path"))
-        assert options2.cli_path == Path("/another/path")
-
-    def test_use_subprocess_with_other_options(self) -> None:
-        """use_subprocess works with other options."""
-        options = ClaudeAgentOptions(
-            use_subprocess=True,
-            model="claude-3-5-sonnet",
-            permission_mode="bypassPermissions",
-            allowed_tools=["Bash", "Read"],
-        )
-        assert options.use_subprocess is True
-        assert options.model == "claude-3-5-sonnet"
-        assert options.permission_mode == "bypassPermissions"
-        assert options.allowed_tools == ["Bash", "Read"]
-
-
 class TestMessageParser:
     """Test message parsing from CLI output."""
 
@@ -315,21 +275,15 @@ class TestQueryClass:
 class TestSubprocessClient:
     """Test subprocess mode client functionality."""
 
-    def test_client_with_subprocess_mode(self) -> None:
-        """Test client creation with subprocess mode."""
-        options = ClaudeAgentOptions(use_subprocess=True)
+    def test_client_initialization(self) -> None:
+        """Test client creates subprocess components."""
+        options = ClaudeAgentOptions()
         client = RipperdocSDKClient(options=options)
 
-        assert client._use_subprocess is True
         # Subprocess components should be initialized
         assert hasattr(client, "_transport_options")
-
-    def test_client_with_in_process_mode(self) -> None:
-        """Test client creation with in-process mode (default)."""
-        options = ClaudeAgentOptions(use_subprocess=False)
-        client = RipperdocSDKClient(options=options)
-
-        assert client._use_subprocess is False
+        assert hasattr(client, "_transport")
+        assert hasattr(client, "_query")
 
     def test_build_transport_options(self) -> None:
         """Test building transport options from ClaudeAgentOptions."""
@@ -351,7 +305,7 @@ class TestSubprocessClient:
     @pytest.mark.asyncio
     async def test_subprocess_connect_mocked(self) -> None:
         """Test subprocess connection with mocked transport."""
-        options = ClaudeAgentOptions(use_subprocess=True)
+        options = ClaudeAgentOptions()
 
         with patch(
             "ripperdoc.sdk.client._subprocess_transport",
@@ -472,7 +426,6 @@ class TestIntegration:
     async def test_full_subprocess_flow_mocked(self) -> None:
         """Test full subprocess flow with mocked components."""
         options = ClaudeAgentOptions(
-            use_subprocess=True,
             model="test-model",
             permission_mode="default",
         )
@@ -505,35 +458,30 @@ class TestIntegration:
 
 
 class TestBackwardCompatibility:
-    """Test backward compatibility with in-process mode."""
+    """Test backward compatibility with SDK API.
 
-    @pytest.mark.asyncio
-    async def test_in_process_mode_still_works(self) -> None:
-        """Test that in-process mode still works correctly."""
-        options = ClaudeAgentOptions(use_subprocess=False)
-        client = RipperdocSDKClient(options=options)
+    Note: In-process mode has been removed. The SDK now only supports
+    subprocess mode. These tests verify that the API remains compatible.
+    """
 
-        assert client._use_subprocess is False
-        # Should not have subprocess components initialized
-        assert client._transport is None
-        assert client._query is None
-
-    def test_default_mode_is_in_process(self) -> None:
-        """Test that default mode is in-process."""
+    def test_subprocess_mode_is_default(self) -> None:
+        """Test that subprocess mode is the default and only mode."""
         options = ClaudeAgentOptions()
-        assert options.use_subprocess is False
+        # Client should have subprocess components initialized
+        client = RipperdocSDKClient(options=options)
+        assert hasattr(client, "_transport_options")
+        assert client._transport is None  # Not connected yet
+        assert client._query is None  # Not connected yet
 
-    def test_subprocess_option_does_not_break_other_options(self) -> None:
-        """Test that use_subprocess doesn't interfere with other options."""
+    def test_options_work_with_all_parameters(self) -> None:
+        """Test that options work with all parameters."""
         options = ClaudeAgentOptions(
-            use_subprocess=True,
             model="test-model",
             permission_mode="bypassPermissions",
             allowed_tools=["Bash"],
             max_turns=10,
         )
 
-        assert options.use_subprocess is True
         assert options.model == "test-model"
         assert options.permission_mode == "bypassPermissions"
         assert options.allowed_tools == ["Bash"]
@@ -555,7 +503,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_subprocess_connect_failure(self) -> None:
         """Test handling of subprocess connection failure."""
-        options = ClaudeAgentOptions(use_subprocess=True)
+        options = ClaudeAgentOptions()
 
         # Mock transport that raises on connect
         class FailingTransport(Transport):

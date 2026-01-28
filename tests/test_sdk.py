@@ -1,4 +1,8 @@
-"""Tests for the headless SDK."""
+"""Tests for the headless SDK.
+
+Note: In-process mode has been removed. The SDK now only supports
+subprocess mode. Tests for in-process mode have been removed.
+"""
 
 import asyncio
 
@@ -11,45 +15,75 @@ async def _fake_runner(messages, system_prompt, context, query_context, permissi
     yield create_assistant_message("OK")
 
 
-def test_tool_filtering_respects_allowed_names():
-    async def _run():
-        options = RipperdocOptions(
-            allowed_tools=["Bash", "Read", "Task"],
-            yolo_mode=True,
-        )
-        client = RipperdocClient(options=options, query_runner=_fake_runner)
-        await client.connect()
-
-        names = {tool.name for tool in client.tools}
-        assert names == {"Bash", "Read", "Task"}
-
-        task_tool = next(tool for tool in client.tools if tool.name == "Task")
-        base_names = {tool.name for tool in task_tool._available_tools_provider()}  # type: ignore[attr-defined]
-        assert base_names == {"Bash", "Read"}
-
-        await client.disconnect()
-
-    asyncio.run(_run())
+def test_sdk_imports_work():
+    """Test that basic SDK imports work."""
+    from ripperdoc.sdk import (
+        RipperdocClient,
+        RipperdocOptions,
+        ClaudeAgentOptions,
+        ClaudeSDKClient,
+        query,
+        Message,
+        UserMessage,
+        AssistantMessage,
+        SystemMessage,
+        ResultMessage,
+    )
+    # Verify aliases work
+    assert RipperdocClient is ClaudeSDKClient
+    assert RipperdocOptions is ClaudeAgentOptions
 
 
-def test_query_helper_streams_messages():
-    async def _run():
+def test_options_can_be_created():
+    """Test that options can be created."""
+    options = RipperdocOptions(
+        allowed_tools=["Bash", "Read", "Task"],
+        permission_mode="bypassPermissions",
+    )
+    assert options.allowed_tools == ["Bash", "Read", "Task"]
+    assert options.permission_mode == "bypassPermissions"
+
+
+def test_options_yolo_mode_deprecation():
+    """Test that yolo_mode still works but sets permission_mode."""
+    import warnings
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
         options = RipperdocOptions(yolo_mode=True)
-        messages = []
+        assert options.permission_mode == "bypassPermissions"
+        assert len(w) == 1
+        assert issubclass(w[0].category, DeprecationWarning)
+        assert "yolo_mode is deprecated" in str(w[0].message)
 
-        async for message in sdk_query(prompt="hello", options=options, query_runner=_fake_runner):
-            messages.append(message)
 
-        assert messages
-        # Messages are now in Claude SDK format (AssistantMessage)
-        # The content can be a string or list of ContentBlocks
-        msg = messages[0]
-        # Handle both string content and list of blocks
-        if isinstance(msg.content, str):
-            content = msg.content
-        else:
-            # First block should be a TextBlock
-            content = msg.content[0].text
-        assert content == "OK"
+def test_client_can_be_created():
+    """Test that client can be created."""
+    options = RipperdocOptions()
+    client = RipperdocClient(options=options)
+    assert client.options == options
+    assert client._connected is False
 
-    asyncio.run(_run())
+
+def test_client_properties():
+    """Test that client properties work."""
+    options = RipperdocOptions(
+        model="test-model",
+        user="test-user",
+    )
+    client = RipperdocClient(options=options)
+
+    assert client.session_id is None
+    assert client.turn_count == 0
+    assert client.user == "test-user"
+    assert client.history == []
+
+
+def test_options_build_tools():
+    """Test that build_tools works."""
+    options = RipperdocOptions(
+        allowed_tools=["Bash", "Read"],
+    )
+    tools = options.build_tools()
+    tool_names = {tool.name for tool in tools}
+    assert "Bash" in tool_names
+    assert "Read" in tool_names

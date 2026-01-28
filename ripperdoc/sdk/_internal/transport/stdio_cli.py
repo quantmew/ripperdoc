@@ -6,6 +6,7 @@ It uses anyio for better async/await patterns and portability.
 
 from __future__ import annotations
 
+import asyncio
 import errno
 import json
 import logging
@@ -229,8 +230,7 @@ class SubprocessCLITransport(Transport):
             # Setup stderr stream
             if self._process.stderr:
                 self._stderr_stream = TextReceiveStream(self._process.stderr)
-                self._stderr_task = anyio.create_task()
-                await self._stderr_task.start(self._handle_stderr)
+                self._stderr_task = asyncio.create_task(self._handle_stderr())
 
             # Setup stdin for streaming mode
             if self._is_streaming and self._process.stdin:
@@ -415,7 +415,7 @@ class SubprocessCLITransport(Transport):
         if self._stderr_task:
             with suppress(Exception):
                 self._stderr_task.cancel()
-                with suppress(anyio.TimeoutError):
+                with suppress(asyncio.CancelledError, asyncio.TimeoutError):
                     await self._stderr_task
             self._stderr_task = None
 
