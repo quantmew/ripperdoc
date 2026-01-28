@@ -176,6 +176,7 @@ class UserMessage(BaseModel):
     type: str = "user"
     message: Message
     uuid: str = ""
+    parent_tool_use_id: Optional[str] = None
     tool_use_result: Optional[object] = None
 
     def __init__(self, **data: object) -> None:
@@ -190,6 +191,7 @@ class AssistantMessage(BaseModel):
     type: str = "assistant"
     message: Message
     uuid: str = ""
+    parent_tool_use_id: Optional[str] = None
     cost_usd: float = 0.0
     duration_ms: float = 0.0
     is_api_error_message: bool = False
@@ -199,6 +201,7 @@ class AssistantMessage(BaseModel):
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    error: Optional[str] = None
 
     def __init__(self, **data: object) -> None:
         if "uuid" not in data or not data["uuid"]:
@@ -224,7 +227,9 @@ class ProgressMessage(BaseModel):
 
 
 def create_user_message(
-    content: Union[str, List[Dict[str, Any]]], tool_use_result: Optional[object] = None
+    content: Union[str, List[Dict[str, Any]]],
+    tool_use_result: Optional[object] = None,
+    parent_tool_use_id: Optional[str] = None,
 ) -> UserMessage:
     """Create a user message."""
     if isinstance(content, str):
@@ -258,7 +263,11 @@ def create_user_message(
                 f"ids={[getattr(b, 'tool_use_id', None) for b in tool_result_blocks]}"
             )
 
-    return UserMessage(message=message, tool_use_result=tool_use_result)
+    return UserMessage(
+        message=message,
+        tool_use_result=tool_use_result,
+        parent_tool_use_id=parent_tool_use_id,
+    )
 
 
 def create_assistant_message(
@@ -272,6 +281,8 @@ def create_assistant_message(
     output_tokens: int = 0,
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
+    parent_tool_use_id: Optional[str] = None,
+    error: Optional[str] = None,
 ) -> AssistantMessage:
     """Create an assistant message."""
     if isinstance(content, str):
@@ -295,6 +306,8 @@ def create_assistant_message(
         output_tokens=output_tokens,
         cache_read_tokens=cache_read_tokens,
         cache_creation_tokens=cache_creation_tokens,
+        parent_tool_use_id=parent_tool_use_id,
+        error=error,
     )
 
 

@@ -74,6 +74,9 @@ class StdioProtocolHandler:
         self._hooks: dict[str, list[dict[str, Any]]] = {}
         self._pending_requests: dict[str, Any] = {}
 
+        # Conversation history for multi-turn queries
+        self._conversation_messages: list[Any] = []
+
     async def _write_message(self, message: dict[str, Any]) -> None:
         """Write a JSON message to stdout.
 
@@ -287,13 +290,27 @@ class StdioProtocolHandler:
             self._initialized = True
 
             # Send success response with available tools
+            # Use simple list format for Claude SDK compatibility
+            # Get skill info for agents list
+            from ripperdoc.core.skills import load_all_skills
+            skill_result = load_all_skills(self._project_path)
+            agent_names = [s.name for s in skill_result.skills] if skill_result.skills else []
+
             await self._write_control_response(
                 request_id,
                 response={
                     "session_id": self._session_id,
                     "system_prompt": system_prompt,
-                    "tools": [{"name": t.name} for t in tools],
+                    "tools": [t.name for t in tools],
                     "mcp_servers": [{"name": s.name} for s in servers] if servers else [],
+                    # Additional fields for Claude SDK compatibility
+                    "slash_commands": [],  # TODO: Implement slash commands
+                    "apiKeySource": "none",
+                    "claude_code_version": "0.1.0",  # Ripperdoc SDK version
+                    "output_style": "default",
+                    "agents": agent_names,
+                    "skills": [],  # Skills are now in agents
+                    "plugins": [],
                 }
             )
 
@@ -334,8 +351,13 @@ class StdioProtocolHandler:
             # Create initial user message
             from ripperdoc.utils.messages import UserMessage, AssistantMessage
 
-            messages: list[UserMessage | AssistantMessage] = [create_user_message(prompt)]
-            session_history.append(messages[0])
+            # Add the new user message to conversation history
+            user_message = create_user_message(prompt)
+            self._conversation_messages.append(user_message)
+            session_history.append(user_message)
+
+            # Use the conversation history for messages (maintains context across queries)
+            messages = list(self._conversation_messages)
 
             # Build system prompt
             additional_instructions: list[str] = []
@@ -392,6 +414,13 @@ class StdioProtocolHandler:
             start_time = time.time()
             num_turns = 0
             is_error = False
+            final_result_text = None  # Track final response text for ResultMessage
+
+            # Track token usage and cost
+            total_input_tokens = 0
+            total_output_tokens = 0
+            total_cache_read_tokens = 0
+            total_cache_creation_tokens = 0
 
             try:
                 # Run the query and stream messages
@@ -406,42 +435,129 @@ class StdioProtocolHandler:
                 ):
                     num_turns += 1
 
+                    # Filter out progress messages (internal implementation detail)
+                    msg_type = getattr(message, "type", None)
+                    if msg_type == "progress":
+                        # Progress messages are for internal debugging only
+                        continue
+
+                    # Track token usage from assistant messages
+                    if msg_type == "assistant":
+                        # Accumulate token usage
+                        total_input_tokens += getattr(message, "input_tokens", 0)
+                        total_output_tokens += getattr(message, "output_tokens", 0)
+                        total_cache_read_tokens += getattr(message, "cache_read_tokens", 0)
+                        total_cache_creation_tokens += getattr(message, "cache_creation_tokens", 0)
+
+                        msg_content = getattr(message, "message", None)
+                        if msg_content:
+                            content = getattr(msg_content, "content", None)
+                            if content:
+                                # Extract text blocks for result field
+                                if isinstance(content, str):
+                                    final_result_text = content
+                                elif isinstance(content, list):
+                                    # Concatenate text blocks
+                                    text_parts = []
+                                    for block in content:
+                                        if isinstance(block, dict):
+                                            if block.get("type") == "text":
+                                                text_parts.append(block.get("text", ""))
+                                            elif block.get("type") == "tool_use":
+                                                # Clear result when tool use happens (next text will be final)
+                                                text_parts.clear()
+                                        elif hasattr(block, "type"):
+                                            if block.type == "text":
+                                                text_parts.append(getattr(block, "text", ""))
+                                    if text_parts:
+                                        final_result_text = "\n".join(text_parts)
+
                     # Convert message to SDK format
                     message_dict = self._convert_message_to_sdk(message)
+                    if message_dict is None:
+                        # Skip messages that shouldn't be sent to SDK
+                        continue
                     await self._write_message_stream(message_dict)
 
-                    # Add to history
+                    # Add to conversation history (for context in next queries)
+                    if msg_type == "assistant":
+                        self._conversation_messages.append(message)
+
+                    # Add to local history and session history
                     messages.append(message)  # type: ignore[arg-type]
                     session_history.append(message)  # type: ignore[arg-type]
 
+                # Calculate cost (simplified model - can be made more accurate with model-specific pricing)
+                # Using approximate pricing: $3/M input tokens, $15/M output tokens
+                # This is a rough estimate - actual pricing depends on the model used
+                cost_per_million_input = 3.0
+                cost_per_million_output = 15.0
+                total_cost_usd = (
+                    (total_input_tokens * cost_per_million_input / 1_000_000) +
+                    (total_output_tokens * cost_per_million_output / 1_000_000)
+                )
+
+                # Build usage dict
+                usage_dict = {
+                    "input_tokens": total_input_tokens,
+                    "cache_creation_input_tokens": total_cache_creation_tokens,
+                    "cache_read_input_tokens": total_cache_read_tokens,
+                    "output_tokens": total_output_tokens,
+                } if (total_input_tokens or total_output_tokens) else None
+
                 # Send result message
                 duration_ms = int((time.time() - start_time) * 1000)
+                duration_api_ms = duration_ms  # Using total duration for now
 
                 result_message = {
                     "type": "result",
+                    "subtype": "result",
                     "duration_ms": duration_ms,
-                    "duration_api_ms": 0,  # Not tracking separately yet
+                    "duration_api_ms": duration_api_ms,
                     "is_error": is_error,
                     "num_turns": num_turns,
                     "session_id": self._session_id or "",
+                    # Optional fields for SDK compatibility
+                    "total_cost_usd": round(total_cost_usd, 8) if total_cost_usd > 0 else None,
+                    "usage": usage_dict,
+                    "result": final_result_text,  # Include final response text
+                    "structured_output": None,
                 }
 
                 await self._write_message_stream(result_message)
 
             except KeyboardInterrupt:
                 is_error = True
+                # Send error result message for SDK compatibility
                 await self._write_message_stream({
-                    "type": "system",
-                    "subtype": "error",
-                    "data": {"message": "Interrupted by user"},
+                    "type": "result",
+                    "subtype": "result",
+                    "duration_ms": int((time.time() - start_time) * 1000),
+                    "duration_api_ms": 0,
+                    "is_error": True,
+                    "num_turns": num_turns,
+                    "session_id": self._session_id or "",
+                    "total_cost_usd": None,
+                    "usage": None,
+                    "result": "Interrupted by user",
+                    "structured_output": None,
                 })
             except Exception as e:
                 is_error = True
                 logger.error(f"Query error: {e}", exc_info=True)
+                # Send error result message for SDK compatibility
                 await self._write_message_stream({
-                    "type": "system",
-                    "subtype": "error",
-                    "data": {"message": str(e)},
+                    "type": "result",
+                    "subtype": "result",
+                    "duration_ms": int((time.time() - start_time) * 1000),
+                    "duration_api_ms": 0,
+                    "is_error": True,
+                    "num_turns": num_turns,
+                    "session_id": self._session_id or "",
+                    "total_cost_usd": None,
+                    "usage": None,
+                    "result": str(e),
+                    "structured_output": None,
                 })
 
             # Run session end hooks
@@ -459,16 +575,20 @@ class StdioProtocolHandler:
             logger.error(f"Handle query failed: {e}", exc_info=True)
             await self._write_control_response(request_id, error=str(e))
 
-    def _convert_message_to_sdk(self, message: Any) -> dict[str, Any]:
+    def _convert_message_to_sdk(self, message: Any) -> dict[str, Any] | None:
         """Convert internal message to SDK format.
 
         Args:
             message: The internal message object.
 
         Returns:
-            A dictionary in SDK message format.
+            A dictionary in SDK message format, or None if message should be skipped.
         """
         msg_type = getattr(message, "type", None)
+
+        # Filter out progress messages (internal implementation detail)
+        if msg_type == "progress":
+            return None
 
         if msg_type == "assistant":
             content_blocks = []
@@ -483,61 +603,169 @@ class StdioProtocolHandler:
                             if isinstance(block, dict):
                                 content_blocks.append(block)
                             else:
-                                # Convert dataclass to dict
-                                block_dict = {}
-                                if hasattr(block, "type"):
-                                    block_dict["type"] = block.type
-                                if hasattr(block, "text"):
-                                    block_dict["text"] = block.text
-                                if hasattr(block, "id"):
-                                    block_dict["id"] = block.id
-                                if hasattr(block, "name"):
-                                    block_dict["name"] = block.name
-                                if hasattr(block, "input"):
-                                    block_dict["input"] = block.input
-                                if hasattr(block, "tool_use_id"):
-                                    block_dict["tool_use_id"] = block.tool_use_id
-                                if hasattr(block, "content"):
-                                    block_dict["content"] = block.content
-                                if hasattr(block, "is_error"):
-                                    block_dict["is_error"] = block.is_error
+                                # Convert MessageContent (Pydantic model) to dict
+                                block_dict = self._convert_content_block(block)
                                 if block_dict:
                                     content_blocks.append(block_dict)
 
-            return {
+            result = {
                 "type": "assistant",
                 "message": {
                     "content": content_blocks,
                     "model": getattr(message, "model", "main"),
                 },
-                "parent_tool_use_id": getattr(message, "parent_tool_use_id"),
+                "parent_tool_use_id": getattr(message, "parent_tool_use_id", None),
             }
+            # Sanitize to ensure JSON serializable
+            return self._sanitize_for_json(result)  # type: ignore
 
         elif msg_type == "user":
             msg_content = getattr(message, "message", None)
             content = getattr(msg_content, "content", "") if msg_content else ""
-            return {
+
+            result = {
                 "type": "user",
                 "message": {"content": content},
                 "uuid": getattr(message, "uuid", None),
                 "parent_tool_use_id": getattr(message, "parent_tool_use_id", None),
-                "tool_use_result": getattr(message, "tool_use_result", None),
+                "tool_use_result": self._sanitize_for_json(getattr(message, "tool_use_result", None)),
+            }
+            # Sanitize to ensure JSON serializable
+            return self._sanitize_for_json(result)  # type: ignore
+
+        else:
+            # Unknown message type - return None to skip
+            return None
+
+    def _sanitize_for_json(self, obj: Any) -> Any:
+        """Recursively convert objects to JSON-serializable types.
+
+        This function ensures Pydantic models and other objects are converted
+        to dictionaries/lists/primitives that can be JSON serialized.
+
+        Args:
+            obj: The object to sanitize.
+
+        Returns:
+            A JSON-serializable version of the object.
+        """
+        # None values
+        if obj is None:
+            return None
+
+        # Primitives
+        elif isinstance(obj, (str, int, float, bool)):
+            return obj
+
+        # Lists and tuples
+        elif isinstance(obj, (list, tuple)):
+            return [self._sanitize_for_json(item) for item in obj]
+
+        # Dictionaries
+        elif isinstance(obj, dict):
+            return {key: self._sanitize_for_json(value) for key, value in obj.items()}
+
+        # Pydantic models
+        elif hasattr(obj, "model_dump"):
+            try:
+                dumped = obj.model_dump(exclude_none=True)
+                return self._sanitize_for_json(dumped)
+            except Exception:
+                pass
+
+        # Objects with dict() method
+        elif hasattr(obj, "dict"):
+            try:
+                dumped = obj.dict(exclude_none=True)
+                return self._sanitize_for_json(dumped)
+            except Exception:
+                pass
+
+        # Fallback: try to convert to string
+        else:
+            try:
+                return str(obj)
+            except Exception:
+                return None
+
+    def _convert_content_block(self, block: Any) -> dict[str, Any] | None:
+        """Convert a MessageContent block to dictionary.
+
+        Uses the same logic as _content_block_to_api in messages.py
+        to ensure consistency and proper field mapping.
+
+        Args:
+            block: The MessageContent object.
+
+        Returns:
+            A dictionary representation of the block.
+        """
+        block_type = getattr(block, "type", None)
+
+        if block_type == "text":
+            return {
+                "type": "text",
+                "text": getattr(block, "text", None) or "",
             }
 
-        elif msg_type == "progress":
+        elif block_type == "thinking":
             return {
-                "type": "progress",
-                "tool_use_id": getattr(message, "tool_use_id", None),
-                "content": getattr(message, "content", None),
+                "type": "thinking",
+                "thinking": getattr(block, "thinking", None) or getattr(block, "text", None) or "",
+                "signature": getattr(block, "signature", None),
+            }
+
+        elif block_type == "tool_use":
+            # Use the same id extraction logic as _content_block_to_api
+            # Try id first, then tool_use_id, then empty string
+            tool_id = (
+                getattr(block, "id", None) or
+                getattr(block, "tool_use_id", None) or
+                ""
+            )
+            return {
+                "type": "tool_use",
+                "id": tool_id,
+                "name": getattr(block, "name", None) or "",
+                "input": getattr(block, "input", None) or {},
+            }
+
+        elif block_type == "tool_result":
+            return {
+                "type": "tool_result",
+                "tool_use_id": getattr(block, "tool_use_id", None) or getattr(block, "id", None) or "",
+                "content": getattr(block, "text", None) or getattr(block, "content", None) or "",
+                "is_error": getattr(block, "is_error", None),
+            }
+
+        elif block_type == "image":
+            return {
+                "type": "image",
+                "source": {
+                    "type": getattr(block, "source_type", None) or "base64",
+                    "media_type": getattr(block, "media_type", None) or "image/jpeg",
+                    "data": getattr(block, "image_data", None) or "",
+                },
             }
 
         else:
-            # Unknown message type
-            return {
-                "type": "system",
-                "subtype": "unknown",
-                "data": {"message_type": str(msg_type)},
-            }
+            # Unknown block type - try to convert with generic approach
+            block_dict = {}
+            if hasattr(block, "type"):
+                block_dict["type"] = block.type
+            if hasattr(block, "text"):
+                block_dict["text"] = block.text
+            if hasattr(block, "id"):
+                block_dict["id"] = block.id
+            if hasattr(block, "name"):
+                block_dict["name"] = block.name
+            if hasattr(block, "input"):
+                block_dict["input"] = block.input
+            if hasattr(block, "content"):
+                block_dict["content"] = block.content
+            if hasattr(block, "is_error"):
+                block_dict["is_error"] = block.is_error
+            return block_dict if block_dict else None
 
     async def _handle_control_request(self, message: dict[str, Any]) -> None:
         """Handle a control request from the SDK.
@@ -556,6 +784,21 @@ class StdioProtocolHandler:
             elif request_subtype == "query":
                 await self._handle_query(request, request_id)
 
+            elif request_subtype == "set_permission_mode":
+                await self._handle_set_permission_mode(request, request_id)
+
+            elif request_subtype == "set_model":
+                await self._handle_set_model(request, request_id)
+
+            elif request_subtype == "rewind_files":
+                await self._handle_rewind_files(request, request_id)
+
+            elif request_subtype == "hook_callback":
+                await self._handle_hook_callback(request, request_id)
+
+            elif request_subtype == "can_use_tool":
+                await self._handle_can_use_tool(request, request_id)
+
             else:
                 await self._write_control_response(
                     request_id,
@@ -565,6 +808,145 @@ class StdioProtocolHandler:
         except Exception as e:
             logger.error(f"Error handling control request: {e}", exc_info=True)
             await self._write_control_response(request_id, error=str(e))
+
+    async def _handle_set_permission_mode(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Handle set_permission_mode request from SDK.
+
+        Args:
+            request: The set_permission_mode request data.
+            request_id: The request ID.
+        """
+        mode = request.get("mode", "default")
+        # Update the permission mode in the query context
+        if self._query_context:
+            # Map string mode to yolo_mode boolean
+            self._query_context.yolo_mode = (mode == "bypassPermissions")
+
+        await self._write_control_response(
+            request_id,
+            response={"status": "permission_mode_set", "mode": mode}
+        )
+
+    async def _handle_set_model(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Handle set_model request from SDK.
+
+        Args:
+            request: The set_model request data.
+            request_id: The request ID.
+        """
+        model = request.get("model")
+        # Update the model in the query context
+        if self._query_context:
+            self._query_context.model = model or "main"
+
+        await self._write_control_response(
+            request_id,
+            response={"status": "model_set", "model": model}
+        )
+
+    async def _handle_rewind_files(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Handle rewind_files request from SDK.
+
+        Note: File checkpointing is not currently supported.
+        This method exists for Claude SDK API compatibility.
+
+        Args:
+            request: The rewind_files request data.
+            request_id: The request ID.
+        """
+        await self._write_control_response(
+            request_id,
+            error="File checkpointing and rewind_files are not currently supported"
+        )
+
+    async def _handle_hook_callback(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Handle hook_callback request from SDK.
+
+        Args:
+            request: The hook_callback request data.
+            request_id: The request ID.
+        """
+        # Get callback info
+        callback_id = request.get("callback_id")
+        input_data = request.get("input", {})
+        tool_use_id = request.get("tool_use_id")
+
+        # For now, return a basic response
+        # Full hook support would require integration with hook_manager
+        await self._write_control_response(
+            request_id,
+            response={
+                "continue": True,
+            }
+        )
+
+    async def _handle_can_use_tool(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Handle can_use_tool request from SDK.
+
+        Args:
+            request: The can_use_tool request data.
+            request_id: The request ID.
+        """
+        tool_name = request.get("tool_name", "")
+        tool_input = request.get("input", {})
+
+        # Use the permission checker if available
+        if self._can_use_tool:
+            try:
+                # Call the permission checker
+                from ripperdoc_agent_sdk.types import ToolPermissionContext
+
+                context = ToolPermissionContext(
+                    signal=None,
+                    suggestions=[],
+                )
+
+                result = await self._can_use_tool(tool_name, tool_input, context)
+
+                # Convert result to response format
+                from ripperdoc_agent_sdk.types import PermissionResultAllow
+
+                if isinstance(result, PermissionResultAllow):
+                    await self._write_control_response(
+                        request_id,
+                        response={
+                            "decision": "allow",
+                            "updatedInput": result.updated_input or tool_input,
+                        }
+                    )
+                else:
+                    await self._write_control_response(
+                        request_id,
+                        response={
+                            "decision": "deny",
+                            "message": result.message if hasattr(result, "message") else "",
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Error in permission check: {e}")
+                await self._write_control_response(
+                    request_id,
+                    error=str(e)
+                )
+        else:
+            # No permission checker, allow by default
+            await self._write_control_response(
+                request_id,
+                response={
+                    "decision": "allow",
+                    "updatedInput": tool_input,
+                }
+            )
 
     async def run(self) -> None:
         """Main run loop for the stdio protocol handler.

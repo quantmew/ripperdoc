@@ -599,7 +599,7 @@ def stdio_cmd(
     This command enables Ripperdoc to communicate with SDKs via JSON Control
     Protocol over stdin/stdout.
     """
-    from ripperdoc.cli.commands.stdio_cmd import _run_stdio
+    from ripperdoc.protocol.stdio import _run_stdio
     import asyncio
 
     asyncio.run(_run_stdio(
