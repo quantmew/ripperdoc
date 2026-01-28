@@ -114,7 +114,7 @@ def read_file_with_encoding(file_path: str) -> Tuple[Optional[List[str]], str, O
     )
     return None, "", error_msg
 
-# Maximum file size to read (default 256KB, aligned with Claude Code official limit)
+# Maximum file size to read (default 256KB)
 # Can be overridden via env var in bytes
 MAX_FILE_SIZE_BYTES = int(os.getenv("RIPPERDOC_MAX_READ_FILE_SIZE_BYTES", "262144"))  # 256KB
 

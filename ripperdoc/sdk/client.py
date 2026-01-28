@@ -1,7 +1,4 @@
 """Headless Python SDK for Ripperdoc.
-
-`query` helper for simple calls and a `RipperdocClient` for long-lived
-sessions that keep conversation history.
 """
 
 from __future__ import annotations
@@ -11,6 +8,7 @@ import os
 import time
 import uuid
 import warnings
+from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -39,9 +37,9 @@ from ripperdoc.tools.task_tool import TaskTool
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.messages import (
-    AssistantMessage,
-    ProgressMessage,
-    UserMessage,
+    AssistantMessage as RipperdocAssistantMessage,
+    ProgressMessage as RipperdocProgressMessage,
+    UserMessage as RipperdocUserMessage,
     create_assistant_message,
     create_user_message,
 )
@@ -57,20 +55,57 @@ from ripperdoc.utils.session_history import (
 )
 from ripperdoc.utils.log import get_logger
 
+from .types import (
+    Message,
+    UserMessage,
+    AssistantMessage,
+    SystemMessage,
+    ResultMessage,
+    ContentBlock,
+    TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
+    ToolResultBlock,
+    PermissionMode as TypedPermissionMode,
+    SettingSource as TypedSettingSource,
+    McpServerConfig as TypedMcpServerConfig,
+    AgentDefinition as TypedAgentDefinition,
+    HookMatcher as TypedHookMatcher,
+    CanUseTool,
+    ToolPermissionContext,
+    PermissionResultAllow,
+    PermissionResultDeny,
+    PermissionUpdate,
+    SdkBeta,
+    SandboxSettings,
+    SystemPromptPreset,
+    ToolsPreset,
+)
+from .adapter import (
+    MessageAdapter,
+    AsyncMessageAdapter,
+    ResultMessageFactory,
+)
 
-class PermissionMode(str, Enum):
-    """Permission mode for SDK operations.
 
-    - DEFAULT: Standard permission behavior, prompts for dangerous operations
-    - ACCEPT_EDITS: Auto-accept file edits without prompting
-    - BYPASS_PERMISSIONS: Bypass all permission checks (equivalent to yolo_mode)
-    - PLAN: Planning mode - no execution, only planning
+# PermissionMode: Use Literal type
+# This is a type alias, not a class
+PermissionMode = TypedPermissionMode
+
+# Helper class for backward compatibility with code that uses PermissionMode.DEFAULT
+class _PermissionModeCompat:
+    """Compatibility class for PermissionMode enum-like access.
+
+    Deprecated: Use string literals directly instead.
+    Example: Use "default" instead of PermissionMode.DEFAULT
     """
-
     DEFAULT = "default"
     ACCEPT_EDITS = "acceptEdits"
     BYPASS_PERMISSIONS = "bypassPermissions"
     PLAN = "plan"
+
+# For backward compatibility, create an enum-like object
+PermissionModeCompat = _PermissionModeCompat()
 
 
 @dataclass
@@ -97,6 +132,49 @@ class McpServerConfig:
     # Optional instructions for the server
     instructions: Optional[str] = None
 
+    def to_typed_dict(self) -> TypedMcpServerConfig:
+        """Convert to Claude SDK compatible TypedDict format."""
+        if self.type == "stdio":
+            return {
+                "type": "stdio",
+                "command": self.command or "",
+                **({"args": self.args} if self.args else {}),
+                **({"env": self.env} if self.env else {}),
+            }
+        elif self.type == "sse":
+            return {
+                "type": "sse",
+                "url": self.url or "",
+                **({"headers": self.headers} if self.headers else {}),
+            }
+        elif self.type == "http":
+            return {
+                "type": "http",
+                "url": self.url or "",
+                **({"headers": self.headers} if self.headers else {}),
+            }
+        else:
+            # Default to stdio
+            return {
+                "type": "stdio",
+                "command": self.command or "",
+            }
+
+    @classmethod
+    def from_typed_dict(cls, config: TypedMcpServerConfig) -> "McpServerConfig":
+        """Create from Claude SDK compatible TypedDict format."""
+        server_type = config.get("type", "stdio")
+        return cls(
+            type=server_type,
+            command=config.get("command"),
+            args=config.get("args"),
+            url=config.get("url"),
+            env=config.get("env"),
+            headers=config.get("headers"),
+            description=config.get("description"),
+            instructions=config.get("instructions"),
+        )
+
 
 @dataclass
 class AgentConfig:
@@ -118,6 +196,41 @@ class AgentConfig:
     # Whether to fork context for this agent
     fork_context: bool = False
 
+    def to_agent_definition(self) -> TypedAgentDefinition:
+        """Convert to Claude SDK compatible AgentDefinition."""
+        return TypedAgentDefinition(
+            description=self.description,
+            prompt=self.prompt,
+            tools=self.tools,
+            model=self._map_model_value(self.model),
+        )
+
+    @staticmethod
+    def _map_model_value(model: Optional[str]) -> Optional[Literal["sonnet", "opus", "haiku", "inherit"]]:
+        """Map model string to Claude SDK compatible literal."""
+        if model is None:
+            return None
+        model_lower = model.lower()
+        if "sonnet" in model_lower:
+            return "sonnet"
+        elif "opus" in model_lower:
+            return "opus"
+        elif "haiku" in model_lower:
+            return "haiku"
+        elif model_lower in ("inherit", "main"):
+            return "inherit"
+        return None
+
+    @classmethod
+    def from_agent_definition(cls, definition: TypedAgentDefinition) -> "AgentConfig":
+        """Create from Claude SDK compatible AgentDefinition."""
+        return cls(
+            description=definition.description,
+            prompt=definition.prompt,
+            tools=definition.tools,
+            model=definition.model,
+        )
+
 
 # Type alias for hook callback functions
 # Hook callbacks receive event type, input data, and return a decision dict
@@ -136,11 +249,45 @@ class HookMatcher:
 
     Defines when a hook should be triggered based on tool names or patterns.
     """
-
     # Callback function to execute
     callback: HookCallback
     # Tool name pattern to match (for PreToolUse/PostToolUse hooks)
     tool_pattern: Optional[str] = None
+
+    def to_typed_matcher(self) -> TypedHookMatcher:
+        """Convert to Claude SDK compatible HookMatcher."""
+        # Wrap single callback in a list for compatibility
+        return TypedHookMatcher(
+            matcher=self.tool_pattern,
+            hooks=[self._wrap_callback(self.callback)],
+        )
+
+    @staticmethod
+    def _wrap_callback(
+        callback: HookCallback,
+    ) -> Callable[
+        [Any, str | None, Any],  # HookInput, tool_use_id, HookContext
+        Awaitable[Dict[str, Any]],
+    ]:
+        """Wrap Ripperdoc-style hook callback to Claude SDK format."""
+        async def wrapped(
+            input_data: Any,
+            tool_use_id: str | None,
+            context: Any,
+        ) -> Dict[str, Any]:
+            # Extract event type from input_data if available
+            event_type = getattr(input_data, "hook_event_name", "Unknown")
+            # Convert input to dict format expected by Ripperdoc callback
+            input_dict = input_data if isinstance(input_data, dict) else {
+                "event": event_type,
+                "data": input_data,
+            }
+            result = callback(event_type, input_dict)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result  # type: ignore
+
+        return wrapped
 
 
 # Type alias for stderr callback
@@ -151,6 +298,9 @@ class SettingSource(str, Enum):
     """Sources for loading settings configuration.
 
     Controls which settings files are loaded during session initialization.
+
+    Deprecated: Use string literals directly.
+    Example: Use "user" instead of SettingSource.USER
     """
 
     USER = "user"        # ~/.ripperdoc/settings.json
@@ -159,7 +309,11 @@ class SettingSource(str, Enum):
     ENV = "env"          # Environment variables
 
 
-MessageType = Union[UserMessage, AssistantMessage, ProgressMessage]
+# Use TypedSettingSource for Claude SDK compatibility
+SettingSourceType = TypedSettingSource
+
+
+MessageType = Union[RipperdocUserMessage, RipperdocAssistantMessage, RipperdocProgressMessage]
 PermissionChecker = Callable[
     [Tool[Any, Any], Any],
     Union[
@@ -250,7 +404,7 @@ class RipperdocOptions:
     tools: Optional[Sequence[Tool[Any, Any]]] = None
     allowed_tools: Optional[Sequence[str]] = None
     disallowed_tools: Optional[Sequence[str]] = None
-    permission_mode: PermissionMode = PermissionMode.DEFAULT
+    permission_mode: PermissionMode = "default"  # Use string literal for Claude SDK compatibility
     verbose: bool = False
     model: str = "main"
     max_thinking_tokens: int = 0
@@ -287,19 +441,26 @@ class RipperdocOptions:
     max_buffer_size: Optional[int] = None
     # Deprecated: use permission_mode instead (kept for backward compatibility)
     yolo_mode: bool = False
+    # Claude SDK specific fields (accepted but may not be fully supported)
+    max_budget_usd: Optional[float] = None
+    fallback_model: Optional[str] = None
+    betas: List[str] = field(default_factory=list)
+    sandbox: Optional[Dict[str, Any]] = None
+    enable_file_checkpointing: bool = False
+    output_format: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         """Handle deprecated yolo_mode parameter."""
         # If yolo_mode is explicitly set to True, apply permission_mode
         if self.yolo_mode:
             warnings.warn(
-                "yolo_mode is deprecated, use permission_mode=PermissionMode.BYPASS_PERMISSIONS instead",
+                "yolo_mode is deprecated, use permission_mode='bypassPermissions' instead",
                 DeprecationWarning,
                 stacklevel=3,
             )
-            self.permission_mode = PermissionMode.BYPASS_PERMISSIONS
+            self.permission_mode = "bypassPermissions"
         # If permission_mode is set to BYPASS_PERMISSIONS, sync yolo_mode
-        elif self.permission_mode == PermissionMode.BYPASS_PERMISSIONS:
+        elif self.permission_mode == "bypassPermissions":
             object.__setattr__(self, "yolo_mode", True)
 
     def build_tools(self) -> List[Tool[Any, Any]]:
@@ -350,19 +511,28 @@ class RipperdocOptions:
         return [text for text in self.additional_instructions if text]
 
 
-class RipperdocClient:
-    """Persistent Ripperdoc session with conversation history."""
+# For Claude SDK compatibility, we create an alias
+ClaudeAgentOptions = RipperdocOptions
+
+
+class RipperdocSDKClient:
+    """Persistent session with conversation history.
+
+    This class provides Claude Agent SDK compatible interface while using
+    Ripperdoc's internal implementation. It supports bidirectional, interactive
+    conversations with message streaming and session management.
+    """
 
     def __init__(
         self,
-        options: Optional[RipperdocOptions] = None,
+        options: Optional[ClaudeAgentOptions] = None,
         query_runner: Optional[QueryRunner] = None,
     ) -> None:
-        self.options = options or RipperdocOptions()
+        self.options = options or ClaudeAgentOptions()
         self._tools = self.options.build_tools()
         self._query_runner = query_runner or _core_query
 
-        self._history: List[MessageType] = []
+        self._history: List[Union[RipperdocUserMessage, RipperdocAssistantMessage, RipperdocProgressMessage]] = []
         self._queue: asyncio.Queue = asyncio.Queue()
         self._current_task: Optional[asyncio.Task] = None
         self._current_context: Optional[QueryContext] = None
@@ -373,13 +543,15 @@ class RipperdocClient:
         self._session_start_time: Optional[float] = None
         self._session_end_sent: bool = False
         self._turn_count: int = 0
+        # Track current model for Claude SDK compatibility
+        self._current_model: str = self.options.model or "unknown"
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
         return self._tools
 
     @property
-    def history(self) -> List[MessageType]:
+    def history(self) -> List[Union[RipperdocUserMessage, RipperdocAssistantMessage, RipperdocProgressMessage]]:
         return list(self._history)
 
     @property
@@ -397,7 +569,7 @@ class RipperdocClient:
         """Return the user identifier for this session."""
         return self.options.user
 
-    async def __aenter__(self) -> "RipperdocClient":
+    async def __aenter__(self) -> "ClaudeSDKClient":
         await self.connect()
         return self
 
@@ -742,8 +914,8 @@ class RipperdocClient:
 
         # Determine yolo_mode from permission_mode
         yolo_mode = self.options.permission_mode in (
-            PermissionMode.BYPASS_PERMISSIONS,
-            PermissionMode.ACCEPT_EDITS,
+            "bypassPermissions",
+            "acceptEdits",
         )
 
         query_context = QueryContext(
@@ -753,7 +925,7 @@ class RipperdocClient:
             model=self.options.model,
             verbose=self.options.verbose,
             max_turns=self.options.max_turns,
-            permission_mode=self.options.permission_mode.value,
+            permission_mode=self.options.permission_mode,
         )
         self._current_context = query_context
 
@@ -774,8 +946,12 @@ class RipperdocClient:
 
         self._current_task = asyncio.create_task(_runner())
 
-    async def receive_messages(self) -> AsyncIterator[MessageType]:
-        """Yield messages for the active query."""
+    async def receive_messages(self) -> AsyncIterator[Message]:
+        """Yield messages for the active query in Claude SDK compatible format.
+
+        This method returns messages in Claude Agent SDK compatible format
+        (UserMessage, AssistantMessage, SystemMessage, ResultMessage).
+        """
         if self._current_task is None:
             raise RuntimeError("No active query to receive messages from.")
 
@@ -783,12 +959,26 @@ class RipperdocClient:
             message = await self._queue.get()
             if message is _END_OF_STREAM:
                 break
-            yield message  # type: ignore[misc]
+            # Convert internal message to Claude SDK compatible format
+            yield MessageAdapter.to_claude_message(
+                message,
+                model=self._current_model,
+                session_id=self._session_id,
+            )
 
-    async def receive_response(self) -> AsyncIterator[MessageType]:
-        """Alias for receive_messages."""
+    async def receive_response(self) -> AsyncIterator[Message]:
+        """Yield messages until and including a ResultMessage.
+
+        This async iterator yields all messages in sequence and automatically terminates
+        after yielding a ResultMessage (which indicates the response is complete).
+
+        Yields:
+            Message: Each message received (UserMessage, AssistantMessage, SystemMessage, ResultMessage)
+        """
         async for message in self.receive_messages():
             yield message
+            if isinstance(message, ResultMessage):
+                return
 
     async def interrupt(self) -> None:
         """Request cancellation of the active query."""
@@ -803,6 +993,92 @@ class RipperdocClient:
                 pass
 
         await self._queue.put(_END_OF_STREAM)
+
+    async def set_permission_mode(self, mode: PermissionMode) -> None:
+        """Change permission mode during conversation.
+
+        Args:
+            mode: The permission mode to set. Valid options:
+                - 'default': Prompts for dangerous tools
+                - 'acceptEdits': Auto-accept file edits
+                - 'bypassPermissions': Allow all tools (use with caution)
+                - 'plan': Planning mode - no execution
+
+        Example:
+            ```python
+            async with ClaudeSDKClient() as client:
+                await client.query("Help me analyze this code")
+                await client.set_permission_mode('acceptEdits')
+                await client.query("Now implement the fix")
+            ```
+        """
+        if mode not in ("default", "acceptEdits", "bypassPermissions", "plan"):
+            raise ValueError(f"Invalid permission mode: {mode}")
+
+        self.options.permission_mode = mode
+        logger.info(f"[sdk] Permission mode changed to {mode}")
+
+    async def set_model(self, model: Optional[str] = None) -> None:
+        """Change the AI model during conversation.
+
+        Args:
+            model: The model to use, or None to use default.
+
+        Example:
+            ```python
+            async with ClaudeSDKClient() as client:
+                await client.query("Help me understand this problem")
+                await client.set_model('claude-sonnet-4-5')
+                await client.query("Now implement the solution")
+            ```
+        """
+        self.options.model = model
+        self._current_model = model or "unknown"
+        logger.info(f"[sdk] Model changed to {model}")
+
+    async def rewind_files(self, user_message_id: str) -> None:
+        """Rewind tracked files to their state at a specific user message.
+
+        Note: This is a placeholder for Claude SDK compatibility.
+        File checkpointing is not currently implemented in Ripperdoc.
+
+        Args:
+            user_message_id: UUID of the user message to rewind to.
+
+        Raises:
+            NotImplementedError: File checkpointing is not supported yet.
+        """
+        raise NotImplementedError(
+            "File checkpointing and rewind_files() are not currently supported "
+            "in Ripperdoc. This method exists for Claude SDK API compatibility."
+        )
+
+    async def get_server_info(self) -> Dict[str, Any] | None:
+        """Get server initialization info.
+
+        Returns basic information about the current session.
+
+        Returns:
+            Dictionary with session info, or None if not connected.
+
+        Example:
+            ```python
+            async with ClaudeSDKClient() as client:
+                info = await client.get_server_info()
+                if info:
+                    print(f"Session ID: {info.get('session_id')}")
+            ```
+        """
+        if not self._connected:
+            return None
+
+        return {
+            "session_id": self._session_id,
+            "turn_count": self._turn_count,
+            "model": self._current_model,
+            "cwd": str(self.options.cwd) if self.options.cwd else None,
+            "permission_mode": self.options.permission_mode,
+        }
 
     async def _build_system_prompt(
         self, user_prompt: str, hook_instructions: Optional[List[str]] = None
@@ -857,17 +1133,72 @@ class RipperdocClient:
 
 
 async def query(
-    prompt: str,
-    options: Optional[RipperdocOptions] = None,
-    query_runner: Optional[QueryRunner] = None,
-) -> AsyncIterator[MessageType]:
-    """One-shot helper: run a prompt in a fresh session."""
-    client = RipperdocClient(options=options, query_runner=query_runner)
+    *,
+    prompt: Union[str, AsyncIterable[dict[str, Any]]],
+    options: Optional[ClaudeAgentOptions] = None,
+    transport: Any = None,  # Ignored, for Claude SDK compatibility
+    query_runner: Optional[QueryRunner] = None,  # For testing purposes
+) -> AsyncIterator[Message]:
+    """Query for one-shot or unidirectional streaming interactions.
+
+    This function is compatible with Claude Agent SDK's query() function.
+    It provides a simple, stateless interface for queries where you don't need
+    bidirectional communication or conversation management.
+
+    Args:
+        prompt: The prompt to send. Can be a string for single-shot queries
+                or an AsyncIterable[dict] for streaming mode.
+        options: Optional configuration (defaults to ClaudeAgentOptions() if None).
+        transport: Ignored parameter for Claude SDK compatibility.
+
+    Yields:
+        Messages from the conversation in Claude SDK compatible format.
+
+    Example:
+        ```python
+        async for message in query(
+            prompt="What is the capital of France?",
+            options=ClaudeAgentOptions(allowed_tools=["Bash"])
+        ):
+            print(message)
+        ```
+    """
+    # Handle streaming mode (AsyncIterable prompt)
+    if isinstance(prompt, AsyncIterable):
+        # For streaming mode, we use the client directly
+        client = RipperdocSDKClient(options=options)
+        await client.connect()
+        try:
+            async for msg in client.receive_messages():
+                yield msg
+        finally:
+            await client.disconnect()
+        return
+
+    # For simple string prompts, use the original flow
+    internal_options = options or ClaudeAgentOptions()
+    client = RipperdocSDKClient(options=internal_options, query_runner=query_runner)
     await client.connect()
-    await client.query(prompt)
+    await client.query(str(prompt))
 
     try:
         async for message in client.receive_messages():
+            # receive_messages() already converts to Claude SDK compatible format
             yield message
     finally:
         await client.disconnect()
+
+
+# =============================================================================
+# Backward Compatibility Aliases
+# =============================================================================
+
+# For backward compatibility, provide aliases using old names
+RipperdocClient = RipperdocSDKClient
+# For Claude SDK compatibility, provide alias
+ClaudeSDKClient = RipperdocSDKClient
+# Note: RipperdocOptions is already an alias for ClaudeAgentOptions (defined above)
+
+# Re-export internal message types for compatibility
+MessageType = Union[RipperdocUserMessage, RipperdocAssistantMessage, RipperdocProgressMessage]
+ProgressMessage = RipperdocProgressMessage

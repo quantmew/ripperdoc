@@ -97,6 +97,12 @@ def api_base_env_candidates(provider: ProviderType) -> list[str]:
 # Known vision-enabled model patterns for auto-detection
 VISION_ENABLED_MODELS = {
     # Anthropic Claude models
+    "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-5-20250929",
+    "claude-opus-4-5-20251101",
+    "claude-haiku-4-5",
+    "claude-sonnet-4-5",
+    "claude-opus-4-5",
     "claude-3-5-sonnet",
     "claude-3-5-sonnet-20241022",
     "claude-3-5-sonnet-20240620",
