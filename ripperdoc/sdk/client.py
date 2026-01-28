@@ -86,6 +86,9 @@ from .adapter import (
     AsyncMessageAdapter,
     ResultMessageFactory,
 )
+# Subprocess mode imports (lazy loaded to avoid circular imports)
+_subprocess_transport = None
+_query_class = None
 
 
 # PermissionMode: Use Literal type
@@ -448,6 +451,9 @@ class RipperdocOptions:
     sandbox: Optional[Dict[str, Any]] = None
     enable_file_checkpointing: bool = False
     output_format: Optional[Dict[str, Any]] = None
+    # Subprocess mode settings
+    use_subprocess: bool = False
+    cli_path: Optional[Union[str, Path]] = None
 
     def __post_init__(self) -> None:
         """Handle deprecated yolo_mode parameter."""
@@ -521,6 +527,11 @@ class RipperdocSDKClient:
     This class provides Claude Agent SDK compatible interface while using
     Ripperdoc's internal implementation. It supports bidirectional, interactive
     conversations with message streaming and session management.
+
+    Subprocess Mode:
+    When options.use_subprocess=True, the client will communicate with a
+    Ripperdoc CLI subprocess via JSON Control Protocol over stdio. This
+    enables multi-language SDK support and process isolation.
     """
 
     def __init__(
@@ -545,6 +556,63 @@ class RipperdocSDKClient:
         self._turn_count: int = 0
         # Track current model for Claude SDK compatibility
         self._current_model: str = self.options.model or "unknown"
+
+        # Subprocess mode attributes
+        self._use_subprocess = self.options.use_subprocess
+        self._transport: Optional[Any] = None  # Will be SubprocessCLITransport
+        self._query: Optional[Any] = None  # Will be Query class
+        self._stdin_stream: Optional[Any] = None
+
+        # Lazy load subprocess components only when needed
+        if self._use_subprocess:
+            self._init_subprocess_components()
+
+    def _init_subprocess_components(self) -> None:
+        """Initialize subprocess mode components (lazy loaded).
+
+        This is done in __init__ to avoid importing subprocess modules
+        unless subprocess mode is actually used.
+        """
+        global _subprocess_transport, _query_class
+
+        if _subprocess_transport is None:
+            from ripperdoc.sdk._internal.transport.stdio_cli import SubprocessCLITransport
+            _subprocess_transport = SubprocessCLITransport
+
+        if _query_class is None:
+            from ripperdoc.sdk._internal.query import Query
+            _query_class = Query
+
+        # Convert options to typed dict format for transport
+        self._transport_options = self._build_transport_options()
+
+    def _build_transport_options(self) -> Any:
+        """Build options dict for SubprocessCLITransport."""
+        # Build the options dict
+        options_dict = {
+            "model": self.options.model or "main",
+            "permission_mode": self.options.permission_mode,
+            "max_turns": self.options.max_turns,
+            "system_prompt": self.options.system_prompt,
+            "cwd": str(self.options.cwd) if self.options.cwd else None,
+            "allowed_tools": list(self.options.allowed_tools) if self.options.allowed_tools else None,
+            "disallowed_tools": list(self.options.disallowed_tools) if self.options.disallowed_tools else None,
+            "env": self.options.env or {},
+            "stderr": self.options.stderr,
+            "max_buffer_size": self.options.max_buffer_size,
+            # Claude SDK compatibility fields (passed but may be ignored)
+            "max_budget_usd": self.options.max_budget_usd,
+            "fallback_model": self.options.fallback_model,
+            "betas": self.options.betas,
+            "sandbox": self.options.sandbox,
+            "enable_file_checkpointing": self.options.enable_file_checkpointing,
+            "output_format": self.options.output_format,
+        }
+
+        # Remove None values
+        options_dict = {k: v for k, v in options_dict.items() if v is not None}
+
+        return options_dict
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -642,51 +710,174 @@ class RipperdocSDKClient:
     async def connect(self, prompt: Optional[str] = None) -> None:
         """Prepare the session and optionally send an initial prompt."""
         if not self._connected:
-            if self.options.cwd is not None:
-                self._previous_cwd = Path.cwd()
-                os.chdir(_coerce_to_path(self.options.cwd))
+            # Subprocess mode: initialize transport and query
+            if self._use_subprocess:
+                await self._connect_subprocess()
+            else:
+                # In-process mode: original implementation
+                if self.options.cwd is not None:
+                    self._previous_cwd = Path.cwd()
+                    os.chdir(_coerce_to_path(self.options.cwd))
+                project_path = _coerce_to_path(self.options.cwd or Path.cwd())
+                hook_manager.set_project_dir(project_path)
+
+                # Handle resume/continue_conversation
+                self._load_resumed_session(project_path)
+
+                self._session_id = self._session_id or str(uuid.uuid4())
+                hook_manager.set_session_id(self._session_id)
+                hook_manager.set_llm_callback(build_hook_llm_callback())
+
+                # Set up environment variables if provided
+                if self.options.env:
+                    self._setup_environment_variables()
+
+                # Load programmatic agents if configured
+                if self.options.agents:
+                    self._register_programmatic_agents()
+
+                # Load programmatic hooks if configured
+                if self.options.hooks:
+                    self._register_programmatic_hooks()
+
+                # Load programmatic MCP servers if configured
+                if self.options.mcp_servers:
+                    await self._load_programmatic_mcp_servers(project_path)
+
+                try:
+                    source = "resume" if (self.options.resume or self.options.continue_conversation) else "startup"
+                    result = await hook_manager.run_session_start_async(source)
+                    self._session_hook_contexts = self._collect_hook_contexts(result)
+                    self._session_start_time = time.time()
+                    self._session_end_sent = False
+                except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
+                    logger.warning(
+                        "[sdk] SessionStart hook failed: %s: %s",
+                        type(exc).__name__,
+                        exc,
+                    )
+
             self._connected = True
-            project_path = _coerce_to_path(self.options.cwd or Path.cwd())
-            hook_manager.set_project_dir(project_path)
-
-            # Handle resume/continue_conversation
-            self._load_resumed_session(project_path)
-
-            self._session_id = self._session_id or str(uuid.uuid4())
-            hook_manager.set_session_id(self._session_id)
-            hook_manager.set_llm_callback(build_hook_llm_callback())
-
-            # Set up environment variables if provided
-            if self.options.env:
-                self._setup_environment_variables()
-
-            # Load programmatic agents if configured
-            if self.options.agents:
-                self._register_programmatic_agents()
-
-            # Load programmatic hooks if configured
-            if self.options.hooks:
-                self._register_programmatic_hooks()
-
-            # Load programmatic MCP servers if configured
-            if self.options.mcp_servers:
-                await self._load_programmatic_mcp_servers(project_path)
-
-            try:
-                source = "resume" if (self.options.resume or self.options.continue_conversation) else "startup"
-                result = await hook_manager.run_session_start_async(source)
-                self._session_hook_contexts = self._collect_hook_contexts(result)
-                self._session_start_time = time.time()
-                self._session_end_sent = False
-            except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
-                logger.warning(
-                    "[sdk] SessionStart hook failed: %s: %s",
-                    type(exc).__name__,
-                    exc,
-                )
 
         if prompt:
             await self.query(prompt)
+
+    async def _connect_subprocess(self) -> None:
+        """Initialize subprocess mode connection.
+
+        Creates the SubprocessCLITransport and Query instances,
+        connects to the CLI subprocess, and sends initialize request.
+        """
+        if not _subprocess_transport or not _query_class:
+            raise RuntimeError("Subprocess components not initialized")
+
+        logger.info("[sdk] Connecting in subprocess mode")
+
+        # Build options dict for transport (avoids circular imports)
+        options_dict = self._build_transport_options()
+
+        # Create the transport with dict options
+        self._transport = _subprocess_transport(
+            prompt="",  # Empty prompt for streaming mode
+            options=options_dict,  # Pass dict directly, transport accepts both dict and object
+        )
+
+        # Connect the transport (starts the subprocess)
+        await self._transport.connect()
+
+        # Create the Query handler
+        self._query = _query_class(
+            transport=self._transport,
+            is_streaming_mode=True,
+            can_use_tool=self._build_permission_checker(),
+            hooks=self._build_hooks_dict(),
+            sdk_mcp_servers=self.options.mcp_servers,
+        )
+
+        # Start the query's message reading task
+        await self._query.start()
+
+        # Send initialize request
+        try:
+            init_response = await self._query._send_control_request(
+                {
+                    "subtype": "initialize",
+                    "options": options_dict,
+                },
+                timeout=60.0,
+            )
+            self._session_id = init_response.get("session_id")
+            logger.info(
+                "[sdk] Subprocess initialized",
+                extra={"session_id": self._session_id},
+            )
+        except Exception as e:
+            logger.error(f"[sdk] Failed to initialize subprocess: {e}")
+            await self._transport.close()
+            raise
+
+    def _build_permission_checker(self) -> Optional[Callable]:
+        """Build permission checker for subprocess mode."""
+        if self.options.permission_mode == "bypassPermissions":
+            return None
+
+        # Create a wrapper that converts between SDK and CLI formats
+        async def checker(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            context: Any,
+        ) -> Any:
+            from ripper.sdk.types import PermissionResultAllow, PermissionResultDeny
+
+            # Call the original permission checker
+            if self.options.permission_checker:
+                result = self.options.permission_checker(
+                    tool_name,
+                    tool_input,
+                    context,
+                )
+                if asyncio.iscoroutine(result):
+                    result = await result
+
+                # Convert result to SDK format
+                if isinstance(result, bool):
+                    return PermissionResultAllow() if result else PermissionResultDeny()
+                elif isinstance(result, tuple):
+                    allowed, message = result
+                    return PermissionResultAllow() if allowed else PermissionResultDeny(message=message)
+                elif isinstance(result, dict):
+                    if result.get("decision") == "allow":
+                        return PermissionResultAllow(updated_input=result.get("updated_input"))
+                    else:
+                        return PermissionResultDeny(message=result.get("message"), interrupt=result.get("interrupt", False))
+                elif isinstance(result, PermissionResult):
+                    return result
+                else:
+                    return PermissionResultAllow()
+
+            # Default: allow
+            return PermissionResultAllow()
+
+        return checker
+
+    def _build_hooks_dict(self) -> dict[str, list[dict[str, Any]]]:
+        """Build hooks dict for subprocess mode."""
+        hooks_dict: dict[str, list[dict[str, Any]]] = {}
+
+        if not self.options.hooks:
+            return hooks_dict
+
+        # Convert HookMatcher objects to dict format
+        for event_name, matchers in self.options.hooks.items():
+            hooks_dict[event_name] = []
+            for matcher in matchers:
+                hook_dict = {
+                    "matcher": matcher.matcher if hasattr(matcher, "matcher") else "*",
+                    "callback_id": f"hook_{id(matcher)}",  # Use id as unique identifier
+                }
+                hooks_dict[event_name].append(hook_dict)
+
+        return hooks_dict
 
     def _setup_environment_variables(self) -> None:
         """Set up environment variables for the session."""
@@ -823,6 +1014,16 @@ class RipperdocSDKClient:
 
     async def disconnect(self) -> None:
         """Tear down the session and restore the working directory."""
+        # Subprocess mode: close transport and query
+        if self._use_subprocess:
+            if self._query:
+                await self._query.close()
+                self._query = None
+            if self._transport:
+                await self._transport.close()
+                self._transport = None
+
+        # In-process mode cleanup
         if self._current_context:
             self._current_context.abort_controller.set()
 
@@ -875,6 +1076,12 @@ class RipperdocSDKClient:
         if not self._connected:
             await self.connect()
 
+        # Subprocess mode: use Query class to send query
+        if self._use_subprocess:
+            await self._query_subprocess(prompt)
+            return
+
+        # In-process mode: original implementation
         # Check max_turns limit
         if self.options.max_turns is not None and self._turn_count >= self.options.max_turns:
             error_message = create_assistant_message(
@@ -946,6 +1153,33 @@ class RipperdocSDKClient:
 
         self._current_task = asyncio.create_task(_runner())
 
+    async def _query_subprocess(self, prompt: str) -> None:
+        """Send a query in subprocess mode."""
+        if not self._query:
+            raise RuntimeError("Query not initialized in subprocess mode")
+
+        self._queue = asyncio.Queue()
+
+        async def _runner() -> None:
+            try:
+                # Send query request via control protocol
+                await self._query._send_control_request(
+                    {
+                        "subtype": "query",
+                        "prompt": prompt,
+                    }
+                )
+
+                # Receive messages from the query's message stream
+                async for message in self._query.receive_messages():
+                    if message.type in ("user", "assistant", "progress"):
+                        self._history.append(message)  # type: ignore[arg-type]
+                    await self._queue.put(message)
+            finally:
+                await self._queue.put(_END_OF_STREAM)
+
+        self._current_task = asyncio.create_task(_runner())
+
     async def receive_messages(self) -> AsyncIterator[Message]:
         """Yield messages for the active query in Claude SDK compatible format.
 
@@ -959,12 +1193,19 @@ class RipperdocSDKClient:
             message = await self._queue.get()
             if message is _END_OF_STREAM:
                 break
-            # Convert internal message to Claude SDK compatible format
-            yield MessageAdapter.to_claude_message(
-                message,
-                model=self._current_model,
-                session_id=self._session_id,
-            )
+
+            # In subprocess mode, messages are already in Claude SDK format
+            # In in-process mode, we need to convert them
+            if self._use_subprocess:
+                # Message is already a Claude SDK Message type
+                yield message  # type: ignore
+            else:
+                # Convert internal message to Claude SDK compatible format
+                yield MessageAdapter.to_claude_message(
+                    message,
+                    model=self._current_model,
+                    session_id=self._session_id,
+                )
 
     async def receive_response(self) -> AsyncIterator[Message]:
         """Yield messages until and including a ResultMessage.

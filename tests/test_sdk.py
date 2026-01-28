@@ -37,10 +37,19 @@ def test_query_helper_streams_messages():
         options = RipperdocOptions(yolo_mode=True)
         messages = []
 
-        async for message in sdk_query("hello", options=options, query_runner=_fake_runner):
+        async for message in sdk_query(prompt="hello", options=options, query_runner=_fake_runner):
             messages.append(message)
 
         assert messages
-        assert messages[0].message.content == "OK"
+        # Messages are now in Claude SDK format (AssistantMessage)
+        # The content can be a string or list of ContentBlocks
+        msg = messages[0]
+        # Handle both string content and list of blocks
+        if isinstance(msg.content, str):
+            content = msg.content
+        else:
+            # First block should be a TextBlock
+            content = msg.content[0].text
+        assert content == "OK"
 
     asyncio.run(_run())

@@ -2,6 +2,28 @@
 
 This SDK provides Claude Agent SDK compatible interfaces while using
 Ripperdoc's internal implementation.
+
+The SDK supports two communication modes:
+1. In-process mode (default): Direct Python implementation
+2. Subprocess mode: Communication via JSON Control Protocol over stdio
+
+To use subprocess mode, set `use_subprocess=True` in ClaudeAgentOptions:
+
+    ```python
+    from ripperdoc.sdk import query, ClaudeAgentOptions
+
+    async for message in query(
+        prompt="Hello!",
+        options=ClaudeAgentOptions(use_subprocess=True)
+    ):
+        print(message)
+    ```
+
+Subprocess mode enables:
+- Multi-language SDK support (future)
+- Process isolation
+- Better resource management
+- Consistent protocol across all SDK implementations
 """
 
 from ripperdoc.sdk.client import (
@@ -24,6 +46,23 @@ from ripperdoc.sdk.client import (
     clear_programmatic_registries,
     get_programmatic_agents,
     get_programmatic_hooks,
+)
+
+# Transport layer
+from ripperdoc.sdk.transport import (
+    Transport,
+    StdioTransport,
+    StdioTransportConfig,
+    InProcessTransport,
+)
+
+# Control protocol types (for subprocess communication)
+from ripperdoc.sdk.control_protocol import (
+    SDKControlRequest,
+    SDKControlResponse,
+    StreamMessage,
+    PermissionUpdate as ControlPermissionUpdate,
+    ServerInfo,
 )
 
 from ripperdoc.sdk.types import (
@@ -109,6 +148,15 @@ __all__ = [
     "__version__",
     # Transport
     "Transport",
+    "StdioTransport",
+    "StdioTransportConfig",
+    "InProcessTransport",
+    # Control Protocol
+    "SDKControlRequest",
+    "SDKControlResponse",
+    "StreamMessage",
+    "PermissionUpdate",
+    "ServerInfo",
     # Client and Options
     "RipperdocSDKClient",
     "ClaudeAgentOptions",

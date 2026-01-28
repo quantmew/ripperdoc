@@ -534,6 +534,86 @@ def config_cmd() -> None:
         console.print()
 
 
+@cli.command(name="stdio")
+@click.option(
+    "--input-format",
+    type=click.Choice(["stream-json", "auto"]),
+    default="stream-json",
+    help="Input format for messages.",
+)
+@click.option(
+    "--output-format",
+    type=click.Choice(["stream-json"]),
+    default="stream-json",
+    help="Output format for messages.",
+)
+@click.option(
+    "--model",
+    type=str,
+    default=None,
+    help="Model profile for the current session.",
+)
+@click.option(
+    "--permission-mode",
+    type=click.Choice(["default", "acceptEdits", "plan", "bypassPermissions"]),
+    default="default",
+    help="Permission mode for tool usage.",
+)
+@click.option(
+    "--max-turns",
+    type=int,
+    default=None,
+    help="Maximum number of conversation turns.",
+)
+@click.option(
+    "--system-prompt",
+    type=str,
+    default=None,
+    help="System prompt to use for the session.",
+)
+@click.option(
+    "--print",
+    "-p",
+    is_flag=True,
+    help="Print mode (for single prompt queries).",
+)
+@click.option(
+    "--",
+    "prompt",
+    type=str,
+    default=None,
+    help="Direct prompt (for print mode).",
+)
+def stdio_cmd(
+    input_format: str,
+    output_format: str,
+    model: str | None,
+    permission_mode: str,
+    max_turns: int | None,
+    system_prompt: str | None,
+    print: bool,
+    prompt: str | None,
+) -> None:
+    """Stdio mode for SDK subprocess communication.
+
+    This command enables Ripperdoc to communicate with SDKs via JSON Control
+    Protocol over stdin/stdout.
+    """
+    from ripperdoc.cli.commands.stdio_cmd import _run_stdio
+    import asyncio
+
+    asyncio.run(_run_stdio(
+        input_format=input_format,
+        output_format=output_format,
+        model=model,
+        permission_mode=permission_mode,
+        max_turns=max_turns,
+        system_prompt=system_prompt,
+        print_mode=print,
+        prompt=prompt,
+    ))
+
+
 @cli.command(name="version")
 def version_cmd() -> None:
     """Show version information"""

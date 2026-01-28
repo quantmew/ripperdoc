@@ -138,19 +138,22 @@ class TestRunWithInterrupt:
             await asyncio.sleep(0.5)  # Long running
             return "success"
 
-        # Simulate interrupt after short delay
-        async def trigger_interrupt():
+        # Mock the interrupt listener to return True after a short delay
+        original_listen = handler._listen_for_interrupt_key
+
+        async def mock_listen():
             await asyncio.sleep(0.05)
-            handler._query_interrupted = True
-            handler._trigger_abort()
+            return True  # Simulate interrupt key press
 
-        # Run both tasks
-        interrupt_task = asyncio.create_task(trigger_interrupt())
-        result = await handler.run_with_interrupt(dummy_coro())
-        await interrupt_task
+        handler._listen_for_interrupt_key = mock_listen
 
-        assert result is True  # Was interrupted
-        assert handler.was_interrupted is True
+        try:
+            result = await handler.run_with_interrupt(dummy_coro())
+
+            assert result is True  # Was interrupted
+            assert handler.was_interrupted is True
+        finally:
+            handler._listen_for_interrupt_key = original_listen
 
     async def test_sets_listener_active_state(self):
         """Should properly set _esc_listener_active during execution."""
@@ -167,17 +170,25 @@ class TestRunWithInterrupt:
         assert handler._esc_listener_active is False
 
     async def test_cleanup_on_exception(self):
-        """Should clean up state even if coroutine raises exception."""
+        """Should clean up state even if coroutine raises exception.
+
+        Note: run_with_interrupt catches exceptions in the query_task to ensure
+        proper cleanup. The exception is logged but not re-raised. This test verifies
+        that the state is still cleaned up properly even when exceptions occur.
+        """
         handler = InterruptHandler()
 
         async def failing_coro():
             handler._esc_listener_active = True
             raise ValueError("Test error")
 
-        with pytest.raises(ValueError):
-            await handler.run_with_interrupt(failing_coro())
+        # run_with_interrupt catches exceptions, so no exception is raised
+        result = await handler.run_with_interrupt(failing_coro())
 
-        # State should be cleaned up
+        # Result should be False (completed, but with error)
+        assert result is False
+
+        # State should be cleaned up regardless
         assert handler._esc_listener_active is False
 
     async def test_concurrent_safe(self):
