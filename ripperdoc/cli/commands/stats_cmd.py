@@ -165,7 +165,9 @@ def _handle(ui: Any, _args: str) -> bool:
     )
 
     # Row 2: Total tokens | Longest session
-    total_tokens_display = format_large_number(stats.total_tokens) if stats.total_tokens > 0 else "0"
+    total_tokens_display = (
+        format_large_number(stats.total_tokens) if stats.total_tokens > 0 else "0"
+    )
     longest_session_display = ""
     if stats.longest_session_duration.total_seconds() > 0:
         longest_session_display = format_duration(stats.longest_session_duration)
@@ -212,9 +214,7 @@ def _handle(ui: Any, _args: str) -> bool:
     # Create the main panel with statistics
     # Match heatmap width: WEEKDAY_LABEL_WIDTH (8) + weeks_count (52) = 60
     heatmap_width = 8 + weeks_count + 16
-    console.print(
-        Panel(table, title="Statistics", border_style="blue", width=heatmap_width)
-    )
+    console.print(Panel(table, title="Statistics", border_style="blue", width=heatmap_width))
     console.print()
 
     # Fun comparisons

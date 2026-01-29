@@ -56,4 +56,3 @@ def build_hook_llm_callback(
             return f"Prompt hook evaluation failed: {exc}"
 
     return _callback
-

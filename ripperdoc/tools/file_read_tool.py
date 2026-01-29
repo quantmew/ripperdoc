@@ -109,10 +109,11 @@ def read_file_with_encoding(file_path: str) -> Tuple[Optional[List[str]], str, O
     error_msg = (
         f"Unable to determine file encoding. "
         f"Detected: {detected_encoding or 'unknown'} (confidence: {confidence * 100:.0f}%). "
-        f"Tried fallback encodings: {', '.join(fallback_encodings)}. "
+        f"Tried fallback encodings: utf-8, latin-1. "
         f"Please convert the file to UTF-8."
     )
     return None, "", error_msg
+
 
 # Maximum file size to read (default 256KB)
 # Can be overridden via env var in bytes

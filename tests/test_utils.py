@@ -12,13 +12,8 @@ Tests cover:
 - message_formatting.py: Message content formatting
 """
 
-import json
-import math
 import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,7 +143,7 @@ class TestParseOptionalInt:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.json_utils import safe_parse_json
+from ripperdoc.utils.json_utils import safe_parse_json  # noqa: E402
 
 
 class TestSafeParseJson:
@@ -161,16 +156,16 @@ class TestSafeParseJson:
 
     def test_valid_json_array(self):
         """Valid JSON array should be parsed."""
-        result = safe_parse_json('[1, 2, 3]')
+        result = safe_parse_json("[1, 2, 3]")
         assert result == [1, 2, 3]
 
     def test_valid_json_primitives(self):
         """Valid JSON primitives should be parsed."""
         assert safe_parse_json('"hello"') == "hello"
-        assert safe_parse_json('42') == 42
-        assert safe_parse_json('true') is True
-        assert safe_parse_json('false') is False
-        assert safe_parse_json('null') is None
+        assert safe_parse_json("42") == 42
+        assert safe_parse_json("true") is True
+        assert safe_parse_json("false") is False
+        assert safe_parse_json("null") is None
 
     def test_none_returns_none(self):
         """None input should return None."""
@@ -202,7 +197,7 @@ class TestSafeParseJson:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.safe_get_cwd import safe_get_cwd, get_original_cwd
+from ripperdoc.utils.safe_get_cwd import safe_get_cwd, get_original_cwd  # noqa: E402
 
 
 class TestSafeGetCwd:
@@ -222,6 +217,7 @@ class TestSafeGetCwd:
 
     def test_safe_get_cwd_fallback_on_oserror(self, monkeypatch):
         """safe_get_cwd should fall back on OSError."""
+
         def raise_oserror():
             raise OSError("Directory deleted")
 
@@ -232,6 +228,7 @@ class TestSafeGetCwd:
 
     def test_safe_get_cwd_fallback_on_runtime_error(self, monkeypatch):
         """safe_get_cwd should fall back on RuntimeError."""
+
         def raise_runtime():
             raise RuntimeError("Some error")
 
@@ -245,7 +242,7 @@ class TestSafeGetCwd:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.bash_constants import (
+from ripperdoc.utils.bash_constants import (  # noqa: E402
     get_bash_max_output_length,
     get_bash_default_timeout_ms,
     get_bash_max_timeout_ms,
@@ -315,7 +312,7 @@ class TestBashConstants:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.token_estimation import estimate_tokens
+from ripperdoc.utils.token_estimation import estimate_tokens  # noqa: E402
 
 
 class TestTokenEstimation:
@@ -356,7 +353,7 @@ class TestTokenEstimation:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.shell_token_utils import (
+from ripperdoc.utils.shell_token_utils import (  # noqa: E402
     parse_shell_tokens,
     filter_valid_tokens,
     parse_and_clean_shell_tokens,
@@ -468,7 +465,7 @@ class TestParseAndCleanShellTokens:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.exit_code_handlers import (
+from ripperdoc.utils.exit_code_handlers import (  # noqa: E402
     ExitCodeResult,
     default_handler,
     grep_handler,
@@ -480,7 +477,6 @@ from ripperdoc.utils.exit_code_handlers import (
     get_exit_code_handler,
     interpret_exit_code,
     create_exit_result,
-    COMMON_COMMANDS,
 )
 
 
@@ -701,7 +697,7 @@ class TestCreateExitResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.output_utils import (
+from ripperdoc.utils.output_utils import (  # noqa: E402
     trim_blank_lines,
     is_image_data,
     truncate_output,
@@ -924,7 +920,7 @@ class TestSanitizeOutput:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.message_formatting import (
+from ripperdoc.utils.message_formatting import (  # noqa: E402
     stringify_message_content,
     format_tool_use_detail,
     format_tool_result_detail,
@@ -934,6 +930,7 @@ from ripperdoc.utils.message_formatting import (
 
 class MockBlock:
     """Mock content block for testing."""
+
     def __init__(self, block_type, **kwargs):
         self.type = block_type
         for key, value in kwargs.items():
@@ -1019,10 +1016,13 @@ class TestFormatToolUseDetail:
 
     def test_task_tool(self):
         """Task tool should show subagent and description."""
-        result = format_tool_use_detail("Task", {
-            "subagent_type": "Explore",
-            "description": "Find files",
-        })
+        result = format_tool_use_detail(
+            "Task",
+            {
+                "subagent_type": "Explore",
+                "description": "Find files",
+            },
+        )
         assert "subagent=Explore" in result
         assert "desc=Find files" in result
 

@@ -32,7 +32,7 @@ def _list_themes(ui: Any) -> None:
     manager = get_theme_manager()
     current_name = manager.current.name
 
-    ui.console.print(f"\n[bold]Available Themes:[/bold]")
+    ui.console.print("\n[bold]Available Themes:[/bold]")
 
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Marker", width=2)
@@ -50,7 +50,7 @@ def _list_themes(ui: Any) -> None:
         table.add_row(marker, display, theme.description)
 
     ui.console.print(table)
-    ui.console.print(f"\n[dim]Usage: /themes <name> to switch[/dim]")
+    ui.console.print("\n[dim]Usage: /themes <name> to switch[/dim]")
 
 
 def _preview_theme(ui: Any, theme: Theme) -> None:
@@ -78,9 +78,7 @@ def _switch_theme(ui: Any, theme_name: str, preview_only: bool = False) -> None:
     manager = get_theme_manager()
 
     if theme_name not in BUILTIN_THEMES:
-        ui.console.print(
-            f"[{manager.get_color('error')}]Unknown theme: {escape(theme_name)}[/]"
-        )
+        ui.console.print(f"[{manager.get_color('error')}]Unknown theme: {escape(theme_name)}[/]")
         available = ", ".join(BUILTIN_THEMES.keys())
         ui.console.print(f"[dim]Available themes: {available}[/dim]")
         return
@@ -105,9 +103,7 @@ def _switch_theme(ui: Any, theme_name: str, preview_only: bool = False) -> None:
         )
         return
 
-    ui.console.print(
-        f"[{manager.get_color('success')}]✓ Theme switched to {theme.display_name}[/]"
-    )
+    ui.console.print(f"[{manager.get_color('success')}]✓ Theme switched to {theme.display_name}[/]")
 
 
 def _handle(ui: Any, arg: str) -> bool:

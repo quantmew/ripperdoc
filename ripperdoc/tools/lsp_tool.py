@@ -101,9 +101,7 @@ def _read_text(file_path: Path) -> str:
     return file_path.read_text(encoding="utf-8", errors="replace")
 
 
-def _normalize_position(
-    lines: List[str], line: int, character: int
-) -> Tuple[int, int, str]:
+def _normalize_position(lines: List[str], line: int, character: int) -> Tuple[int, int, str]:
     if not lines:
         return 0, 0, ""
     line_index = max(0, min(line - 1, len(lines) - 1))
@@ -121,7 +119,9 @@ def _extract_symbol_at_position(line_text: str, char_index: int) -> Optional[str
         return None
 
     if not line_text[char_index].isalnum() and line_text[char_index] != "_":
-        if char_index > 0 and (line_text[char_index - 1].isalnum() or line_text[char_index - 1] == "_"):
+        if char_index > 0 and (
+            line_text[char_index - 1].isalnum() or line_text[char_index - 1] == "_"
+        ):
             char_index -= 1
         else:
             return None
@@ -148,8 +148,8 @@ def _location_to_path_line_char(location: Optional[Dict[str, Any]]) -> Tuple[str
     if not location:
         return "<unknown>", 0, 0
     uri = location.get("uri") or location.get("targetUri")
-    range_info = location.get("range") or location.get("targetRange") or location.get(
-        "targetSelectionRange"
+    range_info = (
+        location.get("range") or location.get("targetRange") or location.get("targetSelectionRange")
     )
     path = "<unknown>"
     if isinstance(uri, str):
@@ -166,9 +166,7 @@ def _location_to_path_line_char(location: Optional[Dict[str, Any]]) -> Tuple[str
     return path, line, character
 
 
-def _format_locations(
-    label: str, locations: List[Dict[str, Any]]
-) -> Tuple[str, int, int]:
+def _format_locations(label: str, locations: List[Dict[str, Any]]) -> Tuple[str, int, int]:
     if not locations:
         return f"No {label} found.", 0, 0
 
@@ -583,13 +581,9 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
         if operation == "goToDefinition":
             if isinstance(result, dict):
                 result = [result]
-            formatted, result_count, file_count = _format_locations(
-                "definition(s)", result or []
-            )
+            formatted, result_count, file_count = _format_locations("definition(s)", result or [])
         elif operation == "findReferences":
-            formatted, result_count, file_count = _format_locations(
-                "reference(s)", result or []
-            )
+            formatted, result_count, file_count = _format_locations("reference(s)", result or [])
         elif operation == "hover":
             formatted, result_count, file_count = _format_hover(result or {})
         elif operation == "documentSymbol":

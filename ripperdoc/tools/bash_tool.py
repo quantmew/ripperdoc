@@ -617,7 +617,7 @@ build projects, run tests, and interact with the file system."""
             )
             return self._create_error_output(
                 effective_command, f"Failed to start background task: {str(e)}", sandbox_requested
-        )
+            )
 
         bg_timeout = (
             None
@@ -637,9 +637,15 @@ build projects, run tests, and interact with the file system."""
                     status = "failed"
                 else:
                     exit_code = getattr(task, "exit_code", None)
-                    status = "running" if exit_code is None else ("completed" if exit_code == 0 else "failed")
+                    status = (
+                        "running"
+                        if exit_code is None
+                        else ("completed" if exit_code == 0 else "failed")
+                    )
                 exit_code = getattr(task, "exit_code", None)
-                status_line = f"Background bash task {getattr(task, 'id', '')} finished with status: {status}"
+                status_line = (
+                    f"Background bash task {getattr(task, 'id', '')} finished with status: {status}"
+                )
                 if exit_code is not None:
                     status_line += f" (exit code {exit_code})"
                 details = [
@@ -655,13 +661,13 @@ build projects, run tests, and interact with the file system."""
                     },
                 )
 
-            completion_callbacks = [_notify_completion]
+            completion_callbacks = [_notify_completion]  # type: ignore[assignment]
 
         task_id = await start_background_command(
             final_command,
             timeout=bg_timeout,
             shell_executable=resolved_shell,
-            completion_callbacks=completion_callbacks,
+            completion_callbacks=completion_callbacks,  # type: ignore[arg-type]
         )
 
         return BashToolOutput(

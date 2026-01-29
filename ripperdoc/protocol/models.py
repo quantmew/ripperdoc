@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ConfigDict
 # Content Block Models
 # ============================================================================
 
+
 class ContentBlock(BaseModel):
     """Base class for content blocks in messages."""
 
@@ -86,6 +87,7 @@ ContentBlockType = (
 # Message Models
 # ============================================================================
 
+
 class MessageData(BaseModel):
     """Base message data."""
 
@@ -134,6 +136,7 @@ StreamMessage = AssistantStreamMessage | UserStreamMessage
 # Control Protocol Models
 # ============================================================================
 
+
 class ControlResponseData(BaseModel):
     """Base class for control response data."""
 
@@ -169,6 +172,7 @@ class ControlResponseMessage(BaseModel):
 # ============================================================================
 # Result/Usage Models
 # ============================================================================
+
 
 class UsageInfo(BaseModel):
     """Token usage information."""
@@ -226,6 +230,7 @@ class ResultMessage(BaseModel):
 # Permission Response Models
 # ============================================================================
 
+
 class PermissionResponseAllow(BaseModel):
     """A permission allow response."""
 
@@ -243,6 +248,7 @@ class PermissionResponseDeny(BaseModel):
 # ============================================================================
 # Helper Functions
 # ============================================================================
+
 
 def model_to_dict(model: BaseModel) -> dict[str, Any]:
     """Convert a Pydantic model to a JSON-serializable dictionary.

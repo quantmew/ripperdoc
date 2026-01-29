@@ -28,7 +28,9 @@ class Spinner:
         self._live: Optional[Live] = None
         # Spinner color from theme for visual separation in the terminal
         self._renderable: RichSpinner = RichSpinner(
-            spinner, text=Text(self._fit_to_terminal(self.text), style=self._style), style=self._style
+            spinner,
+            text=Text(self._fit_to_terminal(self.text), style=self._style),
+            style=self._style,
         )
 
     def _get_terminal_width(self) -> int:
@@ -53,7 +55,7 @@ class Spinner:
 
         # Smart truncation: keep the structure intact
         # Find the last complete parenthetical group if possible
-        truncated = text[:max_width - 1] + "…"
+        truncated = text[: max_width - 1] + "…"
         return truncated
 
     def _clear_line(self) -> None:

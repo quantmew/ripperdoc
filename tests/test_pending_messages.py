@@ -32,7 +32,9 @@ class NoOpTool(Tool[NoOpInput, None]):
     def render_result_for_assistant(self, output: None) -> str:  # pragma: no cover - trivial
         return "done"
 
-    def render_tool_use_message(self, input_data: NoOpInput, verbose: bool = False) -> str:  # pragma: no cover - trivial
+    def render_tool_use_message(
+        self, input_data: NoOpInput, verbose: bool = False
+    ) -> str:  # pragma: no cover - trivial
         return "noop"
 
     async def call(self, input_data: NoOpInput, context: ToolUseContext):  # noqa: ARG002

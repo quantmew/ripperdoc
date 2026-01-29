@@ -93,6 +93,7 @@ def filter_tools_by_names(
 
     # If Task is requested, recreate it with the filtered base tools
     if has_task:
+
         def _filtered_base_provider() -> List[Tool[Any, Any]]:
             return [t for t in filtered if getattr(t, "name", None) != "Task"]
 

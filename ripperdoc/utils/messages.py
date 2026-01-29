@@ -144,9 +144,7 @@ def _content_block_to_openai(block: MessageContent) -> Dict[str, Any]:
         data_url = f"data:{media_type};base64,{image_data}"
         return {
             "type": "image_url",
-            "image_url": {
-                "url": data_url
-            },
+            "image_url": {"url": data_url},
         }
     # Fallback text message
     return {
@@ -501,19 +499,24 @@ def normalize_messages_for_api(
                     )
 
                     # If message has images or only text/images (no tool_result), use content array format
-                    if has_images or (has_text_only and not any(
-                        getattr(block, "type", None) == "tool_result" for block in user_content
-                    )):
+                    if has_images or (
+                        has_text_only
+                        and not any(
+                            getattr(block, "type", None) == "tool_result" for block in user_content
+                        )
+                    ):
                         content_array: List[Dict[str, Any]] = []
                         for block in user_content:
                             block_type = getattr(block, "type", None)
                             if block_type == "image":
                                 content_array.append(_content_block_to_openai(block))
                             elif block_type == "text":
-                                content_array.append({
-                                    "type": "text",
-                                    "text": getattr(block, "text", "") or "",
-                                })
+                                content_array.append(
+                                    {
+                                        "type": "text",
+                                        "text": getattr(block, "text", "") or "",
+                                    }
+                                )
                             elif block_type == "tool_result":
                                 # Handle tool_result separately
                                 tool_results_seen += 1

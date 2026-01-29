@@ -45,9 +45,7 @@ class ToolUseContext(BaseModel):
     # SkipValidation prevents Pydantic from copying the cache during validation,
     # ensuring Read and Edit tools share the same cache instance.
     # FileCacheType supports both Dict[str, FileSnapshot] and BoundedFileCache.
-    file_state_cache: Annotated[FileCacheType, SkipValidation] = Field(
-        default_factory=dict
-    )
+    file_state_cache: Annotated[FileCacheType, SkipValidation] = Field(default_factory=dict)
     conversation_messages: Annotated[Optional[List[Any]], SkipValidation] = Field(
         default=None,
         description="Full conversation history for tools that need parent context.",

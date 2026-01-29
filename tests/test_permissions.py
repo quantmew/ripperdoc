@@ -222,9 +222,9 @@ async def test_mixed_format_rules_in_permission_checker(tmp_path: Path):
     # Setup config with mixed rule formats
     config = ProjectConfig(
         bash_allow_rules=[
-            "git:*",          # Legacy format
-            "npm *",          # Glob format
-            "* --version",    # Glob format
+            "git:*",  # Legacy format
+            "npm *",  # Glob format
+            "* --version",  # Glob format
         ]
     )
     save_project_config(config, tmp_path)
@@ -232,7 +232,7 @@ async def test_mixed_format_rules_in_permission_checker(tmp_path: Path):
     can_use_tool = make_permission_checker(
         project_path=tmp_path,
         yolo_mode=False,
-        prompt_fn=lambda _: "1"  # Auto-approve
+        prompt_fn=lambda _: "1",  # Auto-approve
     )
 
     tool = BashTool()

@@ -10,12 +10,10 @@ Tests cover:
 - TOCTOU protection
 """
 
-import asyncio
 import os
 import sys
 import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,7 +23,6 @@ from ripperdoc.tools.file_edit_tool import (
     FileEditToolInput,
     FileEditToolOutput,
 )
-from ripperdoc.core.tool import ToolUseContext
 
 
 class TestFileEditToolInput:
@@ -557,6 +554,7 @@ class TestTOCTOUProtection:
 
         # Create snapshot with old timestamp
         import time
+
         old_time = time.time() - 10  # 10 seconds ago
         snapshot = MagicMock()
         snapshot.timestamp = old_time
@@ -567,6 +565,7 @@ class TestTOCTOUProtection:
 
         # Touch file to update mtime
         import time
+
         time.sleep(0.01)  # Ensure mtime changes
         test_file.write_text("modified externally")
 
@@ -583,7 +582,9 @@ class TestTOCTOUProtection:
 class TestPreservation:
     """Tests for file preservation during edits."""
 
-    @pytest.mark.skipif(sys.platform != "win32", reason="Line ending preservation is Windows-specific")
+    @pytest.mark.skipif(
+        sys.platform != "win32", reason="Line ending preservation is Windows-specific"
+    )
     async def test_preserves_line_endings(self, tmp_path):
         """Should preserve line ending style.
 

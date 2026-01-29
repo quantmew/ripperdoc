@@ -158,7 +158,11 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         # Vision support prompt
         supports_vision_default = existing_profile.supports_vision if existing_profile else None
         supports_vision = None
-        vision_default_display = "auto" if supports_vision_default is None else ("yes" if supports_vision_default else "no")
+        vision_default_display = (
+            "auto"
+            if supports_vision_default is None
+            else ("yes" if supports_vision_default else "no")
+        )
         supports_vision_input = (
             console.input(f"Supports vision (images)? [{vision_default_display}] (Y/n/auto): ")
             .strip()
@@ -296,9 +300,15 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         )
 
         # Vision support prompt
-        vision_default_display = "auto" if existing_profile.supports_vision is None else ("yes" if existing_profile.supports_vision else "no")
+        vision_default_display = (
+            "auto"
+            if existing_profile.supports_vision is None
+            else ("yes" if existing_profile.supports_vision else "no")
+        )
         supports_vision_input = (
-            console.input(f"Supports vision (images)? [{vision_default_display}] (Y/n/auto/C=clear): ")
+            console.input(
+                f"Supports vision (images)? [{vision_default_display}] (Y/n/auto/C=clear): "
+            )
             .strip()
             .lower()
         )
@@ -392,10 +402,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
                 pointer = "main"
                 target = tokens[1]
         else:
-            pointer = (
-                console.input("Pointer (main/quick) [main]: ").strip().lower()
-                or "main"
-            )
+            pointer = console.input("Pointer (main/quick) [main]: ").strip().lower() or "main"
             if pointer not in valid_pointers:
                 console.print(
                     f"[red]Invalid pointer '{escape(pointer)}'. Valid pointers: {', '.join(valid_pointers)}[/red]"

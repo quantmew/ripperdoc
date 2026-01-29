@@ -123,6 +123,7 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
 
     # Filter by date range (use timezone-aware cutoff if needed)
     from datetime import timezone
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Ensure comparison works with both naive and aware datetimes

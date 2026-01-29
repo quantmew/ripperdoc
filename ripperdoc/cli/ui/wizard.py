@@ -135,7 +135,7 @@ def get_model_name_with_suggestions(
     api_base_override: Optional[str],
 ) -> Tuple[str, Optional[str]]:
     """Get model name with provider-specific suggestions and default API base.
-    
+
     Returns:
         Tuple of (model_name, api_base)
     """
@@ -152,7 +152,7 @@ def get_model_name_with_suggestions(
     if suggestions:
         console.print("\n[dim]Available models for this provider:[/dim]")
         for i, model_name in enumerate(suggestions[:5]):  # Show top 5
-            console.print(f"  [dim]{i+1}. {model_name}[/dim]")
+            console.print(f"  [dim]{i + 1}. {model_name}[/dim]")
         console.print("")
 
     # Prompt for model name
@@ -162,16 +162,12 @@ def get_model_name_with_suggestions(
         model = click.prompt("Model name", default=default_model)
         # Prompt for API base if still not set
         if api_base is None:
-            api_base_input = click.prompt(
-                "API base URL (optional)", default="", show_default=False
-            )
+            api_base_input = click.prompt("API base URL (optional)", default="", show_default=False)
             api_base = api_base_input or None
     elif provider.protocol == ProviderType.GEMINI:
         model = click.prompt("Model name", default=default_model)
         if api_base is None:
-            api_base_input = click.prompt(
-                "API base URL (optional)", default="", show_default=False
-            )
+            api_base_input = click.prompt("API base URL (optional)", default="", show_default=False)
             api_base = api_base_input or None
     else:
         model = click.prompt("Model name", default=default_model)
@@ -191,9 +187,7 @@ def get_context_window() -> Optional[int]:
         try:
             context_window = int(context_window_input.strip())
         except ValueError:
-            console.print(
-                "[yellow]Invalid context window, using auto-detected defaults.[/yellow]"
-            )
+            console.print("[yellow]Invalid context window, using auto-detected defaults.[/yellow]")
     return context_window
 
 
@@ -201,6 +195,7 @@ def get_version() -> str:
     """Get current version of Ripperdoc."""
     try:
         from ripperdoc import __version__
+
         return __version__
     except ImportError:
         return "unknown"

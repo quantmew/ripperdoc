@@ -35,9 +35,7 @@ def test_cli_consumes_piped_stdin_as_initial_query(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
     runner = CliRunner()
-    result = runner.invoke(
-        cli_module.cli, ["--yolo"], input="你好\n", env={"HOME": str(tmp_path)}
-    )
+    result = runner.invoke(cli_module.cli, ["--yolo"], input="你好\n", env={"HOME": str(tmp_path)})
 
     assert result.exit_code == 0
     assert recorded["initial_query"] == "你好"

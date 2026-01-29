@@ -8,9 +8,8 @@ Tests cover:
 """
 
 import asyncio
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
-import pytest
 
 from ripperdoc.cli.ui.interrupt_handler import (
     InterruptHandler,
@@ -92,7 +91,7 @@ class TestPauseAndResumeListener:
         handler = InterruptHandler()
 
         # Pause and remember state
-        prev = handler.pause_listener()
+        _prev = handler.pause_listener()
         assert handler._esc_listener_paused is True
 
         # Resume with False - should stay paused
@@ -292,11 +291,12 @@ class TestWindowsSpecificBehavior:
 
         async def run_listener_with_interrupt():
             """Simulate ESC key press after a short delay."""
+
             async def trigger_esc():
                 await asyncio.sleep(0.05)
                 # Simulate ESC key being pressed
                 mock_msvcrt.kbhit.return_value = True
-                mock_msvcrt.getch.return_value = b'\x1b'
+                mock_msvcrt.getch.return_value = b"\x1b"
 
             esc_task = asyncio.create_task(trigger_esc())
             result = await handler._listen_for_interrupt_key()
@@ -306,8 +306,9 @@ class TestWindowsSpecificBehavior:
         async def test():
             # Patch the import to use our mock
             import sys
+
             old_modules = sys.modules.copy()
-            sys.modules['msvcrt'] = mock_msvcrt
+            sys.modules["msvcrt"] = mock_msvcrt
 
             try:
                 task = asyncio.create_task(run_listener_with_interrupt())
@@ -333,7 +334,7 @@ class TestWindowsSpecificBehavior:
         async def run_listener_paused():
             # Even with key available, should not detect when paused
             mock_msvcrt.kbhit.return_value = True
-            mock_msvcrt.getch.return_value = b'\x1b'
+            mock_msvcrt.getch.return_value = b"\x1b"
 
             await asyncio.sleep(0.05)  # Give it time to NOT detect
             handler._esc_listener_active = False
@@ -342,8 +343,9 @@ class TestWindowsSpecificBehavior:
 
         async def test():
             import sys
+
             old_modules = sys.modules.copy()
-            sys.modules['msvcrt'] = mock_msvcrt
+            sys.modules["msvcrt"] = mock_msvcrt
 
             try:
                 task = asyncio.create_task(run_listener_paused())

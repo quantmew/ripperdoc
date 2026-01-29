@@ -149,8 +149,10 @@ async def _check_tool_permissions(
             if isinstance(decision, PermissionResult):
                 return decision.result, decision.message, decision.updated_input
             if isinstance(decision, dict) and "result" in decision:
-                return bool(decision.get("result")), decision.get("message"), decision.get(
-                    "updated_input"
+                return (
+                    bool(decision.get("result")),
+                    decision.get("message"),
+                    decision.get("updated_input"),
                 )
             if isinstance(decision, tuple) and len(decision) == 2:
                 return bool(decision[0]), decision[1], None
@@ -316,14 +318,14 @@ async def _run_tool_use_generator(
     if post_result.additional_context:
         _append_hook_context(context, f"PostToolUse:{tool_name}", post_result.additional_context)
     if post_result.system_message:
-        _append_hook_context(
-            context, f"PostToolUse:{tool_name}:system", post_result.system_message
-        )
+        _append_hook_context(context, f"PostToolUse:{tool_name}:system", post_result.system_message)
     if post_result.should_block:
         reason = post_result.block_reason or post_result.stop_reason or "Blocked by hook."
         yield create_user_message(f"PostToolUse hook blocked: {reason}")
 
-    logger.debug("[query] _run_tool_use_generator DONE: tool='%s' tool_use_id=%s", tool_name, tool_use_id)
+    logger.debug(
+        "[query] _run_tool_use_generator DONE: tool='%s' tool_use_id=%s", tool_name, tool_use_id
+    )
 
 
 def _group_tool_calls_by_concurrency(prepared_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -471,15 +473,16 @@ async def _run_concurrent_tool_uses(
 
     logger.debug("[query] _run_concurrent_tool_uses: creating %d tasks", len(generators))
     tasks = [
-        asyncio.create_task(_consume(gen, i, tool_names[i]))
-        for i, gen in enumerate(generators)
+        asyncio.create_task(_consume(gen, i, tool_names[i])) for i, gen in enumerate(generators)
     ]
     active = len(tasks)
     logger.debug("[query] _run_concurrent_tool_uses: %d tasks created, entering while loop", active)
 
     try:
         while active:
-            logger.debug("[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active)
+            logger.debug(
+                "[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active
+            )
             message = await queue.get()
             logger.debug(
                 "[query] _run_concurrent_tool_uses: got message type=%s, active=%d",
@@ -488,7 +491,9 @@ async def _run_concurrent_tool_uses(
             )
             if message is None:
                 active -= 1
-                logger.debug("[query] _run_concurrent_tool_uses: None received, active now=%d", active)
+                logger.debug(
+                    "[query] _run_concurrent_tool_uses: None received, active now=%d", active
+                )
                 continue
             if isinstance(message, UserMessage):
                 tool_results.append(message)
@@ -967,7 +972,10 @@ async def query_llm(
             )
 
         error_msg = create_assistant_message(
-            content=content, duration_ms=duration_ms, metadata=error_metadata, model=model_profile.model
+            content=content,
+            duration_ms=duration_ms,
+            metadata=error_metadata,
+            model=model_profile.model,
         )
         error_msg.is_api_error_message = True
         return error_msg
@@ -1154,9 +1162,13 @@ async def _run_query_iteration(
     )
 
     if not tool_use_blocks:
-        logger.debug("[query] No tool_use blocks; running stop hook and returning response to user.")
+        logger.debug(
+            "[query] No tool_use blocks; running stop hook and returning response to user."
+        )
         stop_hook = query_context.stop_hook
-        logger.debug(f"[query] stop_hook={stop_hook}, stop_hook_active={query_context.stop_hook_active}")
+        logger.debug(
+            f"[query] stop_hook={stop_hook}, stop_hook_active={query_context.stop_hook_active}"
+        )
         logger.debug("[query] BEFORE calling hook_manager.run_stop_async")
         stop_result = (
             await hook_manager.run_subagent_stop_async(
@@ -1443,12 +1455,13 @@ async def query(
             # Before stopping, check if new pending messages arrived during this iteration.
             trailing_pending = query_context.drain_pending_messages()
             if trailing_pending:
+                # type: ignore[operator,list-item]
                 next_messages = (
                     messages + [result.assistant_message] + result.tool_results
                     if result.assistant_message is not None
-                    else messages + result.tool_results
-                )
-                next_messages = next_messages + trailing_pending  # type: ignore[operator]
+                    else messages + result.tool_results  # type: ignore[operator]
+                )  # type: ignore[operator]
+                next_messages = next_messages + trailing_pending  # type: ignore[operator,list-item]
                 for pending in trailing_pending:
                     yield pending
                 messages = next_messages

@@ -281,6 +281,7 @@ class BackgroundShellManager:
 # Module-level functions that delegate to the singleton manager
 # These maintain backward compatibility with existing code
 
+
 def _get_manager() -> BackgroundShellManager:
     """Get the singleton manager instance."""
     return BackgroundShellManager.get_instance()

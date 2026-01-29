@@ -1,7 +1,7 @@
-from pathlib import Path
 from rich.markup import escape
 
 from ripperdoc.core.skills import (
+    SkillDefinition,
     SkillLoadResult,
     SkillLocation,
     load_all_skills,
@@ -46,7 +46,7 @@ def _handle(ui: Any, _: str) -> bool:
     project_skills = [s for s in result.skills if s.location == SkillLocation.PROJECT]
     other_skills = [s for s in result.skills if s.location == SkillLocation.OTHER]
 
-    def print_skill(skill) -> None:
+    def print_skill(skill: SkillDefinition) -> None:
         location_tag = f"[dim]({skill.location.value})[/dim]" if skill.location else ""
         console.print(f"\n[bold cyan]{escape(skill.name)}[/bold cyan] {location_tag}")
         console.print(f"  {escape(skill.description)}")
@@ -65,7 +65,7 @@ def _handle(ui: Any, _: str) -> bool:
             console.print(f"  Type: {escape(skill.skill_type)}")
 
         if skill.disable_model_invocation:
-            console.print(f"  [yellow]Model invocation disabled[/yellow]")
+            console.print("  [yellow]Model invocation disabled[/yellow]")
 
         console.print(f"  Path: {escape(str(skill.path))}", markup=False)
 

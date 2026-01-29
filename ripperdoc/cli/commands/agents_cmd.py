@@ -18,7 +18,7 @@ from ripperdoc.tools.task_tool import (
 )
 from ripperdoc.utils.log import get_logger
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from .base import SlashCommand
 
 logger = get_logger()
@@ -101,9 +101,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         for run_id in sorted(run_ids):
             snapshot: Dict[Any, Any] = get_agent_run_snapshot(run_id) or {}
             result_text = snapshot.get("result_text") or snapshot.get("error") or ""
-            result_preview = (
-                result_text if len(result_text) <= 80 else result_text[:77] + "..."
-            )
+            result_preview = result_text if len(result_text) <= 80 else result_text[:77] + "..."
             table.add_row(
                 escape(run_id),
                 escape(snapshot.get("status") or "unknown"),
@@ -136,9 +134,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         details.add_row("Status", escape(snapshot.get("status") or "unknown"))
         details.add_row("Agent", escape(snapshot.get("agent_type") or "unknown"))
         details.add_row("Duration", _format_duration(snapshot.get("duration_ms")))
-        details.add_row(
-            "Background", "yes" if snapshot.get("is_background") else "no"
-        )
+        details.add_row("Background", "yes" if snapshot.get("is_background") else "no")
         if snapshot.get("model_used"):
             details.add_row("Model", escape(str(snapshot.get("model_used"))))
         if snapshot.get("tool_use_count"):

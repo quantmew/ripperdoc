@@ -852,16 +852,15 @@ class TestFlexibleWildcardMatching:
     def test_legacy_and_glob_coexistence(self):
         """Both legacy and glob formats should work together."""
         from ripperdoc.utils.permissions.tool_permission_utils import (
-            match_rule,
             evaluate_shell_command_permissions,
         )
         from ripperdoc.utils.safe_get_cwd import safe_get_cwd
 
         # Mix of legacy and new format rules
         allowed_rules = {
-            "git:*",           # Legacy format
-            "npm *",           # Glob format
-            "* --help",        # Glob format
+            "git:*",  # Legacy format
+            "npm *",  # Glob format
+            "* --help",  # Glob format
         }
 
         cwd = safe_get_cwd()
@@ -942,7 +941,9 @@ class TestFlexibleWildcardMatching:
 
     def test_deny_rules_with_globs(self):
         """Deny rules should work with glob patterns."""
-        from ripperdoc.utils.permissions.tool_permission_utils import evaluate_shell_command_permissions
+        from ripperdoc.utils.permissions.tool_permission_utils import (
+            evaluate_shell_command_permissions,
+        )
         from ripperdoc.utils.safe_get_cwd import safe_get_cwd
 
         cwd = safe_get_cwd()

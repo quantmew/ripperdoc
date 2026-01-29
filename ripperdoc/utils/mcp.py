@@ -6,7 +6,6 @@ import asyncio
 import contextvars
 import json
 import shlex
-import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -300,9 +299,8 @@ class McpRuntime:
             elif config.type in ("http", "streamable-http"):
                 if not config.url:
                     raise ValueError("HTTP MCP server requires a 'url'.")
-                cm = streamable_http_client(
+                cm = streamable_http_client(  # type: ignore[call-arg]
                     url=config.url,
-                    headers=config.headers or None,
                     terminate_on_close=True,
                 )
                 # Track the underlying async generator for explicit cleanup

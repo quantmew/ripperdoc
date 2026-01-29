@@ -64,7 +64,9 @@ def create_wildcard_tool_rule(rule_name: str, use_glob_style: bool = False) -> L
     Returns:
         List containing a single ToolRule with wildcard pattern
     """
-    return [ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(rule_name, use_glob_style))]
+    return [
+        ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(rule_name, use_glob_style))
+    ]
 
 
 def extract_rule_prefix(rule_string: str) -> Optional[str]:
@@ -273,11 +275,15 @@ def _collect_rule_suggestions(command: str) -> List[ToolRule]:
     if tokens:
         # Legacy prefix format
         suggestions.append(
-            ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(tokens[0], use_glob_style=False))
+            ToolRule(
+                tool_name="Bash", rule_content=create_wildcard_rule(tokens[0], use_glob_style=False)
+            )
         )
         # New glob-style format
         suggestions.append(
-            ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(tokens[0], use_glob_style=True))
+            ToolRule(
+                tool_name="Bash", rule_content=create_wildcard_rule(tokens[0], use_glob_style=True)
+            )
         )
 
     return suggestions

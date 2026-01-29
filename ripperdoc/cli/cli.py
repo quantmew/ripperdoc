@@ -44,7 +44,6 @@ from ripperdoc.utils.log import enable_session_file_logging, get_logger
 
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.panel import Panel
 from rich.markup import escape
 
 console = Console()
@@ -287,7 +286,6 @@ async def run_query(
                 exc,
             )
         logger.debug("[cli] Shutdown MCP runtime", extra={"session_id": session_id})
-
 
 
 @click.group(invoke_without_command=True)
@@ -602,16 +600,18 @@ def stdio_cmd(
     from ripperdoc.protocol.stdio import _run_stdio
     import asyncio
 
-    asyncio.run(_run_stdio(
-        input_format=input_format,
-        output_format=output_format,
-        model=model,
-        permission_mode=permission_mode,
-        max_turns=max_turns,
-        system_prompt=system_prompt,
-        print_mode=print,
-        prompt=prompt,
-    ))
+    asyncio.run(
+        _run_stdio(
+            input_format=input_format,
+            output_format=output_format,
+            model=model,
+            permission_mode=permission_mode,
+            max_turns=max_turns,
+            system_prompt=system_prompt,
+            print_mode=print,
+            prompt=prompt,
+        )
+    )
 
 
 @cli.command(name="version")

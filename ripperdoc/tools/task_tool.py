@@ -152,6 +152,7 @@ async def cancel_agent_run(agent_id: str) -> bool:
     record.task = None
     return True
 
+
 class TaskToolInput(BaseModel):
     """Input schema for delegating to a subagent."""
 
@@ -264,7 +265,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             f"- Fetch background results by calling {background_fetch_tool_name} with resume=<agent_id>. If the agent is still running, set wait=true to block or wait=false to get status only.\n"
             "- To continue a completed agent, call Task with resume=<agent_id> and a new prompt.\n"
             "- Provide clear, detailed prompts so the agent can work autonomously and return exactly the information you need.\n"
-            '- Agents can opt into parent context by setting fork_context: true in their frontmatter. When enabled, they receive the full conversation history before the tool call.\n'
+            "- Agents can opt into parent context by setting fork_context: true in their frontmatter. When enabled, they receive the full conversation history before the tool call.\n"
             "- The agent's outputs should generally be trusted\n"
             "- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent\n"
             "- If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.\n"
@@ -634,9 +635,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             error=error_override or record.error,
         )
 
-    def _coerce_parent_history(
-        self, messages: Optional[Sequence[object]]
-    ) -> List[MessageType]:
+    def _coerce_parent_history(self, messages: Optional[Sequence[object]]) -> List[MessageType]:
         if not messages:
             return []
         history: List[MessageType] = []

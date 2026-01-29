@@ -14,9 +14,6 @@ import asyncio
 import json
 import os
 import sys
-from pathlib import Path
-from typing import Any, Dict
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -25,10 +22,7 @@ from ripperdoc.core.hooks.config import (
     HookDefinition,
     HookMatcher,
     HooksConfig,
-    get_global_hooks_path,
     get_merged_hooks_config,
-    get_project_hooks_path,
-    get_project_local_hooks_path,
     load_hooks_config,
 )
 from ripperdoc.core.hooks.events import (
@@ -161,15 +155,17 @@ class TestHookOutputParsing:
 
     def test_hook_specific_output_pre_tool_use(self):
         """JSON with hookSpecificOutput for PreToolUse should parse correctly."""
-        json_output = json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "permissionDecisionReason": "Allowed by policy",
-                "updatedInput": {"command": "ls -la"},
-                "additionalContext": "Modified command",
+        json_output = json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "permissionDecisionReason": "Allowed by policy",
+                    "updatedInput": {"command": "ls -la"},
+                    "additionalContext": "Modified command",
+                }
             }
-        })
+        )
         output = HookOutput.from_raw(json_output, "", 0)
         assert output.decision == HookDecision.ALLOW
         assert output.reason == "Allowed by policy"
@@ -178,28 +174,32 @@ class TestHookOutputParsing:
 
     def test_hook_specific_output_permission_request(self):
         """JSON with hookSpecificOutput for PermissionRequest should parse correctly."""
-        json_output = json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PermissionRequest",
-                "decision": {
-                    "behavior": "allow",
-                    "updatedInput": {"path": "/tmp/safe"},
-                    "message": "Auto-allowed for temp directory",
+        json_output = json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {
+                        "behavior": "allow",
+                        "updatedInput": {"path": "/tmp/safe"},
+                        "message": "Auto-allowed for temp directory",
+                    },
                 }
             }
-        })
+        )
         output = HookOutput.from_raw(json_output, "", 0)
         assert output.decision == HookDecision.ALLOW
         assert output.reason == "Auto-allowed for temp directory"
 
     def test_hook_specific_output_post_tool_use(self):
         """JSON with hookSpecificOutput for PostToolUse should parse correctly."""
-        json_output = json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "additionalContext": "Code quality check passed",
+        json_output = json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": "Code quality check passed",
+                }
             }
-        })
+        )
         output = HookOutput.from_raw(json_output, "", 0)
         assert output.additional_context == "Code quality check passed"
 
@@ -316,18 +316,22 @@ class TestHooksConfig:
     def test_load_valid_config(self, tmp_path):
         """Loading valid config should parse correctly."""
         config_path = tmp_path / "hooks.json"
-        config_path.write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash",
-                        "hooks": [
-                            {"type": "command", "command": "echo test", "timeout": 30}
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {"type": "command", "command": "echo test", "timeout": 30}
+                                ],
+                            }
                         ]
                     }
-                ]
-            }
-        }))
+                }
+            )
+        )
         config = load_hooks_config(config_path)
         assert "PreToolUse" in config.hooks
         assert len(config.hooks["PreToolUse"]) == 1
@@ -338,33 +342,40 @@ class TestHooksConfig:
     def test_load_config_without_wrapper(self, tmp_path):
         """Loading config without 'hooks' wrapper should work."""
         config_path = tmp_path / "hooks.json"
-        config_path.write_text(json.dumps({
-            "PreToolUse": [
+        config_path.write_text(
+            json.dumps(
                 {
-                    "matcher": "*",
-                    "hooks": [
-                        {"type": "command", "command": "echo test"}
+                    "PreToolUse": [
+                        {"matcher": "*", "hooks": [{"type": "command", "command": "echo test"}]}
                     ]
                 }
-            ]
-        }))
+            )
+        )
         config = load_hooks_config(config_path)
         assert "PreToolUse" in config.hooks
 
     def test_load_prompt_hook(self, tmp_path):
         """Loading prompt hook should parse correctly."""
         config_path = tmp_path / "hooks.json"
-        config_path.write_text(json.dumps({
-            "hooks": {
-                "Stop": [
-                    {
-                        "hooks": [
-                            {"type": "prompt", "prompt": "Should continue? $ARGUMENTS", "timeout": 20}
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "prompt",
+                                        "prompt": "Should continue? $ARGUMENTS",
+                                        "timeout": 20,
+                                    }
+                                ]
+                            }
                         ]
                     }
-                ]
-            }
-        }))
+                }
+            )
+        )
         config = load_hooks_config(config_path)
         assert "Stop" in config.hooks
         hook = config.hooks["Stop"][0].hooks[0]
@@ -375,17 +386,15 @@ class TestHooksConfig:
     def test_prompt_hook_on_unsupported_event_skipped(self, tmp_path):
         """Prompt hook on unsupported event should be skipped."""
         config_path = tmp_path / "hooks.json"
-        config_path.write_text(json.dumps({
-            "hooks": {
-                "SessionEnd": [
-                    {
-                        "hooks": [
-                            {"type": "prompt", "prompt": "Test prompt"}
-                        ]
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionEnd": [{"hooks": [{"type": "prompt", "prompt": "Test prompt"}]}]
                     }
-                ]
-            }
-        }))
+                }
+            )
+        )
         config = load_hooks_config(config_path)
         # SessionEnd doesn't support prompt hooks, should be empty
         assert "SessionEnd" not in config.hooks or len(config.hooks.get("SessionEnd", [])) == 0
@@ -393,37 +402,39 @@ class TestHooksConfig:
     def test_unknown_event_skipped(self, tmp_path):
         """Unknown event names should be skipped with warning."""
         config_path = tmp_path / "hooks.json"
-        config_path.write_text(json.dumps({
-            "hooks": {
-                "UnknownEvent": [
-                    {
-                        "hooks": [
-                            {"type": "command", "command": "echo test"}
-                        ]
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "UnknownEvent": [{"hooks": [{"type": "command", "command": "echo test"}]}]
                     }
-                ]
-            }
-        }))
+                }
+            )
+        )
         config = load_hooks_config(config_path)
         assert "UnknownEvent" not in config.hooks
 
     def test_get_hooks_for_event_with_tool_name(self, tmp_path):
         """get_hooks_for_event should filter by tool name."""
         config_path = tmp_path / "hooks.json"
-        config_path.write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash",
-                        "hooks": [{"type": "command", "command": "bash-hook"}]
-                    },
-                    {
-                        "matcher": "Write",
-                        "hooks": [{"type": "command", "command": "write-hook"}]
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": "bash-hook"}],
+                            },
+                            {
+                                "matcher": "Write",
+                                "hooks": [{"type": "command", "command": "write-hook"}],
+                            },
+                        ]
                     }
-                ]
-            }
-        }))
+                }
+            )
+        )
         config = load_hooks_config(config_path)
 
         bash_hooks = config.get_hooks_for_event(HookEvent.PRE_TOOL_USE, "Bash")
@@ -436,19 +447,29 @@ class TestHooksConfig:
 
     def test_merge_configs(self, tmp_path):
         """Merging configs should combine hooks from both."""
-        config1 = HooksConfig(hooks={
-            "PreToolUse": [HookMatcher(matcher="Bash", hooks=[
-                HookDefinition(type="command", command="hook1")
-            ])]
-        })
-        config2 = HooksConfig(hooks={
-            "PreToolUse": [HookMatcher(matcher="Write", hooks=[
-                HookDefinition(type="command", command="hook2")
-            ])],
-            "PostToolUse": [HookMatcher(matcher="*", hooks=[
-                HookDefinition(type="command", command="hook3")
-            ])]
-        })
+        config1 = HooksConfig(
+            hooks={
+                "PreToolUse": [
+                    HookMatcher(
+                        matcher="Bash", hooks=[HookDefinition(type="command", command="hook1")]
+                    )
+                ]
+            }
+        )
+        config2 = HooksConfig(
+            hooks={
+                "PreToolUse": [
+                    HookMatcher(
+                        matcher="Write", hooks=[HookDefinition(type="command", command="hook2")]
+                    )
+                ],
+                "PostToolUse": [
+                    HookMatcher(
+                        matcher="*", hooks=[HookDefinition(type="command", command="hook3")]
+                    )
+                ],
+            }
+        )
 
         merged = config1.merge_with(config2)
         assert len(merged.hooks["PreToolUse"]) == 2
@@ -461,34 +482,50 @@ class TestHooksConfig:
         # Create global config
         global_dir = tmp_path / ".ripperdoc"
         global_dir.mkdir(parents=True)
-        (global_dir / "hooks.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{"matcher": "*", "hooks": [
-                    {"type": "command", "command": "global-hook"}
-                ]}]
-            }
-        }))
+        (global_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": "global-hook"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         # Create project config
         project_path = tmp_path / "project"
         project_dir = project_path / ".ripperdoc"
         project_dir.mkdir(parents=True)
-        (project_dir / "hooks.json").write_text(json.dumps({
-            "hooks": {
-                "PostToolUse": [{"matcher": "*", "hooks": [
-                    {"type": "command", "command": "project-hook"}
-                ]}]
-            }
-        }))
+        (project_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": "project-hook"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         # Create local config
-        (project_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "SessionStart": [{"hooks": [
-                    {"type": "command", "command": "local-hook"}
-                ]}]
-            }
-        }))
+        (project_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [{"hooks": [{"type": "command", "command": "local-hook"}]}]
+                    }
+                }
+            )
+        )
 
         config = get_merged_hooks_config(project_path)
         assert "PreToolUse" in config.hooks  # From global
@@ -676,6 +713,7 @@ class TestHookExecutor:
     @pytest.mark.asyncio
     async def test_execute_async_prompt_with_callback(self, tmp_path):
         """Async prompt execution should use LLM callback."""
+
         async def mock_llm_callback(prompt: str) -> str:
             return json.dumps({"decision": "allow", "reason": "LLM approved"})
 
@@ -703,6 +741,7 @@ class TestHookExecutor:
     @pytest.mark.asyncio
     async def test_execute_async_prompt_timeout(self, tmp_path):
         """Async prompt execution should timeout."""
+
         async def slow_callback(prompt: str) -> str:
             await asyncio.sleep(10)
             return "{}"
@@ -848,14 +887,20 @@ class TestHookManager:
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
         json_output = json.dumps({"decision": "allow"})
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "Bash",
-                    "hooks": [{"type": "command", "command": f"echo '{json_output}'"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": f"echo '{json_output}'"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_pre_tool_use("Bash", {"command": "ls"})
@@ -869,14 +914,17 @@ class TestHookManager:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": "echo test"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"matcher": "*", "hooks": [{"type": "command", "command": "echo test"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_pre_tool_use_async("Bash", {"command": "ls"})
@@ -889,13 +937,17 @@ class TestHookManager:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{"type": "command", "command": "echo checked"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "UserPromptSubmit": [
+                            {"hooks": [{"type": "command", "command": "echo checked"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_user_prompt_submit("Hello world")
@@ -908,13 +960,17 @@ class TestHookManager:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "Notification": [{
-                    "hooks": [{"type": "command", "command": "echo notified"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Notification": [
+                            {"hooks": [{"type": "command", "command": "echo notified"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_notification("Test message", "info")
@@ -927,13 +983,17 @@ class TestHookManager:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "SessionStart": [{
-                    "hooks": [{"type": "command", "command": "echo started"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {"hooks": [{"type": "command", "command": "echo started"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_session_start("startup")
@@ -947,13 +1007,15 @@ class TestHookManager:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "SessionEnd": [{
-                    "hooks": [{"type": "command", "command": "echo ended"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionEnd": [{"hooks": [{"type": "command", "command": "echo ended"}]}]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_session_end("other", duration_seconds=100.0, message_count=10)
@@ -966,13 +1028,11 @@ class TestHookManager:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "Stop": [{
-                    "hooks": [{"type": "command", "command": "echo stopped"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo stopped"}]}]}}
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_stop(stop_hook_active=False, reason="end_turn")
@@ -1085,9 +1145,9 @@ class TestHookResult:
     def test_updated_input(self):
         """Updated input should be from first output with one."""
         outputs = [
-            HookOutput(hook_specific_output=PreToolUseHookOutput(
-                updatedInput={"command": "modified"}
-            )),
+            HookOutput(
+                hook_specific_output=PreToolUseHookOutput(updatedInput={"command": "modified"})
+            ),
         ]
         result = HookResult(outputs)
         assert result.updated_input == {"command": "modified"}
@@ -1223,14 +1283,25 @@ print(json.dumps({"received_tool": data.get("tool_name")}))
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": f"{sys.executable} {script_path}"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": f"{sys.executable} {script_path}",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_pre_tool_use("TestTool", {"arg": "value"})
@@ -1256,13 +1327,24 @@ print(json.dumps(result))
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "hooks": [{"type": "command", "command": f"{sys.executable} {script_path}"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": f"{sys.executable} {script_path}",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(
             project_dir=tmp_path,
@@ -1279,14 +1361,25 @@ print(json.dumps(result))
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "Bash",
-                    "hooks": [{"type": "command", "command": "echo 'Dangerous command' >&2; exit 2"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "echo 'Dangerous command' >&2; exit 2",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_pre_tool_use("Bash", {"command": "rm -rf /"})
@@ -1301,14 +1394,20 @@ print(json.dumps(result))
         json_output = json.dumps({"decision": "allow", "reason": "Trusted operation"})
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": f"echo '{json_output}'"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": f"echo '{json_output}'"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_pre_tool_use("Bash", {"command": "ls"})
@@ -1319,22 +1418,30 @@ print(json.dumps(result))
         """Hook should be able to modify tool input via updatedInput."""
         monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
 
-        json_output = json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "updatedInput": {"command": "ls -la --color=never"}
+        json_output = json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "updatedInput": {"command": "ls -la --color=never"},
+                }
             }
-        })
+        )
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "Bash",
-                    "hooks": [{"type": "command", "command": f"echo '{json_output}'"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": f"echo '{json_output}'"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_pre_tool_use("Bash", {"command": "ls -la"})
@@ -1347,18 +1454,24 @@ print(json.dumps(result))
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "*",
-                    "hooks": [
-                        {"type": "command", "command": "echo hook1"},
-                        {"type": "command", "command": "echo hook2"},
-                        {"type": "command", "command": "echo hook3"},
-                    ]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {"type": "command", "command": "echo hook1"},
+                                    {"type": "command", "command": "echo hook2"},
+                                    {"type": "command", "command": "echo hook3"},
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_pre_tool_use("Bash", {})
@@ -1371,14 +1484,20 @@ print(json.dumps(result))
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "Edit|Write",
-                    "hooks": [{"type": "command", "command": "echo file_operation"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Edit|Write",
+                                "hooks": [{"type": "command", "command": "echo file_operation"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
 
@@ -1400,12 +1519,8 @@ print(json.dumps(result))
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.core.hooks.integration import (
+from ripperdoc.core.hooks.integration import (  # noqa: E402
     HookInterceptor,
-    check_pre_tool_use,
-    check_pre_tool_use_async,
-    run_post_tool_use,
-    run_post_tool_use_async,
     check_user_prompt,
     check_user_prompt_async,
     notify_session_start,
@@ -1447,14 +1562,22 @@ class TestHookInterceptor:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": "echo 'Blocked' >&2; exit 2"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {"type": "command", "command": "echo 'Blocked' >&2; exit 2"}
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         interceptor = HookInterceptor(manager=manager)
@@ -1471,14 +1594,20 @@ class TestHookInterceptor:
         json_output = json.dumps({"decision": "ask", "reason": "Please confirm"})
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": f"echo '{json_output}'"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": f"echo '{json_output}'"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         interceptor = HookInterceptor(manager=manager)
@@ -1495,7 +1624,9 @@ class TestHookInterceptor:
         manager = HookManager(project_dir=tmp_path)
         interceptor = HookInterceptor(manager=manager)
 
-        should_proceed, block_reason, context = await interceptor.check_pre_tool_use_async("Bash", {})
+        should_proceed, block_reason, context = await interceptor.check_pre_tool_use_async(
+            "Bash", {}
+        )
 
         assert should_proceed is True
 
@@ -1505,14 +1636,20 @@ class TestHookInterceptor:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PostToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": "echo post_check"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": "echo post_check"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         interceptor = HookInterceptor(manager=manager)
@@ -1530,21 +1667,25 @@ class TestHookInterceptor:
         json_output = json.dumps({"decision": "block", "reason": "Quality check failed"})
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PostToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": f"echo '{json_output}'"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": f"echo '{json_output}'"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         interceptor = HookInterceptor(manager=manager)
 
-        should_continue, block_reason, context = interceptor.run_post_tool_use(
-            "Bash", {}, "output"
-        )
+        should_continue, block_reason, context = interceptor.run_post_tool_use("Bash", {}, "output")
 
         assert should_continue is False
         assert block_reason == "Quality check failed"
@@ -1582,14 +1723,17 @@ class TestHookInterceptor:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": "exit 2"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"matcher": "*", "hooks": [{"type": "command", "command": "exit 2"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         interceptor = HookInterceptor(manager=manager)
@@ -1695,16 +1839,19 @@ class TestIntegrationConvenienceFunctions:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{"type": "command", "command": "exit 2"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "exit 2"}]}]
+                    }
+                }
+            )
+        )
 
         # Initialize a new manager for this test
         from ripperdoc.core.hooks.integration import hook_manager
+
         hook_manager.set_project_dir(tmp_path)
         hook_manager.reload_config()
 
@@ -1718,6 +1865,7 @@ class TestIntegrationConvenienceFunctions:
         monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
 
         from ripperdoc.core.hooks.integration import hook_manager
+
         hook_manager.set_project_dir(tmp_path)
         hook_manager.reload_config()
 
@@ -1730,6 +1878,7 @@ class TestIntegrationConvenienceFunctions:
         monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
 
         from ripperdoc.core.hooks.integration import hook_manager
+
         hook_manager.set_project_dir(tmp_path)
         hook_manager.reload_config()
 
@@ -1743,6 +1892,7 @@ class TestIntegrationConvenienceFunctions:
         monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
 
         from ripperdoc.core.hooks.integration import hook_manager
+
         hook_manager.set_project_dir(tmp_path)
         hook_manager.reload_config()
 
@@ -1755,6 +1905,7 @@ class TestIntegrationConvenienceFunctions:
         monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
 
         from ripperdoc.core.hooks.integration import hook_manager
+
         hook_manager.set_project_dir(tmp_path)
         hook_manager.reload_config()
 
@@ -1770,15 +1921,20 @@ class TestIntegrationConvenienceFunctions:
         json_output = json.dumps({"decision": "block", "reason": "Keep working"})
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "Stop": [{
-                    "hooks": [{"type": "command", "command": f"echo '{json_output}'"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {"hooks": [{"type": "command", "command": f"echo '{json_output}'"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         from ripperdoc.core.hooks.integration import hook_manager
+
         hook_manager.set_project_dir(tmp_path)
         hook_manager.reload_config()
 
@@ -1793,6 +1949,7 @@ class TestIntegrationConvenienceFunctions:
         monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
 
         from ripperdoc.core.hooks.integration import hook_manager
+
         hook_manager.set_project_dir(tmp_path)
         hook_manager.reload_config()
 
@@ -1816,14 +1973,22 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PermissionRequest": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": "echo permission_checked"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PermissionRequest": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {"type": "command", "command": "echo permission_checked"}
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_permission_request_async("Bash", {"command": "ls"})
@@ -1837,14 +2002,20 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PostToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": "echo post_tool"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": "echo post_tool"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_post_tool_use_async("Bash", {}, "output")
@@ -1858,13 +2029,17 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{
-                    "hooks": [{"type": "command", "command": "echo prompt_checked"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "UserPromptSubmit": [
+                            {"hooks": [{"type": "command", "command": "echo prompt_checked"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_user_prompt_submit_async("Hello")
@@ -1878,13 +2053,17 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "Notification": [{
-                    "hooks": [{"type": "command", "command": "echo notified"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Notification": [
+                            {"hooks": [{"type": "command", "command": "echo notified"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_notification_async("Test", "info")
@@ -1898,13 +2077,15 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "Stop": [{
-                    "hooks": [{"type": "command", "command": "echo stop_checked"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [{"hooks": [{"type": "command", "command": "echo stop_checked"}]}]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_stop_async(False, "end_turn")
@@ -1918,13 +2099,17 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "SubagentStop": [{
-                    "hooks": [{"type": "command", "command": "echo subagent_stop"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SubagentStop": [
+                            {"hooks": [{"type": "command", "command": "echo subagent_stop"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_subagent_stop_async(False)
@@ -1938,13 +2123,17 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreCompact": [{
-                    "hooks": [{"type": "command", "command": "echo pre_compact"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreCompact": [
+                            {"hooks": [{"type": "command", "command": "echo pre_compact"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_pre_compact_async("manual", "Keep imports")
@@ -1958,13 +2147,17 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "SessionStart": [{
-                    "hooks": [{"type": "command", "command": "echo session_start"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {"hooks": [{"type": "command", "command": "echo session_start"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_session_start_async("startup")
@@ -1979,13 +2172,17 @@ class TestHookManagerAsyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "SessionEnd": [{
-                    "hooks": [{"type": "command", "command": "echo session_end"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionEnd": [
+                            {"hooks": [{"type": "command", "command": "echo session_end"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = await manager.run_session_end_async("logout", 100.0, 10)
@@ -2007,14 +2204,20 @@ class TestHookManagerSyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PermissionRequest": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": "echo permission"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PermissionRequest": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": "echo permission"}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_permission_request("Write", {"file_path": "/tmp/test"})
@@ -2027,14 +2230,17 @@ class TestHookManagerSyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PostToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{"type": "command", "command": "echo post"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {"matcher": "*", "hooks": [{"type": "command", "command": "echo post"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_post_tool_use("Bash", {}, "output", "toolu_123")
@@ -2047,13 +2253,17 @@ class TestHookManagerSyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "SubagentStop": [{
-                    "hooks": [{"type": "command", "command": "echo subagent"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SubagentStop": [
+                            {"hooks": [{"type": "command", "command": "echo subagent"}]}
+                        ]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_subagent_stop(False)
@@ -2066,13 +2276,15 @@ class TestHookManagerSyncMethods:
 
         config_dir = tmp_path / ".ripperdoc"
         config_dir.mkdir(parents=True)
-        (config_dir / "hooks.local.json").write_text(json.dumps({
-            "hooks": {
-                "PreCompact": [{
-                    "hooks": [{"type": "command", "command": "echo compact"}]
-                }]
-            }
-        }))
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreCompact": [{"hooks": [{"type": "command", "command": "echo compact"}]}]
+                    }
+                }
+            )
+        )
 
         manager = HookManager(project_dir=tmp_path)
         result = manager.run_pre_compact("auto")

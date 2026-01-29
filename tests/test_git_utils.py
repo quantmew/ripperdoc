@@ -14,8 +14,6 @@ Tests cover:
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional
-from unittest.mock import patch, MagicMock
 import subprocess
 
 import pytest
@@ -53,6 +51,7 @@ class TestIsGitRepository:
 
     def test_returns_false_when_git_not_available(self, tmp_path, monkeypatch):
         """Should return False when git is not installed."""
+
         # Mock subprocess.run to simulate git not found
         def mock_run(*args, **kwargs):
             raise FileNotFoundError("git not found")
@@ -178,9 +177,7 @@ class TestBuildIgnorePatternsMap:
     def test_includes_user_patterns(self, tmp_path):
         """Should include user-provided ignore patterns."""
         subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-        result = build_ignore_patterns_map(
-            tmp_path, user_ignore_patterns=["*.pyc", "*.log"]
-        )
+        result = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["*.pyc", "*.log"])
         assert None in result  # User patterns go under None key
         assert "*.pyc" in result[None]
         assert "*.log" in result[None]
@@ -241,10 +238,7 @@ class TestShouldIgnorePath:
         subdir = tmp_path / "subdir"
         subdir.mkdir()
 
-        ignore_map = {
-            None: ["*.log"],
-            subdir: ["*.tmp"]
-        }
+        ignore_map = {None: ["*.log"], subdir: ["*.tmp"]}
 
         log_file = tmp_path / "test.log"
         tmp_file = subdir / "test.tmp"
@@ -315,7 +309,12 @@ class TestGetCurrentGitBranch:
             ["git", "commit", "-m", "initial"],
             cwd=tmp_path,
             capture_output=True,
-            env={"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@test.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@test.com"},
+            env={
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@test.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@test.com",
+            },
         )
 
         # Detach HEAD
@@ -354,7 +353,12 @@ class TestGetGitCommitHash:
             ["git", "commit", "-m", "initial"],
             cwd=tmp_path,
             capture_output=True,
-            env={"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@test.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@test.com"},
+            env={
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@test.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@test.com",
+            },
         )
 
         result = get_git_commit_hash(tmp_path)
@@ -371,7 +375,12 @@ class TestGetGitCommitHash:
             ["git", "commit", "-m", "initial"],
             cwd=tmp_path,
             capture_output=True,
-            env={"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@test.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@test.com"},
+            env={
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@test.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@test.com",
+            },
         )
 
         result = get_git_commit_hash(tmp_path)
@@ -399,7 +408,12 @@ class TestIsWorkingDirectoryClean:
             ["git", "commit", "-m", "initial"],
             cwd=tmp_path,
             capture_output=True,
-            env={"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@test.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@test.com"},
+            env={
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@test.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@test.com",
+            },
         )
 
         result = is_working_directory_clean(tmp_path)
@@ -414,7 +428,12 @@ class TestIsWorkingDirectoryClean:
             ["git", "commit", "-m", "initial"],
             cwd=tmp_path,
             capture_output=True,
-            env={"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@test.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@test.com"},
+            env={
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@test.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@test.com",
+            },
         )
         (tmp_path / "file.txt").write_text("modified")
 
@@ -477,6 +496,7 @@ class TestErrorHandling:
 
     def test_handles_git_command_timeout(self, tmp_path, monkeypatch):
         """Should handle git command timeout gracefully."""
+
         def mock_run(*args, **kwargs):
             raise subprocess.TimeoutExpired("git", 5)
 
@@ -486,6 +506,7 @@ class TestErrorHandling:
 
     def test_handles_git_command_error(self, tmp_path, monkeypatch):
         """Should handle git command errors gracefully."""
+
         def mock_run(*args, **kwargs):
             raise subprocess.CalledProcessError(1, "git")
 
@@ -499,7 +520,7 @@ class TestErrorHandling:
         gitignore = tmp_path / ".gitignore"
 
         # Write binary data that can't be decoded as UTF-8
-        gitignore.write_bytes(b'\xff\xfe invalid utf-8')
+        gitignore.write_bytes(b"\xff\xfe invalid utf-8")
 
         # Should not raise
         patterns = read_gitignore_patterns(tmp_path)

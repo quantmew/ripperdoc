@@ -205,12 +205,14 @@ class ThemeManager:
     """Theme manager - singleton pattern."""
 
     _instance: Optional["ThemeManager"] = None
+    _current_theme: Theme
+    _listeners: List[Callable[["Theme"], None]]
 
     def __new__(cls) -> "ThemeManager":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._current_theme = THEME_DARK
-            cls._instance._listeners: List[Callable[["Theme"], None]] = []
+            cls._instance._listeners = []
         return cls._instance
 
     @property

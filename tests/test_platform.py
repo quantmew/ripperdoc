@@ -7,10 +7,6 @@ Tests cover:
 - Cross-platform compatibility
 """
 
-from unittest.mock import patch
-
-import pytest
-
 from ripperdoc.utils.platform import (
     # Platform class
     Platform,
@@ -112,9 +108,11 @@ class TestPlatformWithMocking:
         # Force reimport to get the mocked value
         import importlib
         import ripperdoc.utils.platform
+
         importlib.reload(ripperdoc.utils.platform)
 
         from ripperdoc.utils.platform import Platform
+
         assert Platform.is_windows() is True
         assert Platform.is_linux() is False
         assert Platform.is_macos() is False
@@ -125,9 +123,11 @@ class TestPlatformWithMocking:
         monkeypatch.setattr("sys.platform", "linux")
         import importlib
         import ripperdoc.utils.platform
+
         importlib.reload(ripperdoc.utils.platform)
 
         from ripperdoc.utils.platform import Platform
+
         assert Platform.is_linux() is True
         assert Platform.is_windows() is False
         assert Platform.is_macos() is False
@@ -138,9 +138,11 @@ class TestPlatformWithMocking:
         monkeypatch.setattr("sys.platform", "darwin")
         import importlib
         import ripperdoc.utils.platform
+
         importlib.reload(ripperdoc.utils.platform)
 
         from ripperdoc.utils.platform import Platform
+
         assert Platform.is_macos() is True
         assert Platform.is_windows() is False
         assert Platform.is_linux() is False
@@ -151,9 +153,11 @@ class TestPlatformWithMocking:
         monkeypatch.setattr("sys.platform", "freebsd")
         import importlib
         import ripperdoc.utils.platform
+
         importlib.reload(ripperdoc.utils.platform)
 
         from ripperdoc.utils.platform import Platform
+
         assert Platform.is_bsd() is True
 
     def test_openbsd_detection(self, monkeypatch):
@@ -161,9 +165,11 @@ class TestPlatformWithMocking:
         monkeypatch.setattr("sys.platform", "openbsd")
         import importlib
         import ripperdoc.utils.platform
+
         importlib.reload(ripperdoc.utils.platform)
 
         from ripperdoc.utils.platform import Platform
+
         assert Platform.is_bsd() is True
 
     def test_unknown_platform_detection(self, monkeypatch):
@@ -171,9 +177,11 @@ class TestPlatformWithMocking:
         monkeypatch.setattr("sys.platform", "some_unknown_os")
         import importlib
         import ripperdoc.utils.platform
+
         importlib.reload(ripperdoc.utils.platform)
 
         from ripperdoc.utils.platform import Platform
+
         assert Platform.get_system() == "unknown"
 
 

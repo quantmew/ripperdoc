@@ -127,9 +127,7 @@ def _get_week_grid(
     return weeks, max_count
 
 
-def render_heatmap(
-    console: Console, daily_activity: Dict[str, int], weeks_count: int = 52
-) -> None:
+def render_heatmap(console: Console, daily_activity: Dict[str, int], weeks_count: int = 52) -> None:
     """Render activity heatmap to console.
 
     Args:

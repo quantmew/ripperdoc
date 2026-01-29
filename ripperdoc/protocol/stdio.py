@@ -38,7 +38,6 @@ from ripperdoc.utils.mcp import (
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
-from ripperdoc.utils.log import get_logger
 from ripperdoc.protocol.models import (
     ControlResponseMessage,
     ControlResponseSuccess,
@@ -121,7 +120,7 @@ class StdioProtocolHandler:
             error: The error message (for failure).
         """
         if error:
-            response_data = ControlResponseError(
+            response_data: ControlResponseSuccess | ControlResponseError = ControlResponseError(  # type: ignore[assignment]
                 request_id=request_id,
                 error=error,
             )
@@ -153,12 +152,10 @@ class StdioProtocolHandler:
             The line content, or None if EOF.
         """
         try:
-            line = await asyncio.get_event_loop().run_in_executor(
-                None, sys.stdin.readline
-            )
+            line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
             if not line:
                 return None
-            return line.rstrip("\n\r")
+            return line.rstrip("\n\r")  # type: ignore[no-any-return]
         except (OSError, IOError) as e:
             logger.error(f"Error reading from stdin: {e}")
             return None
@@ -205,10 +202,7 @@ class StdioProtocolHandler:
             request_id: The request ID.
         """
         if self._initialized:
-            await self._write_control_response(
-                request_id,
-                error="Already initialized"
-            )
+            await self._write_control_response(request_id, error="Already initialized")
             return
 
         try:
@@ -228,7 +222,7 @@ class StdioProtocolHandler:
 
             # Parse tool options
             allowed_tools = options.get("allowed_tools")
-            disallowed_tools = options.get("disallowed_tools")
+            _disallowed_tools = options.get("disallowed_tools")
             tools_list = options.get("tools")
 
             # Get the tool list
@@ -245,10 +239,7 @@ class StdioProtocolHandler:
 
             # Create permission checker
             if not yolo_mode:
-                self._can_use_tool = make_permission_checker(
-                    self._project_path,
-                    yolo_mode=False
-                )
+                self._can_use_tool = make_permission_checker(self._project_path, yolo_mode=False)
 
             # Setup model
             model = options.get("model") or "main"
@@ -308,6 +299,7 @@ class StdioProtocolHandler:
             # Use simple list format for Claude SDK compatibility
             # Get skill info for agents list
             from ripperdoc.core.skills import load_all_skills
+
             skill_result = load_all_skills(self._project_path)
             agent_names = [s.name for s in skill_result.skills] if skill_result.skills else []
 
@@ -339,30 +331,22 @@ class StdioProtocolHandler:
             request_id: The request ID.
         """
         if not self._initialized:
-            await self._write_control_response(
-                request_id,
-                error="Not initialized"
-            )
+            await self._write_control_response(request_id, error="Not initialized")
             return
 
         try:
             prompt = request.get("prompt", "")
             if not prompt:
-                await self._write_control_response(
-                    request_id,
-                    error="Prompt is required"
-                )
+                await self._write_control_response(request_id, error="Prompt is required")
                 return
 
             # Create session history
             session_history = SessionHistory(
-                self._project_path,
-                self._session_id or str(uuid.uuid4())
+                self._project_path, self._session_id or str(uuid.uuid4())
             )
             hook_manager.set_transcript_path(str(session_history.path))
 
             # Create initial user message
-            from ripperdoc.utils.messages import UserMessage, AssistantMessage
 
             # Add the new user message to conversation history
             user_message = create_user_message(prompt)
@@ -398,9 +382,15 @@ class StdioProtocolHandler:
                     )
                     await self._write_control_response(request_id, error=str(reason))
                     return
-                if hasattr(prompt_hook_result, "system_message") and prompt_hook_result.system_message:
+                if (
+                    hasattr(prompt_hook_result, "system_message")
+                    and prompt_hook_result.system_message
+                ):
                     additional_instructions.append(str(prompt_hook_result.system_message))
-                if hasattr(prompt_hook_result, "additional_context") and prompt_hook_result.additional_context:
+                if (
+                    hasattr(prompt_hook_result, "additional_context")
+                    and prompt_hook_result.additional_context
+                ):
                     additional_instructions.append(str(prompt_hook_result.additional_context))
             except Exception as e:
                 logger.warning(f"Prompt submit hook failed: {e}")
@@ -419,8 +409,7 @@ class StdioProtocolHandler:
 
             # Send acknowledgment that query is starting
             await self._write_control_response(
-                request_id,
-                response={"status": "querying", "session_id": self._session_id}
+                request_id, response={"status": "querying", "session_id": self._session_id}
             )
 
             # Track query metrics
@@ -444,10 +433,12 @@ class StdioProtocolHandler:
                     messages,
                     system_prompt,
                     context,
-                    self._query_context,
+                    self._query_context or {},  # type: ignore[arg-type]
                     self._can_use_tool,
                 ):
-                    logger.debug(f"[stdio] Received message of type: {getattr(message, 'type', 'unknown')}")
+                    logger.debug(
+                        f"[stdio] Received message of type: {getattr(message, 'type', 'unknown')}"
+                    )
                     num_turns += 1
 
                     # Filter out progress messages (internal implementation detail)
@@ -508,9 +499,8 @@ class StdioProtocolHandler:
                 # This is a rough estimate - actual pricing depends on the model used
                 cost_per_million_input = 3.0
                 cost_per_million_output = 15.0
-                total_cost_usd = (
-                    (total_input_tokens * cost_per_million_input / 1_000_000) +
-                    (total_output_tokens * cost_per_million_output / 1_000_000)
+                total_cost_usd = (total_input_tokens * cost_per_million_input / 1_000_000) + (
+                    total_output_tokens * cost_per_million_output / 1_000_000
                 )
 
                 logger.debug("[stdio] Building usage info")
@@ -630,9 +620,17 @@ class StdioProtocolHandler:
             # Resolve model pointer to actual model name for SDK
             # The message may have model=None (unset), so fall back to QueryContext.model
             # Then resolve any pointer (e.g., "main") to the actual model name
-            model_pointer = getattr(message, "model", None) or self._query_context.model
-            model_profile = resolve_model_profile(model_pointer)
-            actual_model = model_profile.model if model_profile else model_pointer
+            model_pointer = getattr(message, "model", None) or (
+                self._query_context.model if self._query_context else None
+            )  # type: ignore[union-attr]
+            model_profile = resolve_model_profile(
+                str(model_pointer) if model_pointer else "claude-opus-4-5-20251101"
+            )
+            actual_model = (
+                model_profile.model
+                if model_profile
+                else (model_pointer or "claude-opus-4-5-20251101")
+            )
 
             stream_message = AssistantStreamMessage(
                 message=AssistantMessageData(
@@ -669,7 +667,7 @@ class StdioProtocolHandler:
                         # since the data is in tool_use_result field
                 content = content_str
 
-            stream_message = UserStreamMessage(
+            stream_message: UserStreamMessage | AssistantStreamMessage = UserStreamMessage(  # type: ignore[assignment,no-redef]
                 message=UserMessageData(content=content),
                 uuid=getattr(message, "uuid", None),
                 parent_tool_use_id=getattr(message, "parent_tool_use_id", None),
@@ -762,11 +760,7 @@ class StdioProtocolHandler:
         elif block_type == "tool_use":
             # Use the same id extraction logic as _content_block_to_api
             # Try id first, then tool_use_id, then empty string
-            tool_id = (
-                getattr(block, "id", None) or
-                getattr(block, "tool_use_id", None) or
-                ""
-            )
+            tool_id = getattr(block, "id", None) or getattr(block, "tool_use_id", None) or ""
             return {
                 "type": "tool_use",
                 "id": tool_id,
@@ -777,7 +771,9 @@ class StdioProtocolHandler:
         elif block_type == "tool_result":
             return {
                 "type": "tool_result",
-                "tool_use_id": getattr(block, "tool_use_id", None) or getattr(block, "id", None) or "",
+                "tool_use_id": getattr(block, "tool_use_id", None)
+                or getattr(block, "id", None)
+                or "",
                 "content": getattr(block, "text", None) or getattr(block, "content", None) or "",
                 "is_error": getattr(block, "is_error", None),
             }
@@ -845,17 +841,14 @@ class StdioProtocolHandler:
 
             else:
                 await self._write_control_response(
-                    request_id,
-                    error=f"Unknown request subtype: {request_subtype}"
+                    request_id, error=f"Unknown request subtype: {request_subtype}"
                 )
 
         except Exception as e:
             logger.error(f"Error handling control request: {e}", exc_info=True)
             await self._write_control_response(request_id, error=str(e))
 
-    async def _handle_set_permission_mode(
-        self, request: dict[str, Any], request_id: str
-    ) -> None:
+    async def _handle_set_permission_mode(self, request: dict[str, Any], request_id: str) -> None:
         """Handle set_permission_mode request from SDK.
 
         Args:
@@ -866,16 +859,13 @@ class StdioProtocolHandler:
         # Update the permission mode in the query context
         if self._query_context:
             # Map string mode to yolo_mode boolean
-            self._query_context.yolo_mode = (mode == "bypassPermissions")
+            self._query_context.yolo_mode = mode == "bypassPermissions"
 
         await self._write_control_response(
-            request_id,
-            response={"status": "permission_mode_set", "mode": mode}
+            request_id, response={"status": "permission_mode_set", "mode": mode}
         )
 
-    async def _handle_set_model(
-        self, request: dict[str, Any], request_id: str
-    ) -> None:
+    async def _handle_set_model(self, request: dict[str, Any], request_id: str) -> None:
         """Handle set_model request from SDK.
 
         Args:
@@ -888,13 +878,10 @@ class StdioProtocolHandler:
             self._query_context.model = model or "main"
 
         await self._write_control_response(
-            request_id,
-            response={"status": "model_set", "model": model}
+            request_id, response={"status": "model_set", "model": model}
         )
 
-    async def _handle_rewind_files(
-        self, request: dict[str, Any], request_id: str
-    ) -> None:
+    async def _handle_rewind_files(self, request: dict[str, Any], request_id: str) -> None:
         """Handle rewind_files request from SDK.
 
         Note: File checkpointing is not currently supported.
@@ -905,13 +892,10 @@ class StdioProtocolHandler:
             request_id: The request ID.
         """
         await self._write_control_response(
-            request_id,
-            error="File checkpointing and rewind_files are not currently supported"
+            request_id, error="File checkpointing and rewind_files are not currently supported"
         )
 
-    async def _handle_hook_callback(
-        self, request: dict[str, Any], request_id: str
-    ) -> None:
+    async def _handle_hook_callback(self, request: dict[str, Any], request_id: str) -> None:
         """Handle hook_callback request from SDK.
 
         Args:
@@ -919,9 +903,9 @@ class StdioProtocolHandler:
             request_id: The request ID.
         """
         # Get callback info
-        callback_id = request.get("callback_id")
-        input_data = request.get("input", {})
-        tool_use_id = request.get("tool_use_id")
+        _callback_id = request.get("callback_id")
+        _input_data = request.get("input", {})
+        _tool_use_id = request.get("tool_use_id")
 
         # For now, return a basic response
         # Full hook support would require integration with hook_manager
@@ -929,12 +913,10 @@ class StdioProtocolHandler:
             request_id,
             response={
                 "continue": True,
-            }
+            },
         )
 
-    async def _handle_can_use_tool(
-        self, request: dict[str, Any], request_id: str
-    ) -> None:
+    async def _handle_can_use_tool(self, request: dict[str, Any], request_id: str) -> None:
         """Handle can_use_tool request from SDK.
 
         Args:
@@ -948,7 +930,7 @@ class StdioProtocolHandler:
         if self._can_use_tool:
             try:
                 # Call the permission checker
-                from ripperdoc_agent_sdk.types import ToolPermissionContext
+                from ripperdoc_agent_sdk.types import ToolPermissionContext  # type: ignore[import-not-found]
 
                 context = ToolPermissionContext(
                     signal=None,
@@ -969,8 +951,10 @@ class StdioProtocolHandler:
                         response=model_to_dict(perm_response),
                     )
                 else:
-                    perm_response = PermissionResponseDeny(
-                        message=result.message if hasattr(result, "message") else "",
+                    perm_response: PermissionResponseAllow | PermissionResponseDeny = (
+                        PermissionResponseDeny(  # type: ignore[assignment,no-redef]
+                            message=result.message if hasattr(result, "message") else "",
+                        )
                     )
                     await self._write_control_response(
                         request_id,
@@ -978,10 +962,7 @@ class StdioProtocolHandler:
                     )
             except Exception as e:
                 logger.error(f"Error in permission check: {e}")
-                await self._write_control_response(
-                    request_id,
-                    error=str(e)
-                )
+                await self._write_control_response(request_id, error=str(e))
         else:
             # No permission checker, allow by default
             perm_response = PermissionResponseAllow(
@@ -1100,16 +1081,18 @@ def stdio_cmd(
         ripperdoc stdio --output-format stream-json
     """
     # Set up async event loop
-    asyncio.run(_run_stdio(
-        input_format=input_format,
-        output_format=output_format,
-        model=model,
-        permission_mode=permission_mode,
-        max_turns=max_turns,
-        system_prompt=system_prompt,
-        print_mode=print,
-        prompt=prompt,
-    ))
+    asyncio.run(
+        _run_stdio(
+            input_format=input_format,
+            output_format=output_format,
+            model=model,
+            permission_mode=permission_mode,
+            max_turns=max_turns,
+            system_prompt=system_prompt,
+            print_mode=print,
+            prompt=prompt,
+        )
+    )
 
 
 async def _run_stdio(

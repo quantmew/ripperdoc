@@ -662,7 +662,7 @@ def validate_shell_command(shell_command: str) -> ValidationResult:
         lex = shlex.shlex(cmd, posix=True)
         lex.whitespace_split = True  # Split on whitespace, better for argument parsing
         lex.commenters = ""  # Don't treat # as comment for security analysis
-        
+
         tokens = []
         try:
             # Get all tokens
@@ -691,7 +691,7 @@ def validate_shell_command(shell_command: str) -> ValidationResult:
                 # Single ; & | are dangerous
                 return True
             i += 1
-        
+
         # Also check for find -exec escaped semicolon pattern
         # shlex will have already parsed \; as separate token ';' (since escaped)
         # We need to check if this ; is part of find -exec pattern
@@ -716,7 +716,7 @@ def validate_shell_command(shell_command: str) -> ValidationResult:
                     continue
                 # Not part of find -exec, so it's dangerous
                 return True
-        
+
         return False
 
     if has_metachars_outside_quotes(sanitized_for_metachar_check):

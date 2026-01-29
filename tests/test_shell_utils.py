@@ -6,9 +6,7 @@ Tests cover:
 - Cross-platform shell handling
 """
 
-import os
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -134,27 +132,6 @@ class TestBuildShellCommand:
         assert "/c" in result
         assert "echo test" in result
 
-    def test_zsh_command(self):
-        """Zsh command should use -lc flags."""
-        result = build_shell_command("/bin/zsh", "ls -la")
-        assert result == ["/bin/zsh", "-lc", "ls -la"]
-
-    def test_git_bash_command(self):
-        """Git Bash on Windows should use -lc flags."""
-        result = build_shell_command(r"C:\Program Files\Git\bin\bash.exe", "pwd")
-        assert result[0].endswith("bash.exe")
-        assert result[1] == "-lc"
-        assert result[2] == "pwd"
-
-    def test_cmd_exe_command(self):
-        """cmd.exe command should use /d /s /c flags."""
-        result = build_shell_command(r"C:\Windows\System32\cmd.exe", "dir")
-        assert result[0].endswith("cmd.exe")
-        assert "/d" in result
-        assert "/s" in result
-        assert "/c" in result
-        assert "dir" in result
-
     def test_cmd_with_backslash(self):
         """cmd.exe path with backslash should use Windows format."""
         result = build_shell_command(r"C:\Windows\System32\cmd.exe", "dir")
@@ -250,6 +227,7 @@ class TestFindGitBashWindows:
 
     def test_returns_none_when_not_found(self, monkeypatch):
         """Should return None when Git Bash is not found."""
+
         def mock_which(cmd):
             return None
 

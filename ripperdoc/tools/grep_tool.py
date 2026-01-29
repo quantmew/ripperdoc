@@ -263,24 +263,33 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         self, input_data: GrepToolInput, _context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
         """Search for the pattern."""
-        logger.debug("[grep_tool] call ENTER: pattern='%s' path='%s'", input_data.pattern, input_data.path)
+        logger.debug(
+            "[grep_tool] call ENTER: pattern='%s' path='%s'", input_data.pattern, input_data.path
+        )
 
         try:
             search_path = input_data.path or "."
 
             async def _run_search(command: List[str]) -> Tuple[int, str, str]:
                 """Execute the search command and return decoded output."""
-                logger.debug("[grep_tool] _run_search: BEFORE create_subprocess_exec, cmd=%s", command[:5])
+                logger.debug(
+                    "[grep_tool] _run_search: BEFORE create_subprocess_exec, cmd=%s", command[:5]
+                )
                 process = await asyncio.create_subprocess_exec(
                     *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
-                logger.debug("[grep_tool] _run_search: AFTER create_subprocess_exec, pid=%s", process.pid)
+                logger.debug(
+                    "[grep_tool] _run_search: AFTER create_subprocess_exec, pid=%s", process.pid
+                )
                 logger.debug("[grep_tool] _run_search: BEFORE communicate()")
                 stdout, stderr = await process.communicate()
-                logger.debug("[grep_tool] _run_search: AFTER communicate(), returncode=%s", process.returncode)
+                logger.debug(
+                    "[grep_tool] _run_search: AFTER communicate(), returncode=%s",
+                    process.returncode,
+                )
                 stdout_text = stdout.decode("utf-8", errors="ignore") if stdout else ""
                 stderr_text = stderr.decode("utf-8", errors="ignore") if stderr else ""
-                return process.returncode, stdout_text, stderr_text
+                return process.returncode or 0, stdout_text, stderr_text
 
             use_ripgrep = shutil.which("rg") is not None
             logger.debug("[grep_tool] use_ripgrep=%s", use_ripgrep)
@@ -336,7 +345,11 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
 
             logger.debug("[grep_tool] BEFORE _run_search, cmd=%s", cmd)
             returncode, stdout_text, stderr_text = await _run_search(cmd)
-            logger.debug("[grep_tool] AFTER _run_search, returncode=%s, stdout_len=%d", returncode, len(stdout_text))
+            logger.debug(
+                "[grep_tool] AFTER _run_search, returncode=%s, stdout_len=%d",
+                returncode,
+                len(stdout_text),
+            )
             fallback_attempted = False
 
             if returncode not in (0, 1):
@@ -366,7 +379,9 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                         output_mode=input_data.output_mode,
                         head_limit=input_data.head_limit,
                     )
-                    yield ToolResult(data=error_output, result_for_assistant=f"Grep error: {error_msg}")
+                    yield ToolResult(
+                        data=error_output, result_for_assistant=f"Grep error: {error_msg}"
+                    )
                     return
 
             # Parse output

@@ -10,12 +10,8 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 # Supported image formats
-SUPPORTED_IMAGE_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"
-}
-SUPPORTED_IMAGE_MIME_TYPES = {
-    "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"
-}
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+SUPPORTED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"}
 
 MAX_IMAGE_SIZE_BYTES = 32 * 1024 * 1024  # 32MB
 

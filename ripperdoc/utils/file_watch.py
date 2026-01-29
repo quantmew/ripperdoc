@@ -308,7 +308,9 @@ def detect_changed_files(
             continue
 
         try:
-            new_content = _read_portion(file_path, snapshot.offset, snapshot.limit, snapshot.encoding)
+            new_content = _read_portion(
+                file_path, snapshot.offset, snapshot.limit, snapshot.encoding
+            )
         except (
             OSError,
             IOError,

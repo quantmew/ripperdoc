@@ -98,8 +98,8 @@ class InterruptHandler:
 
                 # Check for key press in a thread to avoid blocking
                 def check_key() -> Optional[str]:
-                    if msvcrt.kbhit():
-                        return msvcrt.getch().decode('latin-1')
+                    if msvcrt.kbhit():  # type: ignore[attr-defined]
+                        return msvcrt.getch().decode("latin-1")  # type: ignore[attr-defined,no-any-return]
                     return None
 
                 key = await asyncio.to_thread(check_key)

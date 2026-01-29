@@ -52,8 +52,6 @@ from ripperdoc.utils.conversation_compaction import (
     compact_conversation,
     CompactionResult,
     CompactionError,
-    extract_tool_ids_from_message,
-    get_complete_tool_pairs_tail,
 )
 from ripperdoc.utils.message_compaction import (
     estimate_conversation_tokens,
@@ -86,7 +84,6 @@ from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
 from ripperdoc.utils.message_formatting import stringify_message_content
 from ripperdoc.utils.image_utils import read_image_as_base64, is_image_file
-from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 
 
 # Type alias for conversation messages
@@ -129,7 +126,7 @@ def _extract_image_paths(text: str) -> List[str]:
     result = []
 
     # Find all @ followed by content until space or end
-    for match in re.finditer(r'@(\S+)', text):
+    for match in re.finditer(r"@(\S+)", text):
         candidate = match.group(1)
         if not candidate:
             continue
@@ -142,11 +139,43 @@ def _extract_image_paths(text: str) -> List[str]:
 
         # Not a file, try to find where the file path ends
         # Common file extensions
-        extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg',
-                      '.py', '.js', '.ts', '.tsx', '.jsx', '.vue', '.go', '.rs',
-                      '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.php', '.rb',
-                      '.sh', '.md', '.txt', '.json', '.yaml', '.yml', '.xml',
-                      '.html', '.css', '.scss', '.sql', '.db']
+        extensions = [
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".bmp",
+            ".svg",
+            ".py",
+            ".js",
+            ".ts",
+            ".tsx",
+            ".jsx",
+            ".vue",
+            ".go",
+            ".rs",
+            ".java",
+            ".c",
+            ".cpp",
+            ".h",
+            ".hpp",
+            ".cs",
+            ".php",
+            ".rb",
+            ".sh",
+            ".md",
+            ".txt",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".xml",
+            ".html",
+            ".css",
+            ".scss",
+            ".sql",
+            ".db",
+        ]
 
         found_path = None
         for ext in extensions:
@@ -154,7 +183,7 @@ def _extract_image_paths(text: str) -> List[str]:
             if ext.lower() in candidate.lower():
                 # Found extension, extract path up to and including it
                 ext_pos = candidate.lower().find(ext.lower())
-                potential_path = candidate[:ext_pos + len(ext)]
+                potential_path = candidate[: ext_pos + len(ext)]
                 if Path(potential_path).exists():
                     found_path = potential_path
                     break
@@ -163,7 +192,7 @@ def _extract_image_paths(text: str) -> List[str]:
                 # For cases like "file.txt.extraText"
                 last_ext_pos = candidate.lower().rfind(ext.lower())
                 if last_ext_pos > ext_pos:
-                    potential_path = candidate[:last_ext_pos + len(ext)]
+                    potential_path = candidate[: last_ext_pos + len(ext)]
                     if Path(potential_path).exists():
                         found_path = potential_path
                         break
@@ -236,12 +265,14 @@ def _process_images_in_input(
         result = read_image_as_base64(path_candidate)
         if result:
             base64_data, mime_type = result
-            image_blocks.append({
-                "type": "image",
-                "source_type": "base64",
-                "media_type": mime_type,
-                "image_data": base64_data,
-            })
+            image_blocks.append(
+                {
+                    "type": "image",
+                    "source_type": "base64",
+                    "media_type": mime_type,
+                    "image_data": base64_data,
+                }
+            )
             # Remove image reference from text (content included separately as image block)
             processed_text = processed_text.replace(f"@{ref_path}", "")
         else:
@@ -252,7 +283,7 @@ def _process_images_in_input(
             )
 
     # Clean up extra whitespace
-    processed_text = re.sub(r'\s+', ' ', processed_text).strip()
+    processed_text = re.sub(r"\s+", " ", processed_text).strip()
 
     return processed_text, image_blocks
 
@@ -347,9 +378,7 @@ class RichUI:
             theme_manager.set_theme("dark")  # Fallback to default
 
         # Initialize component handlers
-        self._message_display = MessageDisplay(
-            self.console, self.verbose, self.show_full_thinking
-        )
+        self._message_display = MessageDisplay(self.console, self.verbose, self.show_full_thinking)
         self._interrupt_handler = InterruptHandler()
         self._interrupt_handler.set_abort_callback(self._trigger_abort)
 
@@ -425,9 +454,7 @@ class RichUI:
     def _toggle_thinking_mode(self) -> None:
         """Toggle thinking mode on/off. Status is shown in rprompt."""
         if not self._supports_thinking_mode():
-            self.console.print(
-                "[yellow]Current model does not support thinking mode.[/yellow]"
-            )
+            self.console.print("[yellow]Current model does not support thinking mode.[/yellow]")
             return
         self._thinking_mode_enabled = not self._thinking_mode_enabled
 
@@ -447,12 +474,16 @@ class RichUI:
         if not self._supports_thinking_mode():
             return ""
         if self._thinking_mode_enabled:
-            return FormattedText([
-                ('class:rprompt-on', '⚡ Thinking'),
-            ])
-        return FormattedText([
-            ('class:rprompt-off', 'Thinking: off'),
-        ])
+            return FormattedText(
+                [
+                    ("class:rprompt-on", "⚡ Thinking"),
+                ]
+            )
+        return FormattedText(
+            [
+                ("class:rprompt-off", "Thinking: off"),
+            ]
+        )
 
     def _context_usage_lines(
         self, breakdown: Any, model_label: str, auto_compact_enabled: bool
@@ -1004,7 +1035,7 @@ class RichUI:
         # Handle bash command progress: "Running... (10s)\nstdout..."
         if content.startswith("Running..."):
             # Extract just the "Running... (time)" part before any newline
-            first_line = content.split('\n', 1)[0]
+            first_line = content.split("\n", 1)[0]
             return first_line
 
         # For other progress messages, limit length to avoid terminal wrapping
@@ -1046,9 +1077,7 @@ class RichUI:
             hook_result = await hook_manager.run_user_prompt_submit_async(user_input)
             if hook_result.should_block or not hook_result.should_continue:
                 reason = (
-                    hook_result.block_reason
-                    or hook_result.stop_reason
-                    or "Prompt blocked by hook."
+                    hook_result.block_reason or hook_result.stop_reason or "Prompt blocked by hook."
                 )
                 self.console.print(f"[red]{escape(str(reason))}[/red]")
                 return
@@ -1429,8 +1458,10 @@ class RichUI:
             # First check if /dev/tty exists and is accessible
             try:
                 import os
+
                 if os.path.exists("/dev/tty"):
                     from prompt_toolkit.input import create_input
+
                     input_obj = create_input(always_prefer_tty=True)
                     self._using_tty_input = True  # Mark that we're using /dev/tty
                     logger.info(
@@ -1450,10 +1481,12 @@ class RichUI:
                     extra={"session_id": self.session_id},
                 )
 
-        prompt_style = Style.from_dict({
-            'rprompt-on': 'fg:ansicyan bold',
-            'rprompt-off': 'fg:ansibrightblack',
-        })
+        prompt_style = Style.from_dict(
+            {
+                "rprompt-on": "fg:ansicyan bold",
+                "rprompt-off": "fg:ansibrightblack",
+            }
+        )
         self._prompt_session = PromptSession(
             completer=combined_completer,
             complete_style=CompleteStyle.COLUMN,
@@ -1560,7 +1593,9 @@ class RichUI:
                     if self._using_tty_input:
                         self._run_async(self.process_query(user_input))
                     else:
-                        interrupted = self._run_async_with_esc_interrupt(self.process_query(user_input))
+                        interrupted = self._run_async_with_esc_interrupt(
+                            self.process_query(user_input)
+                        )
                         if interrupted:
                             console.print(
                                 "\n[red]■ Conversation interrupted[/red] · [dim]Tell the model what to do differently.[/dim]"
@@ -1591,9 +1626,7 @@ class RichUI:
 
                     # First Ctrl+C - just abort the query and continue
                     self._last_ctrl_c_time = current_time
-                    console.print(
-                        "\n[dim]Query interrupted. Press Ctrl+C again to exit.[/dim]"
-                    )
+                    console.print("\n[dim]Query interrupted. Press Ctrl+C again to exit.[/dim]")
                     continue
                 except EOFError:
                     console.print("\n[yellow]Goodbye![/yellow]")

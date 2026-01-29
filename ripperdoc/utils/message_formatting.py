@@ -151,10 +151,10 @@ def format_reasoning_preview(reasoning: Any, show_full_thinking: bool = False) -
         text = "\n".join(p for p in parts if p)
     else:
         text = str(reasoning)
-    
+
     if show_full_thinking:
         return text
-    
+
     lines = text.strip().splitlines()
     if not lines:
         return ""

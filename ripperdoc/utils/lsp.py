@@ -228,7 +228,9 @@ def _parse_server_config(name: str, raw: Dict[str, Any]) -> Optional[LspServerCo
     env = {str(k): str(v) for k, v in env.items()} if env else {}
 
     initialization_options = (
-        raw.get("initializationOptions") if isinstance(raw.get("initializationOptions"), dict) else {}
+        raw.get("initializationOptions")
+        if isinstance(raw.get("initializationOptions"), dict)
+        else {}
     )
     settings = raw.get("settings") if isinstance(raw.get("settings"), dict) else {}
 
@@ -433,7 +435,10 @@ class LspServer:
                     break
                 logger.debug(
                     "[lsp] stderr",
-                    extra={"server": self.config.name, "line": line.decode(errors="replace").strip()},
+                    extra={
+                        "server": self.config.name,
+                        "line": line.decode(errors="replace").strip(),
+                    },
                 )
         except (asyncio.CancelledError, RuntimeError):
             return
