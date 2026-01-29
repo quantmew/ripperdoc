@@ -22,6 +22,7 @@ import click
 from ripperdoc.core.config import get_project_config
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
+from ripperdoc.core.query_utils import resolve_model_profile
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
@@ -626,10 +627,17 @@ class StdioProtocolHandler:
                                 if block_dict:
                                     content_blocks.append(block_dict)
 
+            # Resolve model pointer to actual model name for SDK
+            # The message may have model=None (unset), so fall back to QueryContext.model
+            # Then resolve any pointer (e.g., "main") to the actual model name
+            model_pointer = getattr(message, "model", None) or self._query_context.model
+            model_profile = resolve_model_profile(model_pointer)
+            actual_model = model_profile.model if model_profile else model_pointer
+
             stream_message = AssistantStreamMessage(
                 message=AssistantMessageData(
                     content=content_blocks,
-                    model=getattr(message, "model", "main"),
+                    model=actual_model,
                 ),
                 parent_tool_use_id=getattr(message, "parent_tool_use_id", None),
             )

@@ -853,6 +853,7 @@ async def query_llm(
             error_msg = create_assistant_message(
                 content=str(exc),
                 duration_ms=duration_ms,
+                model=model_profile.model,
             )
             error_msg.is_api_error_message = True
             return error_msg
@@ -867,6 +868,7 @@ async def query_llm(
                     "Check your model configuration and provider dependencies."
                 ),
                 duration_ms=duration_ms,
+                model=model_profile.model,
             )
             error_msg.is_api_error_message = True
             return error_msg
@@ -907,6 +909,7 @@ async def query_llm(
                 content=provider_response.content_blocks,
                 duration_ms=provider_response.duration_ms,
                 metadata=metadata,
+                model=model_profile.model,
             )
             error_msg.is_api_error_message = True
             return error_msg
@@ -964,7 +967,7 @@ async def query_llm(
             )
 
         error_msg = create_assistant_message(
-            content=content, duration_ms=duration_ms, metadata=error_metadata
+            content=content, duration_ms=duration_ms, metadata=error_metadata, model=model_profile.model
         )
         error_msg.is_api_error_message = True
         return error_msg
@@ -1087,7 +1090,7 @@ async def _run_query_iteration(
                 await assistant_task
             except CancelledError:
                 pass
-            yield create_assistant_message(INTERRUPT_MESSAGE)
+            yield create_assistant_message(INTERRUPT_MESSAGE, model=model_profile.model)
             result.should_stop = True
             return
         if assistant_task.done():
@@ -1132,7 +1135,7 @@ async def _run_query_iteration(
 
     # Check for abort
     if query_context.abort_controller.is_set():
-        yield create_assistant_message(INTERRUPT_MESSAGE)
+        yield create_assistant_message(INTERRUPT_MESSAGE, model=model_profile.model)
         result.should_stop = True
         return
 
@@ -1346,7 +1349,7 @@ async def _run_query_iteration(
 
     # Check for abort after tools
     if query_context.abort_controller.is_set():
-        yield create_assistant_message(INTERRUPT_MESSAGE_FOR_TOOL_USE)
+        yield create_assistant_message(INTERRUPT_MESSAGE_FOR_TOOL_USE, model=model_profile.model)
         result.tool_results = tool_results
         result.should_stop = True
         return
@@ -1362,6 +1365,26 @@ async def query(
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable] = None,
 ) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
+    """Execute a query with tool support.
+
+    This is the main query loop that:
+    1. Sends messages to the AI
+    2. Handles tool use responses
+    3. Executes tools
+    4. Continues the conversation in a loop until no more tool calls
+
+    Args:
+        messages: Conversation history
+        system_prompt: Base system prompt
+        context: Additional context dictionary
+        query_context: Query configuration
+        can_use_tool_fn: Optional function to check tool permissions
+
+    Yields:
+        Messages (user, assistant, progress) as they are generated
+    """
+    # Resolve model once for use in messages (e.g., max iterations, errors)
+    model_profile = resolve_model_profile(query_context.model)
     """Execute a query with tool support.
 
     This is the main query loop that:
@@ -1449,5 +1472,6 @@ async def query(
     )
     yield create_assistant_message(
         f"Reached maximum query iterations ({MAX_QUERY_ITERATIONS}). "
-        "Please continue the conversation to proceed."
+        "Please continue the conversation to proceed.",
+        model=model_profile.model,
     )
