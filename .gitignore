@@ -210,3 +210,8 @@ __marimo__/
 .ripperdoc/
 .ripperdoc.json
 *_ripperdoc.log
+
+
+# Nuitka build
+cli.build/
+cli.pyi

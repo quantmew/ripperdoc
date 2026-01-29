@@ -1,0 +1,1 @@
+python -m nuitka ripperdoc/cli/cli.py --include-package=ripperdoc
