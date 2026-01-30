@@ -5,7 +5,7 @@ for communication with AI models.
 """
 
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from uuid import uuid4
 from enum import Enum
 from ripperdoc.utils.log import get_logger
@@ -40,6 +40,19 @@ class MessageContent(BaseModel):
     media_type: Optional[str] = None  # "image/jpeg", "image/png", etc.
     image_data: Optional[str] = None  # base64-encoded image data or URL
 
+    @field_validator("input", mode="before")
+    @classmethod
+    def validate_input(cls, v):
+        """Ensure input is always a dict, never a Pydantic model."""
+        if v is not None and not isinstance(v, dict):
+            if hasattr(v, "model_dump"):
+                v = v.model_dump()
+            elif hasattr(v, "dict"):
+                v = v.dict()
+            else:
+                v = {"value": str(v)}
+        return v
+
 
 def _content_block_to_api(block: MessageContent) -> Dict[str, Any]:
     """Convert a MessageContent block to API-ready dict for tool protocols."""
@@ -57,11 +70,19 @@ def _content_block_to_api(block: MessageContent) -> Dict[str, Any]:
             "signature": getattr(block, "signature", None),
         }
     if block_type == "tool_use":
+        input_value = getattr(block, "input", None) or {}
+        # Ensure input is a dict, not a Pydantic model
+        if hasattr(input_value, "model_dump"):
+            input_value = input_value.model_dump()
+        elif hasattr(input_value, "dict"):
+            input_value = input_value.dict()
+        elif not isinstance(input_value, dict):
+            input_value = {"value": str(input_value)}
         return {
             "type": "tool_use",
             "id": getattr(block, "id", None) or getattr(block, "tool_use_id", "") or "",
             "name": getattr(block, "name", None) or "",
-            "input": getattr(block, "input", None) or {},
+            "input": input_value,
         }
     if block_type == "tool_result":
         result: Dict[str, Any] = {
@@ -268,6 +289,34 @@ def create_user_message(
     )
 
 
+def _normalize_content_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a content item to ensure all fields are JSON-serializable.
+
+    This is needed because some API providers may return Pydantic models
+    for tool input fields, which need to be converted to dicts for proper
+    serialization and later processing.
+
+    Args:
+        item: The content item dict from API response
+
+    Returns:
+        Normalized content item with all fields JSON-serializable
+    """
+    normalized = dict(item)
+
+    # If input is a Pydantic model, convert to dict
+    if 'input' in normalized and normalized['input'] is not None:
+        input_value = normalized['input']
+        if hasattr(input_value, 'model_dump'):
+            normalized['input'] = input_value.model_dump()
+        elif hasattr(input_value, 'dict'):
+            normalized['input'] = input_value.dict()
+        elif not isinstance(input_value, dict):
+            normalized['input'] = {'value': str(input_value)}
+
+    return normalized
+
+
 def create_assistant_message(
     content: Union[str, List[Dict[str, Any]]],
     cost_usd: float = 0.0,
@@ -286,7 +335,8 @@ def create_assistant_message(
     if isinstance(content, str):
         message_content: Union[str, List[MessageContent]] = content
     else:
-        message_content = [MessageContent(**item) for item in content]
+        # Normalize content items to ensure tool input is always a dict
+        message_content = [MessageContent(**_normalize_content_item(item)) for item in content]
 
     message = Message(
         role=MessageRole.ASSISTANT,

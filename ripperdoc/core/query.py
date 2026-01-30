@@ -251,8 +251,14 @@ async def _run_tool_use_generator(
         )
         # Re-parse the input with the updated values
         try:
-            parsed_input = tool.input_schema(**pre_result.updated_input)
-            tool_input_dict = pre_result.updated_input
+            # Ensure updated_input is a dict, not a Pydantic model
+            updated_input = pre_result.updated_input
+            if hasattr(updated_input, "model_dump"):
+                updated_input = updated_input.model_dump()
+            elif not isinstance(updated_input, dict):
+                updated_input = {"value": str(updated_input)}
+            parsed_input = tool.input_schema(**updated_input)
+            tool_input_dict = updated_input
         except (ValueError, TypeError) as exc:
             logger.warning(
                 f"[query] Failed to apply updated input from hook: {exc}",
@@ -1214,6 +1220,17 @@ async def _run_query_iteration(
         tool_use_id = getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
         tool_input = getattr(tool_use, "input", {}) or {}
 
+        # Handle case where input is a Pydantic model instead of a dict
+        # This can happen when the API response contains structured tool input objects
+        # Always try to convert if it has model_dump or dict methods
+        if tool_input and hasattr(tool_input, "model_dump"):
+            tool_input = tool_input.model_dump()
+        elif tool_input and hasattr(tool_input, "dict") and callable(getattr(tool_input, "dict")):
+            tool_input = tool_input.dict()
+        elif tool_input and not isinstance(tool_input, dict):
+            # Last resort: convert unknown type to string representation
+            tool_input = {"value": str(tool_input)}
+
         tool, missing_msg = _resolve_tool(query_context.tool_registry, tool_name, tool_use_id)
         if missing_msg:
             logger.warning(f"[query] Tool '{tool_name}' not found for tool_use_id={tool_use_id}")
@@ -1273,7 +1290,13 @@ async def _run_query_iteration(
                     break
                 if updated_input:
                     try:
-                        parsed_input = tool.input_schema(**updated_input)
+                        # Ensure updated_input is a dict, not a Pydantic model
+                        normalized_input = updated_input
+                        if hasattr(normalized_input, "model_dump"):
+                            normalized_input = normalized_input.model_dump()
+                        elif not isinstance(normalized_input, dict):
+                            normalized_input = {"value": str(normalized_input)}
+                        parsed_input = tool.input_schema(**normalized_input)
                     except ValidationError as ve:
                         detail_text = format_pydantic_errors(ve)
                         error_msg = tool_result_message(
