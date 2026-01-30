@@ -667,8 +667,35 @@ class StdioProtocolHandler:
                             )
                             num_turns[0] += 1
 
-                            # Filter out progress messages
+                            # Handle progress messages
                             if msg_type == "progress":
+                                # Check if this is a subagent message that should be forwarded to SDK
+                                is_subagent_msg = getattr(message, "is_subagent_message", False)
+                                if is_subagent_msg:
+                                    # Extract the subagent message from content
+                                    subagent_message = getattr(message, "content", None)
+                                    if subagent_message and hasattr(subagent_message, "type"):
+                                        logger.debug(
+                                            f"[stdio] Forwarding subagent message: type={getattr(subagent_message, 'type', 'unknown')}"
+                                        )
+                                        # Convert and forward the subagent message to SDK
+                                        message_dict = self._convert_message_to_sdk(subagent_message)
+                                        if message_dict:
+                                            await self._write_message_stream(message_dict)
+
+                                            # Add subagent messages to conversation history
+                                            subagent_msg_type = getattr(subagent_message, "type", "")
+                                            if subagent_msg_type == "assistant":
+                                                self._conversation_messages.append(subagent_message)
+
+                                                # Track token usage from subagent assistant messages
+                                                total_input_tokens[0] += getattr(subagent_message, "input_tokens", 0)
+                                                total_output_tokens[0] += getattr(subagent_message, "output_tokens", 0)
+                                                total_cache_read_tokens[0] += getattr(subagent_message, "cache_read_tokens", 0)
+                                                total_cache_creation_tokens[0] += getattr(
+                                                    subagent_message, "cache_creation_tokens", 0
+                                                )
+                                # Continue to filter out normal progress messages
                                 continue
 
                             # Track token usage from assistant messages

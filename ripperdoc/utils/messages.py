@@ -237,6 +237,7 @@ class ProgressMessage(BaseModel):
     content: Any
     normalized_messages: List[Message] = []
     sibling_tool_use_ids: set[str] = set()
+    is_subagent_message: bool = False  # Flag to indicate if content is a subagent message
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(self, **data: object) -> None:
@@ -364,6 +365,7 @@ def create_progress_message(
     sibling_tool_use_ids: set[str],
     content: Any,
     normalized_messages: Optional[List[Message]] = None,
+    is_subagent_message: bool = False,
 ) -> ProgressMessage:
     """Create a progress message."""
     return ProgressMessage(
@@ -371,6 +373,7 @@ def create_progress_message(
         sibling_tool_use_ids=sibling_tool_use_ids,
         content=content,
         normalized_messages=normalized_messages or [],
+        is_subagent_message=is_subagent_message,
     )
 
 

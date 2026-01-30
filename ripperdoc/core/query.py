@@ -297,6 +297,7 @@ async def _run_tool_use_generator(
                             tool_use_id=tool_use_id,
                             sibling_tool_use_ids=sibling_ids,
                             content=output.content,
+                            is_subagent_message=getattr(output, 'is_subagent_message', False),
                         )
                         logger.debug(
                             f"[query] Progress from tool_use_id={tool_use_id}: {output.content}"
@@ -1294,6 +1295,7 @@ async def _run_query_iteration(
             )
 
             tool_context = ToolUseContext(
+                message_id=tool_use_id,  # Set message_id for parent_tool_use_id tracking
                 yolo_mode=query_context.yolo_mode,
                 verbose=query_context.verbose,
                 permission_checker=can_use_tool_fn,

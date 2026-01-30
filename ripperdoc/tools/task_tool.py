@@ -440,6 +440,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
             yield ToolProgress(content=f"Resuming subagent '{record.agent_type}'")
 
+            # Get the Task tool's tool_use_id to set as parent_tool_use_id for subagent messages
+            parent_tool_use_id = context.message_id
+
             assistant_messages: List[AssistantMessage] = []
             tool_use_count = 0
             async for message in query(
@@ -449,8 +452,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 subagent_context,
                 context.permission_checker,
             ):
-                if getattr(message, "type", "") == "progress":
+                msg_type = getattr(message, "type", "")
+                if msg_type == "progress":
                     continue
+
+                # Track the message for internal state
                 tool_use_count, updates = self._track_subagent_message(
                     message,
                     record.history,
@@ -459,6 +465,12 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 )
                 for update in updates:
                     yield ToolProgress(content=update)
+
+                # CRITICAL: Also yield subagent messages to SDK for compatibility
+                if msg_type in ("assistant", "user"):
+                    # Set parent_tool_use_id to link subagent messages to the Task tool call
+                    message_with_parent = message.model_copy(update={"parent_tool_use_id": parent_tool_use_id})
+                    yield ToolProgress(content=message_with_parent, is_subagent_message=True)
 
             duration_ms = (time.time() - record.start_time) * 1000
             result_text = (
@@ -564,6 +576,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
         yield ToolProgress(content=f"Launching subagent '{target_agent.agent_type}'")
 
+        # Get the Task tool's tool_use_id to set as parent_tool_use_id for subagent messages
+        parent_tool_use_id = context.message_id
+
         assistant_messages = []
         tool_use_count = 0
         async for message in query(
@@ -573,8 +588,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             subagent_context,
             context.permission_checker,
         ):
-            if getattr(message, "type", "") == "progress":
+            msg_type = getattr(message, "type", "")
+            if msg_type == "progress":
                 continue
+
+            # Track the message for internal state
             tool_use_count, updates = self._track_subagent_message(
                 message,
                 record.history,
@@ -583,6 +601,14 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             )
             for update in updates:
                 yield ToolProgress(content=update)
+
+            # CRITICAL: Also yield subagent messages to SDK for compatibility
+            # This allows SDK clients to see the full subagent conversation
+            if msg_type in ("assistant", "user"):
+                # Set parent_tool_use_id to link subagent messages to the Task tool call
+                # Use model_copy() to create a new message with the parent_tool_use_id set
+                message_with_parent = message.model_copy(update={"parent_tool_use_id": parent_tool_use_id})
+                yield ToolProgress(content=message_with_parent, is_subagent_message=True)
 
         duration_ms = (time.time() - record.start_time) * 1000
         result_text = (
