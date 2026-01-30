@@ -10,12 +10,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
+import traceback
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator, Callable, TypeVar
 
 import click
 
@@ -56,6 +59,123 @@ from ripperdoc.protocol.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Timeout constants for stdio operations
+STDIO_READ_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_READ_TIMEOUT", "300"))  # 5 minutes default
+STDIO_QUERY_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_QUERY_TIMEOUT", "600"))  # 10 minutes default
+STDIO_WATCHDOG_INTERVAL_SEC = float(os.getenv("RIPPERDOC_STDIO_WATCHDOG_INTERVAL", "30"))  # 30 seconds
+STDIO_TOOL_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_TOOL_TIMEOUT", "300"))  # 5 minutes per tool
+STDIO_HOOK_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_HOOK_TIMEOUT", "30"))  # 30 seconds for hooks
+
+
+T = TypeVar("T")
+
+
+@asynccontextmanager
+async def timeout_wrapper(
+    timeout_sec: float,
+    operation_name: str,
+    on_timeout: Callable[[str], Any] | None = None,
+) -> AsyncGenerator[None, None]:
+    """Context manager that wraps an async operation with timeout and comprehensive error handling.
+
+    Args:
+        timeout_sec: Maximum seconds to wait for the operation
+        operation_name: Human-readable name for logging
+        on_timeout: Optional callback called on timeout
+
+    Yields:
+        None
+
+    Raises:
+        asyncio.TimeoutError: If operation exceeds timeout
+    """
+    try:
+        async with asyncio.timeout(timeout_sec):
+            yield
+    except asyncio.TimeoutError:
+        error_msg = f"{operation_name} timed out after {timeout_sec:.1f}s"
+        logger.error(f"[timeout] {error_msg}", exc_info=True)
+        if on_timeout:
+            result = on_timeout(error_msg)
+            if inspect.isawaitable(result):
+                await result
+        raise
+    except Exception as e:
+        logger.error(f"[timeout] {operation_name} failed: {type(e).__name__}: {e}", exc_info=True)
+        raise
+
+
+import inspect
+
+
+class OperationWatchdog:
+    """Watchdog that monitors long-running operations and triggers timeout if stuck."""
+
+    def __init__(self, timeout_sec: float, check_interval: float = 30.0):
+        """Initialize watchdog.
+
+        Args:
+            timeout_sec: Maximum seconds allowed before watchdog triggers
+            check_interval: Seconds between activity checks
+        """
+        self.timeout_sec = timeout_sec
+        self.check_interval = check_interval
+        self._last_activity: float = time.time()
+        self._stopped = False
+        self._task: asyncio.Task[None] | None = None
+        self._monitoring_task: asyncio.Task[None] | None = None
+
+    def _update_activity(self) -> None:
+        """Update the last activity timestamp."""
+        self._last_activity = time.time()
+
+    def ping(self) -> None:
+        """Update activity timestamp to prevent watchdog timeout."""
+        self._update_activity()
+        logger.debug(
+            f"[watchdog] Activity ping recorded, time since last: {time.time() - self._last_activity:.1f}s"
+        )
+
+    async def _watchdog_loop(self) -> None:
+        """Background task that monitors activity and triggers timeout if stuck."""
+        while not self._stopped:
+            try:
+                await asyncio.sleep(self.check_interval)
+            except asyncio.CancelledError:
+                break
+
+            time_since_activity = time.time() - self._last_activity
+            if time_since_activity > self.timeout_sec:
+                logger.error(
+                    f"[watchdog] No activity for {time_since_activity:.1f}s "
+                    f"(timeout={self.timeout_sec:.1f}s) - triggering cancellation"
+                )
+                # Cancel the task being monitored
+                if self._monitoring_task and not self._monitoring_task.done():
+                    self._monitoring_task.cancel()
+                break
+
+    async def __aenter__(self) -> "OperationWatchdog":
+        """Start the watchdog."""
+        self._stopped = False
+        self._monitoring_task = asyncio.current_task()
+        self._task = asyncio.create_task(self._watchdog_loop())
+        logger.debug(
+            f"[watchdog] Started with timeout={self.timeout_sec}s, check_interval={self.check_interval}s"
+        )
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        """Stop the watchdog."""
+        self._stopped = True
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.debug("[watchdog] Stopped")
 
 
 class StdioProtocolHandler:
@@ -146,53 +266,87 @@ class StdioProtocolHandler:
         await self._write_message(message_dict)
 
     async def _read_line(self) -> str | None:
-        """Read a single line from stdin.
+        """Read a single line from stdin with timeout.
 
         Returns:
-            The line content, or None if EOF.
+            The line content, or None if EOF or timeout.
         """
         try:
-            line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
+            # Wrap the blocking readline with timeout
+            line = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
+                timeout=STDIO_READ_TIMEOUT_SEC,
+            )
             if not line:
                 return None
             return line.rstrip("\n\r")  # type: ignore[no-any-return]
+        except asyncio.TimeoutError:
+            logger.error(f"[stdio] stdin read timed out after {STDIO_READ_TIMEOUT_SEC}s")
+            # Signal EOF to allow graceful shutdown
+            return None
         except (OSError, IOError) as e:
             logger.error(f"Error reading from stdin: {e}")
             return None
 
     async def _read_messages(self) -> AsyncIterator[dict[str, Any]]:
-        """Read and parse JSON messages from stdin.
+        """Read and parse JSON messages from stdin with comprehensive error handling.
 
         Yields:
             Parsed JSON message dictionaries.
         """
         json_buffer = ""
+        consecutive_empty_lines = 0
+        max_empty_lines = 100  # Prevent infinite loop on empty input
 
-        while True:
-            line = await self._read_line()
-            if line is None:
-                break
+        try:
+            while True:
+                line = await self._read_line()
+                if line is None:
+                    logger.debug("[stdio] EOF reached, stopping message reader")
+                    break
 
-            line = line.strip()
-            if not line:
-                continue
-
-            # Handle JSON that may span multiple lines
-            json_lines = line.split("\n")
-            for json_line in json_lines:
-                json_line = json_line.strip()
-                if not json_line:
+                line = line.strip()
+                if not line:
+                    consecutive_empty_lines += 1
+                    if consecutive_empty_lines > max_empty_lines:
+                        logger.warning(
+                            f"[stdio] Too many empty lines ({max_empty_lines}), stopping"
+                        )
+                        break
                     continue
 
-                json_buffer += json_line
+                consecutive_empty_lines = 0  # Reset counter on non-empty line
 
-                try:
-                    data = json.loads(json_buffer)
-                    json_buffer = ""
-                    yield data
-                except json.JSONDecodeError:
-                    # Keep buffering - might be incomplete JSON
-                    continue
+                # Handle JSON that may span multiple lines
+                json_lines = line.split("\n")
+                for json_line in json_lines:
+                    json_line = json_line.strip()
+                    if not json_line:
+                        continue
+
+                    json_buffer += json_line
+
+                    try:
+                        data = json.loads(json_buffer)
+                        json_buffer = ""
+                        logger.debug(
+                            f"[stdio] Successfully parsed message, type={data.get('type', 'unknown')}"
+                        )
+                        yield data
+                    except json.JSONDecodeError:
+                        # Keep buffering - might be incomplete JSON
+                        # But limit buffer size to prevent memory issues
+                        if len(json_buffer) > 10_000_000:  # 10MB limit
+                            logger.error("[stdio] JSON buffer too large, resetting")
+                            json_buffer = ""
+                        continue
+
+        except asyncio.CancelledError:
+            logger.info("[stdio] Message reader cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"[stdio] Error in message reader: {type(e).__name__}: {e}", exc_info=True)
+            raise
 
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
@@ -324,7 +478,10 @@ class StdioProtocolHandler:
             await self._write_control_response(request_id, error=str(e))
 
     async def _handle_query(self, request: dict[str, Any], request_id: str) -> None:
-        """Handle query request from SDK.
+        """Handle query request from SDK with comprehensive timeout and error handling.
+
+        This method ensures ResultMessage is ALWAYS sent on any error/exception/timeout,
+        including detailed stack traces for debugging.
 
         Args:
             request: The query request data.
@@ -334,11 +491,71 @@ class StdioProtocolHandler:
             await self._write_control_response(request_id, error="Not initialized")
             return
 
+        # Variables to track query state (using lists for mutable reference across async contexts)
+        num_turns = [0]  # [int]
+        is_error = [False]  # [bool]
+        final_result_text = [None]  # [str | None]
+
+        # Track token usage
+        total_input_tokens = [0]  # [int]
+        total_output_tokens = [0]  # [int]
+        total_cache_read_tokens = [0]  # [int]
+        total_cache_creation_tokens = [0]  # [int]
+
+        start_time = time.time()
+        result_message_sent = [False]  # [bool] - Track if we've sent ResultMessage
+
+        async def send_final_result(result: ResultMessage) -> None:
+            """Send ResultMessage and mark as sent."""
+            if result_message_sent[0]:
+                logger.warning("[stdio] ResultMessage already sent, skipping duplicate")
+                return
+            logger.debug("[stdio] Sending ResultMessage")
+            try:
+                await self._write_message_stream(model_to_dict(result))
+                result_message_sent[0] = True
+                logger.debug("[stdio] ResultMessage sent successfully")
+            except Exception as e:
+                logger.error(f"[stdio] Failed to send ResultMessage: {e}", exc_info=True)
+                result_message_sent[0] = True  # Mark as sent to avoid retries
+
+        async def send_error_result(error_msg: str, exc: Exception | None = None) -> None:
+            """Send error ResultMessage with full stack trace."""
+            if exc:
+                tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+                error_detail = f"{type(exc).__name__}: {error_msg}\n\nStack trace:\n{tb_str}"
+            else:
+                error_detail = error_msg
+
+            result = ResultMessage(
+                duration_ms=int((time.time() - start_time) * 1000),
+                duration_api_ms=0,
+                is_error=True,
+                num_turns=num_turns[0],
+                session_id=self._session_id or "",
+                total_cost_usd=None,
+                usage=None,
+                result=error_detail[:50000] if len(error_detail) > 50000 else error_detail,  # Limit size
+                structured_output=None,
+            )
+            await send_final_result(result)
+
         try:
             prompt = request.get("prompt", "")
             if not prompt:
                 await self._write_control_response(request_id, error="Prompt is required")
                 return
+
+            logger.info(
+                "[stdio] Starting query handling",
+                extra={
+                    "request_id": request_id,
+                    "prompt_length": len(prompt),
+                    "session_id": self._session_id,
+                    "conversation_messages": len(self._conversation_messages),
+                    "query_timeout": STDIO_QUERY_TIMEOUT_SEC,
+                },
+            )
 
             # Create session history
             session_history = SessionHistory(
@@ -347,53 +564,57 @@ class StdioProtocolHandler:
             hook_manager.set_transcript_path(str(session_history.path))
 
             # Create initial user message
-
-            # Add the new user message to conversation history
             user_message = create_user_message(prompt)
             self._conversation_messages.append(user_message)
             session_history.append(user_message)
 
-            # Use the conversation history for messages (maintains context across queries)
+            # Use the conversation history for messages
             messages = list(self._conversation_messages)
 
             # Build system prompt
             additional_instructions: list[str] = []
 
-            # Run session start hooks
+            # Run session start hooks with timeout
             try:
-                session_start_result = await hook_manager.run_session_start_async("startup")
-                if hasattr(session_start_result, "system_message"):
-                    if session_start_result.system_message:
-                        additional_instructions.append(str(session_start_result.system_message))
-                if hasattr(session_start_result, "additional_context"):
-                    if session_start_result.additional_context:
-                        additional_instructions.append(str(session_start_result.additional_context))
+                async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
+                    session_start_result = await hook_manager.run_session_start_async("startup")
+                    if hasattr(session_start_result, "system_message"):
+                        if session_start_result.system_message:
+                            additional_instructions.append(str(session_start_result.system_message))
+                    if hasattr(session_start_result, "additional_context"):
+                        if session_start_result.additional_context:
+                            additional_instructions.append(str(session_start_result.additional_context))
+            except asyncio.TimeoutError:
+                logger.warning(f"[stdio] Session start hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
             except Exception as e:
-                logger.warning(f"Session start hook failed: {e}")
+                logger.warning(f"[stdio] Session start hook failed: {e}")
 
-            # Run prompt submit hooks
+            # Run prompt submit hooks with timeout
             try:
-                prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
-                if hasattr(prompt_hook_result, "should_block") and prompt_hook_result.should_block:
-                    reason = (
-                        prompt_hook_result.block_reason
-                        if hasattr(prompt_hook_result, "block_reason")
-                        else "Prompt blocked by hook."
-                    )
-                    await self._write_control_response(request_id, error=str(reason))
-                    return
-                if (
-                    hasattr(prompt_hook_result, "system_message")
-                    and prompt_hook_result.system_message
-                ):
-                    additional_instructions.append(str(prompt_hook_result.system_message))
-                if (
-                    hasattr(prompt_hook_result, "additional_context")
-                    and prompt_hook_result.additional_context
-                ):
-                    additional_instructions.append(str(prompt_hook_result.additional_context))
+                async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
+                    prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
+                    if hasattr(prompt_hook_result, "should_block") and prompt_hook_result.should_block:
+                        reason = (
+                            prompt_hook_result.block_reason
+                            if hasattr(prompt_hook_result, "block_reason")
+                            else "Prompt blocked by hook."
+                        )
+                        await self._write_control_response(request_id, error=str(reason))
+                        return
+                    if (
+                        hasattr(prompt_hook_result, "system_message")
+                        and prompt_hook_result.system_message
+                    ):
+                        additional_instructions.append(str(prompt_hook_result.system_message))
+                    if (
+                        hasattr(prompt_hook_result, "additional_context")
+                        and prompt_hook_result.additional_context
+                    ):
+                        additional_instructions.append(str(prompt_hook_result.additional_context))
+            except asyncio.TimeoutError:
+                logger.warning(f"[stdio] Prompt submit hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
             except Exception as e:
-                logger.warning(f"Prompt submit hook failed: {e}")
+                logger.warning(f"[stdio] Prompt submit hook failed: {e}")
 
             # Build final system prompt
             servers = await load_mcp_servers_async(self._project_path)
@@ -412,177 +633,180 @@ class StdioProtocolHandler:
                 request_id, response={"status": "querying", "session_id": self._session_id}
             )
 
-            # Track query metrics
-            start_time = time.time()
-            num_turns = 0
-            is_error = False
-            final_result_text = None  # Track final response text for ResultMessage
-
-            # Track token usage and cost
-            total_input_tokens = 0
-            total_output_tokens = 0
-            total_cache_read_tokens = 0
-            total_cache_creation_tokens = 0
-
+            # Execute query with comprehensive timeout and error handling
             try:
-                # Run the query and stream messages
                 context: dict[str, Any] = {}
 
-                logger.debug("[stdio] Starting query() async iteration")
-                async for message in query(
-                    messages,
-                    system_prompt,
-                    context,
-                    self._query_context or {},  # type: ignore[arg-type]
-                    self._can_use_tool,
-                ):
-                    logger.debug(
-                        f"[stdio] Received message of type: {getattr(message, 'type', 'unknown')}"
-                    )
-                    num_turns += 1
-
-                    # Filter out progress messages (internal implementation detail)
-                    msg_type = getattr(message, "type", None)
-                    if msg_type == "progress":
-                        # Progress messages are for internal debugging only
-                        continue
-
-                    # Track token usage from assistant messages
-                    if msg_type == "assistant":
-                        # Accumulate token usage
-                        total_input_tokens += getattr(message, "input_tokens", 0)
-                        total_output_tokens += getattr(message, "output_tokens", 0)
-                        total_cache_read_tokens += getattr(message, "cache_read_tokens", 0)
-                        total_cache_creation_tokens += getattr(message, "cache_creation_tokens", 0)
-
-                        msg_content = getattr(message, "message", None)
-                        if msg_content:
-                            content = getattr(msg_content, "content", None)
-                            if content:
-                                # Extract text blocks for result field
-                                if isinstance(content, str):
-                                    final_result_text = content
-                                elif isinstance(content, list):
-                                    # Concatenate text blocks
-                                    text_parts = []
-                                    for block in content:
-                                        if isinstance(block, dict):
-                                            if block.get("type") == "text":
-                                                text_parts.append(block.get("text", ""))
-                                            elif block.get("type") == "tool_use":
-                                                # Clear result when tool use happens (next text will be final)
-                                                text_parts.clear()
-                                        elif hasattr(block, "type"):
-                                            if block.type == "text":
-                                                text_parts.append(getattr(block, "text", ""))
-                                    if text_parts:
-                                        final_result_text = "\n".join(text_parts)
-
-                    # Convert message to SDK format
-                    message_dict = self._convert_message_to_sdk(message)
-                    if message_dict is None:
-                        # Skip messages that shouldn't be sent to SDK
-                        continue
-                    await self._write_message_stream(message_dict)
-
-                    # Add to conversation history (for context in next queries)
-                    if msg_type == "assistant":
-                        self._conversation_messages.append(message)
-
-                    # Add to local history and session history
-                    messages.append(message)  # type: ignore[arg-type]
-                    session_history.append(message)  # type: ignore[arg-type]
-
-                logger.debug("[stdio] Query loop ended, building usage info")
-                # Calculate cost (simplified model - can be made more accurate with model-specific pricing)
-                # Using approximate pricing: $3/M input tokens, $15/M output tokens
-                # This is a rough estimate - actual pricing depends on the model used
-                cost_per_million_input = 3.0
-                cost_per_million_output = 15.0
-                total_cost_usd = (total_input_tokens * cost_per_million_input / 1_000_000) + (
-                    total_output_tokens * cost_per_million_output / 1_000_000
+                logger.debug(
+                    "[stdio] Preparing query execution",
+                    extra={
+                        "messages_count": len(messages),
+                        "system_prompt_length": len(system_prompt),
+                        "query_timeout": STDIO_QUERY_TIMEOUT_SEC,
+                    },
                 )
 
+                # Create watchdog for monitoring query progress
+                async with OperationWatchdog(
+                    timeout_sec=STDIO_QUERY_TIMEOUT_SEC, check_interval=STDIO_WATCHDOG_INTERVAL_SEC
+                ):
+                    # Execute query with overall timeout
+                    async with asyncio.timeout(STDIO_QUERY_TIMEOUT_SEC):
+                        async for message in query(
+                            messages,
+                            system_prompt,
+                            context,
+                            self._query_context or {},  # type: ignore[arg-type]
+                            self._can_use_tool,
+                        ):
+                            msg_type = getattr(message, "type", None)
+                            logger.debug(
+                                f"[stdio] Received message of type: {msg_type}, "
+                                f"num_turns={num_turns[0]}, "
+                                f"elapsed_ms={int((time.time() - start_time) * 1000)}"
+                            )
+                            num_turns[0] += 1
+
+                            # Filter out progress messages
+                            if msg_type == "progress":
+                                continue
+
+                            # Track token usage from assistant messages
+                            if msg_type == "assistant":
+                                total_input_tokens[0] += getattr(message, "input_tokens", 0)
+                                total_output_tokens[0] += getattr(message, "output_tokens", 0)
+                                total_cache_read_tokens[0] += getattr(message, "cache_read_tokens", 0)
+                                total_cache_creation_tokens[0] += getattr(
+                                    message, "cache_creation_tokens", 0
+                                )
+
+                                msg_content = getattr(message, "message", None)
+                                if msg_content:
+                                    content = getattr(msg_content, "content", None)
+                                    if content:
+                                        # Extract text blocks for result field
+                                        if isinstance(content, str):
+                                            final_result_text[0] = content
+                                        elif isinstance(content, list):
+                                            text_parts = []
+                                            for block in content:
+                                                if isinstance(block, dict):
+                                                    if block.get("type") == "text":
+                                                        text_parts.append(block.get("text", ""))
+                                                    elif block.get("type") == "tool_use":
+                                                        text_parts.clear()
+                                                elif hasattr(block, "type"):
+                                                    if block.type == "text":
+                                                        text_parts.append(getattr(block, "text", ""))
+                                            if text_parts:
+                                                final_result_text[0] = "\n".join(text_parts)
+
+                            # Convert message to SDK format
+                            message_dict = self._convert_message_to_sdk(message)
+                            if message_dict is None:
+                                continue
+                            await self._write_message_stream(message_dict)
+
+                            # Add to conversation history
+                            if msg_type == "assistant":
+                                self._conversation_messages.append(message)
+
+                            # Add to local history and session history
+                            messages.append(message)  # type: ignore[arg-type]
+                            session_history.append(message)  # type: ignore[arg-type]
+
+                logger.debug("[stdio] Query loop ended successfully")
+
+            except asyncio.TimeoutError:
+                logger.error(f"[stdio] Query execution timed out after {STDIO_QUERY_TIMEOUT_SEC}s")
+                await send_error_result(f"Query timed out after {STDIO_QUERY_TIMEOUT_SEC}s")
+            except asyncio.CancelledError:
+                logger.warning("[stdio] Query was cancelled")
+                await send_error_result("Query was cancelled")
+            except Exception as query_error:
+                is_error[0] = True
+                logger.error(f"[stdio] Query execution error: {type(query_error).__name__}: {query_error}", exc_info=True)
+                await send_error_result(str(query_error), query_error)
+
+            # Build and send normal completion result if no error occurred
+            if not is_error[0] and not result_message_sent[0]:
                 logger.debug("[stdio] Building usage info")
+
+                # Calculate cost
+                cost_per_million_input = 3.0
+                cost_per_million_output = 15.0
+                total_cost_usd = (total_input_tokens[0] * cost_per_million_input / 1_000_000) + (
+                    total_output_tokens[0] * cost_per_million_output / 1_000_000
+                )
+
                 # Build usage info
                 usage_info = None
-                if total_input_tokens or total_output_tokens:
+                if total_input_tokens[0] or total_output_tokens[0]:
                     usage_info = UsageInfo(
-                        input_tokens=total_input_tokens,
-                        cache_creation_input_tokens=total_cache_creation_tokens,
-                        cache_read_input_tokens=total_cache_read_tokens,
-                        output_tokens=total_output_tokens,
+                        input_tokens=total_input_tokens[0],
+                        cache_creation_input_tokens=total_cache_creation_tokens[0],
+                        cache_read_input_tokens=total_cache_read_tokens[0],
+                        output_tokens=total_output_tokens[0],
                     )
 
-                # Send result message
-                logger.debug("[stdio] Creating ResultMessage")
                 duration_ms = int((time.time() - start_time) * 1000)
-                duration_api_ms = duration_ms  # Using total duration for now
+                duration_api_ms = duration_ms
 
                 result_message = ResultMessage(
                     duration_ms=duration_ms,
                     duration_api_ms=duration_api_ms,
-                    is_error=is_error,
-                    num_turns=num_turns,
+                    is_error=is_error[0],
+                    num_turns=num_turns[0],
                     session_id=self._session_id or "",
                     total_cost_usd=round(total_cost_usd, 8) if total_cost_usd > 0 else None,
                     usage=usage_info,
-                    result=final_result_text,
+                    result=final_result_text[0],
                     structured_output=None,
                 )
+                await send_final_result(result_message)
 
-                logger.debug("[stdio] Sending ResultMessage")
-                await self._write_message_stream(model_to_dict(result_message))
-                logger.debug("[stdio] ResultMessage sent")
-
-            except KeyboardInterrupt:
-                is_error = True
-                # Send error result message for SDK compatibility
-                result_message = ResultMessage(
-                    duration_ms=int((time.time() - start_time) * 1000),
-                    duration_api_ms=0,
-                    is_error=True,
-                    num_turns=num_turns,
-                    session_id=self._session_id or "",
-                    total_cost_usd=None,
-                    usage=None,
-                    result="Interrupted by user",
-                    structured_output=None,
-                )
-                await self._write_message_stream(model_to_dict(result_message))
-            except Exception as e:
-                is_error = True
-                logger.error(f"Query error: {e}", exc_info=True)
-                # Send error result message for SDK compatibility
-                result_message = ResultMessage(
-                    duration_ms=int((time.time() - start_time) * 1000),
-                    duration_api_ms=0,
-                    is_error=True,
-                    num_turns=num_turns,
-                    session_id=self._session_id or "",
-                    total_cost_usd=None,
-                    usage=None,
-                    result=str(e),
-                    structured_output=None,
-                )
-                await self._write_message_stream(model_to_dict(result_message))
-
-            # Run session end hooks
+            # Run session end hooks with timeout
             logger.debug("[stdio] Running session end hooks")
             try:
                 duration = time.time() - start_time
-                await hook_manager.run_session_end_async(
-                    "other",
-                    duration_seconds=duration,
-                    message_count=len(messages),
-                )
+                async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
+                    await hook_manager.run_session_end_async(
+                        "other",
+                        duration_seconds=duration,
+                        message_count=len(messages),
+                    )
                 logger.debug("[stdio] Session end hooks completed")
+            except asyncio.TimeoutError:
+                logger.warning(f"[stdio] Session end hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
             except Exception as e:
-                logger.warning(f"Session end hook failed: {e}")
+                logger.warning(f"[stdio] Session end hook failed: {e}")
+
+            logger.info(
+                "[stdio] Query completed",
+                extra={
+                    "request_id": request_id,
+                    "duration_ms": int((time.time() - start_time) * 1000),
+                    "num_turns": num_turns[0],
+                    "is_error": is_error[0],
+                    "input_tokens": total_input_tokens[0],
+                    "output_tokens": total_output_tokens[0],
+                    "result_sent": result_message_sent[0],
+                },
+            )
 
         except Exception as e:
-            logger.error(f"Handle query failed: {e}", exc_info=True)
+            logger.error(f"[stdio] Handle query failed: {type(e).__name__}: {e}", exc_info=True)
             await self._write_control_response(request_id, error=str(e))
+
+            # Ensure ResultMessage is sent even if everything else fails
+            if not result_message_sent[0]:
+                try:
+                    await send_error_result(str(e), e)
+                except Exception as send_error:
+                    logger.error(
+                        f"[stdio] Critical: Failed to send error ResultMessage: {send_error}",
+                        exc_info=True,
+                    )
 
     def _convert_message_to_sdk(self, message: Any) -> dict[str, Any] | None:
         """Convert internal message to SDK format.
@@ -881,14 +1105,14 @@ class StdioProtocolHandler:
             request_id, response={"status": "model_set", "model": model}
         )
 
-    async def _handle_rewind_files(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_rewind_files(self, _request: dict[str, Any], request_id: str) -> None:
         """Handle rewind_files request from SDK.
 
         Note: File checkpointing is not currently supported.
         This method exists for Claude SDK API compatibility.
 
         Args:
-            request: The rewind_files request data.
+            _request: The rewind_files request data.
             request_id: The request ID.
         """
         await self._write_control_response(
@@ -974,7 +1198,7 @@ class StdioProtocolHandler:
             )
 
     async def run(self) -> None:
-        """Main run loop for the stdio protocol handler.
+        """Main run loop for the stdio protocol handler with graceful shutdown.
 
         Reads messages from stdin and handles them until EOF.
         """
@@ -986,24 +1210,69 @@ class StdioProtocolHandler:
 
                 if msg_type == "control_request":
                     await self._handle_control_request(message)
-
                 else:
                     # Unknown message type
                     logger.warning(f"Unknown message type: {msg_type}")
 
         except (OSError, IOError, json.JSONDecodeError) as e:
-            logger.error(f"Error in stdio loop: {e}")
-
+            logger.error(f"Error in stdio loop: {e}", exc_info=True)
+        except asyncio.CancelledError:
+            logger.info("Stdio protocol handler cancelled")
+        except Exception as e:
+            logger.error(f"Unexpected error in stdio loop: {type(e).__name__}: {e}", exc_info=True)
         finally:
-            # Cleanup
-            await shutdown_mcp_runtime()
-            await shutdown_lsp_manager()
-            try:
-                shutdown_background_shell(force=True)
-            except Exception:
-                pass
+            # Comprehensive cleanup with timeout
+            logger.info("Stdio protocol handler shutting down...")
 
-            logger.info("Stdio protocol handler exiting")
+            cleanup_tasks = []
+
+            # Add MCP runtime shutdown
+            async def cleanup_mcp():
+                try:
+                    async with asyncio.timeout(10):
+                        await shutdown_mcp_runtime()
+                except asyncio.TimeoutError:
+                    logger.warning("[cleanup] MCP runtime shutdown timed out")
+                except Exception as e:
+                    logger.error(f"[cleanup] Error shutting down MCP runtime: {e}")
+
+            cleanup_tasks.append(asyncio.create_task(cleanup_mcp()))
+
+            # Add LSP manager shutdown
+            async def cleanup_lsp():
+                try:
+                    async with asyncio.timeout(10):
+                        await shutdown_lsp_manager()
+                except asyncio.TimeoutError:
+                    logger.warning("[cleanup] LSP manager shutdown timed out")
+                except Exception as e:
+                    logger.error(f"[cleanup] Error shutting down LSP manager: {e}")
+
+            cleanup_tasks.append(asyncio.create_task(cleanup_lsp()))
+
+            # Add background shell shutdown
+            async def cleanup_shell():
+                try:
+                    shutdown_background_shell(force=True)
+                except Exception:
+                    pass  # Background shell cleanup is best-effort
+
+            cleanup_tasks.append(asyncio.create_task(cleanup_shell()))
+
+            # Wait for all cleanup tasks with overall timeout
+            try:
+                async with asyncio.timeout(30):
+                    results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+                    # Check for any exceptions that occurred
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            logger.error(f"[cleanup] Task {i} failed: {result}")
+            except asyncio.TimeoutError:
+                logger.warning("[cleanup] Cleanup tasks timed out after 30s")
+            except Exception as e:
+                logger.error(f"[cleanup] Error during cleanup: {e}")
+
+            logger.info("Stdio protocol handler shutdown complete")
 
 
 @click.command(name="stdio")

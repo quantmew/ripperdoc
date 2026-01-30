@@ -68,6 +68,10 @@ logger = get_logger()
 
 DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_API_TIMEOUT", "120"))
 MAX_LLM_RETRIES = int(os.getenv("RIPPERDOC_MAX_RETRIES", "10"))
+# Timeout for individual tool execution (can be overridden per tool if needed)
+DEFAULT_TOOL_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_TOOL_TIMEOUT", "300"))  # 5 minutes
+# Timeout for concurrent tool execution (total for all tools)
+DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_CONCURRENT_TOOL_TIMEOUT", "600"))  # 10 minutes
 
 
 def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
@@ -279,30 +283,46 @@ async def _run_tool_use_generator(
 
     try:
         logger.debug("[query] _run_tool_use_generator: BEFORE tool.call() for '%s'", tool_name)
-        async for output in tool.call(parsed_input, tool_context):
-            logger.debug(
-                "[query] _run_tool_use_generator: tool='%s' yielded output type=%s",
-                tool_name,
-                type(output).__name__,
+        # Wrap tool execution with timeout to prevent hangs
+        try:
+            async with asyncio.timeout(DEFAULT_TOOL_TIMEOUT_SEC):
+                async for output in tool.call(parsed_input, tool_context):
+                    logger.debug(
+                        "[query] _run_tool_use_generator: tool='%s' yielded output type=%s",
+                        tool_name,
+                        type(output).__name__,
+                    )
+                    if isinstance(output, ToolProgress):
+                        yield create_progress_message(
+                            tool_use_id=tool_use_id,
+                            sibling_tool_use_ids=sibling_ids,
+                            content=output.content,
+                        )
+                        logger.debug(
+                            f"[query] Progress from tool_use_id={tool_use_id}: {output.content}"
+                        )
+                    elif isinstance(output, ToolResult):
+                        tool_output = output.data
+                        result_content = output.result_for_assistant or str(output.data)
+                        result_msg = tool_result_message(
+                            tool_use_id, result_content, tool_use_result=output.data
+                        )
+                        yield result_msg
+                        logger.debug(
+                            f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
+                            f"result_len={len(result_content)}"
+                        )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[query] Tool '{tool_name}' timed out after {DEFAULT_TOOL_TIMEOUT_SEC}s",
+                extra={"tool": tool_name, "tool_use_id": tool_use_id},
             )
-            if isinstance(output, ToolProgress):
-                yield create_progress_message(
-                    tool_use_id=tool_use_id,
-                    sibling_tool_use_ids=sibling_ids,
-                    content=output.content,
-                )
-                logger.debug(f"[query] Progress from tool_use_id={tool_use_id}: {output.content}")
-            elif isinstance(output, ToolResult):
-                tool_output = output.data
-                result_content = output.result_for_assistant or str(output.data)
-                result_msg = tool_result_message(
-                    tool_use_id, result_content, tool_use_result=output.data
-                )
-                yield result_msg
-                logger.debug(
-                    f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
-                    f"result_len={len(result_content)}"
-                )
+            yield tool_result_message(
+                tool_use_id,
+                f"Tool '{tool_name}' timed out after {DEFAULT_TOOL_TIMEOUT_SEC:.0f} seconds",
+                is_error=True,
+            )
+            return  # Exit early on timeout
         logger.debug("[query] _run_tool_use_generator: AFTER tool.call() loop for '%s'", tool_name)
     except CancelledError:
         logger.debug("[query] _run_tool_use_generator: tool='%s' CANCELLED", tool_name)
@@ -410,16 +430,17 @@ async def _run_concurrent_tool_uses(
     tool_names: List[str],
     tool_results: List[UserMessage],
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
-    """Drain multiple tool generators concurrently and stream outputs."""
+    """Drain multiple tool generators concurrently and stream outputs with overall timeout."""
     logger.debug(
-        "[query] _run_concurrent_tool_uses ENTER: %d generators, tools=%s",
+        "[query] _run_concurrent_tool_uses ENTER: %d generators, tools=%s, timeout=%s",
         len(generators),
         tool_names,
+        DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC,
     )
     if not generators:
         logger.debug("[query] _run_concurrent_tool_uses: no generators, returning")
         return
-        yield  # Make this a proper async generator that yields nothing
+        yield  # Make this a proper async generator that yields nothing (unreachable but required)
 
     queue: asyncio.Queue[Optional[Union[UserMessage, ProgressMessage]]] = asyncio.Queue()
 
@@ -485,26 +506,51 @@ async def _run_concurrent_tool_uses(
     logger.debug("[query] _run_concurrent_tool_uses: %d tasks created, entering while loop", active)
 
     try:
-        while active:
-            logger.debug(
-                "[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active
-            )
-            message = await queue.get()
-            logger.debug(
-                "[query] _run_concurrent_tool_uses: got message type=%s, active=%d",
-                type(message).__name__ if message else "None",
-                active,
-            )
-            if message is None:
-                active -= 1
+        # Add overall timeout for entire concurrent execution
+        async with asyncio.timeout(DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC):
+            while active:
                 logger.debug(
-                    "[query] _run_concurrent_tool_uses: None received, active now=%d", active
+                    "[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active
                 )
-                continue
-            if isinstance(message, UserMessage):
-                tool_results.append(message)
-            yield message
-        logger.debug("[query] _run_concurrent_tool_uses: while loop finished, all tools done")
+                try:
+                    message = await asyncio.wait_for(
+                        queue.get(), timeout=DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "[query] Concurrent tool execution timed out waiting for messages"
+                    )
+                    # Cancel all remaining tasks
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    raise
+
+                logger.debug(
+                    "[query] _run_concurrent_tool_uses: got message type=%s, active=%d",
+                    type(message).__name__ if message else "None",
+                    active,
+                )
+                if message is None:
+                    active -= 1
+                    logger.debug(
+                        "[query] _run_concurrent_tool_uses: None received, active now=%d", active
+                    )
+                    continue
+                if isinstance(message, UserMessage):
+                    tool_results.append(message)
+                yield message
+            logger.debug("[query] _run_concurrent_tool_uses: while loop finished, all tools done")
+    except asyncio.TimeoutError:
+        logger.error(
+            f"[query] Concurrent tool execution timed out after {DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC}s",
+            extra={"tool_names": tool_names},
+        )
+        # Ensure all tasks are cancelled
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        raise
     finally:
         # Wait for all tasks and collect any exceptions
         results = await asyncio.gather(*tasks, return_exceptions=True)

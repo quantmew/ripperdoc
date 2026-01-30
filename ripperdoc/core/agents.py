@@ -24,8 +24,10 @@ from ripperdoc.tools.glob_tool import GlobTool
 from ripperdoc.tools.grep_tool import GrepTool
 from ripperdoc.tools.kill_bash_tool import KillBashTool
 from ripperdoc.tools.ls_tool import LSTool
+from ripperdoc.tools.lsp_tool import LspTool
 from ripperdoc.tools.multi_edit_tool import MultiEditTool
 from ripperdoc.tools.notebook_edit_tool import NotebookEditTool
+from ripperdoc.tools.skill_tool import SkillTool
 from ripperdoc.tools.todo_tool import TodoReadTool, TodoWriteTool
 from ripperdoc.tools.tool_search_tool import ToolSearchTool
 from ripperdoc.tools.mcp_tools import (
@@ -66,6 +68,8 @@ TOOL_SEARCH_TOOL_NAME = _safe_tool_name(ToolSearchTool, "ToolSearch")
 MCP_LIST_SERVERS_TOOL_NAME = _safe_tool_name(ListMcpServersTool, "ListMcpServers")
 MCP_LIST_RESOURCES_TOOL_NAME = _safe_tool_name(ListMcpResourcesTool, "ListMcpResources")
 MCP_READ_RESOURCE_TOOL_NAME = _safe_tool_name(ReadMcpResourceTool, "ReadMcpResource")
+LSP_TOOL_NAME = _safe_tool_name(LspTool, "LSP")
+SKILL_TOOL_NAME = _safe_tool_name(SkillTool, "Skill")
 TASK_TOOL_NAME = "Task"
 
 
