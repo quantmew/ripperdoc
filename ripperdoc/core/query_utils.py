@@ -125,20 +125,23 @@ def estimate_cost_usd(model_profile: ModelProfile, usage_tokens: Dict[str, int])
 
 
 def resolve_model_profile(model: str) -> ModelProfile:
-    """Resolve a model pointer to a concrete profile, falling back to a safe default."""
-    config = get_global_config()
-    profile_name = getattr(config.model_pointers, model, None) or model
-    model_profile = config.model_profiles.get(profile_name)
-    if model_profile is None:
-        fallback_profile = getattr(config.model_pointers, "main", "default")
-        model_profile = config.model_profiles.get(fallback_profile)
-    if not model_profile:
-        logger.warning(
-            "[config] No model profile found; using built-in default profile",
-            extra={"model_pointer": model},
-        )
-        return ModelProfile(provider=ProviderType.OPENAI_COMPATIBLE, model="gpt-4o-mini")
-    return model_profile
+    """Resolve a model pointer to a concrete profile, falling back to a safe default.
+
+    此函数现在尊重 RIPPERDOC_* 环境变量的覆盖。
+    """
+    from ripperdoc.core.config import get_effective_model_profile
+
+    # 首先尝试使用 get_effective_model_profile 来应用环境变量覆盖
+    model_profile = get_effective_model_profile(model)
+    if model_profile:
+        return model_profile
+
+    # 如果仍然没有找到，使用默认配置
+    logger.warning(
+        "[config] No model profile found; using built-in default profile",
+        extra={"model_pointer": model},
+    )
+    return ModelProfile(provider=ProviderType.OPENAI_COMPATIBLE, model="gpt-4o-mini")
 
 
 def determine_tool_mode(model_profile: ModelProfile) -> str:

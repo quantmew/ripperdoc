@@ -710,6 +710,13 @@ def _infer_protocol_from_url_and_model(base_url: str, model_name: str = "") -> P
     if "generativelanguage.googleapis.com" in base_lower or "gemini" in model_lower:
         return ProviderType.GEMINI
 
+    # URL 路径检测 - 检查路径中是否包含协议标识
+    if "/anthropic" in base_lower or base_lower.endswith("/anthropic"):
+        return ProviderType.ANTHROPIC
+    if "/v1/" in base_lower or "/v1" in base_lower:
+        # 大多数 /v1/ 路径是 OpenAI 兼容格式
+        return ProviderType.OPENAI_COMPATIBLE
+
     # 模型名称前缀检测
     if model_lower.startswith("claude-"):
         return ProviderType.ANTHROPIC
@@ -756,7 +763,8 @@ def has_ripperdoc_env_overrides() -> bool:
 def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]:
     """获取模型配置，应用 RIPPERDOC_* 环境变量覆盖.
 
-    这是获取模型配置的新入口点，替代 get_current_model_profile()。
+    当设置了 RIPPERDOC_BASE_URL 环境变量时，完全在内存中创建 ModelProfile，
+    不依赖也不写入配置文件。这是获取模型配置的新入口点，替代 get_current_model_profile()。
 
     Args:
         pointer: 模型指针名称 ("main" 或 "quick")
@@ -765,52 +773,25 @@ def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]
         应用环境变量覆盖后的 ModelProfile，如果没有则返回 None
     """
     env_overrides = _get_ripperdoc_env_overrides()
-
-    # 如果没有设置任何 RIPPERDOC_* 环境变量，直接返回配置文件中的 profile
     base_url = env_overrides.get("base_url")
-    if not base_url:
-        return get_current_model_profile(pointer)
 
-    # 从配置文件获取基础 profile 作为模板
-    base_profile = get_current_model_profile(pointer)
-
-    # 确定模型名称
-    if pointer == "quick":
-        model_name = env_overrides.get("small_fast_model") or env_overrides.get("model")
-    else:
-        model_name = env_overrides.get("model")
-
-    if not model_name:
-        if base_profile:
-            model_name = base_profile.model
+    # 如果设置了 RIPPERDOC_BASE_URL，完全在内存中创建 profile
+    if base_url:
+        # 确定模型名称
+        if pointer == "quick":
+            model_name = env_overrides.get("small_fast_model") or env_overrides.get("model")
         else:
-            # 默认模型
+            model_name = env_overrides.get("model")
+
+        if not model_name:
             model_name = "claude-sonnet-4-5-20250929"
 
-    # 确定协议类型
-    protocol = env_overrides.get("protocol")
-    if not protocol:
-        if base_profile:
-            protocol = base_profile.provider
-        else:
+        # 确定协议类型
+        protocol = env_overrides.get("protocol")
+        if not protocol:
             protocol = _infer_protocol_from_url_and_model(base_url, model_name)
 
-    # 使用 model_copy 创建覆盖后的 profile
-    if base_profile:
-        # 复制基础配置并覆盖环境变量指定的值
-        update_dict: Dict[str, Any] = {
-            "api_base": base_url,
-            "model": model_name,
-            "provider": protocol,
-        }
-        if env_overrides.get("api_key"):
-            update_dict["api_key"] = env_overrides["api_key"]
-        if env_overrides.get("auth_token"):
-            update_dict["auth_token"] = env_overrides["auth_token"]
-
-        return base_profile.model_copy(update=update_dict)
-    else:
-        # 没有基础 profile，创建新的
+        # 在内存中创建新的 profile，不写入配置文件
         return ModelProfile(
             provider=protocol,
             model=model_name,
@@ -818,6 +799,9 @@ def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]
             api_key=env_overrides.get("api_key"),
             auth_token=env_overrides.get("auth_token"),
         )
+
+    # 没有设置 RIPPERDOC_BASE_URL，返回配置文件中的 profile
+    return get_current_model_profile(pointer)
 
 
 def get_ripperdoc_env_status() -> Dict[str, str]:

@@ -22,7 +22,7 @@ from typing import Any, AsyncGenerator, Callable, TypeVar
 
 import click
 
-from ripperdoc.core.config import get_project_config
+from ripperdoc.core.config import get_project_config, get_effective_model_profile
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.query_utils import resolve_model_profile
@@ -397,6 +397,17 @@ class StdioProtocolHandler:
 
             # Setup model
             model = options.get("model") or "main"
+
+            # 验证模型配置是否有效
+            model_profile = get_effective_model_profile(model)
+            if model_profile is None:
+                error_msg = (
+                    f"No valid model configuration found for '{model}'. "
+                    f"Please set RIPPERDOC_BASE_URL environment variable or complete onboarding."
+                )
+                logger.error(f"[stdio] {error_msg}")
+                await self._write_control_response(request_id, error=error_msg)
+                return
 
             # Create query context
             self._query_context = QueryContext(
