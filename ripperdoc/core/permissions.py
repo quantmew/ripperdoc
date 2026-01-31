@@ -6,13 +6,17 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, Set
+from typing import Any, Awaitable, Callable, Optional, Set, TYPE_CHECKING, TYPE_CHECKING as TYPE_CHECKING
 
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.permissions import PermissionDecision, ToolRule
 from ripperdoc.utils.log import get_logger
+
+if TYPE_CHECKING:
+    from rich.console import Console
+    from prompt_toolkit import PromptSession
 
 logger = get_logger()
 
@@ -89,7 +93,7 @@ def permission_key(tool: Tool[Any, Any], parsed_input: Any) -> str:
 
 
 def _render_options_prompt(prompt: str, options: list[tuple[str, str]]) -> str:
-    """Render a simple numbered prompt."""
+    """Render a simple numbered prompt (fallback for non-Rich environments)."""
     border = "─" * 120
     lines = [border, prompt, ""]
     for idx, (_, label) in enumerate(options, start=1):
@@ -99,6 +103,42 @@ def _render_options_prompt(prompt: str, options: list[tuple[str, str]]) -> str:
     shortcut_choices = "/".join(opt[0] for opt in options)
     lines.append(f"Choice ({numeric_choices} or {shortcut_choices}): ")
     return "\n".join(lines)
+
+
+def _render_options_prompt_rich(
+    console: "Console",
+    prompt: str,
+    options: list[tuple[str, str]]
+) -> None:
+    """Render permission dialog using Rich Panel for better visual consistency."""
+    from rich.panel import Panel
+    from rich.text import Text
+
+    # Build option lines with markup
+    option_lines = []
+    for idx, (_, label) in enumerate(options, start=1):
+        prefix = "[cyan]❯[/cyan]" if idx == 1 else " "
+        option_lines.append(f"{prefix} {idx}. {label}")
+
+    numeric_choices = "/".join(str(i) for i in range(1, len(options) + 1))
+    shortcut_choices = "/".join(opt[0] for opt in options)
+
+    # Build the prompt content as a markup string
+    markup_content = f"{prompt}\n\n" + "\n".join(option_lines) + "\n"
+    markup_content += f"Choice ([cyan]{numeric_choices}[/cyan] or [cyan]{shortcut_choices}[/cyan]): "
+
+    # Parse markup to create a Text object
+    content = Text.from_markup(markup_content)
+
+    # Render the panel
+    panel = Panel(
+        content,
+        title=Text.from_markup("[yellow]Permission Required[/yellow]"),
+        title_align="left",
+        border_style="yellow",
+        padding=(0, 1),
+    )
+    console.print(panel)
 
 
 def _rule_strings(rule_suggestions: Optional[Any]) -> list[str]:
@@ -118,8 +158,17 @@ def make_permission_checker(
     project_path: Path,
     yolo_mode: bool,
     prompt_fn: Optional[Callable[[str], str]] = None,
+    console: Optional["Console"] = None,
+    prompt_session: Optional["PromptSession"] = None,
 ) -> Callable[[Tool[Any, Any], Any], Awaitable[PermissionResult]]:
     """Create a permission checking function for the current project.
+
+    Args:
+        project_path: Path to the project directory
+        yolo_mode: If True, all tool calls are allowed without prompting
+        prompt_fn: Optional function to use for prompting (defaults to input())
+        console: Optional Rich console for rich permission dialogs
+        prompt_session: Optional PromptSession for better interrupt handling
 
     In yolo mode, all tool calls are allowed without prompting.
     """
@@ -131,13 +180,41 @@ def make_permission_checker(
     session_tool_rules: dict[str, Set[str]] = defaultdict(set)
 
     async def _prompt_user(prompt: str, options: list[tuple[str, str]]) -> str:
-        """Prompt the user without blocking the event loop."""
+        """Prompt the user with proper interrupt handling."""
+        # Build the prompt message
+        if console is not None:
+            # Use Rich Panel for the dialog
+            _render_options_prompt_rich(console, prompt, options)
+            # Build simple prompt for the input line
+            numeric_choices = "/".join(str(i) for i in range(1, len(options) + 1))
+            shortcut_choices = "/".join(opt[0] for opt in options)
+            input_prompt = f"Choice ({numeric_choices} or {shortcut_choices}): "
+        else:
+            # Use plain text rendering
+            rendered = _render_options_prompt(prompt, options)
+            input_prompt = rendered
+
+        # Try to use PromptSession if available (better interrupt handling)
+        if prompt_session is not None:
+            try:
+                # PromptSession.prompt() can handle Ctrl+C gracefully
+                return await prompt_session.prompt_async(input_prompt)
+            except KeyboardInterrupt:
+                logger.debug("[permissions] KeyboardInterrupt in prompt_session")
+                return "n"
+            except EOFError:
+                logger.debug("[permissions] EOFError in prompt_session")
+                return "n"
+
+        # Fallback to simple input() via executor
         loop = asyncio.get_running_loop()
         responder = prompt_fn or input
 
         def _ask() -> str:
-            rendered = _render_options_prompt(prompt, options)
-            return responder(rendered)
+            try:
+                return responder(input_prompt)
+            except (KeyboardInterrupt, EOFError):
+                return "n"
 
         return await loop.run_in_executor(None, _ask)
 

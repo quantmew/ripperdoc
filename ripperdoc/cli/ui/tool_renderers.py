@@ -43,7 +43,7 @@ class TodoResultRenderer(ToolResultRenderer):
         if lines:
             self.console.print(f"  ⎿  [dim]{escape(lines[0])}[/]")
             for line in lines[1:]:
-                self.console.print(f"      {line}", markup=False)
+                self.console.print(f"    {line}", markup=False)
         else:
             self.console.print("  ⎿  [dim]Todo update[/]")
 
@@ -107,7 +107,7 @@ class GlobResultRenderer(ToolResultRenderer):
         if self.verbose:
             for line in files[:30]:
                 if line.strip():
-                    self.console.print(f"      {line}", markup=False)
+                    self.console.print(f"    {line}", markup=False)
             if file_count > 30:
                 self.console.print(f"[dim]... ({file_count - 30} more)[/]")
 
@@ -125,7 +125,7 @@ class GrepResultRenderer(ToolResultRenderer):
         if self.verbose:
             for line in matches[:30]:
                 if line.strip():
-                    self.console.print(f"      {line}", markup=False)
+                    self.console.print(f"    {line}", markup=False)
             if match_count > 30:
                 self.console.print(f"[dim]... ({match_count - 30} more)[/]")
 
@@ -142,7 +142,7 @@ class LSResultRenderer(ToolResultRenderer):
         if self.verbose:
             preview = tree_lines[:40]
             for line in preview:
-                self.console.print(f"      {line}", markup=False)
+                self.console.print(f"    {line}", markup=False)
             if len(tree_lines) > len(preview):
                 self.console.print(f"[dim]... ({len(tree_lines) - len(preview)} more)[/]")
 
@@ -193,7 +193,8 @@ class BashResultRenderer(ToolResultRenderer):
             preview = stdout_lines if self.verbose else stdout_lines[:5]
             self.console.print(f"  ⎿  {preview[0]}", markup=False)
             for line in preview[1:]:
-                self.console.print(f"      {line}", markup=False)
+                # Use consistent 4-space indent to match the ⎿ prefix width
+                self.console.print(f"    {line}", markup=False)
             if not self.verbose and len(stdout_lines) > len(preview):
                 self.console.print(f"[dim]... ({len(stdout_lines) - len(preview)} more lines)[/]")
         else:
@@ -229,28 +230,28 @@ class BashResultRenderer(ToolResultRenderer):
             preview = stdout_lines if self.verbose else stdout_lines[:5]
             self.console.print("[dim]stdout:[/]")
             for line in preview:
-                self.console.print(f"      {line}", markup=False)
+                self.console.print(f"    {line}", markup=False)
             if not self.verbose and len(stdout_lines) > len(preview):
                 self.console.print(
                     f"[dim]... ({len(stdout_lines) - len(preview)} more stdout lines)[/]"
                 )
         else:
             self.console.print("[dim]stdout:[/]")
-            self.console.print("      [dim](no stdout)[/]")
+            self.console.print("    [dim](no stdout)[/]")
 
         # Render stderr
         if stderr_lines:
             preview = stderr_lines if self.verbose else stderr_lines[:5]
             self.console.print("[dim]stderr:[/]")
             for line in preview:
-                self.console.print(f"      {line}", markup=False)
+                self.console.print(f"    {line}", markup=False)
             if not self.verbose and len(stderr_lines) > len(preview):
                 self.console.print(
                     f"[dim]... ({len(stderr_lines) - len(preview)} more stderr lines)[/]"
                 )
         else:
             self.console.print("[dim]stderr:[/]")
-            self.console.print("      [dim](no stderr)[/]")
+            self.console.print("    [dim](no stderr)[/]")
 
 
 class ToolResultRendererRegistry:

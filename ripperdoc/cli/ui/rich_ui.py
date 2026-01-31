@@ -350,9 +350,28 @@ class RichUI:
         self._using_tty_input = False  # Track if we're using /dev/tty for input
         self._thinking_mode_enabled = False  # Toggle for extended thinking mode
         hook_manager.set_transcript_path(str(self._session_history.path))
-        self._permission_checker = (
-            None if yolo_mode else make_permission_checker(self.project_path, yolo_mode=False)
-        )
+
+        # Create permission checker with Rich console and PromptSession support
+        if not yolo_mode:
+            # Create a dedicated PromptSession for permission dialogs
+            # This provides better interrupt handling than console.input()
+            from prompt_toolkit import PromptSession
+
+            # Disable CPR (Cursor Position Request) to avoid warnings in terminals
+            # that don't support it (like some remote/CI terminals)
+            import os
+            os.environ['PROMPT_TOOLKIT_NO_CPR'] = '1'
+
+            permission_session = PromptSession()
+
+            self._permission_checker = make_permission_checker(
+                self.project_path,
+                yolo_mode=False,
+                console=console,  # Pass console for Rich Panel rendering
+                prompt_session=permission_session,  # Use PromptSession for input
+            )
+        else:
+            self._permission_checker = None
         # Build ignore filter for file completion
         from ripperdoc.utils.path_ignore import get_project_ignore_patterns
 
@@ -1022,12 +1041,18 @@ class RichUI:
 
         return output_token_est
 
-    def _simplify_progress_suffix(self, content: str) -> str:
+    def _simplify_progress_suffix(self, content: Any) -> str:
         """Simplify progress message content for cleaner spinner display.
 
         For bash command progress (format: "Running... (elapsed)\nstdout_preview"),
         extract only the timing information to avoid cluttering the spinner with
         multi-line stdout content that causes terminal wrapping issues.
+
+        Args:
+            content: Progress message content (can be str or other types)
+
+        Returns:
+            Simplified suffix string for spinner display
         """
         if not isinstance(content, str):
             return f"Working... {content}"
