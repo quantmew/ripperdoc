@@ -15,6 +15,8 @@ from ripperdoc.core.config import (
     api_key_env_candidates,
     get_global_config,
     get_project_config,
+    get_ripperdoc_env_status,
+    has_ripperdoc_env_overrides,
 )
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.utils.log import get_logger
@@ -41,6 +43,12 @@ def _api_key_status(provider: ProviderType, profile_key: Optional[str]) -> Tuple
     """Check API key presence and source."""
     import os
 
+    # 首先检查全局 RIPPERDOC_API_KEY
+    if ripperdoc_api_key := os.getenv("RIPPERDOC_API_KEY"):
+        masked = ripperdoc_api_key[:4] + "…" if len(ripperdoc_api_key) > 4 else "set"
+        return ("ok", f"Found in $RIPPERDOC_API_KEY ({masked})")
+
+    # 然后检查 provider 特定的环境变量
     for env_var in api_key_env_candidates(provider):
         if os.environ.get(env_var):
             masked = os.environ[env_var]
@@ -186,6 +194,23 @@ def _project_status(project_path: Path) -> Tuple[str, str, str]:
         )
 
 
+def _ripperdoc_env_status() -> List[Tuple[str, str, str]]:
+    """Check RIPPERDOC_* environment variable overrides."""
+    rows: List[Tuple[str, str, str]] = []
+
+    if not has_ripperdoc_env_overrides():
+        rows.append(_status_row("Env overrides", "ok", "No RIPPERDOC_* overrides active"))
+        return rows
+
+    rows.append(_status_row("Env overrides", "ok", "RIPPERDOC_* variables detected"))
+
+    status = get_ripperdoc_env_status()
+    for key, value in status.items():
+        rows.append(_status_row("", "ok", f"  {key}: {value}"))
+
+    return rows
+
+
 def _render_table(console: Any, rows: List[Tuple[str, str, str]]) -> None:
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Check")
@@ -202,6 +227,10 @@ def _handle(ui: Any, _: str) -> bool:
 
     results.append(_onboarding_status())
     results.extend(_model_status(project_path))
+
+    # 检查 RIPPERDOC_* 环境变量
+    results.extend(_ripperdoc_env_status())
+
     project_row = _project_status(project_path)
     results.append(project_row)
 

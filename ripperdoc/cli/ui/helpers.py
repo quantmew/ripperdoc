@@ -3,7 +3,7 @@
 import random
 from typing import List, Optional
 
-from ripperdoc.core.config import get_current_model_profile, get_global_config, ModelProfile
+from ripperdoc.core.config import get_effective_model_profile, get_global_config, ModelProfile
 
 
 # Fun words to display while the AI is "thinking"
@@ -103,8 +103,11 @@ def get_random_thinking_word() -> str:
 
 
 def get_profile_for_pointer(pointer: str = "main") -> Optional[ModelProfile]:
-    """Return the configured ModelProfile for a logical pointer or default."""
-    profile = get_current_model_profile(pointer)
+    """Return the configured ModelProfile for a logical pointer or default.
+
+    此函数现在尊重 RIPPERDOC_* 环境变量的覆盖。
+    """
+    profile = get_effective_model_profile(pointer)
     if profile:
         return profile
     config = get_global_config()

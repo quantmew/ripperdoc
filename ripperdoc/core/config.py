@@ -676,3 +676,169 @@ def save_project_local_config(
 ) -> None:
     """Save project-local configuration."""
     config_manager.save_project_local_config(config, project_path)
+
+
+# ==============================================================================
+# RIPPERDOC_* 全局环境变量支持
+# ==============================================================================
+
+# 环境变量名称常量
+RIPPERDOC_BASE_URL = "RIPPERDOC_BASE_URL"
+RIPPERDOC_AUTH_TOKEN = "RIPPERDOC_AUTH_TOKEN"
+RIPPERDOC_MODEL = "RIPPERDOC_MODEL"
+RIPPERDOC_SMALL_FAST_MODEL = "RIPPERDOC_SMALL_FAST_MODEL"
+RIPPERDOC_API_KEY = "RIPPERDOC_API_KEY"
+RIPPERDOC_PROTOCOL = "RIPPERDOC_PROTOCOL"
+
+
+def _infer_protocol_from_url_and_model(base_url: str, model_name: str = "") -> ProviderType:
+    """根据 BASE_URL 和模型名称推断协议类型.
+
+    Args:
+        base_url: API基础URL
+        model_name: 模型名称
+
+    Returns:
+        推断的 ProviderType
+    """
+    base_lower = base_url.lower()
+    model_lower = model_name.lower()
+
+    # 显式域名检测
+    if "anthropic.com" in base_lower:
+        return ProviderType.ANTHROPIC
+    if "generativelanguage.googleapis.com" in base_lower or "gemini" in model_lower:
+        return ProviderType.GEMINI
+
+    # 模型名称前缀检测
+    if model_lower.startswith("claude-"):
+        return ProviderType.ANTHROPIC
+    if model_lower.startswith("gemini-"):
+        return ProviderType.GEMINI
+
+    # 默认使用 OpenAI 兼容协议
+    return ProviderType.OPENAI_COMPATIBLE
+
+
+def _get_ripperdoc_env_overrides() -> Dict[str, Any]:
+    """获取所有 RIPPERDOC_* 环境变量的值.
+
+    Returns:
+        包含所有已设置环境变量的字典
+    """
+    overrides: Dict[str, Any] = {}
+    if base_url := os.getenv(RIPPERDOC_BASE_URL):
+        overrides["base_url"] = base_url
+    if api_key := os.getenv(RIPPERDOC_API_KEY):
+        overrides["api_key"] = api_key
+    if auth_token := os.getenv(RIPPERDOC_AUTH_TOKEN):
+        overrides["auth_token"] = auth_token
+    if model := os.getenv(RIPPERDOC_MODEL):
+        overrides["model"] = model
+    if small_fast_model := os.getenv(RIPPERDOC_SMALL_FAST_MODEL):
+        overrides["small_fast_model"] = small_fast_model
+    if protocol_str := os.getenv(RIPPERDOC_PROTOCOL):
+        try:
+            overrides["protocol"] = ProviderType(protocol_str.lower())
+        except ValueError:
+            logger.warning(
+                "[config] Invalid RIPPERDOC_PROTOCOL value: %s (must be anthropic, openai_compatible, or gemini)",
+                protocol_str,
+            )
+    return overrides
+
+
+def has_ripperdoc_env_overrides() -> bool:
+    """检查是否设置了任何 RIPPERDOC_* 环境变量."""
+    return bool(_get_ripperdoc_env_overrides())
+
+
+def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]:
+    """获取模型配置，应用 RIPPERDOC_* 环境变量覆盖.
+
+    这是获取模型配置的新入口点，替代 get_current_model_profile()。
+
+    Args:
+        pointer: 模型指针名称 ("main" 或 "quick")
+
+    Returns:
+        应用环境变量覆盖后的 ModelProfile，如果没有则返回 None
+    """
+    env_overrides = _get_ripperdoc_env_overrides()
+
+    # 如果没有设置任何 RIPPERDOC_* 环境变量，直接返回配置文件中的 profile
+    base_url = env_overrides.get("base_url")
+    if not base_url:
+        return get_current_model_profile(pointer)
+
+    # 从配置文件获取基础 profile 作为模板
+    base_profile = get_current_model_profile(pointer)
+
+    # 确定模型名称
+    if pointer == "quick":
+        model_name = env_overrides.get("small_fast_model") or env_overrides.get("model")
+    else:
+        model_name = env_overrides.get("model")
+
+    if not model_name:
+        if base_profile:
+            model_name = base_profile.model
+        else:
+            # 默认模型
+            model_name = "claude-sonnet-4-5-20250929"
+
+    # 确定协议类型
+    protocol = env_overrides.get("protocol")
+    if not protocol:
+        if base_profile:
+            protocol = base_profile.provider
+        else:
+            protocol = _infer_protocol_from_url_and_model(base_url, model_name)
+
+    # 使用 model_copy 创建覆盖后的 profile
+    if base_profile:
+        # 复制基础配置并覆盖环境变量指定的值
+        update_dict: Dict[str, Any] = {
+            "api_base": base_url,
+            "model": model_name,
+            "provider": protocol,
+        }
+        if env_overrides.get("api_key"):
+            update_dict["api_key"] = env_overrides["api_key"]
+        if env_overrides.get("auth_token"):
+            update_dict["auth_token"] = env_overrides["auth_token"]
+
+        return base_profile.model_copy(update=update_dict)
+    else:
+        # 没有基础 profile，创建新的
+        return ModelProfile(
+            provider=protocol,
+            model=model_name,
+            api_base=base_url,
+            api_key=env_overrides.get("api_key"),
+            auth_token=env_overrides.get("auth_token"),
+        )
+
+
+def get_ripperdoc_env_status() -> Dict[str, str]:
+    """获取 RIPPERDOC_* 环境变量状态信息用于诊断显示.
+
+    Returns:
+        字典，键为环境变量名称，值为格式化的显示字符串
+    """
+    status: Dict[str, str] = {}
+    if base_url := os.getenv(RIPPERDOC_BASE_URL):
+        status["BASE_URL"] = base_url
+    if protocol := os.getenv(RIPPERDOC_PROTOCOL):
+        status["PROTOCOL"] = protocol
+    if model := os.getenv(RIPPERDOC_MODEL):
+        status["MODEL"] = model
+    if small_fast_model := os.getenv(RIPPERDOC_SMALL_FAST_MODEL):
+        status["SMALL_FAST_MODEL"] = small_fast_model
+    if api_key := os.getenv(RIPPERDOC_API_KEY):
+        masked = api_key[:4] + "…" if len(api_key) > 4 else "set"
+        status["API_KEY"] = f"{masked} (${RIPPERDOC_API_KEY})"
+    if auth_token := os.getenv(RIPPERDOC_AUTH_TOKEN):
+        masked = auth_token[:4] + "…" if len(auth_token) > 4 else "set"
+        status["AUTH_TOKEN"] = f"{masked} (${RIPPERDOC_AUTH_TOKEN})"
+    return status

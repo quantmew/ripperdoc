@@ -22,6 +22,12 @@ def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[
     if not profile:
         return ("Not configured", None)
 
+    # 首先检查全局 RIPPERDOC_AUTH_TOKEN
+    if os.getenv("RIPPERDOC_AUTH_TOKEN"):
+        return ("RIPPERDOC_AUTH_TOKEN (env)", "RIPPERDOC_AUTH_TOKEN")
+    if os.getenv("RIPPERDOC_API_KEY"):
+        return ("RIPPERDOC_API_KEY (env)", "RIPPERDOC_API_KEY")
+
     provider_value = (
         profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
     )
@@ -43,6 +49,10 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
     """Return a human-readable API base URL line."""
     if not profile:
         return "API base URL: Not configured"
+
+    # 首先检查全局 RIPPERDOC_BASE_URL
+    if base_url := os.getenv("RIPPERDOC_BASE_URL"):
+        return f"API base URL: {base_url} (RIPPERDOC_BASE_URL env)"
 
     label_map = {
         ProviderType.ANTHROPIC: "Anthropic base URL",
