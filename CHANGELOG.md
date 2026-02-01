@@ -5,6 +5,58 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-01-31
+
+### Added
+- **Theme management system** - Comprehensive theme support with custom color schemes and styling options
+- **Image input support** - Add support for image input in queries with automatic image processing
+- **Sub-process SDK architecture** - Complete rewrite of SDK with sub-process architecture for better isolation and reliability
+- **Claude Agent SDK compatibility** - Full compatibility with Claude Agent SDK protocol and interfaces
+- **File encoding detection** - Automatic file encoding detection and handling for international text files
+- **Tool execution timeout** - Implement timeout mechanism for tool execution to prevent hanging
+- **Environment variable configuration** - Support `RIPPERDOC_` prefixed environment variables for model parameters
+- **Detailed tool call logging** - Enhanced logging system with detailed tool call information
+- **Thinking mode toggle** - Add toggle and status display for thinking mode
+- **Skill list command** - New `/skills` command to list available skills
+- **Stdin pipe input** - Support piped stdin input for initial queries
+- **Session continuation** - Implement session continuation feature with enhanced logging
+- **Pending message queue** - Implement pending message queue for background tasks
+- **Fuzzy command matching** - Add fuzzy matching for mistyped slash commands with suggestions
+- **Background task tracking** - Add runtime and age tracking for background tasks
+- **Platform utilities** - Unified platform detection logic and platform utility module
+- **LSP and Skill tools** - Add dedicated LSP and Skill tools with enhanced functionality
+- **Sub-agent message forwarding** - Add message forwarding functionality for sub-agents
+- **File read limits** - Enhanced file reading tool with size and line limits
+- **Doctor command** - Add `/doctor` command for system diagnostics
+
+### Changed
+- **Protocol package refactor** - Move stdio_cmd module to protocol package for better organization
+- **SDK removal** - Remove legacy in-process SDK implementation
+- **Query processing improvements** - Ensure tool inputs are always dictionaries with better validation
+- **Parallel tool execution** - Improved error handling for parallel tool execution with tool names in context
+- **File operations enhancement** - Enhanced file editing, reading, and writing tools with encoding support
+- **Background shell improvements** - Better integration with pending message queue
+- **UI improvements** - Enhanced rich UI with better rendering and user interaction
+- **Spinner fixes** - Fix terminal output flickering and layout issues
+- **Permission checker** - Improved tooltip handling and rendering
+- **Error messages** - Enhanced error messages with model information in error and interrupt messages
+- **Git utilities** - New comprehensive git utility functions
+- **Shell utilities** - Improved shell path handling using PureWindowsPath
+- **Message formatting** - Enhanced message formatting with better image support
+
+### Fixed
+- **Timestamp conversion** - Correct timestamp conversion to use UTC in StructuredFormatter
+- **Interrupt handling** - Refine interrupt key detection logic on Windows
+- **Tool input validation** - Ensure tool inputs are always dictionaries
+- **File mention completer** - Improved file mention completion with better search
+- **Type checking** - Format code and fix type-checking issues
+- **Test coverage** - Add comprehensive test coverage for new features
+
+### Removed
+- **Legacy SDK docs** - Remove old SDK documentation
+- **QUICKSTART.md** - Remove quickstart guide (integrated into main README)
+- **In-process SDK mode** - Remove in-process mode in favor of sub-process architecture
+
 ## [0.2.10] - 2026-01-14
 
 ### Added
@@ -155,6 +207,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple command execution
 - Basic project navigation
 
+[0.3.0]: https://github.com/quantmew/Ripperdoc/compare/v0.2.10...v0.3.0
 [0.2.10]: https://github.com/quantmew/Ripperdoc/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/quantmew/Ripperdoc/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/quantmew/Ripperdoc/compare/v0.2.7...v0.2.8
