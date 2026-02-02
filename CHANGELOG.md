@@ -5,6 +5,19 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-02
+
+### Added
+- **ESC key for permission denial** - Press ESC to quickly deny permission requests
+- **ESC key interrupt support** - Press ESC to interrupt running queries
+
+### Changed
+- **Permission prompts refactor** - Refactor permission prompts using prompt_toolkit for better consistency
+- **Permission prompt styling** - Optimize the style and color of permission check prompts for better visual feedback
+
+### Fixed
+- **ESC interrupt handling** - Remove ESC interrupt functionality during query execution to avoid agent termination issues
+
 ## [0.3.0] - 2026-01-31
 
 ### Added
@@ -207,6 +220,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple command execution
 - Basic project navigation
 
+[0.3.1]: https://github.com/quantmew/Ripperdoc/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/quantmew/Ripperdoc/compare/v0.2.10...v0.3.0
 [0.2.10]: https://github.com/quantmew/Ripperdoc/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/quantmew/Ripperdoc/compare/v0.2.8...v0.2.9
