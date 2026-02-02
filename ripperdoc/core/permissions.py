@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -165,7 +166,8 @@ def make_permission_checker(
 
                 # Build formatted message with prompt text
                 # Add visual separation with lines
-                prompt_lines = ["", prompt, ""]
+                # Escape HTML special characters in prompt
+                prompt_lines = ["", html.escape(prompt), ""]
                 formatted_prompt = HTML("\n".join(prompt_lines))
 
                 result = choice(

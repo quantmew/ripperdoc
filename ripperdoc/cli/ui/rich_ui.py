@@ -47,7 +47,6 @@ from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
 from ripperdoc.cli.ui.panels import create_welcome_panel, create_status_bar, print_shortcuts
 from ripperdoc.cli.ui.message_display import MessageDisplay, parse_bash_output_sections
-from ripperdoc.cli.ui.interrupt_handler import InterruptHandler
 from ripperdoc.utils.conversation_compaction import (
     compact_conversation,
     CompactionResult,
@@ -398,8 +397,6 @@ class RichUI:
 
         # Initialize component handlers
         self._message_display = MessageDisplay(self.console, self.verbose, self.show_full_thinking)
-        self._interrupt_handler = InterruptHandler()
-        self._interrupt_handler.set_abort_callback(self._trigger_abort)
 
         # Keep MCP runtime alive for the whole UI session. Create it on the UI loop up front.
         try:
@@ -439,18 +436,6 @@ class RichUI:
     # ─────────────────────────────────────────────────────────────────────────────
     # Properties for backward compatibility with interrupt handler
     # ─────────────────────────────────────────────────────────────────────────────
-
-    @property
-    def _query_interrupted(self) -> bool:
-        return self._interrupt_handler.was_interrupted
-
-    @property
-    def _esc_listener_paused(self) -> bool:
-        return self._interrupt_handler._esc_listener_paused
-
-    @_esc_listener_paused.setter
-    def _esc_listener_paused(self, value: bool) -> None:
-        self._interrupt_handler._esc_listener_paused = value
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Thinking mode toggle
@@ -1276,24 +1261,15 @@ class RichUI:
             self.display_message("System", f"Error: {str(exc)}", is_tool=True)
 
     # ─────────────────────────────────────────────────────────────────────────────
-    # ESC Key Interrupt Support
+    # ESC Key Interrupt Support (removed - causing agent termination issues)
     # ─────────────────────────────────────────────────────────────────────────────
 
-    # Delegate to InterruptHandler
+    # Stub methods for backward compatibility - do nothing
     def _pause_interrupt_listener(self) -> bool:
-        return self._interrupt_handler.pause_listener()
+        return False
 
     def _resume_interrupt_listener(self, previous_state: bool) -> None:
-        self._interrupt_handler.resume_listener(previous_state)
-
-    def _trigger_abort(self) -> None:
-        """Signal the query to abort."""
-        if self.query_context and hasattr(self.query_context, "abort_controller"):
-            self.query_context.abort_controller.set()
-
-    async def _run_query_with_esc_interrupt(self, query_coro: Any) -> bool:
-        """Run a query with ESC key interrupt support."""
-        return await self._interrupt_handler.run_with_interrupt(query_coro)
+        pass
 
     def _run_async(self, coro: Any) -> Any:
         """Run a coroutine on the persistent event loop."""
@@ -1301,16 +1277,6 @@ class RichUI:
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
         return self._loop.run_until_complete(coro)
-
-    def _run_async_with_esc_interrupt(self, coro: Any) -> bool:
-        """Run a coroutine with ESC key interrupt support.
-
-        Returns True if interrupted by ESC, False if completed normally.
-        """
-        if self._loop.is_closed():
-            self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
-        return self._loop.run_until_complete(self._run_query_with_esc_interrupt(coro))
 
     def run_async(self, coro: Any) -> Any:
         """Public wrapper for running coroutines on the UI event loop."""
@@ -1537,8 +1503,7 @@ class RichUI:
         console.print()
         console.print(
             "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. "
-            "Press Alt+Enter for newline. Press Tab to toggle thinking mode. "
-            "Press ESC to interrupt.[/dim]\n"
+            "Press Alt+Enter for newline. Press Tab to toggle thinking mode.[/dim]\n"
         )
 
         session = self.get_prompt_session()
@@ -1562,8 +1527,7 @@ class RichUI:
                 )
                 console.print()  # Add spacing before response
 
-                # Use _run_async instead of _run_async_with_esc_interrupt for piped stdin
-                # since there's no TTY for ESC key detection
+                # Process initial query (ESC interrupt handling removed)
                 self._run_async(self.process_query(self._initial_query))
 
                 logger.info(
@@ -1614,21 +1578,8 @@ class RichUI:
                         },
                     )
 
-                    # When using /dev/tty input, disable ESC interrupt to avoid conflicts
-                    if self._using_tty_input:
-                        self._run_async(self.process_query(user_input))
-                    else:
-                        interrupted = self._run_async_with_esc_interrupt(
-                            self.process_query(user_input)
-                        )
-                        if interrupted:
-                            console.print(
-                                "\n[red]■ Conversation interrupted[/red] · [dim]Tell the model what to do differently.[/dim]"
-                            )
-                            logger.info(
-                                "[ui] Query interrupted by ESC key",
-                                extra={"session_id": self.session_id},
-                            )
+                    # Run query (ESC interrupt handling removed)
+                    self._run_async(self.process_query(user_input))
 
                     console.print()  # Add spacing between interactions
 
