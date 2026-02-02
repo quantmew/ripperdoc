@@ -47,6 +47,7 @@ from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
 from ripperdoc.cli.ui.panels import create_welcome_panel, create_status_bar, print_shortcuts
 from ripperdoc.cli.ui.message_display import MessageDisplay, parse_bash_output_sections
+from ripperdoc.cli.ui.interrupt_listener import EscInterruptListener
 from ripperdoc.utils.conversation_compaction import (
     compact_conversation,
     CompactionResult,
@@ -76,6 +77,8 @@ from ripperdoc.utils.messages import (
     UserMessage,
     AssistantMessage,
     ProgressMessage,
+    INTERRUPT_MESSAGE,
+    INTERRUPT_MESSAGE_FOR_TOOL_USE,
     create_user_message,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
@@ -348,6 +351,10 @@ class RichUI:
         self._exit_reason: Optional[str] = None
         self._using_tty_input = False  # Track if we're using /dev/tty for input
         self._thinking_mode_enabled = False  # Toggle for extended thinking mode
+        self._interrupt_listener = EscInterruptListener(self._schedule_esc_interrupt, logger=logger)
+        self._esc_interrupt_seen = False
+        self._query_in_progress = False
+        self._active_spinner: Optional[ThinkingSpinner] = None
         hook_manager.set_transcript_path(str(self._session_history.path))
 
         # Create permission checker with Rich console and PromptSession support
@@ -909,6 +916,11 @@ class RichUI:
         last_tool_name: Optional[str] = None
 
         if isinstance(message.message.content, str):
+            if self._esc_interrupt_seen and message.message.content.strip() in (
+                INTERRUPT_MESSAGE,
+                INTERRUPT_MESSAGE_FOR_TOOL_USE,
+            ):
+                return last_tool_name
             with pause():
                 self.display_message("Ripperdoc", message.message.content)
         elif isinstance(message.message.content, list):
@@ -1141,11 +1153,26 @@ class RichUI:
             spinner = ThinkingSpinner(console, prompt_tokens_est)
 
             def pause_ui() -> None:
-                spinner.stop()
+                self._pause_interrupt_listener()
+                try:
+                    spinner.stop()
+                except (RuntimeError, ValueError, OSError):
+                    logger.debug("[ui] Failed to pause spinner")
 
             def resume_ui() -> None:
-                spinner.start()
-                spinner.update("Thinking...")
+                if self._esc_interrupt_seen:
+                    return
+                try:
+                    spinner.start()
+                    spinner.update("Thinking...")
+                except (RuntimeError, ValueError, OSError) as exc:
+                    logger.debug(
+                        "[ui] Failed to restart spinner after pause: %s: %s",
+                        type(exc).__name__,
+                        exc,
+                    )
+                finally:
+                    self._resume_interrupt_listener()
 
             self.query_context.pause_ui = pause_ui
             self.query_context.resume_ui = resume_ui
@@ -1154,8 +1181,7 @@ class RichUI:
             base_permission_checker = self._permission_checker
 
             async def permission_checker(tool: Any, parsed_input: Any) -> bool:
-                spinner.stop()
-                was_paused = self._pause_interrupt_listener()
+                pause_ui()
                 try:
                     if base_permission_checker is not None:
                         result = await base_permission_checker(tool, parsed_input)
@@ -1171,18 +1197,7 @@ class RichUI:
                         return allowed
                     return True
                 finally:
-                    self._resume_interrupt_listener(was_paused)
-                    # Wrap spinner restart in try-except to prevent exceptions
-                    # from discarding the permission result
-                    try:
-                        spinner.start()
-                        spinner.update("Thinking...")
-                    except (RuntimeError, ValueError, OSError) as exc:
-                        logger.debug(
-                            "[ui] Failed to restart spinner after permission check: %s: %s",
-                            type(exc).__name__,
-                            exc,
-                        )
+                    resume_ui()
 
             # Process query stream
             tool_registry: Dict[str, Dict[str, Any]] = {}
@@ -1190,6 +1205,10 @@ class RichUI:
             output_token_est = 0
 
             try:
+                self._active_spinner = spinner
+                self._esc_interrupt_seen = False
+                self._query_in_progress = True
+                self._start_interrupt_listener()
                 spinner.start()
                 async for message in query(
                     messages,
@@ -1238,6 +1257,9 @@ class RichUI:
                         extra={"session_id": self.session_id},
                     )
 
+                self._stop_interrupt_listener()
+                self._query_in_progress = False
+                self._active_spinner = None
                 self.conversation_messages = messages
                 logger.info(
                     "[ui] Query processing completed",
@@ -1261,15 +1283,52 @@ class RichUI:
             self.display_message("System", f"Error: {str(exc)}", is_tool=True)
 
     # ─────────────────────────────────────────────────────────────────────────────
-    # ESC Key Interrupt Support (removed - causing agent termination issues)
+    # ESC Key Interrupt Support
     # ─────────────────────────────────────────────────────────────────────────────
 
-    # Stub methods for backward compatibility - do nothing
-    def _pause_interrupt_listener(self) -> bool:
-        return False
+    def _schedule_esc_interrupt(self) -> None:
+        """Schedule ESC interrupt handling on the UI event loop."""
+        if self._loop.is_closed():
+            return
+        try:
+            self._loop.call_soon_threadsafe(self._handle_esc_interrupt)
+        except RuntimeError:
+            pass
 
-    def _resume_interrupt_listener(self, previous_state: bool) -> None:
-        pass
+    def _handle_esc_interrupt(self) -> None:
+        """Abort the current query and display the interrupt notice."""
+        if not self._query_in_progress:
+            return
+        if self._esc_interrupt_seen:
+            return
+        abort_controller = getattr(self.query_context, "abort_controller", None)
+        if abort_controller is None or abort_controller.is_set():
+            return
+
+        self._esc_interrupt_seen = True
+
+        try:
+            if self.query_context and self.query_context.pause_ui:
+                self.query_context.pause_ui()
+            elif self._active_spinner:
+                self._active_spinner.stop()
+        except (RuntimeError, ValueError, OSError):
+            logger.debug("[ui] Failed to pause spinner for ESC interrupt")
+
+        self._message_display.print_interrupt_notice()
+        abort_controller.set()
+
+    def _start_interrupt_listener(self) -> None:
+        self._interrupt_listener.start()
+
+    def _stop_interrupt_listener(self) -> None:
+        self._interrupt_listener.stop()
+
+    def _pause_interrupt_listener(self) -> None:
+        self._interrupt_listener.pause()
+
+    def _resume_interrupt_listener(self) -> None:
+        self._interrupt_listener.resume()
 
     def _run_async(self, coro: Any) -> Any:
         """Run a coroutine on the persistent event loop."""

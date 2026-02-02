@@ -218,6 +218,13 @@ class MessageDisplay:
         if preview:
             self.console.print(f"[dim italic]Thinking: {escape(preview)}[/]")
 
+    def print_interrupt_notice(self) -> None:
+        """Display an interrupt notice when the user cancels with ESC."""
+        self.console.print(
+            "\n[red]■ Conversation interrupted[/red] · "
+            "[dim]Tell the model what to do differently.[/dim]"
+        )
+
 
 def parse_bash_output_sections(content: str) -> Tuple[List[str], List[str]]:
     """Parse stdout/stderr sections from a bash output text block."""
