@@ -5,7 +5,6 @@ Allows the AI to edit files by replacing text.
 
 import contextlib
 import os
-import tempfile
 from pathlib import Path
 from typing import AsyncGenerator, Generator, List, Optional, TextIO
 from pydantic import BaseModel, Field
@@ -20,8 +19,14 @@ from ripperdoc.core.tool import (
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import HAS_FCNTL
-from ripperdoc.utils.file_watch import record_snapshot
 from ripperdoc.utils.path_ignore import check_path_for_tool
+from ripperdoc.utils.file_editing import (
+    atomic_write_with_fallback,
+    file_lock,
+    open_locked_file,
+    safe_record_snapshot,
+    select_write_encoding,
+)
 from ripperdoc.tools.file_read_tool import detect_file_encoding
 
 logger = get_logger()
@@ -38,44 +43,22 @@ def determine_edit_encoding(file_path: str, new_content: str) -> str:
     if not detected_encoding:
         return "utf-8"
 
-    # Verify new content can be encoded
-    try:
-        new_content.encode(detected_encoding)
-        return detected_encoding
-    except (UnicodeEncodeError, LookupError):
-        logger.info(
-            "New content cannot be encoded with %s, falling back to UTF-8 for %s",
-            detected_encoding,
-            file_path,
-        )
-        return "utf-8"
+    return select_write_encoding(
+        detected_encoding,
+        new_content,
+        file_path,
+        log_prefix="[file_edit_tool]",
+    )
 
 
 @contextlib.contextmanager
 def _file_lock(file_handle: TextIO, exclusive: bool = True) -> Generator[None, None, None]:
-    """Acquire a file lock, with fallback for systems without fcntl.
-
-    Args:
-        file_handle: An open file handle to lock
-        exclusive: If True, acquire exclusive lock; otherwise shared lock
-
-    Yields:
-        None
-    """
+    """Compatibility wrapper for tests that expect _file_lock in this module."""
     if not HAS_FCNTL:
-        # On Windows or systems without fcntl, skip locking
         yield
         return
-
-    import fcntl
-
-    lock_type = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
-    try:
-        fcntl.flock(file_handle.fileno(), lock_type)
+    with file_lock(file_handle, exclusive=exclusive):
         yield
-    finally:
-        with contextlib.suppress(OSError):
-            fcntl.flock(file_handle.fileno(), fcntl.LOCK_UN)
 
 
 class FileEditToolInput(BaseModel):
@@ -247,71 +230,20 @@ match exactly (including whitespace and indentation)."""
             file_encoding = "utf-8"
 
         try:
-            # Open file with exclusive lock to prevent concurrent modifications
-            # Use r+ mode to get a file handle we can lock before reading
-            #
-            # TOCTOU mitigation strategy:
-            # 1. Record mtime immediately after open (pre_lock_mtime)
-            # 2. Acquire exclusive lock
-            # 3. Check mtime again after lock (post_lock_mtime)
-            # 4. If pre != post, file was modified in the window between open and lock
-            # 5. Also validate against cached snapshot timestamp
-            with open(abs_file_path, "r+", encoding=file_encoding) as f:
-                # Record mtime immediately after open, before acquiring lock
-                try:
-                    pre_lock_mtime = os.fstat(f.fileno()).st_mtime
-                except OSError:
-                    pre_lock_mtime = None
-
-                with _file_lock(f, exclusive=True):
-                    # Check mtime after acquiring lock to detect modifications
-                    # during the window between open() and lock acquisition
-                    try:
-                        post_lock_mtime = os.fstat(f.fileno()).st_mtime
-                    except OSError:
-                        post_lock_mtime = None
-
-                    # Detect modification during open->lock window
-                    if pre_lock_mtime is not None and post_lock_mtime is not None:
-                        if post_lock_mtime > pre_lock_mtime:
-                            output = FileEditToolOutput(
-                                file_path=input_data.file_path,
-                                replacements_made=0,
-                                success=False,
-                                message="File was modified while acquiring lock. Please retry.",
-                            )
-                            yield ToolResult(
-                                data=output,
-                                result_for_assistant=self.render_result_for_assistant(output),
-                            )
-                            return
-
-                    # Validate against cached snapshot timestamp
-                    if file_snapshot and post_lock_mtime is not None:
-                        if post_lock_mtime > file_snapshot.timestamp:
-                            output = FileEditToolOutput(
-                                file_path=input_data.file_path,
-                                replacements_made=0,
-                                success=False,
-                                message="File has been modified since read, either by the user "
-                                "or by a linter. Read it again before attempting to edit it.",
-                            )
-                            yield ToolResult(
-                                data=output,
-                                result_for_assistant=self.render_result_for_assistant(output),
-                            )
-                            return
-
-                    # Read content while holding the lock
-                    content = f.read()
-
-                    # Check if old_string exists
-                    if input_data.old_string not in content:
+            # Open file with exclusive lock to prevent concurrent modifications.
+            # Uses shared helper for consistent TOCTOU protection.
+            with open_locked_file(abs_file_path, file_encoding) as (
+                f,
+                pre_lock_mtime,
+                post_lock_mtime,
+            ):
+                if pre_lock_mtime is not None and post_lock_mtime is not None:
+                    if post_lock_mtime > pre_lock_mtime:
                         output = FileEditToolOutput(
                             file_path=input_data.file_path,
                             replacements_made=0,
                             success=False,
-                            message=f"String not found in file: {input_data.file_path}",
+                            message="File was modified while acquiring lock. Please retry.",
                         )
                         yield ToolResult(
                             data=output,
@@ -319,17 +251,14 @@ match exactly (including whitespace and indentation)."""
                         )
                         return
 
-                    # Count occurrences
-                    occurrence_count = content.count(input_data.old_string)
-
-                    # Check for ambiguity if not replace_all
-                    if not input_data.replace_all and occurrence_count > 1:
+                if file_snapshot and post_lock_mtime is not None:
+                    if post_lock_mtime > file_snapshot.timestamp:
                         output = FileEditToolOutput(
                             file_path=input_data.file_path,
                             replacements_made=0,
                             success=False,
-                            message=f"String appears {occurrence_count} times in file. "
-                            f"Either provide a unique string or use replace_all=true",
+                            message="File has been modified since read, either by the user "
+                            "or by a linter. Read it again before attempting to edit it.",
                         )
                         yield ToolResult(
                             data=output,
@@ -337,91 +266,81 @@ match exactly (including whitespace and indentation)."""
                         )
                         return
 
-                    # Perform replacement
-                    if input_data.replace_all:
-                        new_content = content.replace(input_data.old_string, input_data.new_string)
-                        replacements = occurrence_count
-                    else:
-                        new_content = content.replace(
-                            input_data.old_string, input_data.new_string, 1
-                        )
-                        replacements = 1
+                content = f.read()
 
-                    # Verify new content can be encoded with file's encoding
-                    # If not, fall back to UTF-8
-                    write_encoding = file_encoding
-                    try:
-                        new_content.encode(file_encoding)
-                    except (UnicodeEncodeError, LookupError):
-                        logger.info(
-                            "New content cannot be encoded with %s, using UTF-8 for %s",
-                            file_encoding,
-                            abs_file_path,
-                        )
-                        write_encoding = "utf-8"
+                if input_data.old_string not in content:
+                    output = FileEditToolOutput(
+                        file_path=input_data.file_path,
+                        replacements_made=0,
+                        success=False,
+                        message=f"String not found in file: {input_data.file_path}",
+                    )
+                    yield ToolResult(
+                        data=output,
+                        result_for_assistant=self.render_result_for_assistant(output),
+                    )
+                    return
 
-                    # Atomic write: write to temp file then rename
-                    # This ensures the file is either fully written or not at all
-                    file_dir = os.path.dirname(abs_file_path)
-                    try:
-                        # Create temp file in same directory to ensure same filesystem
-                        fd, temp_path = tempfile.mkstemp(
-                            dir=file_dir, prefix=".ripperdoc_edit_", suffix=".tmp"
-                        )
-                        try:
-                            with os.fdopen(fd, "w", encoding=write_encoding) as temp_f:
-                                temp_f.write(new_content)
-                            # Preserve original file permissions
-                            original_stat = os.fstat(f.fileno())
-                            os.chmod(temp_path, original_stat.st_mode)
-                            # Atomic replace (works on Unix, best-effort on Windows)
-                            os.replace(temp_path, abs_file_path)
-                        except Exception:
-                            # Clean up temp file on failure
-                            with contextlib.suppress(OSError):
-                                os.unlink(temp_path)
-                            raise
-                    except OSError as atomic_error:
-                        # Fallback to in-place write if atomic write fails
-                        # (e.g., cross-filesystem issues)
-                        # Re-verify file hasn't changed before fallback write (TOCTOU protection)
-                        f.seek(0)
-                        current_content = f.read()
-                        if current_content != content:
-                            output = FileEditToolOutput(
-                                file_path=input_data.file_path,
-                                replacements_made=0,
-                                success=False,
-                                message="File was modified during atomic write fallback. Please retry.",
-                            )
-                            yield ToolResult(
-                                data=output,
-                                result_for_assistant=self.render_result_for_assistant(output),
-                            )
-                            return
-                        f.seek(0)
-                        f.truncate()
-                        f.write(new_content)
-                        logger.debug(
-                            "[file_edit_tool] Atomic write failed, used fallback: %s",
-                            atomic_error,
-                        )
+                occurrence_count = content.count(input_data.old_string)
 
-            # Record the new snapshot after successful edit
-            try:
-                record_snapshot(
+                if not input_data.replace_all and occurrence_count > 1:
+                    output = FileEditToolOutput(
+                        file_path=input_data.file_path,
+                        replacements_made=0,
+                        success=False,
+                        message=f"String appears {occurrence_count} times in file. "
+                        f"Either provide a unique string or use replace_all=true",
+                    )
+                    yield ToolResult(
+                        data=output,
+                        result_for_assistant=self.render_result_for_assistant(output),
+                    )
+                    return
+
+                if input_data.replace_all:
+                    new_content = content.replace(input_data.old_string, input_data.new_string)
+                    replacements = occurrence_count
+                else:
+                    new_content = content.replace(input_data.old_string, input_data.new_string, 1)
+                    replacements = 1
+
+                write_encoding = select_write_encoding(
+                    file_encoding,
+                    new_content,
+                    abs_file_path,
+                    log_prefix="[file_edit_tool]",
+                )
+
+                write_error = atomic_write_with_fallback(
+                    f,
                     abs_file_path,
                     new_content,
-                    getattr(context, "file_state_cache", {}),
-                    encoding=write_encoding,
+                    write_encoding,
+                    content,
+                    temp_prefix=".ripperdoc_edit_",
+                    log_prefix="[file_edit_tool]",
+                    conflict_message="File was modified during atomic write fallback. Please retry.",
                 )
-            except (OSError, IOError, RuntimeError) as exc:
-                logger.warning(
-                    "[file_edit_tool] Failed to record file snapshot: %s: %s",
-                    type(exc).__name__,
-                    exc,
-                    extra={"file_path": abs_file_path},
-                )
+                if write_error:
+                    output = FileEditToolOutput(
+                        file_path=input_data.file_path,
+                        replacements_made=0,
+                        success=False,
+                        message=write_error,
+                    )
+                    yield ToolResult(
+                        data=output,
+                        result_for_assistant=self.render_result_for_assistant(output),
+                    )
+                    return
+
+            safe_record_snapshot(
+                abs_file_path,
+                new_content,
+                getattr(context, "file_state_cache", {}),
+                encoding=write_encoding,
+                log_prefix="[file_edit_tool]",
+            )
 
             # Generate diff for display
             import difflib

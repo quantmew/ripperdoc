@@ -5,7 +5,6 @@ Allows performing multiple exact string replacements in a single file atomically
 
 import difflib
 import os
-from pathlib import Path
 from typing import AsyncGenerator, Optional, List
 from textwrap import dedent
 from pydantic import BaseModel, Field
@@ -19,7 +18,13 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.file_watch import record_snapshot
+from ripperdoc.utils.file_editing import (
+    atomic_write_with_fallback,
+    open_locked_file,
+    resolve_input_path,
+    safe_record_snapshot,
+    select_write_encoding,
+)
 from ripperdoc.tools.file_read_tool import detect_file_encoding
 
 logger = get_logger()
@@ -167,10 +172,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         input_data: MultiEditToolInput,
         context: Optional[ToolUseContext] = None,
     ) -> ValidationResult:
-        path = Path(input_data.file_path).expanduser()
-        if not path.is_absolute():
-            path = Path.cwd() / path
-        resolved_path = str(path.resolve())
+        path, cache_key = resolve_input_path(input_data.file_path)
 
         # Ensure edits differ.
         for edit in input_data.edits:
@@ -197,7 +199,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         # If file exists, check if it has been read before editing
         if path.exists() and not is_creation:
             file_state_cache = getattr(context, "file_state_cache", {}) if context else {}
-            file_snapshot = file_state_cache.get(resolved_path)
+            file_snapshot = file_state_cache.get(cache_key)
 
             if not file_snapshot:
                 return ValidationResult(
@@ -208,7 +210,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
 
             # Check if file has been modified since it was read
             try:
-                current_mtime = os.path.getmtime(resolved_path)
+                current_mtime = os.path.getmtime(cache_key)
                 if current_mtime > file_snapshot.timestamp:
                     return ValidationResult(
                         result=False,
@@ -335,34 +337,254 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
         """Apply multiple edits atomically."""
-        file_path = Path(input_data.file_path).expanduser()
-        if not file_path.is_absolute():
-            file_path = Path.cwd() / file_path
-        file_path = file_path.resolve()
+        resolved_path, cache_key = resolve_input_path(input_data.file_path)
+        file_state_cache = getattr(context, "file_state_cache", {})
+        file_snapshot = file_state_cache.get(cache_key)
 
-        existing = file_path.exists()
+        existing = resolved_path.exists()
+        created = not existing
         original_content = ""
         file_encoding = "utf-8"
 
-        # Detect file encoding if file exists
         if existing:
-            detected_encoding, _ = detect_file_encoding(str(file_path))
+            detected_encoding, _ = detect_file_encoding(str(resolved_path))
             if detected_encoding:
                 file_encoding = detected_encoding
 
+        applied = input_data.edits
+
+        if not existing:
+            try:
+                updated_content, total_replacements = self._apply_edits(original_content, applied)
+            except ValueError as exc:
+                output = MultiEditToolOutput(
+                    file_path=str(resolved_path),
+                    replacements_made=0,
+                    success=False,
+                    message=str(exc),
+                    applied_edits=applied,
+                    created=True,
+                )
+                yield ToolResult(
+                    data=output, result_for_assistant=self.render_result_for_assistant(output)
+                )
+                return
+
+            if updated_content == original_content:
+                output = MultiEditToolOutput(
+                    file_path=str(resolved_path),
+                    replacements_made=0,
+                    success=False,
+                    message="Edits produced no changes.",
+                    applied_edits=applied,
+                    created=True,
+                )
+                yield ToolResult(
+                    data=output, result_for_assistant=self.render_result_for_assistant(output)
+                )
+                return
+
+            # Ensure parent exists (validated earlier) and write the file.
+            resolved_path.parent.mkdir(parents=True, exist_ok=True)
+
+            write_encoding = select_write_encoding(
+                file_encoding,
+                updated_content,
+                resolved_path,
+                log_prefix="[multi_edit_tool]",
+            )
+
+            try:
+                with open(resolved_path, "x", encoding=write_encoding) as handle:
+                    handle.write(updated_content)
+            except FileExistsError:
+                output = MultiEditToolOutput(
+                    file_path=str(resolved_path),
+                    replacements_made=0,
+                    success=False,
+                    message=(
+                        "File was created while preparing edits. "
+                        "Read it first before attempting to edit it."
+                    ),
+                    applied_edits=applied,
+                    created=False,
+                )
+                yield ToolResult(
+                    data=output, result_for_assistant=self.render_result_for_assistant(output)
+                )
+                return
+            except (OSError, IOError, PermissionError, UnicodeDecodeError) as exc:
+                logger.warning(
+                    "[multi_edit_tool] Error writing edited file: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={"file_path": str(resolved_path)},
+                )
+                output = MultiEditToolOutput(
+                    file_path=str(resolved_path),
+                    replacements_made=0,
+                    success=False,
+                    message=f"Error writing file: {exc}",
+                    applied_edits=applied,
+                    created=True,
+                )
+                yield ToolResult(
+                    data=output, result_for_assistant=self.render_result_for_assistant(output)
+                )
+                return
+
+            safe_record_snapshot(
+                cache_key,
+                updated_content,
+                file_state_cache,
+                encoding=write_encoding,
+                log_prefix="[multi_edit_tool]",
+            )
+
+            diff_lines, diff_with_line_numbers, additions, deletions = self._build_diff(
+                original_content, updated_content, str(resolved_path)
+            )
+
+            output = MultiEditToolOutput(
+                file_path=str(resolved_path),
+                replacements_made=total_replacements,
+                success=True,
+                message=(
+                    f"Applied {len(applied)} edit(s) with {total_replacements} replacement(s) "
+                    f"to {resolved_path}"
+                ),
+                additions=additions,
+                deletions=deletions,
+                diff_lines=diff_lines,
+                diff_with_line_numbers=diff_with_line_numbers,
+                applied_edits=applied,
+                created=True,
+            )
+
+            yield ToolResult(
+                data=output,
+                result_for_assistant=self.render_result_for_assistant(output),
+            )
+            return
+
+        updated_content = ""
+        total_replacements = 0
+        write_encoding = file_encoding
+
         try:
-            if existing:
-                original_content = file_path.read_text(encoding=file_encoding)
+            with open_locked_file(resolved_path, file_encoding) as (
+                handle,
+                pre_lock_mtime,
+                post_lock_mtime,
+            ):
+                if pre_lock_mtime is not None and post_lock_mtime is not None:
+                    if post_lock_mtime > pre_lock_mtime:
+                        output = MultiEditToolOutput(
+                            file_path=str(resolved_path),
+                            replacements_made=0,
+                            success=False,
+                            message="File was modified while acquiring lock. Please retry.",
+                            applied_edits=applied,
+                            created=False,
+                        )
+                        yield ToolResult(
+                            data=output,
+                            result_for_assistant=self.render_result_for_assistant(output),
+                        )
+                        return
+
+                if file_snapshot and post_lock_mtime is not None:
+                    if post_lock_mtime > file_snapshot.timestamp:
+                        output = MultiEditToolOutput(
+                            file_path=str(resolved_path),
+                            replacements_made=0,
+                            success=False,
+                            message=(
+                                "File has been modified since read, either by the user "
+                                "or by a linter. Read it again before attempting to edit it."
+                            ),
+                            applied_edits=applied,
+                            created=False,
+                        )
+                        yield ToolResult(
+                            data=output,
+                            result_for_assistant=self.render_result_for_assistant(output),
+                        )
+                        return
+
+                original_content = handle.read()
+
+                try:
+                    updated_content, total_replacements = self._apply_edits(
+                        original_content, applied
+                    )
+                except ValueError as exc:
+                    output = MultiEditToolOutput(
+                        file_path=str(resolved_path),
+                        replacements_made=0,
+                        success=False,
+                        message=str(exc),
+                        applied_edits=applied,
+                        created=False,
+                    )
+                    yield ToolResult(
+                        data=output, result_for_assistant=self.render_result_for_assistant(output)
+                    )
+                    return
+
+                if updated_content == original_content:
+                    output = MultiEditToolOutput(
+                        file_path=str(resolved_path),
+                        replacements_made=0,
+                        success=False,
+                        message="Edits produced no changes.",
+                        applied_edits=applied,
+                        created=False,
+                    )
+                    yield ToolResult(
+                        data=output, result_for_assistant=self.render_result_for_assistant(output)
+                    )
+                    return
+
+                write_encoding = select_write_encoding(
+                    file_encoding,
+                    updated_content,
+                    resolved_path,
+                    log_prefix="[multi_edit_tool]",
+                )
+                write_error = atomic_write_with_fallback(
+                    handle,
+                    resolved_path,
+                    updated_content,
+                    write_encoding,
+                    original_content,
+                    temp_prefix=".ripperdoc_multi_edit_",
+                    log_prefix="[multi_edit_tool]",
+                    conflict_message="File was modified during atomic write fallback. Please retry.",
+                )
+                if write_error:
+                    output = MultiEditToolOutput(
+                        file_path=str(resolved_path),
+                        replacements_made=0,
+                        success=False,
+                        message=write_error,
+                        applied_edits=applied,
+                        created=False,
+                    )
+                    yield ToolResult(
+                        data=output, result_for_assistant=self.render_result_for_assistant(output)
+                    )
+                    return
         except (OSError, IOError, PermissionError, UnicodeDecodeError) as exc:
             # pragma: no cover - unlikely permission issue
             logger.warning(
                 "[multi_edit_tool] Error reading file before edits: %s: %s",
                 type(exc).__name__,
                 exc,
-                extra={"file_path": str(file_path)},
+                extra={"file_path": str(resolved_path)},
             )
             output = MultiEditToolOutput(
-                file_path=str(file_path),
+                file_path=str(resolved_path),
                 replacements_made=0,
                 success=False,
                 message=f"Error reading file: {exc}",
@@ -372,106 +594,32 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             )
             return
 
-        applied = input_data.edits
-        try:
-            updated_content, total_replacements = self._apply_edits(original_content, applied)
-        except ValueError as exc:
-            output = MultiEditToolOutput(
-                file_path=str(file_path),
-                replacements_made=0,
-                success=False,
-                message=str(exc),
-                applied_edits=applied,
-                created=not existing and original_content == "",
-            )
-            yield ToolResult(
-                data=output, result_for_assistant=self.render_result_for_assistant(output)
-            )
-            return
-
-        if updated_content == original_content:
-            output = MultiEditToolOutput(
-                file_path=str(file_path),
-                replacements_made=0,
-                success=False,
-                message="Edits produced no changes.",
-                applied_edits=applied,
-                created=not existing and original_content == "",
-            )
-            yield ToolResult(
-                data=output, result_for_assistant=self.render_result_for_assistant(output)
-            )
-            return
-
-        # Ensure parent exists (validated earlier) and write the file.
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Verify content can be encoded, fall back to UTF-8 if needed
-        write_encoding = file_encoding
-        try:
-            updated_content.encode(file_encoding)
-        except (UnicodeEncodeError, LookupError):
-            logger.info(
-                "New content cannot be encoded with %s, using UTF-8 for %s",
-                file_encoding,
-                str(file_path),
-            )
-            write_encoding = "utf-8"
-
-        try:
-            file_path.write_text(updated_content, encoding=write_encoding)
-            try:
-                record_snapshot(
-                    str(file_path),
-                    updated_content,
-                    getattr(context, "file_state_cache", {}),
-                    encoding=write_encoding,
-                )
-            except (OSError, IOError, RuntimeError) as exc:
-                logger.warning(
-                    "[multi_edit_tool] Failed to record file snapshot: %s: %s",
-                    type(exc).__name__,
-                    exc,
-                    extra={"file_path": str(file_path)},
-                )
-        except (OSError, IOError, PermissionError, UnicodeDecodeError) as exc:
-            logger.warning(
-                "[multi_edit_tool] Error writing edited file: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"file_path": str(file_path)},
-            )
-            output = MultiEditToolOutput(
-                file_path=str(file_path),
-                replacements_made=0,
-                success=False,
-                message=f"Error writing file: {exc}",
-                applied_edits=applied,
-                created=not existing and original_content == "",
-            )
-            yield ToolResult(
-                data=output, result_for_assistant=self.render_result_for_assistant(output)
-            )
-            return
+        safe_record_snapshot(
+            cache_key,
+            updated_content,
+            file_state_cache,
+            encoding=write_encoding,
+            log_prefix="[multi_edit_tool]",
+        )
 
         diff_lines, diff_with_line_numbers, additions, deletions = self._build_diff(
-            original_content, updated_content, str(file_path)
+            original_content, updated_content, str(resolved_path)
         )
 
         output = MultiEditToolOutput(
-            file_path=str(file_path),
+            file_path=str(resolved_path),
             replacements_made=total_replacements,
             success=True,
             message=(
                 f"Applied {len(applied)} edit(s) with {total_replacements} replacement(s) "
-                f"to {file_path}"
+                f"to {resolved_path}"
             ),
             additions=additions,
             deletions=deletions,
             diff_lines=diff_lines,
             diff_with_line_numbers=diff_with_line_numbers,
             applied_edits=applied,
-            created=not existing and original_content == "",
+            created=created,
         )
 
         yield ToolResult(

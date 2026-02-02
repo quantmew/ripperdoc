@@ -4,10 +4,8 @@ Allows performing insert/replace/delete operations on Jupyter notebook cells.
 """
 
 import json
-import os
 import random
 import string
-from pathlib import Path
 from textwrap import dedent
 from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, Field
@@ -21,16 +19,10 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.file_watch import record_snapshot
+from ripperdoc.utils.file_editing import resolve_input_path, safe_record_snapshot
 
 
 logger = get_logger()
-
-
-def _resolve_path(path_str: str) -> Path:
-    """Return an absolute Path, interpreting relative paths from CWD."""
-    path = Path(path_str).expanduser()
-    return path if path.is_absolute() else Path.cwd() / path
 
 
 def _generate_cell_id() -> str:
@@ -137,8 +129,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
     async def validate_input(
         self, input_data: NotebookEditInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
-        path = _resolve_path(input_data.notebook_path)
-        resolved_path = str(path.resolve())
+        path, cache_key = resolve_input_path(input_data.notebook_path)
 
         if not path.exists():
             return ValidationResult(
@@ -175,7 +166,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
 
         # Check if file has been read before editing
         file_state_cache = getattr(context, "file_state_cache", {}) if context else {}
-        file_snapshot = file_state_cache.get(resolved_path)
+        file_snapshot = file_state_cache.get(cache_key)
 
         if not file_snapshot:
             return ValidationResult(
@@ -186,7 +177,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
 
         # Check if file has been modified since it was read
         try:
-            current_mtime = os.path.getmtime(resolved_path)
+            current_mtime = os.path.getmtime(cache_key)
             if current_mtime > file_snapshot.timestamp:
                 return ValidationResult(
                     result=False,
@@ -249,7 +240,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
     async def call(
         self, input_data: NotebookEditInput, context: ToolUseContext
     ) -> AsyncGenerator[ToolOutput, None]:
-        path = _resolve_path(input_data.notebook_path)
+        path, cache_key = resolve_input_path(input_data.notebook_path)
         mode = (input_data.edit_mode or "replace").lower()
         cell_type = (input_data.cell_type or "").lower() or None
         new_source = input_data.new_source
@@ -315,21 +306,12 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
             )
 
             path.write_text(json.dumps(nb_json, indent=1), encoding="utf-8")
-            # Use resolved absolute path to ensure consistency with validation lookup
-            abs_notebook_path = str(path.resolve())
-            try:
-                record_snapshot(
-                    abs_notebook_path,
-                    json.dumps(nb_json, indent=1),
-                    getattr(context, "file_state_cache", {}),
-                )
-            except (OSError, IOError, RuntimeError) as exc:
-                logger.warning(
-                    "[notebook_edit_tool] Failed to record file snapshot: %s: %s",
-                    type(exc).__name__,
-                    exc,
-                    extra={"file_path": abs_notebook_path},
-                )
+            safe_record_snapshot(
+                cache_key,
+                json.dumps(nb_json, indent=1),
+                getattr(context, "file_state_cache", {}),
+                log_prefix="[notebook_edit_tool]",
+            )
 
             output = NotebookEditOutput(
                 new_source=new_source,
