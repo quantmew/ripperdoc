@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple
 import click
 from rich.console import Console
 
+from ripperdoc.cli.ui.choice import ChoiceOption, onboarding_style, prompt_choice
 from ripperdoc.cli.ui.provider_options import (
     KNOWN_PROVIDERS,
     ProviderOption,
@@ -66,38 +67,64 @@ def check_onboarding() -> bool:
 
 def run_onboarding_wizard(config: GlobalConfig) -> bool:
     """Run interactive onboarding wizard."""
-    provider_keys = KNOWN_PROVIDERS.keys() + ["custom"]
+    provider_keys = list(KNOWN_PROVIDERS.keys()) + ["custom"]
     default_choice_key = KNOWN_PROVIDERS.default_choice.key
 
-    # Display provider options vertically
-    console.print("[bold]Available providers:[/bold]")
-    for i, provider_key in enumerate(provider_keys, 1):
-        marker = "[cyan]→[/cyan]" if provider_key == default_choice_key else " "
-        console.print(f"  {marker} {i}. {provider_key}")
-    console.print("")
-
-    # Prompt for provider choice with validation
-    provider_choice: Optional[str] = None
-    while provider_choice is None:
-        raw_choice = click.prompt(
-            "Choose your model provider",
-            default=default_choice_key,
+    # Build provider choice options with rich styling
+    provider_options = [
+        ChoiceOption(
+            key,
+            key,  # Plain text, not colored
+            is_default=(key == default_choice_key),
         )
-        provider_choice = resolve_provider_choice(raw_choice, provider_keys)
-        if provider_choice is None:
-            console.print(
-                f"[red]Invalid choice. Please enter a provider name or number (1-{len(provider_keys)}).[/red]"
-            )
+        for key in provider_keys
+    ]
+
+    # Prompt for provider choice using unified choice component
+    provider_choice = prompt_choice(
+        message="Choose your model provider",
+        options=provider_options,
+        title="Available providers",
+        allow_esc=True,
+        esc_value=default_choice_key,
+        style=onboarding_style(),
+    )
+
+    # Validate the choice (in case user typed an invalid value)
+    validated_choice = resolve_provider_choice(provider_choice, provider_keys)
+    if validated_choice is None:
+        console.print(
+            f"[red]Invalid choice. Please enter a provider name or number (1-{len(provider_keys)}).[/red]"
+        )
+        return run_onboarding_wizard(config)
+    provider_choice = validated_choice
 
     api_base_override: Optional[str] = None
     if provider_choice == "custom":
-        protocol_input = click.prompt(
-            "Protocol family (for API compatibility)",
-            type=click.Choice([p.value for p in ProviderType]),
-            default=ProviderType.OPENAI_COMPATIBLE.value,
+        # Build protocol choice options
+        protocol_options = [
+            ChoiceOption(
+                p.value,
+                p.value,  # Plain text
+                is_default=(p == ProviderType.OPENAI_COMPATIBLE),
+            )
+            for p in ProviderType
+        ]
+
+        protocol_input = prompt_choice(
+            message="Choose the protocol family (for API compatibility)",
+            options=protocol_options,
+            title="Custom Provider - Protocol Selection",
+            allow_esc=True,
+            esc_value=ProviderType.OPENAI_COMPATIBLE.value,
+            style=onboarding_style(),
         )
         protocol = ProviderType(protocol_input)
-        api_base_override = click.prompt("API Base URL")
+
+        # Get API base URL - use click.prompt for free-form text input
+        console.print("\n[dim]Now we need your API Base URL.[/dim]")
+        api_base_override = click.prompt("API Base URL").strip()
+
         provider_option = ProviderOption(
             key="custom",
             protocol=protocol,
@@ -160,29 +187,55 @@ def get_model_name_with_suggestions(
     default_model = provider.default_model or default_model_for_protocol(provider.protocol)
     suggestions = list(provider.model_suggestions)
 
-    # Show suggestions if available
+    # Prompt for model name using unified choice component if suggestions exist
     if suggestions:
-        console.print("\n[dim]Available models for this provider:[/dim]")
-        for i, model_name in enumerate(suggestions[:5]):  # Show top 5
-            console.print(f"  [dim]{i + 1}. {model_name}[/dim]")
-        console.print("")
+        # Create choice options for models
+        model_options = [
+            ChoiceOption(model, model)  # Plain text
+            for model in suggestions[:5]  # Show top 5
+        ]
+        # Add custom option
+        model_options.append(ChoiceOption("custom", "<dim>Custom model...</dim>"))
 
-    # Prompt for model name
-    if provider.protocol == ProviderType.ANTHROPIC:
-        model = click.prompt("Model name", default=default_model)
-    elif provider.protocol == ProviderType.OPENAI_COMPATIBLE:
-        model = click.prompt("Model name", default=default_model)
-        # Prompt for API base if still not set
-        if api_base is None:
-            api_base_input = click.prompt("API base URL (optional)", default="", show_default=False)
-            api_base = api_base_input or None
-    elif provider.protocol == ProviderType.GEMINI:
-        model = click.prompt("Model name", default=default_model)
-        if api_base is None:
-            api_base_input = click.prompt("API base URL (optional)", default="", show_default=False)
-            api_base = api_base_input or None
+        model = prompt_choice(
+            message="Select a model or choose 'Custom' to enter manually",
+            options=model_options,
+            title="Available models for this provider",
+            description=f"Default: {default_model}",
+            allow_esc=True,
+            esc_value=default_model,
+            style=onboarding_style(),
+        )
+
+        # If user chose custom, prompt for manual input using click.prompt
+        if model == "custom":
+            console.print("\n[dim]Enter your custom model name:[/dim]")
+            model = click.prompt("Model name", default=default_model).strip()
     else:
-        model = click.prompt("Model name", default=default_model)
+        # No suggestions, use default
+        model = default_model
+
+    # Prompt for API base if still not set (for OpenAI-compatible providers)
+    if provider.protocol == ProviderType.OPENAI_COMPATIBLE and api_base is None:
+        api_base_input = prompt_choice(
+            message="Enter API base URL (or press Enter to skip)",
+            options=[ChoiceOption("", "<dim>Skip</dim>")],
+            title="API base URL (optional)",
+            allow_esc=True,
+            esc_value="",
+            style=onboarding_style(),
+        )
+        api_base = api_base_input or None
+    elif provider.protocol == ProviderType.GEMINI and api_base is None:
+        api_base_input = prompt_choice(
+            message="Enter API base URL (or press Enter to skip)",
+            options=[ChoiceOption("", "<dim>Skip</dim>")],
+            title="API base URL (optional)",
+            allow_esc=True,
+            esc_value="",
+            style=onboarding_style(),
+        )
+        api_base = api_base_input or None
 
     return model, api_base
 

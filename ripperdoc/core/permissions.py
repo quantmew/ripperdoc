@@ -9,12 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Set, TYPE_CHECKING, TYPE_CHECKING as TYPE_CHECKING
 
-from prompt_toolkit.filters import is_done
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.shortcuts import choice
-from prompt_toolkit.styles import Style
-
+from ripperdoc.cli.ui.choice import prompt_choice
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool import Tool
@@ -101,25 +96,6 @@ def permission_key(tool: Tool[Any, Any], parsed_input: Any) -> str:
     return tool.name
 
 
-def _permission_style() -> Style:
-    """Create the style for permission choice prompts."""
-    return Style.from_dict(
-        {
-            "frame.border": "#d4a017",  # Golden/amber border
-            "selected-option": "bold",
-            "option": "#5fd7ff",  # Cyan for unselected options
-            "title": "#ffaf00",  # Orange/amber for tool name
-            "description": "#ffffff",  # White for descriptions
-            "question": "#ffd700",  # Gold for the question
-            "label": "#87afff",  # Light blue for field labels (Command:, Sandbox:, etc.)
-            "warning": "#ff5555",  # Red for warnings
-            "yes-option": "#ffffff",  # Neutral for Yes options
-            "no-option": "#ffffff",  # Neutral for No option
-            "value": "#f8f8f2",  # Off-white for values
-        }
-    )
-
-
 def _rule_strings(rule_suggestions: Optional[Any]) -> list[str]:
     """Normalize rule suggestions to simple strings."""
     if not rule_suggestions:
@@ -137,8 +113,8 @@ def make_permission_checker(
     project_path: Path,
     yolo_mode: bool,
     prompt_fn: Optional[Callable[[str], str]] = None,
-    console: Optional["Console"] = None,
-    prompt_session: Optional["PromptSession"] = None,
+    console: Optional["Console"] = None,  # noqa: ARG001 (kept for backward compatibility)
+    prompt_session: Optional["PromptSession"] = None,  # noqa: ARG001 (kept for backward compatibility)
 ) -> Callable[[Tool[Any, Any], Any], Awaitable[PermissionResult]]:
     """Create a permission checking function for the current project.
 
@@ -146,25 +122,25 @@ def make_permission_checker(
         project_path: Path to the project directory
         yolo_mode: If True, all tool calls are allowed without prompting
         prompt_fn: Optional function to use for prompting (defaults to input())
-        console: Optional Rich console for rich permission dialogs
-        prompt_session: Optional PromptSession for better interrupt handling
+        console: (Deprecated) No longer used, kept for backward compatibility
+        prompt_session: (Deprecated) No longer used, kept for backward compatibility
 
     In yolo mode, all tool calls are allowed without prompting.
     """
 
+    _ = console, prompt_session  # Mark as intentionally unused
     project_path = project_path.resolve()
     config_manager.get_project_config(project_path)
 
     session_allowed_tools: Set[str] = set()
     session_tool_rules: dict[str, Set[str]] = defaultdict(set)
 
-    async def _prompt_user(prompt: str, options: list[tuple[str, str]], is_html: bool = False) -> str:
-        """Prompt the user with proper interrupt handling using choice().
+    async def _prompt_user(prompt: str, options: list[tuple[str, str]]) -> str:
+        """Prompt the user with proper interrupt handling using unified choice component.
 
         Args:
-            prompt: The prompt text to display.
+            prompt: The prompt text to display (supports HTML formatting).
             options: List of (value, label) tuples for choices.
-            is_html: If True, prompt is already formatted HTML and should not be escaped.
         """
         loop = asyncio.get_running_loop()
 
@@ -179,42 +155,13 @@ def make_permission_checker(
                     input_prompt = f"Choice ({numeric_choices} or {shortcut_choices}): "
                     return responder(input_prompt)
 
-                # Convert options to choice() format (value, label)
-                # Labels can be HTML-formatted strings
-                choice_options = [(value, HTML(label) if "<" in label else label) for value, label in options]
-
-                # Build formatted message with prompt text
-                # Add visual separation with lines
-                if is_html:
-                    # Prompt is already HTML formatted
-                    formatted_prompt = HTML(f"\n{prompt}\n")
-                else:
-                    # Escape HTML special characters in plain text prompt
-                    formatted_prompt = HTML(f"\n{html.escape(prompt)}\n")
-
-                esc_bindings = KeyBindings()
-
-                @esc_bindings.add("escape", eager=True)
-                def _esc_to_deny(event: Any) -> None:
-                    event.app.exit(result="n", style="class:aborting")
-
-                result = choice(
-                    message=formatted_prompt,
-                    options=choice_options,
-                    style=_permission_style(),
-                    show_frame=~is_done,  # Frame disappears after selection
-                    key_bindings=esc_bindings,
+                # Use the unified choice component
+                return prompt_choice(
+                    message=prompt,
+                    options=options,
+                    allow_esc=True,
+                    esc_value="n",  # ESC means no
                 )
-
-                # Clear the entire prompt after selection
-                # ANSI codes: ESC[F = move cursor to beginning of previous line
-                #              ESC[2K = clear entire line
-                # We need to clear: blank + prompt + blank + options (each option takes 1 line)
-                # plus frame borders (top and bottom) = approximately 6-8 lines
-                for _ in range(12):  # Clear enough lines to cover the prompt
-                    print("\033[F\033[2K", end="", flush=True)
-
-                return result
             except KeyboardInterrupt:
                 logger.debug("[permissions] KeyboardInterrupt in choice")
                 return "n"
@@ -410,7 +357,7 @@ def make_permission_checker(
             ("n", "<no-option>No</no-option>"),
         ]
 
-        answer = (await _prompt_user(prompt, options=options, is_html=True)).strip().lower()
+        answer = (await _prompt_user(prompt, options=options)).strip().lower()
         logger.debug(
             "[permissions] User answer for permission prompt",
             extra={"answer": answer, "tool": getattr(tool, "name", None)},
