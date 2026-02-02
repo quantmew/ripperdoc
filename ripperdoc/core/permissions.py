@@ -42,35 +42,37 @@ def _format_input_preview(parsed_input: Any, tool_name: Optional[str] = None) ->
 
     For Bash commands, shows full details for security review.
     For other tools, shows a concise preview.
+    Returns HTML-formatted text with color tags.
     """
     # For Bash tool, show full command details for security review
     if tool_name == "Bash" and hasattr(parsed_input, "command"):
-        lines = [f"Command: {getattr(parsed_input, 'command')}"]
+        command = html.escape(getattr(parsed_input, "command"))
+        lines = [f"<label>Command:</label> <value>{command}</value>"]
 
         # Add other relevant parameters
         if hasattr(parsed_input, "timeout") and parsed_input.timeout:
-            lines.append(f"Timeout: {parsed_input.timeout}ms")
+            lines.append(f"<label>Timeout:</label> <value>{parsed_input.timeout}ms</value>")
         if hasattr(parsed_input, "sandbox"):
-            lines.append(f"Sandbox: {parsed_input.sandbox}")
+            lines.append(f"<label>Sandbox:</label> <value>{parsed_input.sandbox}</value>")
         if hasattr(parsed_input, "run_in_background"):
-            lines.append(f"Background: {parsed_input.run_in_background}")
+            lines.append(f"<label>Background:</label> <value>{parsed_input.run_in_background}</value>")
         if hasattr(parsed_input, "shell_executable") and parsed_input.shell_executable:
-            lines.append(f"Shell: {parsed_input.shell_executable}")
+            lines.append(f"<label>Shell:</label> <value>{html.escape(parsed_input.shell_executable)}</value>")
 
         return "\n  ".join(lines)
 
     # For other tools with commands, show concise preview
     if hasattr(parsed_input, "command"):
-        return f"command='{getattr(parsed_input, 'command')}'"
+        return f"<label>command:</label> <value>'{html.escape(getattr(parsed_input, 'command'))}'</value>"
     if hasattr(parsed_input, "file_path"):
-        return f"file='{getattr(parsed_input, 'file_path')}'"
+        return f"<label>file:</label> <value>'{html.escape(getattr(parsed_input, 'file_path'))}'</value>"
     if hasattr(parsed_input, "path"):
-        return f"path='{getattr(parsed_input, 'path')}'"
+        return f"<label>path:</label> <value>'{html.escape(getattr(parsed_input, 'path'))}'</value>"
 
     preview = str(parsed_input)
     if len(preview) > 140:
-        return preview[:137] + "..."
-    return preview
+        preview = preview[:137] + "..."
+    return f"<value>{html.escape(preview)}</value>"
 
 
 def permission_key(tool: Tool[Any, Any], parsed_input: Any) -> str:
@@ -104,6 +106,15 @@ def _permission_style() -> Style:
         {
             "frame.border": "#d4a017",  # Golden/amber border
             "selected-option": "bold",
+            "option": "#5fd7ff",  # Cyan for unselected options
+            "title": "#ffaf00",  # Orange/amber for tool name
+            "description": "#ffffff",  # White for descriptions
+            "question": "#ffd700",  # Gold for the question
+            "label": "#87afff",  # Light blue for field labels (Command:, Sandbox:, etc.)
+            "warning": "#ff5555",  # Red for warnings
+            "yes-option": "#50fa7b",  # Green for Yes options
+            "no-option": "#ff5555",  # Red for No option
+            "value": "#f8f8f2",  # Off-white for values
         }
     )
 
@@ -146,8 +157,14 @@ def make_permission_checker(
     session_allowed_tools: Set[str] = set()
     session_tool_rules: dict[str, Set[str]] = defaultdict(set)
 
-    async def _prompt_user(prompt: str, options: list[tuple[str, str]]) -> str:
-        """Prompt the user with proper interrupt handling using choice()."""
+    async def _prompt_user(prompt: str, options: list[tuple[str, str]], is_html: bool = False) -> str:
+        """Prompt the user with proper interrupt handling using choice().
+
+        Args:
+            prompt: The prompt text to display.
+            options: List of (value, label) tuples for choices.
+            is_html: If True, prompt is already formatted HTML and should not be escaped.
+        """
         loop = asyncio.get_running_loop()
 
         def _ask() -> str:
@@ -162,13 +179,17 @@ def make_permission_checker(
                     return responder(input_prompt)
 
                 # Convert options to choice() format (value, label)
-                choice_options = [(value, label) for value, label in options]
+                # Labels can be HTML-formatted strings
+                choice_options = [(value, HTML(label) if "<" in label else label) for value, label in options]
 
                 # Build formatted message with prompt text
                 # Add visual separation with lines
-                # Escape HTML special characters in prompt
-                prompt_lines = ["", html.escape(prompt), ""]
-                formatted_prompt = HTML("\n".join(prompt_lines))
+                if is_html:
+                    # Prompt is already HTML formatted
+                    formatted_prompt = HTML(f"\n{prompt}\n")
+                else:
+                    # Escape HTML special characters in plain text prompt
+                    formatted_prompt = HTML(f"\n{html.escape(prompt)}\n")
 
                 result = choice(
                     message=formatted_prompt,
@@ -364,23 +385,24 @@ def make_permission_checker(
             )
 
         input_preview = _format_input_preview(parsed_input, tool_name=tool.name)
-        prompt_lines = [
-            f"{tool.name}",
-            "",
-            f"  {input_preview}",
-        ]
+        # Use inline styles for prompt_toolkit HTML formatting
+        # The style names must match keys in the _permission_style() dict
+        prompt_html = f"""<title>{html.escape(tool.name)}</title>
+
+  <description>{input_preview}</description>"""
         if decision.message:
-            prompt_lines.append(f"  {decision.message}")
-        prompt_lines.append("  Do you want to proceed?")
-        prompt = "\n".join(prompt_lines)
+            # Use warning style for warning messages
+            prompt_html += f"\n  <warning>{html.escape(decision.message)}</warning>"
+        prompt_html += "\n  <question>Do you want to proceed?</question>"
+        prompt = prompt_html
 
         options = [
-            ("y", "Yes"),
-            ("s", "Yes, for this session"),
-            ("n", "No"),
+            ("y", "<yes-option>Yes</yes-option>"),
+            ("s", "<yes-option>Yes, for this session</yes-option>"),
+            ("n", "<no-option>No</no-option>"),
         ]
 
-        answer = (await _prompt_user(prompt, options=options)).strip().lower()
+        answer = (await _prompt_user(prompt, options=options, is_html=True)).strip().lower()
         logger.debug(
             "[permissions] User answer for permission prompt",
             extra={"answer": answer, "tool": getattr(tool, "name", None)},
