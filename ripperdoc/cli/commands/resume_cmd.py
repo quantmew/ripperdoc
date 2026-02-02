@@ -10,14 +10,24 @@ from ripperdoc.utils.session_history import (
     load_session_messages,
 )
 
+from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice, theme_style
+
 from .base import SlashCommand
 
 # Number of sessions to display per page
-PAGE_SIZE = 20
+PAGE_SIZE = 10
 
 
 def _format_time(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _truncate_prompt(prompt: str, max_length: int = 50) -> str:
+    """Truncate prompt text for display."""
+    prompt = prompt.strip()
+    if len(prompt) > max_length:
+        return prompt[:max_length - 3] + "..."
+    return prompt
 
 
 def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
@@ -43,64 +53,64 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
         end_idx = min(start_idx + PAGE_SIZE, len(sessions))
         page_sessions = sessions[start_idx:end_idx]
 
-        ui.console.print(f"\n[bold]Saved sessions (Page {current_page + 1}/{total_pages}):[/bold]")
-        for idx, summary in enumerate(page_sessions, start=start_idx):
-            ui.console.print(
-                f"  [{idx}] {summary.session_id} "
-                f"({summary.message_count} messages, "
-                f"{_format_time(summary.created_at)} → {_format_time(summary.updated_at)}) "
-                f"{escape(summary.last_prompt)}",
-                markup=False,
+        # Build choice options
+        options = []
+        for summary in page_sessions:
+            prompt_preview = _truncate_prompt(summary.last_prompt)
+            label = (
+                f"<info>{summary.session_id[:8]}...</info> "
+                f"({summary.message_count} msgs) "
+                f"<dim>{_format_time(summary.created_at)}</dim> "
+                f"<dim>{escape(prompt_preview)}</dim>"
             )
+            options.append(ChoiceOption(summary.session_id, label))
 
-        # Show navigation hints
-        nav_hints = []
+        # Add navigation options
+        nav_options = []
         if current_page > 0:
-            nav_hints.append("'p' for previous page")
+            nav_options.append(ChoiceOption(
+                "__prev__",
+                "<dim>←</dim> <dim>Previous page</dim>"
+            ))
         if current_page < total_pages - 1:
-            nav_hints.append("'n' for next page")
-        nav_hints.append("Enter to cancel")
+            nav_options.append(ChoiceOption(
+                "__next__",
+                "<dim>→</dim> <dim>Next page</dim>"
+            ))
 
-        prompt = "\nSelect session index"
-        if nav_hints:
-            prompt += f" ({', '.join(nav_hints)})"
-        prompt += ": "
+        # Build the message
+        message = f"<question>Select a session to resume</question> <dim>(Page {current_page + 1}/{total_pages})</dim>"
 
-        choice_text = ui.console.input(prompt).strip().lower()
+        # Combine options: sessions first, then navigation
+        all_options = options + nav_options
 
-        if not choice_text:
+        try:
+            result = prompt_choice(
+                message=message,
+                options=all_options,
+                title="Resume Session",
+                allow_esc=True,
+                esc_value="__cancel__",
+                style=theme_style(),
+            )
+        except (EOFError, KeyboardInterrupt):
             return None
 
-        # Handle pagination commands
-        if choice_text == "n":
-            if current_page < total_pages - 1:
-                current_page += 1
-                continue
-            else:
-                ui.console.print("[yellow]Already at the last page.[/yellow]")
-                continue
-        elif choice_text == "p":
-            if current_page > 0:
-                current_page -= 1
-                continue
-            else:
-                ui.console.print("[yellow]Already at the first page.[/yellow]")
-                continue
-
-        # Handle session selection
-        if not choice_text.isdigit():
-            ui.console.print(
-                "[red]Please enter a session index number, 'n' for next page, or 'p' for previous page.[/red]"
-            )
+        # Handle the result
+        if result == "__cancel__":
+            return None
+        elif result == "__next__":
+            current_page += 1
             continue
-
-        idx = int(choice_text)
-        if idx < 0 or idx >= len(sessions):
-            ui.console.print(
-                f"[red]Invalid session index {escape(str(idx))}. Choose 0-{len(sessions) - 1}.[/red]"
-            )
+        elif result == "__prev__":
+            current_page -= 1
             continue
-        return sessions[idx]
+        else:
+            # Find and return the selected session
+            for s in sessions:
+                if s.session_id == result:
+                    return s
+            return None
 
 
 def _handle(ui: Any, arg: str) -> bool:
