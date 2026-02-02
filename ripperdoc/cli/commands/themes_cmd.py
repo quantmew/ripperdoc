@@ -8,6 +8,7 @@ from typing import Any
 from rich.markup import escape
 from rich.table import Table
 
+from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice
 from ripperdoc.core.config import get_global_config, save_global_config
 from ripperdoc.core.theme import (
     BUILTIN_THEMES,
@@ -111,8 +112,36 @@ def _handle(ui: Any, arg: str) -> bool:
     arg = arg.strip().lower()
 
     if not arg:
+        # Show current theme
         _show_current_theme(ui)
-        _list_themes(ui)
+
+        # Use choice component to select theme
+        manager = get_theme_manager()
+        current_name = manager.current.name
+
+        options = [
+            ChoiceOption(
+                name,
+                f"<info>{theme.display_name}</info>",
+                theme.description,
+                is_default=(name == current_name),
+            )
+            for name, theme in BUILTIN_THEMES.items()
+        ]
+
+        selected = prompt_choice(
+            message="<question>Choose a theme:</question>",
+            options=options,
+            title="Available Themes",
+            allow_esc=True,
+            esc_value=current_name,  # ESC keeps current theme
+        )
+
+        if selected and selected != current_name:
+            _switch_theme(ui, selected)
+        elif selected == current_name:
+            ui.console.print(f"[dim]Theme remains {manager.current.display_name}[/dim]")
+
         return True
 
     parts = arg.split()
