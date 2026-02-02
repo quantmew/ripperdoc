@@ -8,13 +8,15 @@ user interactions.
 from __future__ import annotations
 
 import html
+import shutil
 from typing import Any, Optional
 
 from prompt_toolkit.filters import is_done
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.formatted_text import HTML, fragment_list_to_text, to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.shortcuts import choice
 from prompt_toolkit.styles import Style
+from prompt_toolkit.utils import get_cwidth
 
 
 # Shared style system for all choice prompts
@@ -96,30 +98,45 @@ class ChoiceOption:
         return f"ChoiceOption(value={self.value!r}, label={self.label!r})"
 
 
-def _count_display_lines(text: str, terminal_width: int = 80) -> int:
-    """Estimate the number of lines a text will occupy when displayed.
+def _terminal_width(default: int = 80) -> int:
+    """Return the current terminal width with a reasonable fallback."""
+    try:
+        width = shutil.get_terminal_size(fallback=(default, 24)).columns
+    except OSError:
+        width = default
+    return max(1, width)
+
+
+def _count_display_lines(text: Any, terminal_width: int) -> int:
+    """Estimate the number of lines a formatted text will occupy.
 
     Args:
-        text: The text to measure (may contain newlines)
-        terminal_width: Approximate terminal width for word wrapping
+        text: The text to measure (plain or formatted)
+        terminal_width: Terminal width for word wrapping
 
     Returns:
         Estimated number of lines
     """
-    if not text:
+    if not text or terminal_width <= 0:
         return 0
 
-    # Count explicit newlines
-    lines = text.split("\n")
+    fragments = to_formatted_text(text)
+    plain_text = fragment_list_to_text(fragments)
+    if not plain_text:
+        return 0
 
-    # Account for text wrapping (rough estimate)
+    # Normalize newlines and keep trailing empty lines.
+    plain_text = plain_text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = plain_text.split("\n")
+
+    # Account for text wrapping using display width (CJK-safe).
     total_lines = 0
     for line in lines:
-        if len(line) == 0:
+        if not line:
             total_lines += 1
         else:
-            # Estimate wrapped lines (terminal_width / average line length)
-            wrapped = (len(line) + terminal_width - 1) // terminal_width
+            width = get_cwidth(line)
+            wrapped = (width + terminal_width - 1) // terminal_width
             total_lines += max(1, wrapped)
 
     return total_lines
@@ -228,27 +245,13 @@ def prompt_choice(
     #              ESC[2K = clear entire line
     #
     # Calculate lines to clear:
-    # - Leading blank line: 1
-    # - Title: 1 (if present)
-    # - Description: 1 (if present)
-    # - Message: variable (count newlines)
-    # - Warning: 1 (if present)
-    # - Trailing blank line: 1
-    # - Frame borders: 2 (top and bottom)
     # - Options: len(choice_options)
-    lines_to_clear = 2  # Leading + trailing blank lines
-    if title:
-        lines_to_clear += 1
-    if description:
-        lines_to_clear += 1
-    if warning:
-        lines_to_clear += 1
-    lines_to_clear += _count_display_lines(message)
-    lines_to_clear += 2  # Frame borders (top and bottom)
+    # NOTE: prompt_toolkit renders a final "done" state without the frame
+    # when show_frame=~is_done, so we should not include frame borders here.
+    term_width = _terminal_width()
+    message_width = max(1, term_width - 2)  # account for label padding
+    lines_to_clear = _count_display_lines(formatted_prompt, message_width)
     lines_to_clear += len(choice_options_formatted)
-
-    # Add a small buffer for any rendering quirks
-    lines_to_clear += 2
 
     for _ in range(lines_to_clear):
         print("\033[F\033[2K", end="", flush=True)
