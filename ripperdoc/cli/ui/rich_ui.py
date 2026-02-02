@@ -1559,14 +1559,6 @@ class RichUI:
         console.print(create_welcome_panel())
         console.print()
 
-        # Display status
-        console.print(create_status_bar())
-        console.print()
-        console.print(
-            "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. "
-            "Press Alt+Enter for newline. Press Tab to toggle thinking mode.[/dim]\n"
-        )
-
         # Display random tip
         random_tip = get_random_tip()
         console.print(f"[dim italic]💡 {random_tip}[/dim italic]\n")
