@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable, Optional, Set, TYPE_CHECKING, TYPE_
 
 from prompt_toolkit.filters import is_done
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.shortcuts import choice
 from prompt_toolkit.styles import Style
 
@@ -112,8 +113,8 @@ def _permission_style() -> Style:
             "question": "#ffd700",  # Gold for the question
             "label": "#87afff",  # Light blue for field labels (Command:, Sandbox:, etc.)
             "warning": "#ff5555",  # Red for warnings
-            "yes-option": "#50fa7b",  # Green for Yes options
-            "no-option": "#ff5555",  # Red for No option
+            "yes-option": "#ffffff",  # Neutral for Yes options
+            "no-option": "#ffffff",  # Neutral for No option
             "value": "#f8f8f2",  # Off-white for values
         }
     )
@@ -191,11 +192,18 @@ def make_permission_checker(
                     # Escape HTML special characters in plain text prompt
                     formatted_prompt = HTML(f"\n{html.escape(prompt)}\n")
 
+                esc_bindings = KeyBindings()
+
+                @esc_bindings.add("escape", eager=True)
+                def _esc_to_deny(event: Any) -> None:
+                    event.app.exit(result="n", style="class:aborting")
+
                 result = choice(
                     message=formatted_prompt,
                     options=choice_options,
                     style=_permission_style(),
                     show_frame=~is_done,  # Frame disappears after selection
+                    key_bindings=esc_bindings,
                 )
 
                 # Clear the entire prompt after selection
