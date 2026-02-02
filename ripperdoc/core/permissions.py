@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Set, TYPE_CHECKING, TYPE_CHECKING as TYPE_CHECKING
 
+from prompt_toolkit.filters import is_done
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.shortcuts import choice
+from prompt_toolkit.styles import Style
+
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool import Tool
@@ -92,53 +97,14 @@ def permission_key(tool: Tool[Any, Any], parsed_input: Any) -> str:
     return tool.name
 
 
-def _render_options_prompt(prompt: str, options: list[tuple[str, str]]) -> str:
-    """Render a simple numbered prompt (fallback for non-Rich environments)."""
-    border = "─" * 120
-    lines = [border, prompt, ""]
-    for idx, (_, label) in enumerate(options, start=1):
-        prefix = "❯" if idx == 1 else " "
-        lines.append(f"{prefix} {idx}. {label}")
-    numeric_choices = "/".join(str(i) for i in range(1, len(options) + 1))
-    shortcut_choices = "/".join(opt[0] for opt in options)
-    lines.append(f"Choice ({numeric_choices} or {shortcut_choices}): ")
-    return "\n".join(lines)
-
-
-def _render_options_prompt_rich(
-    console: "Console",
-    prompt: str,
-    options: list[tuple[str, str]]
-) -> None:
-    """Render permission dialog using Rich Panel for better visual consistency."""
-    from rich.panel import Panel
-    from rich.text import Text
-
-    # Build option lines with markup
-    option_lines = []
-    for idx, (_, label) in enumerate(options, start=1):
-        prefix = "[cyan]❯[/cyan]" if idx == 1 else " "
-        option_lines.append(f"{prefix} {idx}. {label}")
-
-    numeric_choices = "/".join(str(i) for i in range(1, len(options) + 1))
-    shortcut_choices = "/".join(opt[0] for opt in options)
-
-    # Build the prompt content as a markup string
-    markup_content = f"{prompt}\n\n" + "\n".join(option_lines) + "\n"
-    markup_content += f"Choice ([cyan]{numeric_choices}[/cyan] or [cyan]{shortcut_choices}[/cyan]): "
-
-    # Parse markup to create a Text object
-    content = Text.from_markup(markup_content)
-
-    # Render the panel
-    panel = Panel(
-        content,
-        title=Text.from_markup("[yellow]Permission Required[/yellow]"),
-        title_align="left",
-        border_style="yellow",
-        padding=(0, 1),
+def _permission_style() -> Style:
+    """Create the style for permission choice prompts."""
+    return Style.from_dict(
+        {
+            "frame.border": "#d4a017",  # Golden/amber border
+            "selected-option": "bold",
+        }
     )
-    console.print(panel)
 
 
 def _rule_strings(rule_suggestions: Optional[Any]) -> list[str]:
@@ -180,40 +146,49 @@ def make_permission_checker(
     session_tool_rules: dict[str, Set[str]] = defaultdict(set)
 
     async def _prompt_user(prompt: str, options: list[tuple[str, str]]) -> str:
-        """Prompt the user with proper interrupt handling."""
-        # Build the prompt message
-        if console is not None:
-            # Use Rich Panel for the dialog
-            _render_options_prompt_rich(console, prompt, options)
-            # Build simple prompt for the input line
-            numeric_choices = "/".join(str(i) for i in range(1, len(options) + 1))
-            shortcut_choices = "/".join(opt[0] for opt in options)
-            input_prompt = f"Choice ({numeric_choices} or {shortcut_choices}): "
-        else:
-            # Use plain text rendering
-            rendered = _render_options_prompt(prompt, options)
-            input_prompt = rendered
-
-        # Try to use PromptSession if available (better interrupt handling)
-        if prompt_session is not None:
-            try:
-                # PromptSession.prompt() can handle Ctrl+C gracefully
-                return await prompt_session.prompt_async(input_prompt)
-            except KeyboardInterrupt:
-                logger.debug("[permissions] KeyboardInterrupt in prompt_session")
-                return "n"
-            except EOFError:
-                logger.debug("[permissions] EOFError in prompt_session")
-                return "n"
-
-        # Fallback to simple input() via executor
+        """Prompt the user with proper interrupt handling using choice()."""
         loop = asyncio.get_running_loop()
-        responder = prompt_fn or input
 
         def _ask() -> str:
             try:
-                return responder(input_prompt)
-            except (KeyboardInterrupt, EOFError):
+                # If a custom prompt_fn is provided (e.g., for tests), use it directly
+                responder = prompt_fn or None
+                if responder is not None:
+                    # Build a simple text prompt for the prompt_fn
+                    numeric_choices = "/".join(str(i) for i in range(1, len(options) + 1))
+                    shortcut_choices = "/".join(opt[0] for opt in options)
+                    input_prompt = f"Choice ({numeric_choices} or {shortcut_choices}): "
+                    return responder(input_prompt)
+
+                # Convert options to choice() format (value, label)
+                choice_options = [(value, label) for value, label in options]
+
+                # Build formatted message with prompt text
+                # Add visual separation with lines
+                prompt_lines = ["", prompt, ""]
+                formatted_prompt = HTML("\n".join(prompt_lines))
+
+                result = choice(
+                    message=formatted_prompt,
+                    options=choice_options,
+                    style=_permission_style(),
+                    show_frame=~is_done,  # Frame disappears after selection
+                )
+
+                # Clear the entire prompt after selection
+                # ANSI codes: ESC[F = move cursor to beginning of previous line
+                #              ESC[2K = clear entire line
+                # We need to clear: blank + prompt + blank + options (each option takes 1 line)
+                # plus frame borders (top and bottom) = approximately 6-8 lines
+                for _ in range(12):  # Clear enough lines to cover the prompt
+                    print("\033[F\033[2K", end="", flush=True)
+
+                return result
+            except KeyboardInterrupt:
+                logger.debug("[permissions] KeyboardInterrupt in choice")
+                return "n"
+            except EOFError:
+                logger.debug("[permissions] EOFError in choice")
                 return "n"
 
         return await loop.run_in_executor(None, _ask)
