@@ -23,7 +23,7 @@ from typing import Any, AsyncGenerator, Callable, TypeVar
 import click
 
 from ripperdoc.core.config import get_project_config, get_effective_model_profile
-from ripperdoc.core.default_tools import get_default_tools
+from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.query_utils import resolve_model_profile
 from ripperdoc.core.system_prompt import build_system_prompt
@@ -431,6 +431,8 @@ class StdioProtocolHandler:
             dynamic_tools = await load_dynamic_mcp_tools_async(self._project_path)
             if dynamic_tools:
                 tools = merge_tools_with_dynamic(tools, dynamic_tools)
+                if allowed_tools is not None:
+                    tools = filter_tools_by_names(tools, allowed_tools)
                 self._query_context.tools = tools
 
             mcp_instructions = format_mcp_instructions(servers)

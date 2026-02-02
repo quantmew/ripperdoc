@@ -24,7 +24,7 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 
 from ripperdoc.core.config import get_global_config, provider_protocol, model_supports_vision
-from ripperdoc.core.default_tools import get_default_tools
+from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
 from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
@@ -706,9 +706,10 @@ class RichUI:
         dynamic_tools = await load_dynamic_mcp_tools_async(self.project_path)
 
         if dynamic_tools and self.query_context:
-            self.query_context.tools = merge_tools_with_dynamic(
-                self.query_context.tools, dynamic_tools
-            )
+            merged_tools = merge_tools_with_dynamic(self.query_context.tools, dynamic_tools)
+            if self.allowed_tools is not None:
+                merged_tools = filter_tools_by_names(merged_tools, self.allowed_tools)
+            self.query_context.tools = merged_tools
 
         logger.debug(
             "[ui] Prepared tools and MCP servers",

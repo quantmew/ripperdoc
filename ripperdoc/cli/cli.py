@@ -17,7 +17,11 @@ from ripperdoc.core.config import (
     get_project_config,
 )
 from ripperdoc.cli.ui.wizard import check_onboarding
-from ripperdoc.core.default_tools import get_default_tools, BUILTIN_TOOL_NAMES
+from ripperdoc.core.default_tools import (
+    BUILTIN_TOOL_NAMES,
+    filter_tools_by_names,
+    get_default_tools,
+)
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
@@ -95,6 +99,7 @@ async def run_query(
     custom_system_prompt: Optional[str] = None,
     append_system_prompt: Optional[str] = None,
     model: Optional[str] = None,
+    allowed_tools: Optional[List[str]] = None,
 ) -> None:
     """Run a single query and print the response."""
     logger.info(
@@ -154,6 +159,8 @@ async def run_query(
         dynamic_tools = await load_dynamic_mcp_tools_async(Path.cwd())
         if dynamic_tools:
             tools = merge_tools_with_dynamic(tools, dynamic_tools)
+            if allowed_tools is not None:
+                tools = filter_tools_by_names(tools, allowed_tools)
             query_context.tools = tools
         mcp_instructions = format_mcp_instructions(servers)
         skill_result = load_all_skills(Path.cwd())
@@ -484,6 +491,7 @@ def cli(
                 custom_system_prompt=system_prompt,
                 append_system_prompt=append_system_prompt,
                 model=model,
+                allowed_tools=allowed_tools,
             )
         )
         return

@@ -3,6 +3,7 @@
 Allows the AI to read file contents.
 """
 
+import itertools
 import os
 from pathlib import Path
 from typing import AsyncGenerator, List, Optional, Tuple
@@ -24,7 +25,7 @@ from ripperdoc.utils.path_ignore import check_path_for_tool
 logger = get_logger()
 
 
-def detect_file_encoding(file_path: str) -> Tuple[Optional[str], float]:
+def detect_file_encoding(file_path: str, max_bytes: Optional[int] = None) -> Tuple[Optional[str], float]:
     """Detect file encoding using charset-normalizer.
 
     Returns:
@@ -32,7 +33,7 @@ def detect_file_encoding(file_path: str) -> Tuple[Optional[str], float]:
     """
     try:
         with open(file_path, "rb") as f:
-            raw_data = f.read()
+            raw_data = f.read() if max_bytes is None else f.read(max_bytes)
         results = from_bytes(raw_data)
 
         if not results:
@@ -97,6 +98,76 @@ def read_file_with_encoding(file_path: str) -> Tuple[Optional[List[str]], str, O
     try:
         with open(file_path, "r", encoding="latin-1", errors="strict") as f:
             lines = f.readlines()
+        logger.warning(
+            "File %s: encoding detection failed, using latin-1 fallback",
+            file_path,
+        )
+        return lines, "latin-1", None
+    except (UnicodeDecodeError, LookupError):
+        pass
+
+    # All attempts failed - return error
+    error_msg = (
+        f"Unable to determine file encoding. "
+        f"Detected: {detected_encoding or 'unknown'} (confidence: {confidence * 100:.0f}%). "
+        f"Tried fallback encodings: utf-8, latin-1. "
+        f"Please convert the file to UTF-8."
+    )
+    return None, "", error_msg
+
+
+def read_file_slice_with_encoding(
+    file_path: str, offset: int, limit: Optional[int], sample_bytes: int = 65536
+) -> Tuple[Optional[List[str]], str, Optional[str]]:
+    """Read a slice of a file with encoding detection.
+
+    Returns:
+        Tuple of (lines, encoding_used, error_message).
+        If successful: (lines, encoding, None)
+        If failed: (None, "", error_message)
+    """
+
+    def _read_slice(encoding: str) -> List[str]:
+        start = max(offset, 0)
+        if limit is None:
+            end = None
+        elif limit <= 0:
+            return []
+        else:
+            end = start + limit
+        with open(file_path, "r", encoding=encoding, errors="strict") as f:
+            return list(itertools.islice(f, start, end))
+
+    # First, try UTF-8 (most common)
+    try:
+        lines = _read_slice("utf-8")
+        return lines, "utf-8", None
+    except UnicodeDecodeError:
+        pass
+
+    # UTF-8 failed, use charset-normalizer to detect encoding (sampled)
+    detected_encoding, confidence = detect_file_encoding(file_path, max_bytes=sample_bytes)
+
+    if detected_encoding:
+        try:
+            lines = _read_slice(detected_encoding)
+            logger.info(
+                "File %s decoded using detected encoding %s",
+                file_path,
+                detected_encoding,
+            )
+            return lines, detected_encoding, None
+        except (UnicodeDecodeError, LookupError) as e:
+            logger.warning(
+                "Failed to read %s with detected encoding %s: %s",
+                file_path,
+                detected_encoding,
+                e,
+            )
+
+    # Detection failed - try latin-1 as last resort (can decode any byte sequence)
+    try:
+        lines = _read_slice("latin-1")
         logger.warning(
             "File %s: encoding detection failed, using latin-1 fallback",
             file_path,
@@ -243,7 +314,9 @@ and limit to read only a portion of the file."""
         try:
             # Check file size before reading to prevent memory exhaustion
             file_size = os.path.getsize(input_data.file_path)
-            if file_size > MAX_FILE_SIZE_BYTES:
+            offset = max(input_data.offset or 0, 0)
+            limit = input_data.limit
+            if file_size > MAX_FILE_SIZE_BYTES and limit is None:
                 size_kb = file_size / 1024
                 limit_kb = MAX_FILE_SIZE_BYTES / 1024
                 error_output = FileReadToolOutput(
@@ -259,8 +332,16 @@ and limit to read only a portion of the file."""
                 )
                 return
 
-            # Detect and read file with proper encoding
-            lines, used_encoding, encoding_error = read_file_with_encoding(input_data.file_path)
+            if limit is None:
+                # Detect and read full file with proper encoding
+                lines, used_encoding, encoding_error = read_file_with_encoding(
+                    input_data.file_path
+                )
+            else:
+                # Read only the requested slice (avoids loading huge files)
+                lines, used_encoding, encoding_error = read_file_slice_with_encoding(
+                    input_data.file_path, offset=offset, limit=limit
+                )
 
             if lines is None:
                 # Encoding detection failed - return warning to LLM
@@ -277,29 +358,24 @@ and limit to read only a portion of the file."""
                 )
                 return
 
-            offset = input_data.offset or 0
-            limit = input_data.limit
-            total_lines = len(lines)
-
             # Check line count if no limit is specified (to prevent context overflow)
-            if limit is None and total_lines > MAX_READ_LINES:
-                error_output = FileReadToolOutput(
-                    content=f"File too large: {total_lines} lines exceeds limit of {MAX_READ_LINES} lines. Use offset and limit parameters to read portions.",
-                    file_path=input_data.file_path,
-                    line_count=total_lines,
-                    offset=0,
-                    limit=None,
-                )
-                yield ToolResult(
-                    data=error_output,
-                    result_for_assistant=f"Error: File {input_data.file_path} has {total_lines} lines, exceeding the limit of {MAX_READ_LINES} lines when reading without limit parameter. Use offset and limit to read portions, e.g., Read(file_path='{input_data.file_path}', offset=0, limit=500).",
-                )
-                return
-
-            # Apply offset and limit
             if limit is not None:
-                selected_lines = lines[offset : offset + limit]
+                selected_lines = lines
             else:
+                total_lines = len(lines)
+                if total_lines > MAX_READ_LINES:
+                    error_output = FileReadToolOutput(
+                        content=f"File too large: {total_lines} lines exceeds limit of {MAX_READ_LINES} lines. Use offset and limit parameters to read portions.",
+                        file_path=input_data.file_path,
+                        line_count=total_lines,
+                        offset=0,
+                        limit=None,
+                    )
+                    yield ToolResult(
+                        data=error_output,
+                        result_for_assistant=f"Error: File {input_data.file_path} has {total_lines} lines, exceeding the limit of {MAX_READ_LINES} lines when reading without limit parameter. Use offset and limit to read portions, e.g., Read(file_path='{input_data.file_path}', offset=0, limit=500).",
+                    )
+                    return
                 selected_lines = lines[offset:]
 
             content = "".join(selected_lines)
