@@ -689,6 +689,17 @@ class AnthropicClient(ProviderClient):
             if usage:
                 # Update with final usage - output_tokens comes here
                 usage_tokens["output_tokens"] = getattr(usage, "output_tokens", 0)
+                # Some APIs (like zhipu) may also include input_tokens here
+                input_tokens = getattr(usage, "input_tokens", None)
+                if input_tokens is not None:
+                    usage_tokens["input_tokens"] = input_tokens
+                # Also check for cache tokens
+                cache_read = getattr(usage, "cache_read_input_tokens", None)
+                if cache_read is not None:
+                    usage_tokens["cache_read_input_tokens"] = cache_read
+                cache_creation = getattr(usage, "cache_creation_input_tokens", None)
+                if cache_creation is not None:
+                    usage_tokens["cache_creation_input_tokens"] = cache_creation
 
         elif event_type == "message_stop":
             # Message complete
