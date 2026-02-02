@@ -8,7 +8,7 @@ from typing import Any
 from rich.markup import escape
 from rich.table import Table
 
-from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice
+from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice, theme_style
 from ripperdoc.core.config import get_global_config, save_global_config
 from ripperdoc.core.theme import (
     BUILTIN_THEMES,
@@ -135,6 +135,7 @@ def _handle(ui: Any, arg: str) -> bool:
             title="Available Themes",
             allow_esc=True,
             esc_value=current_name,  # ESC keeps current theme
+            style=theme_style(),
         )
 
         if selected and selected != current_name:

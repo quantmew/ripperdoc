@@ -72,6 +72,32 @@ def onboarding_style() -> Style:
     )
 
 
+def theme_style() -> Style:
+    """Create the style for theme selection prompts.
+
+    Uses a subtle gray border for a clean, minimal appearance.
+    """
+    return Style.from_dict(
+        {
+            "frame.border": "#626262",  # Subtle gray border
+            "selected-option": "bold",
+            "option": "#f8f8f2",
+            "title": "#f8f8f2",  # Off-white for titles
+            "description": "#f0f0f0",
+            "question": "#f8f8f2",
+            "label": "#8be9fd",
+            "warning": "#ffb86c",
+            "info": "#5fd7ff",
+            "dim": "#626262",
+            "yes-option": "#ffffff",
+            "no-option": "#ffffff",
+            "value": "#f8f8f2",
+            "default": "#50fa7b",
+            "marker": "#8be9fd",
+        }
+    )
+
+
 class ChoiceOption:
     """Represents a single choice option.
 
