@@ -84,6 +84,7 @@ from ripperdoc.utils.messages import (
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
+from ripperdoc.cli.ui.tips import get_random_tip
 from ripperdoc.utils.message_formatting import stringify_message_content
 from ripperdoc.utils.image_utils import read_image_as_base64, is_image_file
 
@@ -1565,6 +1566,10 @@ class RichUI:
             "[dim]Tip: type '/' then press Tab to see available commands. Type '@' to mention files. "
             "Press Alt+Enter for newline. Press Tab to toggle thinking mode.[/dim]\n"
         )
+
+        # Display random tip
+        random_tip = get_random_tip()
+        console.print(f"[dim italic]💡 {random_tip}[/dim italic]\n")
 
         session = self.get_prompt_session()
         logger.info(
