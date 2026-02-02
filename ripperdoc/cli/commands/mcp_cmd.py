@@ -48,6 +48,9 @@ def _handle(ui: Any, _: str) -> bool:
             ui.console.print("    Tools:")
             for tool in server.tools:
                 desc = f" — {tool.description}" if tool.description else ""
+                # Truncate long descriptions
+                if tool.description and len(tool.description) > 80:
+                    desc = f" — {tool.description[:77]}..."
                 ui.console.print(f"      • {tool.name}{desc}", markup=False)
         else:
             ui.console.print("    Tools: none discovered")
