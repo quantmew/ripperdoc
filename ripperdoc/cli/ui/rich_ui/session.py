@@ -4,26 +4,19 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 """
 
 import asyncio
-import difflib
 import json
 import sys
 import time
 import uuid
-from typing import List, Dict, Any, Optional, Union, Iterable
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import FormattedText
 from rich.console import Console
 from rich.markup import escape
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion, merge_completers
-from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.history import InMemoryHistory
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.shortcuts.prompt import CompleteStyle
-from prompt_toolkit.styles import Style
-
-from ripperdoc.core.config import get_global_config, provider_protocol, model_supports_vision
+from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
 from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
@@ -31,21 +24,13 @@ from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
-from ripperdoc.cli.commands import (
-    get_slash_command,
-    get_custom_command,
-    list_slash_commands,
-    list_custom_commands,
-    slash_command_completions,
-    expand_command_content,
-    CustomCommandDefinition,
-)
+from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permissions import make_permission_checker
 from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
-from ripperdoc.cli.ui.panels import create_welcome_panel, create_status_bar, print_shortcuts
+from ripperdoc.cli.ui.panels import create_welcome_panel, print_shortcuts
 from ripperdoc.cli.ui.message_display import MessageDisplay, parse_bash_output_sections
 from ripperdoc.cli.ui.interrupt_listener import EscInterruptListener
 from ripperdoc.utils.conversation_compaction import (
@@ -61,7 +46,6 @@ from ripperdoc.utils.message_compaction import (
     micro_compact_messages,
     resolve_auto_compact_enabled,
 )
-from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.mcp import (
     ensure_mcp_runtime,
     format_mcp_instructions,
@@ -77,16 +61,21 @@ from ripperdoc.utils.messages import (
     UserMessage,
     AssistantMessage,
     ProgressMessage,
-    INTERRUPT_MESSAGE,
-    INTERRUPT_MESSAGE_FOR_TOOL_USE,
     create_user_message,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.path_ignore import build_ignore_filter
-from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
 from ripperdoc.cli.ui.tips import get_random_tip
 from ripperdoc.utils.message_formatting import stringify_message_content
-from ripperdoc.utils.image_utils import read_image_as_base64, is_image_file
+
+from ripperdoc.cli.ui.rich_ui.commands import handle_slash_command as _handle_slash_command
+from ripperdoc.cli.ui.rich_ui.images import process_images_in_input
+from ripperdoc.cli.ui.rich_ui.input import build_prompt_session
+from ripperdoc.cli.ui.rich_ui.rendering import (
+    handle_assistant_message,
+    handle_progress_message,
+    handle_tool_result_message,
+)
 
 
 # Type alias for conversation messages
@@ -94,201 +83,6 @@ ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
 console = Console()
 logger = get_logger()
-
-
-def _suggest_slash_commands(name: str, project_path: Optional[Path]) -> List[str]:
-    """Return close matching slash commands for a mistyped name."""
-    if not name:
-        return []
-    seen = set()
-    candidates: List[str] = []
-    for command_name, _cmd in slash_command_completions(project_path):
-        if command_name not in seen:
-            candidates.append(command_name)
-            seen.add(command_name)
-    return difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
-
-
-def _extract_image_paths(text: str) -> List[str]:
-    """Extract @-referenced image paths from text.
-
-    Handles cases like:
-    - "@image.png describe this" (space after)
-    - "@image.png描述这个" (no space after, Chinese text)
-    - "@image.png.whatIsThis" (no space, ASCII text)
-
-    Args:
-        text: User input text
-
-    Returns:
-        List of file paths (without the @ prefix)
-    """
-    import re
-    from pathlib import Path
-
-    result = []
-
-    # Find all @ followed by content until space or end
-    for match in re.finditer(r"@(\S+)", text):
-        candidate = match.group(1)
-        if not candidate:
-            continue
-
-        # Try to find the actual file path by progressively trimming
-        # First, check if the full candidate is a file
-        if Path(candidate).exists():
-            result.append(candidate)
-            continue
-
-        # Not a file, try to find where the file path ends
-        # Common file extensions
-        extensions = [
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".webp",
-            ".bmp",
-            ".svg",
-            ".py",
-            ".js",
-            ".ts",
-            ".tsx",
-            ".jsx",
-            ".vue",
-            ".go",
-            ".rs",
-            ".java",
-            ".c",
-            ".cpp",
-            ".h",
-            ".hpp",
-            ".cs",
-            ".php",
-            ".rb",
-            ".sh",
-            ".md",
-            ".txt",
-            ".json",
-            ".yaml",
-            ".yml",
-            ".xml",
-            ".html",
-            ".css",
-            ".scss",
-            ".sql",
-            ".db",
-        ]
-
-        found_path = None
-        for ext in extensions:
-            # Look for this extension in the candidate
-            if ext.lower() in candidate.lower():
-                # Found extension, extract path up to and including it
-                ext_pos = candidate.lower().find(ext.lower())
-                potential_path = candidate[: ext_pos + len(ext)]
-                if Path(potential_path).exists():
-                    found_path = potential_path
-                    break
-
-                # Also try to find the LAST occurrence of this extension
-                # For cases like "file.txt.extraText"
-                last_ext_pos = candidate.lower().rfind(ext.lower())
-                if last_ext_pos > ext_pos:
-                    potential_path = candidate[: last_ext_pos + len(ext)]
-                    if Path(potential_path).exists():
-                        found_path = potential_path
-                        break
-
-        if found_path:
-            result.append(found_path)
-        else:
-            # No file found, keep the original candidate
-            # The processing function will handle non-existent files
-            result.append(candidate)
-
-    return result
-
-
-def _process_images_in_input(
-    user_input: str,
-    project_path: Path,
-    model_pointer: str,
-) -> tuple[str, List[Dict[str, Any]]]:
-    """Process @ references for images in user input.
-
-    Only image files are processed and converted to image blocks.
-    Text files and non-existent files are left as-is in the text.
-
-    Args:
-        user_input: Raw user input text
-        project_path: Project root path
-        model_pointer: Model pointer to check vision support
-
-    Returns:
-        (processed_text, image_blocks) tuple
-    """
-    import re
-    from ripperdoc.cli.ui.helpers import get_profile_for_pointer
-
-    image_blocks: List[Dict[str, Any]] = []
-    processed_text = user_input
-
-    # Check if current model supports vision
-    profile = get_profile_for_pointer(model_pointer)
-    supports_vision = profile and model_supports_vision(profile)
-
-    if not supports_vision:
-        # Model doesn't support vision, leave all @ references as-is
-        return processed_text, image_blocks
-
-    referenced_paths = _extract_image_paths(user_input)
-
-    for ref_path in referenced_paths:
-        # Try relative path first, then absolute path
-        path_candidate = project_path / ref_path
-        if not path_candidate.exists():
-            path_candidate = Path(ref_path)
-
-        if not path_candidate.exists():
-            logger.debug(
-                "[ui] @ referenced file not found",
-                extra={"path": ref_path},
-            )
-            # Keep the reference in text (LLM should know file doesn't exist)
-            continue
-
-        # Only process image files
-        if not is_image_file(path_candidate):
-            # Not an image file, keep @ reference in text
-            # The LLM can decide to read it with the Read tool if needed
-            continue
-
-        # Process image file
-        result = read_image_as_base64(path_candidate)
-        if result:
-            base64_data, mime_type = result
-            image_blocks.append(
-                {
-                    "type": "image",
-                    "source_type": "base64",
-                    "media_type": mime_type,
-                    "image_data": base64_data,
-                }
-            )
-            # Remove image reference from text (content included separately as image block)
-            processed_text = processed_text.replace(f"@{ref_path}", "")
-        else:
-            # Failed to read image, keep reference in text
-            logger.warning(
-                "[ui] Failed to read @ referenced image",
-                extra={"path": ref_path},
-            )
-
-    # Clean up extra whitespace
-    processed_text = re.sub(r"\s+", " ", processed_text).strip()
-
-    return processed_text, image_blocks
 
 
 class RichUI:
@@ -891,183 +685,6 @@ class RichUI:
 
         return messages
 
-    def _handle_assistant_message(
-        self,
-        message: AssistantMessage,
-        tool_registry: Dict[str, Dict[str, Any]],
-        spinner: Optional[ThinkingSpinner] = None,
-    ) -> Optional[str]:
-        """Handle an assistant message from the query stream.
-
-        Returns:
-            The last tool name if a tool_use block was processed, None otherwise.
-        """
-        # Factory to create pause context - spinner.paused() if spinner exists, else no-op
-        from contextlib import nullcontext
-
-        pause = lambda: spinner.paused() if spinner else nullcontext()  # noqa: E731
-
-        meta = getattr(getattr(message, "message", None), "metadata", {}) or {}
-        reasoning_payload = (
-            meta.get("reasoning_content") or meta.get("reasoning") or meta.get("reasoning_details")
-        )
-        if reasoning_payload:
-            with pause():
-                self._print_reasoning(reasoning_payload)
-
-        last_tool_name: Optional[str] = None
-
-        if isinstance(message.message.content, str):
-            if self._esc_interrupt_seen and message.message.content.strip() in (
-                INTERRUPT_MESSAGE,
-                INTERRUPT_MESSAGE_FOR_TOOL_USE,
-            ):
-                return last_tool_name
-            with pause():
-                self.display_message("Ripperdoc", message.message.content)
-        elif isinstance(message.message.content, list):
-            for block in message.message.content:
-                if hasattr(block, "type") and block.type == "text" and block.text:
-                    with pause():
-                        self.display_message("Ripperdoc", block.text)
-                elif hasattr(block, "type") and block.type == "tool_use":
-                    tool_name = getattr(block, "name", "unknown tool")
-                    tool_args = getattr(block, "input", {})
-                    tool_use_id = getattr(block, "tool_use_id", None) or getattr(block, "id", None)
-
-                    if tool_use_id:
-                        tool_registry[tool_use_id] = {
-                            "name": tool_name,
-                            "args": tool_args,
-                            "printed": False,
-                        }
-
-                    if tool_name == "Task":
-                        with pause():
-                            self.display_message(
-                                tool_name, "", is_tool=True, tool_type="call", tool_args=tool_args
-                            )
-                        if tool_use_id:
-                            tool_registry[tool_use_id]["printed"] = True
-
-                    last_tool_name = tool_name
-
-        return last_tool_name
-
-    def _handle_tool_result_message(
-        self,
-        message: UserMessage,
-        tool_registry: Dict[str, Dict[str, Any]],
-        last_tool_name: Optional[str],
-        spinner: Optional[ThinkingSpinner] = None,
-    ) -> None:
-        """Handle a user message containing tool results."""
-        if not isinstance(message.message.content, list):
-            return
-
-        # Factory to create pause context - spinner.paused() if spinner exists, else no-op
-        from contextlib import nullcontext
-
-        pause = lambda: spinner.paused() if spinner else nullcontext()  # noqa: E731
-
-        for block in message.message.content:
-            if not (hasattr(block, "type") and block.type == "tool_result" and block.text):
-                continue
-
-            tool_name = "Tool"
-            tool_data = getattr(message, "tool_use_result", None)
-            is_error = bool(getattr(block, "is_error", False))
-            tool_use_id = getattr(block, "tool_use_id", None)
-
-            entry = tool_registry.get(tool_use_id) if tool_use_id else None
-            if entry:
-                tool_name = entry.get("name", tool_name)
-                if not entry.get("printed"):
-                    with pause():
-                        self.display_message(
-                            tool_name,
-                            "",
-                            is_tool=True,
-                            tool_type="call",
-                            tool_args=entry.get("args", {}),
-                        )
-                    entry["printed"] = True
-            elif last_tool_name:
-                tool_name = last_tool_name
-
-            with pause():
-                self.display_message(
-                    tool_name,
-                    block.text,
-                    is_tool=True,
-                    tool_type="result",
-                    tool_data=tool_data,
-                    tool_error=is_error,
-                )
-
-    def _handle_progress_message(
-        self,
-        message: ProgressMessage,
-        spinner: ThinkingSpinner,
-        output_token_est: int,
-    ) -> int:
-        """Handle a progress message and update spinner.
-
-        Returns:
-            Updated output token estimate.
-        """
-        if self.verbose:
-            with spinner.paused():
-                self.display_message("System", f"Progress: {message.content}", is_tool=True)
-        elif message.content and isinstance(message.content, str):
-            if message.content.startswith("Subagent: "):
-                with spinner.paused():
-                    self.display_message(
-                        "Subagent", message.content[len("Subagent: ") :], is_tool=True
-                    )
-            elif message.content.startswith("Subagent"):
-                with spinner.paused():
-                    self.display_message("Subagent", message.content, is_tool=True)
-
-        if message.tool_use_id == "stream":
-            delta_tokens = estimate_tokens(message.content)
-            output_token_est += delta_tokens
-            spinner.update_tokens(output_token_est)
-        else:
-            # Simplify spinner suffix for bash command progress to avoid clutter
-            suffix = self._simplify_progress_suffix(message.content)
-            spinner.update_tokens(output_token_est, suffix=suffix)
-
-        return output_token_est
-
-    def _simplify_progress_suffix(self, content: Any) -> str:
-        """Simplify progress message content for cleaner spinner display.
-
-        For bash command progress (format: "Running... (elapsed)\nstdout_preview"),
-        extract only the timing information to avoid cluttering the spinner with
-        multi-line stdout content that causes terminal wrapping issues.
-
-        Args:
-            content: Progress message content (can be str or other types)
-
-        Returns:
-            Simplified suffix string for spinner display
-        """
-        if not isinstance(content, str):
-            return f"Working... {content}"
-
-        # Handle bash command progress: "Running... (10s)\nstdout..."
-        if content.startswith("Running..."):
-            # Extract just the "Running... (time)" part before any newline
-            first_line = content.split("\n", 1)[0]
-            return first_line
-
-        # For other progress messages, limit length to avoid terminal wrapping
-        max_length = 60
-        if len(content) > max_length:
-            return f"Working... {content[:max_length]}..."
-
-        return f"Working... {content}"
 
     async def process_query(self, user_input: str) -> None:
         """Process a user query and display the response."""
@@ -1113,7 +730,7 @@ class RichUI:
             )
 
             # Process images in user input
-            processed_input, image_blocks = _process_images_in_input(
+            processed_input, image_blocks = process_images_in_input(
                 user_input, self.project_path, self.model
             )
 
@@ -1220,18 +837,16 @@ class RichUI:
                     permission_checker,  # type: ignore[arg-type]
                 ):
                     if message.type == "assistant" and isinstance(message, AssistantMessage):
-                        result = self._handle_assistant_message(message, tool_registry, spinner)
+                        result = handle_assistant_message(self, message, tool_registry, spinner)
                         if result:
                             last_tool_name = result
 
                     elif message.type == "user" and isinstance(message, UserMessage):
-                        self._handle_tool_result_message(
-                            message, tool_registry, last_tool_name, spinner
-                        )
+                        handle_tool_result_message(self, message, tool_registry, last_tool_name, spinner)
 
                     elif message.type == "progress" and isinstance(message, ProgressMessage):
-                        output_token_est = self._handle_progress_message(
-                            message, spinner, output_token_est
+                        output_token_est = handle_progress_message(
+                            self, message, spinner, output_token_est
                         )
 
                     self._log_message(message)
@@ -1344,212 +959,20 @@ class RichUI:
         return self._run_async(coro)
 
     def handle_slash_command(self, user_input: str) -> bool | str:
-        """Handle slash commands. Returns True if handled as built-in, False if not a command,
-        or a string if it's a custom command that should be sent to the AI."""
+        """Handle slash commands.
 
-        if not user_input.startswith("/"):
-            return False
+        Returns True if handled as built-in, False if not a command,
+        or a string if it's a custom command that should be sent to the AI.
+        """
+        from ripperdoc.cli.ui.rich_ui import _suggest_slash_commands
 
-        parts = user_input[1:].strip().split()
-        if not parts:
-            self.console.print("[red]No command provided after '/'.[/red]")
-            return True
-
-        command_name = parts[0].lower()
-        trimmed_arg = " ".join(parts[1:]).strip()
-
-        # First, try built-in commands
-        command = get_slash_command(command_name)
-        if command is not None:
-            return command.handler(self, trimmed_arg)
-
-        # Then, try custom commands
-        custom_cmd = get_custom_command(command_name, self.project_path)
-        if custom_cmd is not None:
-            # Expand the custom command content
-            expanded_content = expand_command_content(custom_cmd, trimmed_arg, self.project_path)
-
-            # Show a hint that this is from a custom command
-            self.console.print(f"[dim]Running custom command: /{command_name}[/dim]")
-            if custom_cmd.argument_hint and trimmed_arg:
-                self.console.print(f"[dim]Arguments: {trimmed_arg}[/dim]")
-
-            # Return the expanded content to be processed as a query
-            return expanded_content
-
-        suggestions = _suggest_slash_commands(command_name, self.project_path)
-        hint = ""
-        if suggestions:
-            hint = " [dim]Did you mean "
-            hint += ", ".join(f"/{escape(s)}" for s in suggestions)
-            hint += "?[/dim]"
-
-        self.console.print(f"[red]Unknown command: {escape(command_name)}[/red]{hint}")
-        return True
+        return _handle_slash_command(self, user_input, _suggest_slash_commands)
 
     def get_prompt_session(self) -> PromptSession:
         """Create (or return) the prompt session with command completion."""
         if self._prompt_session:
             return self._prompt_session
-
-        class SlashCommandCompleter(Completer):
-            """Autocomplete for slash commands including custom commands."""
-
-            def __init__(self, project_path: Path):
-                self.project_path = project_path
-
-            def get_completions(self, document: Any, _complete_event: Any) -> Iterable[Completion]:
-                text = document.text_before_cursor
-                if not text.startswith("/"):
-                    return
-                query = text[1:]
-                # Get completions including custom commands
-                completions = slash_command_completions(self.project_path)
-                for name, cmd in completions:
-                    if name.startswith(query):
-                        # Handle both SlashCommand and CustomCommandDefinition
-                        description = cmd.description
-                        # Add hint for custom commands
-                        if isinstance(cmd, CustomCommandDefinition):
-                            hint = cmd.argument_hint or ""
-                            display = f"{name} {hint}".strip() if hint else name
-                            display_meta = f"[custom] {description}"
-                        else:
-                            display = name
-                            display_meta = description
-                        yield Completion(
-                            name,
-                            start_position=-len(query),
-                            display=display,
-                            display_meta=display_meta,
-                        )
-
-        # Merge both completers
-        slash_completer = SlashCommandCompleter(self.project_path)
-        file_completer = FileMentionCompleter(self.project_path, self._ignore_filter)
-        combined_completer = merge_completers([slash_completer, file_completer])
-
-        key_bindings = KeyBindings()
-
-        @key_bindings.add("enter")
-        def _(event: Any) -> None:
-            """Accept completion if menu is open; otherwise submit line."""
-            buf = event.current_buffer
-            if buf.complete_state and buf.complete_state.current_completion:
-                buf.apply_completion(buf.complete_state.current_completion)
-                return
-            buf.validate_and_handle()
-
-        @key_bindings.add("tab")
-        def _(event: Any) -> None:
-            """Toggle thinking mode when input is empty; otherwise handle completion."""
-            buf = event.current_buffer
-            # If input is empty, toggle thinking mode
-            if not buf.text.strip():
-                from prompt_toolkit.application import run_in_terminal
-
-                def _toggle() -> None:
-                    ui_instance._toggle_thinking_mode()
-
-                run_in_terminal(_toggle)
-                return
-            # Otherwise, handle completion as usual
-            if buf.complete_state and buf.complete_state.current_completion:
-                buf.apply_completion(buf.complete_state.current_completion)
-            else:
-                buf.start_completion(select_first=True)
-
-        @key_bindings.add("escape", "enter")
-        def _(event: Any) -> None:
-            """Insert newline on Alt+Enter."""
-            event.current_buffer.insert_text("\n")
-
-        # Capture self for use in Ctrl+C handler closure
-        ui_instance = self
-
-        @key_bindings.add("c-c")
-        def _(event: Any) -> None:
-            """Handle Ctrl+C: first press clears input, second press exits."""
-            import time as time_module
-
-            buf = event.current_buffer
-            current_text = buf.text
-            current_time = time_module.time()
-
-            # Check if this is a double Ctrl+C (within 1.5 seconds)
-            if current_time - ui_instance._last_ctrl_c_time < 1.5:
-                # Double Ctrl+C - exit
-                buf.reset()
-                raise KeyboardInterrupt()
-
-            # First Ctrl+C - save to history and clear
-            ui_instance._last_ctrl_c_time = current_time
-
-            if current_text.strip():
-                # Save current input to history before clearing
-                try:
-                    event.app.current_buffer.history.append_string(current_text)
-                except (AttributeError, TypeError, ValueError):
-                    pass
-
-            # Print hint message in clean terminal context, then clear buffer
-            from prompt_toolkit.application import run_in_terminal
-
-            def _print_hint() -> None:
-                print("\n\033[2mPress Ctrl+C again to exit, or continue typing.\033[0m")
-
-            run_in_terminal(_print_hint)
-
-            # Clear the buffer after printing
-            buf.reset()
-
-        # If stdin is not a TTY (e.g., piped input), try to use /dev/tty for interactive input
-        # This allows the user to continue interacting after processing piped content
-        input_obj = None
-        if not sys.stdin.isatty():
-            # First check if /dev/tty exists and is accessible
-            try:
-                import os
-
-                if os.path.exists("/dev/tty"):
-                    from prompt_toolkit.input import create_input
-
-                    input_obj = create_input(always_prefer_tty=True)
-                    self._using_tty_input = True  # Mark that we're using /dev/tty
-                    logger.info(
-                        "[ui] Stdin is not a TTY, using /dev/tty for prompt input",
-                        extra={"session_id": self.session_id},
-                    )
-                else:
-                    logger.info(
-                        "[ui] Stdin is not a TTY and /dev/tty not available",
-                        extra={"session_id": self.session_id},
-                    )
-            except (OSError, RuntimeError, ValueError, ImportError) as exc:
-                logger.warning(
-                    "[ui] Failed to create TTY input: %s: %s",
-                    type(exc).__name__,
-                    exc,
-                    extra={"session_id": self.session_id},
-                )
-
-        prompt_style = Style.from_dict(
-            {
-                "rprompt-on": "fg:ansicyan bold",
-                "rprompt-off": "fg:ansibrightblack",
-            }
-        )
-        self._prompt_session = PromptSession(
-            completer=combined_completer,
-            complete_style=CompleteStyle.COLUMN,
-            complete_while_typing=True,
-            history=InMemoryHistory(),
-            key_bindings=key_bindings,
-            multiline=True,
-            input=input_obj,
-            style=prompt_style,
-            rprompt=self._get_rprompt,
-        )
+        self._prompt_session = build_prompt_session(self, self._ignore_filter)
         return self._prompt_session
 
     def run(self) -> None:
