@@ -1,181 +1,59 @@
-"""Stdio command for SDK subprocess communication.
-
-This module implements the stdio command that enables Ripperdoc to communicate
-with SDKs via JSON Control Protocol over stdin/stdout, following Claude SDK's
-elegant subprocess architecture patterns.
-"""
+"""Stdio protocol handler implementation."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-import os
 import sys
 import time
 import traceback
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator, Callable, TypeVar
-
-import click
+from typing import Any
 
 from ripperdoc.core.config import get_project_config, get_effective_model_profile
 from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
-from ripperdoc.core.query import query, QueryContext
+from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
+from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.permissions import make_permission_checker
+from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.query_utils import resolve_model_profile
 from ripperdoc.core.system_prompt import build_system_prompt
-from ripperdoc.core.hooks.manager import hook_manager
-from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
-from ripperdoc.utils.messages import create_user_message
-from ripperdoc.utils.memory import build_memory_instructions
-from ripperdoc.core.permissions import make_permission_checker
-from ripperdoc.utils.session_history import SessionHistory
-from ripperdoc.utils.mcp import (
-    load_mcp_servers_async,
-    format_mcp_instructions,
-    shutdown_mcp_runtime,
-)
-from ripperdoc.utils.lsp import shutdown_lsp_manager
-from ripperdoc.tools.background_shell import shutdown_background_shell
-from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.protocol.models import (
+    AssistantMessageData,
+    AssistantStreamMessage,
+    ControlResponseError,
     ControlResponseMessage,
     ControlResponseSuccess,
-    ControlResponseError,
-    AssistantStreamMessage,
-    UserStreamMessage,
-    AssistantMessageData,
-    UserMessageData,
-    ResultMessage,
-    UsageInfo,
-    MCPServerInfo,
     InitializeResponseData,
+    MCPServerInfo,
     PermissionResponseAllow,
     PermissionResponseDeny,
+    ResultMessage,
+    UsageInfo,
+    UserMessageData,
+    UserStreamMessage,
     model_to_dict,
 )
+from ripperdoc.tools.background_shell import shutdown_background_shell
+from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
+from ripperdoc.utils.lsp import shutdown_lsp_manager
+from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async, shutdown_mcp_runtime
+from ripperdoc.utils.messages import create_user_message
+from ripperdoc.utils.memory import build_memory_instructions
+from ripperdoc.utils.session_history import SessionHistory
+
+from .timeouts import (
+    STDIO_HOOK_TIMEOUT_SEC,
+    STDIO_QUERY_TIMEOUT_SEC,
+    STDIO_READ_TIMEOUT_SEC,
+    STDIO_WATCHDOG_INTERVAL_SEC,
+)
+from .watchdog import OperationWatchdog
 
 logger = logging.getLogger(__name__)
-
-# Timeout constants for stdio operations
-STDIO_READ_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_READ_TIMEOUT", "300"))  # 5 minutes default
-STDIO_QUERY_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_QUERY_TIMEOUT", "600"))  # 10 minutes default
-STDIO_WATCHDOG_INTERVAL_SEC = float(os.getenv("RIPPERDOC_STDIO_WATCHDOG_INTERVAL", "30"))  # 30 seconds
-STDIO_TOOL_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_TOOL_TIMEOUT", "300"))  # 5 minutes per tool
-STDIO_HOOK_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_HOOK_TIMEOUT", "30"))  # 30 seconds for hooks
-
-
-T = TypeVar("T")
-
-
-@asynccontextmanager
-async def timeout_wrapper(
-    timeout_sec: float,
-    operation_name: str,
-    on_timeout: Callable[[str], Any] | None = None,
-) -> AsyncGenerator[None, None]:
-    """Context manager that wraps an async operation with timeout and comprehensive error handling.
-
-    Args:
-        timeout_sec: Maximum seconds to wait for the operation
-        operation_name: Human-readable name for logging
-        on_timeout: Optional callback called on timeout
-
-    Yields:
-        None
-
-    Raises:
-        asyncio.TimeoutError: If operation exceeds timeout
-    """
-    try:
-        async with asyncio.timeout(timeout_sec):
-            yield
-    except asyncio.TimeoutError:
-        error_msg = f"{operation_name} timed out after {timeout_sec:.1f}s"
-        logger.error(f"[timeout] {error_msg}", exc_info=True)
-        if on_timeout:
-            result = on_timeout(error_msg)
-            if inspect.isawaitable(result):
-                await result
-        raise
-    except Exception as e:
-        logger.error(f"[timeout] {operation_name} failed: {type(e).__name__}: {e}", exc_info=True)
-        raise
-
-
-import inspect
-
-
-class OperationWatchdog:
-    """Watchdog that monitors long-running operations and triggers timeout if stuck."""
-
-    def __init__(self, timeout_sec: float, check_interval: float = 30.0):
-        """Initialize watchdog.
-
-        Args:
-            timeout_sec: Maximum seconds allowed before watchdog triggers
-            check_interval: Seconds between activity checks
-        """
-        self.timeout_sec = timeout_sec
-        self.check_interval = check_interval
-        self._last_activity: float = time.time()
-        self._stopped = False
-        self._task: asyncio.Task[None] | None = None
-        self._monitoring_task: asyncio.Task[None] | None = None
-
-    def _update_activity(self) -> None:
-        """Update the last activity timestamp."""
-        self._last_activity = time.time()
-
-    def ping(self) -> None:
-        """Update activity timestamp to prevent watchdog timeout."""
-        self._update_activity()
-        logger.debug(
-            f"[watchdog] Activity ping recorded, time since last: {time.time() - self._last_activity:.1f}s"
-        )
-
-    async def _watchdog_loop(self) -> None:
-        """Background task that monitors activity and triggers timeout if stuck."""
-        while not self._stopped:
-            try:
-                await asyncio.sleep(self.check_interval)
-            except asyncio.CancelledError:
-                break
-
-            time_since_activity = time.time() - self._last_activity
-            if time_since_activity > self.timeout_sec:
-                logger.error(
-                    f"[watchdog] No activity for {time_since_activity:.1f}s "
-                    f"(timeout={self.timeout_sec:.1f}s) - triggering cancellation"
-                )
-                # Cancel the task being monitored
-                if self._monitoring_task and not self._monitoring_task.done():
-                    self._monitoring_task.cancel()
-                break
-
-    async def __aenter__(self) -> "OperationWatchdog":
-        """Start the watchdog."""
-        self._stopped = False
-        self._monitoring_task = asyncio.current_task()
-        self._task = asyncio.create_task(self._watchdog_loop())
-        logger.debug(
-            f"[watchdog] Started with timeout={self.timeout_sec}s, check_interval={self.check_interval}s"
-        )
-        return self
-
-    async def __aexit__(self, *args: Any) -> None:
-        """Stop the watchdog."""
-        self._stopped = True
-        if self._task and not self._task.done():
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-        logger.debug("[watchdog] Stopped")
 
 
 class StdioProtocolHandler:
@@ -905,7 +783,7 @@ class StdioProtocolHandler:
             )
             return model_to_dict(stream_message)
 
-        elif msg_type == "user":
+        if msg_type == "user":
             msg_content = getattr(message, "message", None)
             content = getattr(msg_content, "content", "") if msg_content else ""
 
@@ -939,9 +817,8 @@ class StdioProtocolHandler:
             )
             return model_to_dict(stream_message)
 
-        else:
-            # Unknown message type - return None to skip
-            return None
+        # Unknown message type - return None to skip
+        return None
 
     def _sanitize_for_json(self, obj: Any) -> Any:
         """Recursively convert objects to JSON-serializable types.
@@ -960,19 +837,19 @@ class StdioProtocolHandler:
             return None
 
         # Primitives
-        elif isinstance(obj, (str, int, float, bool)):
+        if isinstance(obj, (str, int, float, bool)):
             return obj
 
         # Lists and tuples
-        elif isinstance(obj, (list, tuple)):
+        if isinstance(obj, (list, tuple)):
             return [self._sanitize_for_json(item) for item in obj]
 
         # Dictionaries
-        elif isinstance(obj, dict):
+        if isinstance(obj, dict):
             return {key: self._sanitize_for_json(value) for key, value in obj.items()}
 
         # Pydantic models
-        elif hasattr(obj, "model_dump"):
+        if hasattr(obj, "model_dump"):
             try:
                 dumped = obj.model_dump(exclude_none=True)
                 return self._sanitize_for_json(dumped)
@@ -980,7 +857,7 @@ class StdioProtocolHandler:
                 pass
 
         # Objects with dict() method
-        elif hasattr(obj, "dict"):
+        if hasattr(obj, "dict"):
             try:
                 dumped = obj.dict(exclude_none=True)
                 return self._sanitize_for_json(dumped)
@@ -988,11 +865,10 @@ class StdioProtocolHandler:
                 pass
 
         # Fallback: try to convert to string
-        else:
-            try:
-                return str(obj)
-            except Exception:
-                return None
+        try:
+            return str(obj)
+        except Exception:
+            return None
 
     def _convert_content_block(self, block: Any) -> dict[str, Any] | None:
         """Convert a MessageContent block to dictionary.
@@ -1014,14 +890,14 @@ class StdioProtocolHandler:
                 "text": getattr(block, "text", None) or "",
             }
 
-        elif block_type == "thinking":
+        if block_type == "thinking":
             return {
                 "type": "thinking",
                 "thinking": getattr(block, "thinking", None) or getattr(block, "text", None) or "",
                 "signature": getattr(block, "signature", None),
             }
 
-        elif block_type == "tool_use":
+        if block_type == "tool_use":
             # Use the same id extraction logic as _content_block_to_api
             # Try id first, then tool_use_id, then empty string
             tool_id = getattr(block, "id", None) or getattr(block, "tool_use_id", None) or ""
@@ -1032,7 +908,7 @@ class StdioProtocolHandler:
                 "input": getattr(block, "input", None) or {},
             }
 
-        elif block_type == "tool_result":
+        if block_type == "tool_result":
             return {
                 "type": "tool_result",
                 "tool_use_id": getattr(block, "tool_use_id", None)
@@ -1042,7 +918,7 @@ class StdioProtocolHandler:
                 "is_error": getattr(block, "is_error", None),
             }
 
-        elif block_type == "image":
+        if block_type == "image":
             return {
                 "type": "image",
                 "source": {
@@ -1052,24 +928,23 @@ class StdioProtocolHandler:
                 },
             }
 
-        else:
-            # Unknown block type - try to convert with generic approach
-            block_dict = {}
-            if hasattr(block, "type"):
-                block_dict["type"] = block.type
-            if hasattr(block, "text"):
-                block_dict["text"] = block.text
-            if hasattr(block, "id"):
-                block_dict["id"] = block.id
-            if hasattr(block, "name"):
-                block_dict["name"] = block.name
-            if hasattr(block, "input"):
-                block_dict["input"] = block.input
-            if hasattr(block, "content"):
-                block_dict["content"] = block.content
-            if hasattr(block, "is_error"):
-                block_dict["is_error"] = block.is_error
-            return block_dict if block_dict else None
+        # Unknown block type - try to convert with generic approach
+        block_dict = {}
+        if hasattr(block, "type"):
+            block_dict["type"] = block.type
+        if hasattr(block, "text"):
+            block_dict["text"] = block.text
+        if hasattr(block, "id"):
+            block_dict["id"] = block.id
+        if hasattr(block, "name"):
+            block_dict["name"] = block.name
+        if hasattr(block, "input"):
+            block_dict["input"] = block.input
+        if hasattr(block, "content"):
+            block_dict["content"] = block.content
+        if hasattr(block, "is_error"):
+            block_dict["is_error"] = block.is_error
+        return block_dict if block_dict else None
 
     async def _handle_control_request(self, message: dict[str, Any]) -> None:
         """Handle a control request from the SDK.
@@ -1315,141 +1190,4 @@ class StdioProtocolHandler:
             logger.info("Stdio protocol handler shutdown complete")
 
 
-@click.command(name="stdio")
-@click.option(
-    "--input-format",
-    type=click.Choice(["stream-json", "auto"]),
-    default="stream-json",
-    help="Input format for messages.",
-)
-@click.option(
-    "--output-format",
-    type=click.Choice(["stream-json"]),
-    default="stream-json",
-    help="Output format for messages.",
-)
-@click.option(
-    "--model",
-    type=str,
-    default=None,
-    help="Model profile for the current session.",
-)
-@click.option(
-    "--permission-mode",
-    type=click.Choice(["default", "acceptEdits", "plan", "bypassPermissions"]),
-    default="default",
-    help="Permission mode for tool usage.",
-)
-@click.option(
-    "--max-turns",
-    type=int,
-    default=None,
-    help="Maximum number of conversation turns.",
-)
-@click.option(
-    "--system-prompt",
-    type=str,
-    default=None,
-    help="System prompt to use for the session.",
-)
-@click.option(
-    "--print",
-    "-p",
-    is_flag=True,
-    help="Print mode (for single prompt queries).",
-)
-@click.option(
-    "--",
-    "prompt",
-    type=str,
-    default=None,
-    help="Direct prompt (for print mode).",
-)
-def stdio_cmd(
-    input_format: str,
-    output_format: str,
-    model: str | None,
-    permission_mode: str,
-    max_turns: int | None,
-    system_prompt: str | None,
-    print: bool,
-    prompt: str | None,
-) -> None:
-    """Stdio mode for SDK subprocess communication.
-
-    This command enables Ripperdoc to communicate with SDKs via JSON Control
-    Protocol over stdin/stdout. It's designed for subprocess architecture where
-    the SDK manages the CLI process.
-
-    The protocol supports:
-    - control_request/control_response for protocol management
-    - Message streaming for query results
-    - Bidirectional communication for hooks and permissions
-
-    Example:
-        ripperdoc stdio --output-format stream-json
-    """
-    # Set up async event loop
-    asyncio.run(
-        _run_stdio(
-            input_format=input_format,
-            output_format=output_format,
-            model=model,
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            system_prompt=system_prompt,
-            print_mode=print,
-            prompt=prompt,
-        )
-    )
-
-
-async def _run_stdio(
-    input_format: str,
-    output_format: str,
-    model: str | None,
-    permission_mode: str,
-    max_turns: int | None,
-    system_prompt: str | None,
-    print_mode: bool,
-    prompt: str | None,
-) -> None:
-    """Async entry point for stdio command."""
-    handler = StdioProtocolHandler(
-        input_format=input_format,
-        output_format=output_format,
-    )
-
-    # If print mode with prompt, handle as single query
-    if print_mode and prompt:
-        # This is a single-shot query mode
-        # Initialize with defaults and run query
-        request = {
-            "options": {
-                "model": model,
-                "permission_mode": permission_mode,
-                "max_turns": max_turns,
-                "system_prompt": system_prompt,
-            },
-            "prompt": prompt,
-        }
-
-        # Mock request_id for print mode
-        request_id = "print_query"
-
-        # Initialize
-        await handler._handle_initialize(request, request_id)
-
-        # Query
-        query_request = {
-            "prompt": prompt,
-        }
-        await handler._handle_query(query_request, f"{request_id}_query")
-
-        return
-
-    # Otherwise, run the stdio protocol loop
-    await handler.run()
-
-
-__all__ = ["stdio_cmd", "StdioProtocolHandler"]
+__all__ = ["StdioProtocolHandler"]

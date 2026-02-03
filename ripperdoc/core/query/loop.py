@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sys
 import time
 from asyncio import CancelledError
 from dataclasses import dataclass, field
@@ -398,8 +399,11 @@ async def _run_query_iteration(
         except (RuntimeError, ValueError) as exc:
             logger.warning("[query] Failed to enqueue stream progress chunk: %s", exc)
 
+    query_module = sys.modules.get("ripperdoc.core.query")
+    query_llm_fn = getattr(query_module, "query_llm", query_llm) if query_module else query_llm
+
     assistant_task = asyncio.create_task(
-        query_llm(
+        query_llm_fn(
             messages,
             full_system_prompt,
             tools_for_model,
