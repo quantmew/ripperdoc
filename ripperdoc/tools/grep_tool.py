@@ -79,6 +79,8 @@ def _normalize_glob_for_grep(glob_pattern: str) -> str:
 
 
 _GREP_SUPPORTS_PCRE: Optional[bool] = None
+_GREP_COUNT_LINE_RE = re.compile(r"^(?P<file>.*):(?P<count>\d+)$")
+_GREP_CONTENT_LINE_RE = re.compile(r"^(?P<file>.*):(?P<line>\d+):(?P<content>.*)$")
 
 
 def _grep_supports_pcre() -> bool:
@@ -105,6 +107,20 @@ def _grep_supports_pcre() -> bool:
         _GREP_SUPPORTS_PCRE = False
 
     return _GREP_SUPPORTS_PCRE
+
+
+def _parse_count_line(line: str) -> Optional[Tuple[str, int]]:
+    match = _GREP_COUNT_LINE_RE.match(line)
+    if not match:
+        return None
+    return match.group("file"), int(match.group("count"))
+
+
+def _parse_content_line(line: str) -> Optional[Tuple[str, int, str]]:
+    match = _GREP_CONTENT_LINE_RE.match(line)
+    if not match:
+        return None
+    return match.group("file"), int(match.group("line")), match.group("content")
 
 
 class GrepToolInput(BaseModel):
@@ -400,34 +416,45 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                     matches = [GrepMatch(file=line) for line in display_lines]
 
                 elif input_data.output_mode == "count":
-                    total_files = len(set(line.split(":", 1)[0] for line in lines if line))
+                    parsed_files = []
+                    for line in lines:
+                        parsed = _parse_count_line(line)
+                        if parsed:
+                            parsed_files.append(parsed[0])
+                    total_files = len(set(parsed_files))
                     total_match_count = 0
                     for line in lines:
-                        parts = line.rsplit(":", 1)
-                        if len(parts) == 2 and parts[1].isdigit():
-                            total_match_count += int(parts[1])
+                        parsed = _parse_count_line(line)
+                        if parsed:
+                            total_match_count += parsed[1]
                     total_matches = total_match_count
 
                     for line in display_lines:
-                        parts = line.rsplit(":", 1)
-                        if len(parts) == 2:
+                        parsed = _parse_count_line(line)
+                        if parsed:
                             matches.append(
                                 GrepMatch(
-                                    file=parts[0], count=int(parts[1]) if parts[1].isdigit() else 0
+                                    file=parsed[0],
+                                    count=parsed[1],
                                 )
                             )
 
                 else:  # content mode
-                    total_files = len({line.split(":", 1)[0] for line in lines if line})
+                    parsed_files = []
+                    for line in lines:
+                        parsed = _parse_content_line(line)
+                        if parsed:
+                            parsed_files.append(parsed[0])
+                    total_files = len(set(parsed_files))
                     total_matches = len(lines)
                     for line in display_lines:
-                        parts = line.split(":", 2)
-                        if len(parts) >= 3:
+                        parsed = _parse_content_line(line)
+                        if parsed:
                             matches.append(
                                 GrepMatch(
-                                    file=parts[0],
-                                    line_number=int(parts[1]) if parts[1].isdigit() else None,
-                                    content=parts[2] if len(parts) > 2 else "",
+                                    file=parsed[0],
+                                    line_number=parsed[1],
+                                    content=parsed[2],
                                 )
                             )
 
