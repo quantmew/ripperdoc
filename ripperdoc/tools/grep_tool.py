@@ -79,8 +79,10 @@ def _normalize_glob_for_grep(glob_pattern: str) -> str:
 
 
 _GREP_SUPPORTS_PCRE: Optional[bool] = None
-_GREP_COUNT_LINE_RE = re.compile(r"^(?P<file>.*):(?P<count>\d+)$")
-_GREP_CONTENT_LINE_RE = re.compile(r"^(?P<file>.*):(?P<line>\d+):(?P<content>.*)$")
+# Regex patterns for grep/ripgrep output parsing.
+# Content format: file:line:content OR just line:content (single file search)
+# Count format: file:count OR just count (single file search)
+# We use rsplit to parse from right since line:content format is stable
 
 
 def _grep_supports_pcre() -> bool:
@@ -109,18 +111,52 @@ def _grep_supports_pcre() -> bool:
     return _GREP_SUPPORTS_PCRE
 
 
-def _parse_count_line(line: str) -> Optional[Tuple[str, int]]:
-    match = _GREP_COUNT_LINE_RE.match(line)
-    if not match:
-        return None
-    return match.group("file"), int(match.group("count"))
+def _parse_count_line(
+    line: str, default_file: str = ""
+) -> Optional[Tuple[str, int]]:
+    """Parse a count output line (file:count or just count for single file).
+
+    Args:
+        line: The grep output line to parse
+        default_file: Default filename to use when not present in output
+
+    Returns:
+        (filename, count) tuple or None if parsing fails
+    """
+    # Split from right by ':' - at most 1 split (count:last part)
+    # Format: file:count OR just count
+    parts = line.rsplit(":", 1)
+    if len(parts) == 2 and parts[1].strip().isdigit():
+        # file:count format
+        return parts[0], int(parts[1])
+    elif len(parts) == 1 and parts[0].strip().isdigit():
+        # Just count (single file)
+        return default_file, int(parts[0])
+    return None
 
 
-def _parse_content_line(line: str) -> Optional[Tuple[str, int, str]]:
-    match = _GREP_CONTENT_LINE_RE.match(line)
-    if not match:
-        return None
-    return match.group("file"), int(match.group("line")), match.group("content")
+def _parse_content_line(
+    line: str, default_file: str = ""
+) -> Optional[Tuple[str, int, str]]:
+    """Parse a content output line (file:line:content or just line:content for single file).
+
+    Args:
+        line: The grep output line to parse
+        default_file: Default filename to use when not present in output
+
+    Returns:
+        (filename, line_number, content) tuple or None if parsing fails
+    """
+    # Split from right by ':' - at most 2 splits (line:content)
+    # Format: file:line:content OR line:content
+    parts = line.rsplit(":", 2)
+    if len(parts) == 3 and parts[1].strip().isdigit():
+        # file:line:content format
+        return parts[0], int(parts[1]), parts[2]
+    elif len(parts) == 2 and parts[0].strip().isdigit():
+        # line:content format (single file)
+        return default_file, int(parts[0]), parts[1]
+    return None
 
 
 class GrepToolInput(BaseModel):
@@ -418,19 +454,19 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 elif input_data.output_mode == "count":
                     parsed_files = []
                     for line in lines:
-                        parsed = _parse_count_line(line)
+                        parsed = _parse_count_line(line, search_path)
                         if parsed:
                             parsed_files.append(parsed[0])
                     total_files = len(set(parsed_files))
                     total_match_count = 0
                     for line in lines:
-                        parsed = _parse_count_line(line)
+                        parsed = _parse_count_line(line, search_path)
                         if parsed:
                             total_match_count += parsed[1]
                     total_matches = total_match_count
 
                     for line in display_lines:
-                        parsed = _parse_count_line(line)
+                        parsed = _parse_count_line(line, search_path)
                         if parsed:
                             matches.append(
                                 GrepMatch(
@@ -442,13 +478,13 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 else:  # content mode
                     parsed_files = []
                     for line in lines:
-                        parsed = _parse_content_line(line)
+                        parsed = _parse_content_line(line, search_path)
                         if parsed:
                             parsed_files.append(parsed[0])
                     total_files = len(set(parsed_files))
                     total_matches = len(lines)
                     for line in display_lines:
-                        parsed = _parse_content_line(line)
+                        parsed = _parse_content_line(line, search_path)
                         if parsed:
                             matches.append(
                                 GrepMatch(

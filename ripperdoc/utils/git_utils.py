@@ -1,9 +1,12 @@
 """Git utilities for Ripperdoc."""
 
-import subprocess
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 import fnmatch
+import os
+import re
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 def is_git_repository(path: Path) -> bool:
@@ -87,6 +90,301 @@ def read_gitignore_patterns(path: Path) -> List[str]:
             pass
 
     return patterns
+
+
+@dataclass(frozen=True)
+class GitignorePatternEntry:
+    pattern: str
+    negation: bool
+    base_dir: Path
+    source: Optional[Path]
+    line_number: Optional[int]
+
+
+@dataclass(frozen=True)
+class GitignoreRule:
+    pattern: str
+    negation: bool
+    dir_only: bool
+    source: Optional[Path]
+    line_number: Optional[int]
+    regex: re.Pattern[str]
+
+
+class GitignoreMatcher:
+    """Matcher for gitignore-style rules with proper directory context."""
+
+    def __init__(self, root_path: Path, rules: Optional[Iterable[GitignoreRule]] = None) -> None:
+        self.root_path = root_path
+        self.rules: List[GitignoreRule] = list(rules or [])
+
+    def add_rules(self, rules: Iterable[GitignoreRule]) -> None:
+        self.rules.extend(rules)
+
+    def match_details(self, path: Path, is_dir: Optional[bool] = None) -> Optional[GitignoreRule]:
+        """Return the last matching rule for a path, or None."""
+        rel_path = _relative_path(path, self.root_path)
+        if rel_path is None:
+            return None
+
+        if is_dir is None:
+            is_dir = path.is_dir()
+
+        last_match: Optional[GitignoreRule] = None
+        for rule in self.rules:
+            if rule.dir_only and not is_dir:
+                continue
+            if rule.regex.search(rel_path):
+                last_match = rule
+        return last_match
+
+    def ignores(self, path: Path, is_dir: Optional[bool] = None) -> bool:
+        """Return True if the path should be ignored."""
+        rel_path = _relative_path(path, self.root_path)
+        if rel_path is None:
+            return False
+
+        if is_dir is None:
+            is_dir = path.is_dir()
+
+        ignored = False
+        for rule in self.rules:
+            if rule.dir_only and not is_dir:
+                continue
+            if rule.regex.search(rel_path):
+                ignored = not rule.negation
+        return ignored
+
+
+def _relative_path(path: Path, root_path: Path) -> Optional[str]:
+    try:
+        return path.resolve().relative_to(root_path.resolve()).as_posix()
+    except (OSError, RuntimeError, ValueError):
+        try:
+            return path.relative_to(root_path).as_posix()
+        except ValueError:
+            return None
+
+
+def _compile_gitignore_pattern(pattern: str, anchored: bool, dir_only: bool) -> re.Pattern[str]:
+    """Compile a gitignore-style pattern to a regex."""
+    regex = ""
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+
+        if c == "*":
+            if i + 1 < len(pattern) and pattern[i + 1] == "*":
+                if i + 2 < len(pattern) and pattern[i + 2] == "/":
+                    regex += "(?:.*/)?"
+                    i += 3
+                    continue
+                regex += ".*"
+                i += 2
+                continue
+            regex += "[^/]*"
+        elif c == "?":
+            regex += "[^/]"
+        elif c == "[":
+            j = i + 1
+            if j < len(pattern) and pattern[j] in "!^":
+                j += 1
+            while j < len(pattern) and pattern[j] != "]":
+                j += 1
+            if j < len(pattern):
+                regex += pattern[i : j + 1]
+                i = j
+            else:
+                regex += re.escape(c)
+        elif c in ".^$+{}|()":
+            regex += re.escape(c)
+        else:
+            regex += c
+        i += 1
+
+    if anchored:
+        final_regex = f"^{regex}"
+    else:
+        final_regex = f"(?:^|/){regex}"
+
+    if dir_only:
+        final_regex += "(?:/|$)"
+    else:
+        final_regex += "(?:/.*)?$"
+
+    return re.compile(final_regex)
+
+
+def _parse_gitignore_line(raw_line: str) -> Optional[Tuple[str, bool]]:
+    line = raw_line.strip()
+    if not line:
+        return None
+
+    negation = False
+    parsed: List[str] = []
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if c == "\\" and i + 1 < len(line):
+            i += 1
+            parsed.append(line[i])
+            i += 1
+            continue
+        if i == 0 and c == "#":
+            return None
+        if i == 0 and c == "!":
+            negation = True
+            i += 1
+            continue
+        parsed.append(c)
+        i += 1
+
+    pattern = "".join(parsed).strip()
+    if not pattern:
+        return None
+    return pattern, negation
+
+
+def _normalize_gitignore_base_dir(path: Path, root_path: Path) -> str:
+    try:
+        base_rel = path.relative_to(root_path).as_posix()
+    except ValueError:
+        base_rel = ""
+    return "" if base_rel in ("", ".") else base_rel
+
+
+def _rewrite_gitignore_pattern(
+    pattern: str,
+    base_dir: Path,
+    root_path: Path,
+    anchored: bool,
+    has_slash: bool,
+) -> str:
+    base_rel = _normalize_gitignore_base_dir(base_dir, root_path)
+    prefix = f"/{base_rel}" if base_rel else ""
+
+    if anchored or has_slash:
+        if prefix:
+            return f"{prefix}/{pattern}"
+        return f"/{pattern}"
+
+    if prefix:
+        return f"{prefix}/**/{pattern}"
+    return f"/**/{pattern}"
+
+
+def _build_gitignore_rule(
+    pattern: str,
+    negation: bool,
+    base_dir: Path,
+    root_path: Path,
+    source: Optional[Path],
+    line_number: Optional[int],
+) -> GitignoreRule:
+    dir_only = pattern.endswith("/")
+    if dir_only:
+        pattern = pattern[:-1]
+
+    anchored = pattern.startswith("/")
+    if anchored:
+        pattern = pattern[1:]
+
+    has_slash = "/" in pattern
+    rewritten = _rewrite_gitignore_pattern(pattern, base_dir, root_path, anchored, has_slash)
+    compiled = _compile_gitignore_pattern(rewritten.lstrip("/"), anchored=True, dir_only=dir_only)
+    return GitignoreRule(
+        pattern=rewritten,
+        negation=negation,
+        dir_only=dir_only,
+        source=source,
+        line_number=line_number,
+        regex=compiled,
+    )
+
+
+def read_gitignore_entries(path: Path) -> List[GitignorePatternEntry]:
+    """Read gitignore entries with directory context and line numbers."""
+    entries: List[GitignorePatternEntry] = []
+    git_root = get_git_root(path)
+    if git_root is None:
+        return entries
+
+    # Global gitignore (user-level)
+    global_gitignore = Path.home() / ".gitignore"
+    if global_gitignore.exists():
+        try:
+            with open(global_gitignore, "r", encoding="utf-8") as f:
+                for idx, line in enumerate(f, start=1):
+                    parsed = _parse_gitignore_line(line)
+                    if not parsed:
+                        continue
+                    pattern, negation = parsed
+                    entries.append(
+                        GitignorePatternEntry(
+                            pattern=pattern,
+                            negation=negation,
+                            base_dir=git_root,
+                            source=global_gitignore,
+                            line_number=idx,
+                        )
+                    )
+        except (IOError, UnicodeDecodeError):
+            pass
+
+    # .git/info/exclude
+    git_info_exclude = git_root / ".git" / "info" / "exclude"
+    if git_info_exclude.exists():
+        try:
+            with open(git_info_exclude, "r", encoding="utf-8") as f:
+                for idx, line in enumerate(f, start=1):
+                    parsed = _parse_gitignore_line(line)
+                    if not parsed:
+                        continue
+                    pattern, negation = parsed
+                    entries.append(
+                        GitignorePatternEntry(
+                            pattern=pattern,
+                            negation=negation,
+                            base_dir=git_root,
+                            source=git_info_exclude,
+                            line_number=idx,
+                        )
+                    )
+        except (IOError, UnicodeDecodeError):
+            pass
+
+    # Repository .gitignore files (top-down)
+    for current, dirs, files in _walk_repo(git_root):
+        if ".gitignore" in files:
+            gitignore_file = Path(current) / ".gitignore"
+            try:
+                with open(gitignore_file, "r", encoding="utf-8") as f:
+                    for idx, line in enumerate(f, start=1):
+                        parsed = _parse_gitignore_line(line)
+                        if not parsed:
+                            continue
+                        pattern, negation = parsed
+                        entries.append(
+                            GitignorePatternEntry(
+                                pattern=pattern,
+                                negation=negation,
+                                base_dir=Path(current),
+                                source=gitignore_file,
+                                line_number=idx,
+                            )
+                        )
+            except (IOError, UnicodeDecodeError):
+                pass
+
+    return entries
+
+
+def _walk_repo(root: Path) -> Iterable[Tuple[str, List[str], List[str]]]:
+    """Walk repository tree, skipping .git directory."""
+    for current, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d != ".git")
+        files.sort()
+        yield current, dirs, files
 
 
 def parse_gitignore_pattern(pattern: str, root_path: Path) -> Tuple[str, Optional[Path]]:
