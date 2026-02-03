@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Literal
 
@@ -205,22 +206,37 @@ def _render_scope_rules(console: Any, scope: ScopeType, project_path: Path) -> N
     console.print(f"[dim]Config file: {escape(config_path)}[/dim]")
 
 
+def _handle_permissions_tui(ui: Any) -> bool:
+    project_path = getattr(ui, "project_path", Path.cwd())
+    console = ui.console
+    if not sys.stdin.isatty():
+        console.print("[yellow]Interactive UI requires a TTY. Showing plain list instead.[/yellow]")
+        _render_all_rules(console, project_path)
+        return True
+
+    try:
+        from ripperdoc.cli.ui.permissions_tui import run_permissions_tui
+    except (ImportError, ModuleNotFoundError) as exc:
+        console.print(
+            f"[yellow]Textual UI not available ({escape(str(exc))}). Showing plain list.[/yellow]"
+        )
+        _render_all_rules(console, project_path)
+        return True
+
+    try:
+        return bool(run_permissions_tui(project_path))
+    except Exception as exc:  # noqa: BLE001 - fail safe in interactive UI
+        console.print(f"[red]Textual UI failed: {escape(str(exc))}[/red]")
+        _render_all_rules(console, project_path)
+        return True
+
+
 def _handle(ui: Any, trimmed_arg: str) -> bool:
     project_path = getattr(ui, "project_path", Path.cwd())
     args = trimmed_arg.strip().split()
 
-    # No args: show all rules
     if not args:
-        _render_all_rules(ui.console, project_path)
-        ui.console.print()
-        ui.console.print("[dim]Usage:[/dim]")
-        ui.console.print("[dim]  /permissions                     - Show all rules[/dim]")
-        ui.console.print("[dim]  /permissions <scope>             - Show rules for scope[/dim]")
-        ui.console.print("[dim]  /permissions add <scope> <type> <rule>   - Add a rule[/dim]")
-        ui.console.print("[dim]  /permissions remove <scope> <type> <rule> - Remove a rule[/dim]")
-        ui.console.print("[dim]Scopes: user, project, local[/dim]")
-        ui.console.print("[dim]Types: allow, deny[/dim]")
-        return True
+        return _handle_permissions_tui(ui)
 
     # Parse command
     action = args[0].lower()
@@ -232,6 +248,13 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         "local": "local",
         "private": "local",
     }
+
+    if action in ("tui", "ui"):
+        return _handle_permissions_tui(ui)
+
+    if action in ("list", "ls"):
+        _render_all_rules(ui.console, project_path)
+        return True
 
     # Single scope display
     if action in scope_aliases:
