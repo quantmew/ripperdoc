@@ -89,7 +89,7 @@ rd
 
 ### Python SDK（无头模式）
 
-通过新的 Python SDK 使用 Ripperdoc，无需终端 UI。查看 [docs/SDK_USAGE.md](docs/SDK_USAGE.md) 了解一次性 `query` 助手和基于会话的 `RipperdocClient` 的示例。中文指南见 [docs/SDK_USAGE_CN.md](docs/SDK_USAGE_CN.md)。
+通过 Python SDK 使用 Ripperdoc，无需终端 UI。查看 [SDK 文档](https://ripperdoc-docs.pages.dev/docs/sdk-overview/) 了解一次性 `query` 助手和基于会话的 `RipperdocClient` 的示例。
 
 #### SDK 示例
 

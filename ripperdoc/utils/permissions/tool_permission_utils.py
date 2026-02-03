@@ -293,6 +293,7 @@ def evaluate_shell_command_permissions(
     tool_request: object,
     allowed_rules: Iterable[str],
     denied_rules: Iterable[str],
+    ask_rules: Iterable[str],
     allowed_working_dirs: Set[str] | None = None,
     *,
     danger_detector: Callable[[str], bool] | None = None,
@@ -325,11 +326,20 @@ def evaluate_shell_command_permissions(
 
     merged_denied = _merge_rules(denied_rules)
     merged_allowed = _merge_rules(allowed_rules)
+    merged_ask = _merge_rules(ask_rules)
 
     if any(match_rule(trimmed_command, rule) for rule in merged_denied):
         return PermissionDecision(
             behavior="deny",
             message=f"Permission to run '{trimmed_command}' has been denied.",
+            decision_reason={"type": "rule"},
+            rule_suggestions=None,
+        )
+
+    if any(match_rule(trimmed_command, rule) for rule in merged_ask):
+        return PermissionDecision(
+            behavior="ask",
+            message="Command requires confirmation by rule.",
             decision_reason={"type": "rule"},
             rule_suggestions=None,
         )
@@ -382,6 +392,7 @@ def evaluate_shell_command_permissions(
             type("Cmd", (), {"command": left_command}),
             merged_allowed,
             merged_denied,
+            merged_ask,
             allowed_working_dirs,
             danger_detector=danger_detector,
             read_only_detector=read_only_detector,

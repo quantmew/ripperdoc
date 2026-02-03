@@ -89,7 +89,7 @@ This launches an interactive session where you can:
 
 ### Python SDK (headless)
 
-Use Ripperdoc without the terminal UI via the new Python SDK. See [docs/SDK_USAGE.md](docs/SDK_USAGE.md) for examples of the one-shot `query` helper and the session-based `RipperdocClient`. 中文指南见 [docs/SDK_USAGE_CN.md](docs/SDK_USAGE_CN.md)。
+Use Ripperdoc without the terminal UI via the Python SDK. See [SDK Documentation](https://ripperdoc-docs.pages.dev/docs/sdk-overview/) for examples of the one-shot `query` helper and the session-based `RipperdocClient`.
 
 #### SDK Examples
 

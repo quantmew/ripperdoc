@@ -316,6 +316,7 @@ build projects, run tests, and interact with the file system."""
 
         allow_rules = permission_context.get("allowed_rules") or set()
         deny_rules = permission_context.get("denied_rules") or set()
+        ask_rules = permission_context.get("ask_rules") or set()
         allowed_dirs = permission_context.get("allowed_working_directories") or {safe_get_cwd()}
 
         # Check for sensitive directory access with read-only commands (cd, find).
@@ -340,6 +341,7 @@ build projects, run tests, and interact with the file system."""
             input_data,
             allow_rules,
             deny_rules,
+            ask_rules,
             allowed_dirs,
             # danger_detector uses default: validate_shell_command(cmd).behavior != "passthrough"
             # read_only_detector uses default: _is_command_read_only

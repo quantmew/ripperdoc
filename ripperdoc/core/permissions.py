@@ -217,6 +217,13 @@ def make_permission_checker(
                 | set(local_config.local_deny_rules or [])
             )
         }
+        ask_rules = {
+            "Bash": (
+                set(config.bash_ask_rules or [])
+                | set(global_config.user_ask_rules or [])
+                | set(local_config.local_ask_rules or [])
+            )
+        }
         allowed_working_dirs = {
             str(project_path.resolve()),
             *[str(Path(p).resolve()) for p in config.working_directories or []],
@@ -234,6 +241,7 @@ def make_permission_checker(
                     {
                         "allowed_rules": allow_rules.get(tool.name, set()),
                         "denied_rules": deny_rules.get(tool.name, set()),
+                        "ask_rules": ask_rules.get(tool.name, set()),
                         "allowed_working_directories": allowed_working_dirs,
                     },
                 )
@@ -268,7 +276,7 @@ def make_permission_checker(
 
         # If tool doesn't normally require permission (e.g., read-only Bash),
         # enforce deny rules but otherwise skip prompting.
-        if not needs_permission:
+        if not needs_permission and decision.behavior != "ask":
             if decision.behavior == "deny":
                 return PermissionResult(
                     result=False,

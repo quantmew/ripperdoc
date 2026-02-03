@@ -265,9 +265,6 @@ class PermissionsApp(App[None]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         option_id = event.option.id or ""
         if option_id == "__add__":
-            if self._rule_type == "ask":
-                self._set_status("Ask view does not accept explicit rules.")
-                return
             self.push_screen(AddRuleScreen(self._rule_type), self._handle_add_result)
             return
         if option_id.startswith("rule:"):
@@ -326,7 +323,7 @@ class PermissionsApp(App[None]):
         elif self._rule_type == "deny":
             text = "Ripperdoc will block matching tools."
         else:
-            text = "Ripperdoc will ask when no allow/deny rule matches."
+            text = "Ripperdoc will always ask for matching tools."
         description.update(text)
 
     def _update_search_input(self) -> None:
@@ -338,18 +335,13 @@ class PermissionsApp(App[None]):
         option_list.clear_options()
         self._rule_map = {}
 
-        if self._rule_type == "ask":
-            option_list.add_option(
-                Option(
-                    "No explicit ask rules. Tools not matched by allow/deny will prompt.",
-                    id="__none__",
-                    disabled=True,
-                )
-            )
-            return
-
-        allow_rules, deny_rules = self._get_rules_for_scope(self._scope)
-        rules = allow_rules if self._rule_type == "allow" else deny_rules
+        allow_rules, deny_rules, ask_rules = self._get_rules_for_scope(self._scope)
+        if self._rule_type == "allow":
+            rules = allow_rules
+        elif self._rule_type == "deny":
+            rules = deny_rules
+        else:
+            rules = ask_rules
         filtered = self._filter_rules(rules, self._search_query)
 
         option_list.add_option(Option("1. Add a new rule...", id="__add__"))
@@ -410,24 +402,37 @@ class PermissionsApp(App[None]):
             return rule
         return f"Bash({rule})"
 
-    def _get_rules_for_scope(self, scope: ScopeType) -> tuple[list[str], list[str]]:
+    def _get_rules_for_scope(self, scope: ScopeType) -> tuple[list[str], list[str], list[str]]:
         if scope == "user":
             user_config: GlobalConfig = get_global_config()
-            return list(user_config.user_allow_rules), list(user_config.user_deny_rules)
+            return (
+                list(user_config.user_allow_rules),
+                list(user_config.user_deny_rules),
+                list(user_config.user_ask_rules),
+            )
         if scope == "project":
             project_config: ProjectConfig = get_project_config(self._project_path)
-            return list(project_config.bash_allow_rules), list(project_config.bash_deny_rules)
+            return (
+                list(project_config.bash_allow_rules),
+                list(project_config.bash_deny_rules),
+                list(project_config.bash_ask_rules),
+            )
         local_config: ProjectLocalConfig = get_project_local_config(self._project_path)
-        return list(local_config.local_allow_rules), list(local_config.local_deny_rules)
+        return (
+            list(local_config.local_allow_rules),
+            list(local_config.local_deny_rules),
+            list(local_config.local_ask_rules),
+        )
 
     def _add_rule(self, scope: ScopeType, rule_type: RuleType, rule: str) -> bool:
         if scope == "user":
             user_config: GlobalConfig = get_global_config()
-            rules = (
-                user_config.user_allow_rules
-                if rule_type == "allow"
-                else user_config.user_deny_rules
-            )
+            if rule_type == "allow":
+                rules = user_config.user_allow_rules
+            elif rule_type == "deny":
+                rules = user_config.user_deny_rules
+            else:
+                rules = user_config.user_ask_rules
             if rule in rules:
                 return False
             rules.append(rule)
@@ -435,22 +440,24 @@ class PermissionsApp(App[None]):
             return True
         if scope == "project":
             project_config: ProjectConfig = get_project_config(self._project_path)
-            rules = (
-                project_config.bash_allow_rules
-                if rule_type == "allow"
-                else project_config.bash_deny_rules
-            )
+            if rule_type == "allow":
+                rules = project_config.bash_allow_rules
+            elif rule_type == "deny":
+                rules = project_config.bash_deny_rules
+            else:
+                rules = project_config.bash_ask_rules
             if rule in rules:
                 return False
             rules.append(rule)
             save_project_config(project_config, self._project_path)
             return True
         local_config: ProjectLocalConfig = get_project_local_config(self._project_path)
-        rules = (
-            local_config.local_allow_rules
-            if rule_type == "allow"
-            else local_config.local_deny_rules
-        )
+        if rule_type == "allow":
+            rules = local_config.local_allow_rules
+        elif rule_type == "deny":
+            rules = local_config.local_deny_rules
+        else:
+            rules = local_config.local_ask_rules
         if rule in rules:
             return False
         rules.append(rule)
@@ -460,11 +467,12 @@ class PermissionsApp(App[None]):
     def _remove_rule(self, scope: ScopeType, rule_type: RuleType, rule: str) -> bool:
         if scope == "user":
             user_config: GlobalConfig = get_global_config()
-            rules = (
-                user_config.user_allow_rules
-                if rule_type == "allow"
-                else user_config.user_deny_rules
-            )
+            if rule_type == "allow":
+                rules = user_config.user_allow_rules
+            elif rule_type == "deny":
+                rules = user_config.user_deny_rules
+            else:
+                rules = user_config.user_ask_rules
             if rule not in rules:
                 return False
             rules.remove(rule)
@@ -472,22 +480,24 @@ class PermissionsApp(App[None]):
             return True
         if scope == "project":
             project_config: ProjectConfig = get_project_config(self._project_path)
-            rules = (
-                project_config.bash_allow_rules
-                if rule_type == "allow"
-                else project_config.bash_deny_rules
-            )
+            if rule_type == "allow":
+                rules = project_config.bash_allow_rules
+            elif rule_type == "deny":
+                rules = project_config.bash_deny_rules
+            else:
+                rules = project_config.bash_ask_rules
             if rule not in rules:
                 return False
             rules.remove(rule)
             save_project_config(project_config, self._project_path)
             return True
         local_config: ProjectLocalConfig = get_project_local_config(self._project_path)
-        rules = (
-            local_config.local_allow_rules
-            if rule_type == "allow"
-            else local_config.local_deny_rules
-        )
+        if rule_type == "allow":
+            rules = local_config.local_allow_rules
+        elif rule_type == "deny":
+            rules = local_config.local_deny_rules
+        else:
+            rules = local_config.local_ask_rules
         if rule not in rules:
             return False
         rules.remove(rule)

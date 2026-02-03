@@ -230,6 +230,7 @@ class GlobalConfig(BaseModel):
     # User-level permission rules (applied globally)
     user_allow_rules: list[str] = Field(default_factory=list)
     user_deny_rules: list[str] = Field(default_factory=list)
+    user_ask_rules: list[str] = Field(default_factory=list)
 
     # Onboarding
     has_completed_onboarding: bool = False
@@ -258,6 +259,7 @@ class ProjectConfig(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     bash_allow_rules: list[str] = Field(default_factory=list)
     bash_deny_rules: list[str] = Field(default_factory=list)
+    bash_ask_rules: list[str] = Field(default_factory=list)
     working_directories: list[str] = Field(default_factory=list)
 
     # Path ignore patterns (gitignore-style)
@@ -291,6 +293,7 @@ class ProjectLocalConfig(BaseModel):
     # Local permission rules (project-specific but not shared)
     local_allow_rules: list[str] = Field(default_factory=list)
     local_deny_rules: list[str] = Field(default_factory=list)
+    local_ask_rules: list[str] = Field(default_factory=list)
 
 
 class ConfigManager:
