@@ -1,6 +1,13 @@
+import sys
+import textwrap
 from typing import Any, Optional
 
+from rich import box
+from rich.layout import Layout
 from rich.markup import escape
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.config import (
@@ -9,6 +16,7 @@ from ripperdoc.core.config import (
     add_model_profile,
     delete_model_profile,
     get_global_config,
+    model_supports_vision,
     set_model_pointer,
 )
 from ripperdoc.utils.log import get_logger
@@ -19,6 +27,749 @@ from .base import SlashCommand
 logger = get_logger()
 
 
+def _parse_int(console: Any, prompt_text: str, default_value: Optional[int]) -> Optional[int]:
+    raw = console.input(prompt_text).strip()
+    if not raw:
+        return default_value
+    try:
+        return int(raw)
+    except ValueError:
+        console.print("[yellow]Invalid number, keeping previous value.[/yellow]")
+        return default_value
+
+
+def _parse_float(console: Any, prompt_text: str, default_value: float) -> float:
+    raw = console.input(prompt_text).strip()
+    if not raw:
+        return default_value
+    try:
+        return float(raw)
+    except ValueError:
+        console.print("[yellow]Invalid number, keeping previous value.[/yellow]")
+        return default_value
+
+
+def _prompt_provider(console: Any, default_provider: str) -> Optional[ProviderType]:
+    provider_input = (
+        console.input(
+            f"Protocol ({', '.join(p.value for p in ProviderType)}) [{default_provider}]: "
+        )
+        .strip()
+        .lower()
+        or default_provider
+    )
+    try:
+        return ProviderType(provider_input)
+    except ValueError:
+        console.print(f"[red]Invalid provider: {escape(provider_input)}[/red]")
+        return None
+
+
+def _prompt_supports_vision_add(console: Any, default_value: Optional[bool]) -> Optional[bool]:
+    vision_default_display = (
+        "auto" if default_value is None else ("yes" if default_value else "no")
+    )
+    supports_vision_input = (
+        console.input(f"Supports vision (images)? [{vision_default_display}] (Y/n/auto): ")
+        .strip()
+        .lower()
+    )
+    if supports_vision_input in ("y", "yes"):
+        return True
+    if supports_vision_input in ("n", "no"):
+        return False
+    if supports_vision_input in ("auto", ""):
+        return None
+    return default_value
+
+
+def _prompt_supports_vision_edit(console: Any, current_value: Optional[bool]) -> Optional[bool]:
+    vision_default_display = "auto" if current_value is None else ("yes" if current_value else "no")
+    supports_vision_input = (
+        console.input(
+            f"Supports vision (images)? [{vision_default_display}] (Y/n/auto/C=clear): "
+        )
+        .strip()
+        .lower()
+    )
+    if supports_vision_input in ("y", "yes"):
+        return True
+    if supports_vision_input in ("n", "no"):
+        return False
+    if supports_vision_input in ("c", "clear", "-"):
+        return None
+    if supports_vision_input in ("auto", ""):
+        return current_value
+    return current_value
+
+
+def _collect_add_profile_input(
+    console: Any,
+    config: Any,
+    existing_profile: Optional[ModelProfile],
+    current_profile: Optional[ModelProfile],
+) -> tuple[Optional[ModelProfile], bool]:
+    default_provider = (
+        (current_profile.provider.value) if current_profile else ProviderType.ANTHROPIC.value
+    )
+    provider = _prompt_provider(console, default_provider)
+    if provider is None:
+        return None, False
+
+    default_model = (
+        existing_profile.model
+        if existing_profile
+        else (current_profile.model if current_profile else "")
+    )
+    model_prompt = f"Model name to send{f' [{default_model}]' if default_model else ''}: "
+    model_name = console.input(model_prompt).strip() or default_model
+    if not model_name:
+        console.print("[red]Model name is required.[/red]")
+        return None, False
+
+    api_key_input = prompt_secret("API key (leave blank to keep unset)").strip()
+    api_key = api_key_input or (existing_profile.api_key if existing_profile else None)
+
+    auth_token = existing_profile.auth_token if existing_profile else None
+    if provider == ProviderType.ANTHROPIC:
+        auth_token_input = prompt_secret(
+            "Auth token (Anthropic only, leave blank to keep unset)"
+        ).strip()
+        auth_token = auth_token_input or auth_token
+    else:
+        auth_token = None
+
+    api_base_default = existing_profile.api_base if existing_profile else ""
+    api_base = (
+        console.input(
+            f"API base (optional){f' [{api_base_default}]' if api_base_default else ''}: "
+        ).strip()
+        or api_base_default
+        or None
+    )
+
+    max_tokens_default = existing_profile.max_tokens if existing_profile else 4096
+    max_tokens = (
+        _parse_int(
+            console,
+            f"Max output tokens [{max_tokens_default}]: ",
+            max_tokens_default,
+        )
+        or max_tokens_default
+    )
+
+    temp_default = existing_profile.temperature if existing_profile else 0.7
+    temperature = _parse_float(
+        console,
+        f"Temperature [{temp_default}]: ",
+        temp_default,
+    )
+
+    context_window_default = existing_profile.context_window if existing_profile else None
+    context_prompt = "Context window tokens (optional"
+    if context_window_default:
+        context_prompt += f", current {context_window_default}"
+    context_prompt += "): "
+    context_window = _parse_int(console, context_prompt, context_window_default)
+
+    supports_vision_default = existing_profile.supports_vision if existing_profile else None
+    supports_vision = _prompt_supports_vision_add(console, supports_vision_default)
+
+    default_set_main = (
+        not config.model_profiles
+        or getattr(config.model_pointers, "main", "") not in config.model_profiles
+    )
+    set_main_input = (
+        console.input(f"Set as main model? ({'Y' if default_set_main else 'y'}/N): ")
+        .strip()
+        .lower()
+    )
+    set_as_main = set_main_input in ("y", "yes") if set_main_input else default_set_main
+
+    profile = ModelProfile(
+        provider=provider,
+        model=model_name,
+        api_key=api_key,
+        api_base=api_base,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        context_window=context_window,
+        auth_token=auth_token,
+        supports_vision=supports_vision,
+    )
+
+    return profile, set_as_main
+
+
+def _collect_edit_profile_input(
+    console: Any,
+    existing_profile: ModelProfile,
+) -> Optional[ModelProfile]:
+    provider_default = existing_profile.provider.value
+    provider = _prompt_provider(console, provider_default)
+    if provider is None:
+        return None
+
+    model_name = (
+        console.input(f"Model name to send [{existing_profile.model}]: ").strip()
+        or existing_profile.model
+    )
+
+    api_key_label = "[set]" if existing_profile.api_key else "[not set]"
+    api_key_prompt = f"API key {api_key_label} (Enter=keep, '-'=clear)"
+    api_key_input = prompt_secret(api_key_prompt).strip()
+    if api_key_input == "-":
+        api_key = None
+    elif api_key_input:
+        api_key = api_key_input
+    else:
+        api_key = existing_profile.api_key
+
+    auth_token = existing_profile.auth_token
+    if provider == ProviderType.ANTHROPIC or existing_profile.provider == ProviderType.ANTHROPIC:
+        auth_label = "[set]" if auth_token else "[not set]"
+        auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear)"
+        auth_token_input = prompt_secret(auth_prompt).strip()
+        if auth_token_input == "-":
+            auth_token = None
+        elif auth_token_input:
+            auth_token = auth_token_input
+    else:
+        auth_token = None
+
+    api_base = (
+        console.input(f"API base (optional) [{existing_profile.api_base or ''}]: ").strip()
+        or existing_profile.api_base
+    )
+    if api_base == "":
+        api_base = None
+
+    max_tokens = (
+        _parse_int(
+            console,
+            f"Max output tokens [{existing_profile.max_tokens}]: ",
+            existing_profile.max_tokens,
+        )
+        or existing_profile.max_tokens
+    )
+
+    temperature = _parse_float(
+        console,
+        f"Temperature [{existing_profile.temperature}]: ",
+        existing_profile.temperature,
+    )
+
+    context_window = _parse_int(
+        console,
+        f"Context window tokens [{existing_profile.context_window or 'unset'}]: ",
+        existing_profile.context_window,
+    )
+
+    supports_vision = _prompt_supports_vision_edit(console, existing_profile.supports_vision)
+
+    updated_profile = ModelProfile(
+        provider=provider,
+        model=model_name,
+        api_key=api_key,
+        api_base=api_base,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        context_window=context_window,
+        auth_token=auth_token,
+        supports_vision=supports_vision,
+    )
+    return updated_profile
+
+
+def _pointer_markers(pointer_map: dict[str, str], name: str) -> list[str]:
+    return [ptr for ptr, value in pointer_map.items() if value == name]
+
+
+def _vision_labels(profile: ModelProfile) -> tuple[str, str]:
+    if profile.supports_vision is None:
+        detected = model_supports_vision(profile)
+        return "auto", f"auto (detected {'yes' if detected else 'no'})"
+    if profile.supports_vision:
+        return "yes", "yes"
+    return "no", "no"
+
+
+def _render_models_plain(console: Any, config: Any) -> None:
+    pointer_map = config.model_pointers.model_dump()
+    if not config.model_profiles:
+        console.print("  • No models configured")
+        return
+
+    console.print("\n[bold]Configured Models:[/bold]")
+    for name, profile in config.model_profiles.items():
+        markers = [ptr for ptr, value in pointer_map.items() if value == name]
+        marker_text = f" ({', '.join(markers)})" if markers else ""
+        console.print(f"  • {escape(name)}{marker_text}", markup=False)
+        console.print(f"      protocol: {profile.provider.value}", markup=False)
+        console.print(f"      model: {profile.model}", markup=False)
+        if profile.api_base:
+            console.print(f"      api_base: {profile.api_base}", markup=False)
+        if profile.context_window:
+            console.print(f"      context: {profile.context_window} tokens", markup=False)
+        console.print(
+            f"      max_tokens: {profile.max_tokens}, temperature: {profile.temperature}",
+            markup=False,
+        )
+        console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}", markup=False)
+        if profile.provider == ProviderType.ANTHROPIC:
+            console.print(
+                f"      auth_token: {'***' if getattr(profile, 'auth_token', None) else 'Not set'}",
+                markup=False,
+            )
+        if profile.openai_tool_mode:
+            console.print(f"      openai_tool_mode: {profile.openai_tool_mode}", markup=False)
+        if profile.thinking_mode:
+            console.print(f"      thinking_mode: {profile.thinking_mode}", markup=False)
+        if profile.supports_vision is None:
+            vision_display = "auto-detect"
+        elif profile.supports_vision:
+            vision_display = "yes"
+        else:
+            vision_display = "no"
+        console.print(f"      supports_vision: {vision_display}", markup=False)
+    pointer_labels = ", ".join(f"{p}->{v or '-'}" for p, v in pointer_map.items())
+    console.print(f"[dim]Pointers: {escape(pointer_labels)}[/dim]")
+
+
+def _render_models_table(console: Any, config: Any) -> None:
+    pointer_map = config.model_pointers.model_dump()
+    table = Table(box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Ptr", style="magenta", no_wrap=True)
+    table.add_column("Provider", style="green", no_wrap=True)
+    table.add_column("Model", style="white", overflow="fold")
+    table.add_column("Ctx", style="dim", justify="right", no_wrap=True)
+    table.add_column("Max", style="dim", justify="right", no_wrap=True)
+    table.add_column("Temp", style="dim", justify="right", no_wrap=True)
+    table.add_column("Vision", style="yellow", no_wrap=True)
+    table.add_column("Key", style="dim", no_wrap=True)
+    table.add_column("API Base", style="dim", overflow="fold", max_width=28)
+
+    for name, profile in config.model_profiles.items():
+        markers = _pointer_markers(pointer_map, name)
+        pointer_label = ",".join(markers) if markers else "-"
+        context_display = str(profile.context_window) if profile.context_window else "-"
+        vision_display = _vision_labels(profile)[0]
+        api_base = profile.api_base or "-"
+        if profile.api_base:
+            api_base = textwrap.shorten(profile.api_base, width=28, placeholder="...")
+        key_display = "set" if profile.api_key else "-"
+        table.add_row(
+            escape(name),
+            pointer_label,
+            profile.provider.value,
+            escape(profile.model),
+            context_display,
+            str(profile.max_tokens),
+            f"{profile.temperature:.2f}",
+            vision_display,
+            key_display,
+            escape(api_base),
+        )
+
+    title = f"Models ({len(config.model_profiles)})"
+    console.print(Panel(table, title=title, box=box.ROUNDED, padding=(1, 2)))
+    pointer_labels = ", ".join(f"{p}->{v or '-'}" for p, v in pointer_map.items())
+    console.print(f"[dim]Pointers: {escape(pointer_labels)}[/dim]")
+
+
+def _build_model_details_panel(
+    name: str, profile: ModelProfile, pointer_map: dict[str, str]
+) -> Panel:
+    markers = _pointer_markers(pointer_map, name)
+    marker_text = ", ".join(markers) if markers else "-"
+    vision_short, vision_detail = _vision_labels(profile)
+
+    details = Table.grid(padding=(0, 2))
+    details.add_column(style="cyan", no_wrap=True)
+    details.add_column(style="white")
+    details.add_row("Profile", escape(name))
+    details.add_row("Pointers", escape(marker_text))
+    details.add_row("Provider", escape(profile.provider.value))
+    details.add_row("Model", escape(profile.model))
+    details.add_row("API base", escape(profile.api_base or "-"))
+    details.add_row("Context", escape(str(profile.context_window) if profile.context_window else "auto"))
+    details.add_row("Max tokens", escape(str(profile.max_tokens)))
+    details.add_row("Temperature", escape(str(profile.temperature)))
+    details.add_row("Vision", escape(vision_detail if vision_short == "auto" else vision_short))
+    details.add_row("API key", "set" if profile.api_key else "unset")
+    if profile.provider == ProviderType.ANTHROPIC:
+        details.add_row("Auth token", "set" if getattr(profile, "auth_token", None) else "unset")
+    if profile.openai_tool_mode:
+        details.add_row("OpenAI tool mode", escape(profile.openai_tool_mode))
+    if profile.thinking_mode:
+        details.add_row("Thinking mode", escape(profile.thinking_mode))
+
+    return Panel(
+        details,
+        title=f"Model: {escape(name)}",
+        box=box.ROUNDED,
+        padding=(1, 2),
+    )
+
+
+def _render_model_details(
+    console: Any, name: str, profile: ModelProfile, pointer_map: dict[str, str]
+) -> None:
+    console.print(_build_model_details_panel(name, profile, pointer_map))
+
+
+def _default_selected_model(config: Any, preferred: Optional[str] = None) -> Optional[str]:
+    if preferred and preferred in config.model_profiles:
+        return preferred
+    main_pointer = getattr(config.model_pointers, "main", "")
+    if main_pointer in config.model_profiles:
+        return main_pointer
+    if config.model_profiles:
+        return next(iter(config.model_profiles))
+    return None
+
+
+def _build_models_list_panel(
+    config: Any, selected_name: Optional[str], pointer_map: dict[str, str]
+) -> Panel:
+    table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+    table.add_column("#", width=3, no_wrap=True, style="dim")
+    table.add_column("Sel", width=2, no_wrap=True)
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Ptr", style="magenta", no_wrap=True)
+    table.add_column("Model", style="dim")
+
+    for idx, (name, profile) in enumerate(config.model_profiles.items(), start=1):
+        selected = name == selected_name
+        marker_text = Text(">", style="bold yellow") if selected else Text(" ", style="dim")
+        index_text = Text(str(idx), style="dim")
+        name_text = Text(name, style="bold cyan" if selected else "cyan")
+        markers = _pointer_markers(pointer_map, name)
+        pointer_label = ",".join(markers) if markers else "-"
+        pointer_text = Text(pointer_label, style="magenta" if markers else "dim")
+        model_label = f"{profile.provider.value} • {profile.model}"
+        model_text = Text(model_label, style="dim")
+        table.add_row(index_text, marker_text, name_text, pointer_text, model_text)
+
+    if not config.model_profiles:
+        table.add_row(
+            Text(" ", style="dim"),
+            Text(" ", style="dim"),
+            Text("No models configured", style="dim"),
+            "",
+            "",
+        )
+
+    return Panel(table, title="Models", box=box.ROUNDED, padding=(1, 2))
+
+
+def _build_models_header_panel(config: Any, selected_name: Optional[str]) -> Panel:
+    pointer_map = config.model_pointers.model_dump()
+    pointer_labels = ", ".join(f"{p}->{v or '-'}" for p, v in pointer_map.items())
+    selected_label = selected_name or "-"
+
+    header = Text()
+    header.append("Models ", style="bold")
+    header.append(str(len(config.model_profiles)), style="cyan")
+    header.append("  Selected: ", style="dim")
+    header.append(selected_label, style="bold cyan")
+    header.append("  Pointers: ", style="dim")
+    header.append(pointer_labels, style="magenta")
+
+    return Panel(header, box=box.ROUNDED, padding=(0, 1))
+
+
+def _build_models_footer_panel() -> Panel:
+    footer = Text(
+        "↑/↓ move  A add  E edit  D delete  M set main  K set quick  Q exit  R refresh",
+        style="dim",
+    )
+    return Panel(footer, box=box.ROUNDED, padding=(0, 1))
+
+
+def _render_models_dashboard(console: Any, config: Any, selected_name: Optional[str]) -> None:
+    pointer_map = config.model_pointers.model_dump()
+    layout = Layout()
+    layout.split_column(
+        Layout(_build_models_header_panel(config, selected_name), name="header", size=3),
+        Layout(name="body", ratio=1),
+        Layout(_build_models_footer_panel(), name="footer", size=3),
+    )
+
+    list_panel = _build_models_list_panel(config, selected_name, pointer_map)
+    if selected_name and selected_name in config.model_profiles:
+        details_panel = _build_model_details_panel(
+            selected_name, config.model_profiles[selected_name], pointer_map
+        )
+    else:
+        details_panel = Panel("Select a model to view details.", box=box.ROUNDED, padding=(1, 2))
+
+    layout["body"].split_row(
+        Layout(list_panel, name="left", ratio=2),
+        Layout(details_panel, name="right", ratio=3),
+    )
+
+    console.print(layout)
+
+
+def _confirm_action(console: Any, prompt_text: str, default: bool = False) -> bool:
+    suffix = "[Y/n]" if default else "[y/N]"
+    raw = console.input(f"{prompt_text} {suffix}: ").strip().lower()
+    if not raw:
+        return default
+    return raw in ("y", "yes")
+
+
+def _prompt_models_command(console: Any) -> str:
+    try:
+        from prompt_toolkit import prompt as pt_prompt
+        from prompt_toolkit.key_binding import KeyBindings
+    except (ImportError, OSError, RuntimeError):
+        return console.input("Command (a/e/d/m/k/q/r or model #/name): ").strip()
+
+    key_bindings = KeyBindings()
+
+    def _exit_with(value: str) -> None:
+        def _handler(event: Any) -> None:  # noqa: ANN001
+            event.app.exit(result=value)
+
+        return _handler  # type: ignore[return-value]
+
+    for key in ("a", "A"):
+        key_bindings.add(key, eager=True)(_exit_with("a"))
+    for key in ("e", "E"):
+        key_bindings.add(key, eager=True)(_exit_with("e"))
+    for key in ("d", "D"):
+        key_bindings.add(key, eager=True)(_exit_with("d"))
+    for key in ("m", "M"):
+        key_bindings.add(key, eager=True)(_exit_with("m"))
+    for key in ("k", "K"):
+        key_bindings.add(key, eager=True)(_exit_with("k"))
+    for key in ("q", "Q", "escape"):
+        key_bindings.add(key, eager=True)(_exit_with("q"))
+    for key in ("r", "R"):
+        key_bindings.add(key, eager=True)(_exit_with("r"))
+
+    key_bindings.add("up", eager=True)(_exit_with("__up"))
+    key_bindings.add("down", eager=True)(_exit_with("__down"))
+    key_bindings.add("pageup", eager=True)(_exit_with("__page_up"))
+    key_bindings.add("pagedown", eager=True)(_exit_with("__page_down"))
+
+    @key_bindings.add("enter")
+    def _enter(event: Any) -> None:  # noqa: ANN001
+        text = event.current_buffer.text
+        event.app.exit(result=text)
+
+    @key_bindings.add("c-c", eager=True)
+    def _ctrl_c(event: Any) -> None:  # noqa: ANN001
+        event.app.exit(result="q")
+
+    return pt_prompt("Command: ", key_bindings=key_bindings)
+
+
+def _resolve_model_selection(
+    raw: str, config: Any, selected_name: Optional[str]
+) -> Optional[str]:
+    if not raw:
+        return selected_name
+    raw = raw.strip()
+    if raw.isdigit():
+        idx = int(raw)
+        if idx <= 0:
+            return selected_name
+        names = list(config.model_profiles.keys())
+        if 1 <= idx <= len(names):
+            return names[idx - 1]
+        return selected_name
+    if raw in config.model_profiles:
+        return raw
+    # Case-insensitive match
+    lower_map = {name.lower(): name for name in config.model_profiles}
+    return lower_map.get(raw.lower(), selected_name)
+
+
+def _handle_models_rich_tui(ui: Any) -> bool:
+    console = ui.console
+    if not sys.stdin.isatty():
+        console.print("[yellow]Interactive UI requires a TTY. Showing plain list instead.[/yellow]")
+        _render_models_plain(console, get_global_config())
+        return True
+
+    selected_name: Optional[str] = None
+
+    while True:
+        config = get_global_config()
+        selected_name = _default_selected_model(config, selected_name)
+        console.print()
+        _render_models_dashboard(console, config, selected_name)
+
+        if not config.model_profiles:
+            if _confirm_action(console, "No models configured. Add one now?", default=True):
+                profile_name = console.input("Profile name: ").strip()
+                if not profile_name:
+                    console.print("[red]Model profile name is required.[/red]")
+                    continue
+                existing_profile = config.model_profiles.get(profile_name)
+                if existing_profile:
+                    if not _confirm_action(
+                        console, f"Profile '{profile_name}' exists. Overwrite?"
+                    ):
+                        continue
+                profile, set_as_main = _collect_add_profile_input(
+                    console, config, existing_profile, get_profile_for_pointer("main")
+                )
+                if not profile:
+                    continue
+                try:
+                    add_model_profile(
+                        profile_name,
+                        profile,
+                        overwrite=bool(existing_profile),
+                        set_as_main=set_as_main,
+                    )
+                except (OSError, IOError, ValueError, TypeError, PermissionError) as exc:
+                    console.print(f"[red]Failed to save model: {escape(str(exc))}[/red]")
+                    continue
+                marker = " (main)" if set_as_main else ""
+                console.print(f"[green]✓ Model '{escape(profile_name)}' saved{marker}[/green]")
+                continue
+            return True
+
+        command = _prompt_models_command(console).strip().lower()
+        if command in ("__up", "__down", "__page_up", "__page_down"):
+            names = list(config.model_profiles.keys())
+            if not names:
+                continue
+            current_index = names.index(selected_name) if selected_name in names else 0
+            if command == "__up":
+                current_index = max(0, current_index - 1)
+            elif command == "__down":
+                current_index = min(len(names) - 1, current_index + 1)
+            elif command == "__page_up":
+                current_index = max(0, current_index - 5)
+            elif command == "__page_down":
+                current_index = min(len(names) - 1, current_index + 5)
+            selected_name = names[current_index]
+            continue
+        if command in ("", "r", "refresh"):
+            continue
+        if command in ("q", "quit", "exit"):
+            return True
+        if command in ("a", "add"):
+            profile_name = console.input("Profile name: ").strip()
+            if not profile_name:
+                console.print("[red]Model profile name is required.[/red]")
+                continue
+            existing_profile = config.model_profiles.get(profile_name)
+            if existing_profile:
+                if not _confirm_action(console, f"Profile '{profile_name}' exists. Overwrite?"):
+                    continue
+            profile, set_as_main = _collect_add_profile_input(
+                console, config, existing_profile, get_profile_for_pointer("main")
+            )
+            if not profile:
+                continue
+            try:
+                add_model_profile(
+                    profile_name,
+                    profile,
+                    overwrite=bool(existing_profile),
+                    set_as_main=set_as_main,
+                )
+            except (OSError, IOError, ValueError, TypeError, PermissionError) as exc:
+                console.print(f"[red]Failed to save model: {escape(str(exc))}[/red]")
+                continue
+            marker = " (main)" if set_as_main else ""
+            console.print(f"[green]✓ Model '{escape(profile_name)}' saved{marker}[/green]")
+            selected_name = profile_name
+            continue
+
+        if command in ("e", "edit", "d", "delete", "del", "remove", "m", "main", "k", "quick"):
+            if not selected_name:
+                console.print("[yellow]No model selected.[/yellow]")
+                continue
+            model_name = selected_name
+        else:
+            model_name = _resolve_model_selection(command, config, selected_name)
+            if not model_name:
+                console.print("[yellow]Unknown model or command.[/yellow]")
+                continue
+            if model_name != selected_name:
+                selected_name = model_name
+                continue
+
+        profile = config.model_profiles.get(model_name or "")
+        if not profile:
+            console.print(f"[yellow]Model '{escape(model_name or '')}' not found.[/yellow]")
+            continue
+
+        if command in ("e", "edit"):
+            updated_profile = _collect_edit_profile_input(console, profile)
+            if not updated_profile:
+                continue
+            try:
+                add_model_profile(
+                    model_name,
+                    updated_profile,
+                    overwrite=True,
+                    set_as_main=False,
+                )
+            except (OSError, IOError, ValueError, TypeError, PermissionError) as exc:
+                console.print(f"[red]Failed to update model: {escape(str(exc))}[/red]")
+                continue
+            console.print(f"[green]✓ Model '{escape(model_name)}' updated[/green]")
+            continue
+
+        if command in ("m", "main", "k", "quick"):
+            pointer = "main" if command in ("m", "main") else "quick"
+            try:
+                set_model_pointer(pointer, model_name)
+                console.print(
+                    f"[green]✓ Pointer '{escape(pointer)}' set to '{escape(model_name)}'[/green]"
+                )
+            except (ValueError, KeyError, OSError, IOError, PermissionError) as exc:
+                console.print(f"[red]{escape(str(exc))}[/red]")
+            continue
+
+        if command in ("d", "delete", "del", "remove"):
+            if not _confirm_action(console, f"Delete model '{model_name}'?"):
+                continue
+            try:
+                delete_model_profile(model_name)
+                console.print(f"[green]✓ Deleted model '{escape(model_name)}'[/green]")
+                selected_name = None
+            except KeyError as exc:
+                console.print(f"[yellow]{escape(str(exc))}[/yellow]")
+            except (OSError, IOError, PermissionError) as exc:
+                console.print(f"[red]Failed to delete model: {escape(str(exc))}[/red]")
+            continue
+
+    return True
+
+
+def _handle_models_tui(ui: Any) -> bool:
+    console = ui.console
+    if not sys.stdin.isatty():
+        console.print("[yellow]Interactive UI requires a TTY. Showing plain list instead.[/yellow]")
+        _render_models_plain(console, get_global_config())
+        return True
+
+    try:
+        from ripperdoc.cli.ui.models_tui import run_models_tui
+    except (ImportError, ModuleNotFoundError) as exc:
+        console.print(
+            f"[yellow]Textual UI not available ({escape(str(exc))}). Falling back to Rich UI.[/yellow]"
+        )
+        return _handle_models_rich_tui(ui)
+
+    try:
+        return bool(run_models_tui())
+    except Exception as exc:  # noqa: BLE001 - fail safe in interactive UI
+        console.print(f"[red]Textual UI failed: {escape(str(exc))}[/red]")
+        return _handle_models_rich_tui(ui)
+
+
 def _handle(ui: Any, trimmed_arg: str) -> bool:
     console = ui.console
     tokens = trimmed_arg.split()
@@ -26,11 +777,13 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
     config = get_global_config()
     logger.info(
         "[models_cmd] Handling /models command",
-        extra={"subcommand": subcmd or "list", "session_id": getattr(ui, "session_id", None)},
+        extra={"subcommand": subcmd or "tui", "session_id": getattr(ui, "session_id", None)},
     )
 
     def print_models_usage() -> None:
-        console.print("[bold]/models[/bold] — list configured models")
+        console.print("[bold]/models[/bold] — open interactive models UI")
+        console.print("[bold]/models tui[/bold] — open interactive models UI")
+        console.print("[bold]/models list[/bold] — list configured models (plain)")
         console.print("[bold]/models add <name>[/bold] — add or update a model profile")
         console.print("[bold]/models edit <name>[/bold] — edit an existing model profile")
         console.print("[bold]/models delete <name>[/bold] — delete a model profile")
@@ -39,28 +792,15 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             "[bold]/models use <pointer> <name>[/bold] — set a specific pointer (main/quick)"
         )
 
-    def parse_int(prompt_text: str, default_value: Optional[int]) -> Optional[int]:
-        raw = console.input(prompt_text).strip()
-        if not raw:
-            return default_value
-        try:
-            return int(raw)
-        except ValueError:
-            console.print("[yellow]Invalid number, keeping previous value.[/yellow]")
-            return default_value
-
-    def parse_float(prompt_text: str, default_value: float) -> float:
-        raw = console.input(prompt_text).strip()
-        if not raw:
-            return default_value
-        try:
-            return float(raw)
-        except ValueError:
-            console.print("[yellow]Invalid number, keeping previous value.[/yellow]")
-            return default_value
-
     if subcmd in ("help", "-h", "--help"):
         print_models_usage()
+        return True
+
+    if subcmd in ("", "tui", "ui"):
+        return _handle_models_tui(ui)
+
+    if subcmd in ("list", "ls"):
+        _render_models_plain(console, config)
         return True
 
     if subcmd in ("add", "create"):
@@ -82,123 +822,11 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
                 return True
             overwrite = True
 
-        current_profile = get_profile_for_pointer("main")
-        default_provider = (
-            (current_profile.provider.value) if current_profile else ProviderType.ANTHROPIC.value
+        profile, set_as_main = _collect_add_profile_input(
+            console, config, existing_profile, get_profile_for_pointer("main")
         )
-        provider_input = (
-            console.input(
-                f"Protocol ({', '.join(p.value for p in ProviderType)}) [{default_provider}]: "
-            )
-            .strip()
-            .lower()
-            or default_provider
-        )
-        try:
-            provider = ProviderType(provider_input)
-        except ValueError:
-            console.print(f"[red]Invalid provider: {escape(provider_input)}[/red]")
-            print_models_usage()
+        if not profile:
             return True
-
-        default_model = (
-            existing_profile.model
-            if existing_profile
-            else (current_profile.model if current_profile else "")
-        )
-        model_prompt = f"Model name to send{f' [{default_model}]' if default_model else ''}: "
-        model_name = console.input(model_prompt).strip() or default_model
-        if not model_name:
-            console.print("[red]Model name is required.[/red]")
-            return True
-
-        api_key_input = prompt_secret("API key (leave blank to keep unset)").strip()
-        api_key = api_key_input or (existing_profile.api_key if existing_profile else None)
-
-        auth_token = existing_profile.auth_token if existing_profile else None
-        if provider == ProviderType.ANTHROPIC:
-            auth_token_input = prompt_secret(
-                "Auth token (Anthropic only, leave blank to keep unset)"
-            ).strip()
-            auth_token = auth_token_input or auth_token
-        else:
-            auth_token = None
-
-        api_base_default = existing_profile.api_base if existing_profile else ""
-        api_base = (
-            console.input(
-                f"API base (optional){f' [{api_base_default}]' if api_base_default else ''}: "
-            ).strip()
-            or api_base_default
-            or None
-        )
-
-        max_tokens_default = existing_profile.max_tokens if existing_profile else 4096
-        max_tokens = (
-            parse_int(
-                f"Max output tokens [{max_tokens_default}]: ",
-                max_tokens_default,
-            )
-            or max_tokens_default
-        )
-
-        temp_default = existing_profile.temperature if existing_profile else 0.7
-        temperature = parse_float(
-            f"Temperature [{temp_default}]: ",
-            temp_default,
-        )
-
-        context_window_default = existing_profile.context_window if existing_profile else None
-        context_prompt = "Context window tokens (optional"
-        if context_window_default:
-            context_prompt += f", current {context_window_default}"
-        context_prompt += "): "
-        context_window = parse_int(context_prompt, context_window_default)
-
-        # Vision support prompt
-        supports_vision_default = existing_profile.supports_vision if existing_profile else None
-        supports_vision = None
-        vision_default_display = (
-            "auto"
-            if supports_vision_default is None
-            else ("yes" if supports_vision_default else "no")
-        )
-        supports_vision_input = (
-            console.input(f"Supports vision (images)? [{vision_default_display}] (Y/n/auto): ")
-            .strip()
-            .lower()
-        )
-        if supports_vision_input in ("y", "yes"):
-            supports_vision = True
-        elif supports_vision_input in ("n", "no"):
-            supports_vision = False
-        elif supports_vision_input in ("auto", ""):
-            supports_vision = None
-        else:
-            supports_vision = supports_vision_default
-
-        default_set_main = (
-            not config.model_profiles
-            or getattr(config.model_pointers, "main", "") not in config.model_profiles
-        )
-        set_main_input = (
-            console.input(f"Set as main model? ({'Y' if default_set_main else 'y'}/N): ")
-            .strip()
-            .lower()
-        )
-        set_as_main = set_main_input in ("y", "yes") if set_main_input else default_set_main
-
-        profile = ModelProfile(
-            provider=provider,
-            model=model_name,
-            api_key=api_key,
-            api_base=api_base,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            context_window=context_window,
-            auth_token=auth_token,
-            supports_vision=supports_vision,
-        )
 
         try:
             add_model_profile(
@@ -228,113 +856,9 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print("[red]Model profile not found.[/red]")
             print_models_usage()
             return True
-
-        provider_default = existing_profile.provider.value
-        provider_input = (
-            console.input(
-                f"Protocol ({', '.join(p.value for p in ProviderType)}) [{provider_default}]: "
-            )
-            .strip()
-            .lower()
-            or provider_default
-        )
-        try:
-            provider = ProviderType(provider_input)
-        except ValueError:
-            console.print(f"[red]Invalid provider: {escape(provider_input)}[/red]")
+        updated_profile = _collect_edit_profile_input(console, existing_profile)
+        if not updated_profile:
             return True
-
-        model_name = (
-            console.input(f"Model name to send [{existing_profile.model}]: ").strip()
-            or existing_profile.model
-        )
-
-        api_key_label = "[set]" if existing_profile.api_key else "[not set]"
-        api_key_prompt = f"API key {api_key_label} (Enter=keep, '-'=clear)"
-        api_key_input = prompt_secret(api_key_prompt).strip()
-        if api_key_input == "-":
-            api_key = None
-        elif api_key_input:
-            api_key = api_key_input
-        else:
-            api_key = existing_profile.api_key
-
-        auth_token = existing_profile.auth_token
-        if (
-            provider == ProviderType.ANTHROPIC
-            or existing_profile.provider == ProviderType.ANTHROPIC
-        ):
-            auth_label = "[set]" if auth_token else "[not set]"
-            auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear)"
-            auth_token_input = prompt_secret(auth_prompt).strip()
-            if auth_token_input == "-":
-                auth_token = None
-            elif auth_token_input:
-                auth_token = auth_token_input
-        else:
-            auth_token = None
-
-        api_base = (
-            console.input(f"API base (optional) [{existing_profile.api_base or ''}]: ").strip()
-            or existing_profile.api_base
-        )
-        if api_base == "":
-            api_base = None
-
-        max_tokens = (
-            parse_int(
-                f"Max output tokens [{existing_profile.max_tokens}]: ",
-                existing_profile.max_tokens,
-            )
-            or existing_profile.max_tokens
-        )
-
-        temperature = parse_float(
-            f"Temperature [{existing_profile.temperature}]: ",
-            existing_profile.temperature,
-        )
-
-        context_window = parse_int(
-            f"Context window tokens [{existing_profile.context_window or 'unset'}]: ",
-            existing_profile.context_window,
-        )
-
-        # Vision support prompt
-        vision_default_display = (
-            "auto"
-            if existing_profile.supports_vision is None
-            else ("yes" if existing_profile.supports_vision else "no")
-        )
-        supports_vision_input = (
-            console.input(
-                f"Supports vision (images)? [{vision_default_display}] (Y/n/auto/C=clear): "
-            )
-            .strip()
-            .lower()
-        )
-        supports_vision = None
-        if supports_vision_input in ("y", "yes"):
-            supports_vision = True
-        elif supports_vision_input in ("n", "no"):
-            supports_vision = False
-        elif supports_vision_input in ("c", "clear", "-"):
-            supports_vision = None
-        elif supports_vision_input in ("auto", ""):
-            supports_vision = existing_profile.supports_vision
-        else:
-            supports_vision = existing_profile.supports_vision
-
-        updated_profile = ModelProfile(
-            provider=provider,
-            model=model_name,
-            api_key=api_key,
-            api_base=api_base,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            context_window=context_window,
-            auth_token=auth_token,
-            supports_vision=supports_vision,
-        )
 
         try:
             add_model_profile(
@@ -433,46 +957,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         return True
 
     print_models_usage()
-    pointer_map = config.model_pointers.model_dump()
-    if not config.model_profiles:
-        console.print("  • No models configured")
-        return True
-
-    console.print("\n[bold]Configured Models:[/bold]")
-    for name, profile in config.model_profiles.items():
-        markers = [ptr for ptr, value in pointer_map.items() if value == name]
-        marker_text = f" ({', '.join(markers)})" if markers else ""
-        console.print(f"  • {escape(name)}{marker_text}", markup=False)
-        console.print(f"      protocol: {profile.provider.value}", markup=False)
-        console.print(f"      model: {profile.model}", markup=False)
-        if profile.api_base:
-            console.print(f"      api_base: {profile.api_base}", markup=False)
-        if profile.context_window:
-            console.print(f"      context: {profile.context_window} tokens", markup=False)
-        console.print(
-            f"      max_tokens: {profile.max_tokens}, temperature: {profile.temperature}",
-            markup=False,
-        )
-        console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}", markup=False)
-        if profile.provider == ProviderType.ANTHROPIC:
-            console.print(
-                f"      auth_token: {'***' if getattr(profile, 'auth_token', None) else 'Not set'}",
-                markup=False,
-            )
-        if profile.openai_tool_mode:
-            console.print(f"      openai_tool_mode: {profile.openai_tool_mode}", markup=False)
-        if profile.thinking_mode:
-            console.print(f"      thinking_mode: {profile.thinking_mode}", markup=False)
-        # Display vision support
-        if profile.supports_vision is None:
-            vision_display = "auto-detect"
-        elif profile.supports_vision:
-            vision_display = "yes"
-        else:
-            vision_display = "no"
-        console.print(f"      supports_vision: {vision_display}", markup=False)
-    pointer_labels = ", ".join(f"{p}->{v or '-'}" for p, v in pointer_map.items())
-    console.print(f"[dim]Pointers: {escape(pointer_labels)}[/dim]")
+    _render_models_plain(console, config)
     return True
 
 
