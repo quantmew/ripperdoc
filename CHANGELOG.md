@@ -5,6 +5,27 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-02-03
+
+### Added
+- **Ask rules support** - Add explicit ask rules to permission system for commands requiring user confirmation
+- **Interactive management TUIs** - Add interactive terminal UIs for managing agents, models, and permissions
+- **Cache tokens tracking** - Add support for Anthropic cache tokens and alternative API usage tracking
+- **Random tips system** - Add random tips feature to help users discover features during usage
+- **Tool filtering** - Add tool filtering capability and optimize file slice reading performance
+
+### Changed
+- **Unified choice component** - Introduce unified choice component and refactor permission prompts for consistency
+- **Session selection UI** - Modernize session selection interface with interactive choice component
+- **Theme selection UI** - Enhance theme selection with custom styling and interactive prompts
+- **Welcome panel and status bar** - Improve UX information display in welcome panel and status bar
+- **File editing utilities** - Extract common file editing utilities to shared module for better code organization
+
+### Fixed
+- **Long tool descriptions** - Truncate long tool descriptions in MCP server list for better display
+- **Terminal line calculation** - Improve terminal line count calculation for choice prompts
+- **Ask rules precedence** - Ensure proper precedence: deny > ask > allow in permission evaluation
+
 ## [0.3.1] - 2026-02-02
 
 ### Added
@@ -220,6 +241,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple command execution
 - Basic project navigation
 
+[0.3.2]: https://github.com/quantmew/Ripperdoc/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/quantmew/Ripperdoc/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/quantmew/Ripperdoc/compare/v0.2.10...v0.3.0
 [0.2.10]: https://github.com/quantmew/Ripperdoc/compare/v0.2.9...v0.2.10
