@@ -7,6 +7,7 @@ the query-response loop including tool execution.
 import asyncio
 import inspect
 import os
+import sys
 import time
 from asyncio import CancelledError
 from dataclasses import dataclass, field
@@ -577,7 +578,8 @@ async def _run_concurrent_tool_uses(
             )
 
         # Re-raise first exception if any occurred, so caller knows something failed
-        if exceptions_found:
+        # Only raise here if no outer exception is already in flight (e.g., timeout/cancel).
+        if exceptions_found and sys.exc_info()[1] is None:
             first_name = exceptions_found[0][1]
             first_exc = exceptions_found[0][2]
             logger.error(
@@ -586,6 +588,7 @@ async def _run_concurrent_tool_uses(
                 first_name,
                 first_exc,
             )
+            raise first_exc
 
 
 class ToolRegistry:

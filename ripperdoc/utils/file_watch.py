@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import itertools
 import os
 import sys
 import threading
@@ -256,14 +257,13 @@ def record_snapshot(
 def _read_portion(
     file_path: str, offset: int, limit: Optional[int], encoding: str = "utf-8"
 ) -> str:
-    with open(file_path, "r", encoding=encoding, errors="replace") as handle:
-        lines = handle.readlines()
+    """Read a slice of a file by line without loading the entire file into memory."""
     start = max(offset, 0)
-    if limit is None:
-        selected = lines[start:]
-    else:
-        selected = lines[start : start + limit]
-    return "".join(selected)
+    with open(file_path, "r", encoding=encoding, errors="replace") as handle:
+        if limit is None:
+            return "".join(itertools.islice(handle, start, None))
+        end = start + limit
+        return "".join(itertools.islice(handle, start, end))
 
 
 def _build_diff_summary(old_content: str, new_content: str, file_path: str, max_lines: int) -> str:
