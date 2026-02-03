@@ -68,6 +68,38 @@ def _extract_directory_from_glob(glob_pattern: str) -> str:
     return prefix.rsplit("/", 1)[0] or "/"
 
 
+def _extract_cd_target(args: List[str]) -> tuple[str | None, bool]:
+    """Return the cd target and whether '-' should map to OLDPWD."""
+    if not args:
+        return None, False
+
+    saw_option_terminator = False
+    idx = 0
+
+    if args[0] == "--":
+        saw_option_terminator = True
+        idx = 1
+    elif args[0].startswith("-") and args[0] != "-":
+        for i, arg in enumerate(args):
+            if arg == "--":
+                saw_option_terminator = True
+                idx = i + 1
+                break
+            if arg.startswith("-") and arg != "-":
+                continue
+            idx = i
+            break
+        else:
+            return None, False
+
+    if idx >= len(args):
+        return None, False
+
+    target = args[idx]
+    treat_dash_as_previous = target == "-" and not saw_option_terminator
+    return target, treat_dash_as_previous
+
+
 def _is_path_allowed(resolved_path: Path, allowed_dirs: Set[str]) -> bool:
     resolved_str = str(resolved_path)
     for allowed in allowed_dirs:
@@ -95,7 +127,23 @@ def _check_command_paths(
     command: str, args: List[str], cwd: str, allowed_dirs: Set[str]
 ) -> ValidationResponse:
     if command == "cd":
-        target = args[0] if args else os.path.expanduser("~")
+        target, use_oldpwd = _extract_cd_target(args)
+        if target is None:
+            target = os.path.expanduser("~")
+        if use_oldpwd:
+            oldpwd = os.environ.get("OLDPWD")
+            if not oldpwd:
+                preview = _format_allowed_dirs_preview(sorted(allowed_dirs))
+                return ValidationResponse(
+                    behavior="ask",
+                    message=(
+                        "Requesting permission to change directory to previous directory "
+                        "(OLDPWD is not set; unable to validate path). "
+                        f"Allowed directories: {preview}"
+                    ),
+                    rule_suggestions=None,
+                )
+            target = oldpwd
         allowed, resolved = _validate_path(target, cwd, allowed_dirs)
     elif command == "ls":
         # ls is a read-only command, allow it to run on any path

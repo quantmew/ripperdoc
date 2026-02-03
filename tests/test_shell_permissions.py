@@ -234,6 +234,34 @@ def test_path_validation_allows_within_allowed(tmp_path: Path):
     assert result.behavior == "passthrough"
 
 
+def test_cd_dash_allows_when_oldpwd_within_allowed(tmp_path: Path, monkeypatch):
+    """cd - should resolve OLDPWD and allow if within allowed dirs."""
+    previous = tmp_path / "previous"
+    previous.mkdir()
+    monkeypatch.setenv("OLDPWD", str(previous))
+    allowed = {str(tmp_path)}
+    result = validate_shell_command_paths("cd -", str(tmp_path), allowed)
+    assert result.behavior == "passthrough"
+
+
+def test_cd_dash_requests_when_oldpwd_outside_allowed(tmp_path: Path, monkeypatch):
+    """cd - should require confirmation if OLDPWD is outside allowed dirs."""
+    monkeypatch.setenv("OLDPWD", str(tmp_path.parent))
+    allowed = {str(tmp_path)}
+    result = validate_shell_command_paths("cd -", str(tmp_path), allowed)
+    assert result.behavior == "ask"
+    assert "permission" in result.message.lower() or "outside" in result.message.lower()
+
+
+def test_cd_dash_requests_when_oldpwd_missing(tmp_path: Path, monkeypatch):
+    """cd - without OLDPWD should require confirmation since path is unknown."""
+    monkeypatch.delenv("OLDPWD", raising=False)
+    allowed = {str(tmp_path)}
+    result = validate_shell_command_paths("cd -", str(tmp_path), allowed)
+    assert result.behavior == "ask"
+    assert "oldpwd" in result.message.lower()
+
+
 def test_ls_allows_any_path(tmp_path: Path):
     """ls is a read-only command and should be allowed on any path."""
     allowed = {str(tmp_path)}
