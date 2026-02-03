@@ -1,5 +1,8 @@
-from rich.markup import escape
+import sys
+from typing import Any, Dict
+
 from rich import box
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -18,7 +21,6 @@ from ripperdoc.tools.task_tool import (
 )
 from ripperdoc.utils.log import get_logger
 
-from typing import Any, Dict
 from .base import SlashCommand
 
 logger = get_logger()
@@ -43,6 +45,77 @@ def _format_duration(duration_ms: float | None) -> str:
     return f"{hours}h {mins}m"
 
 
+def _print_agents_usage(console: Any) -> None:
+    console.print("[bold]/agents[/bold] — open interactive agents UI")
+    console.print("[bold]/agents tui[/bold] — open interactive agents UI")
+    console.print("[bold]/agents list[/bold] — list configured agents (plain)")
+    console.print(
+        "[bold]/agents create <name> [location] [model][/bold] — "
+        "create agent (location: user|project, default user)"
+    )
+    console.print("[bold]/agents edit <name> [location][/bold] — edit an existing agent")
+    console.print(
+        "[bold]/agents delete <name> [location][/bold] — "
+        "delete agent (location: user|project, default user)"
+    )
+    console.print("[bold]/agents runs[/bold] — list subagent runs")
+    console.print("[bold]/agents show <id>[/bold] — show subagent run details")
+    console.print("[bold]/agents cancel <id>[/bold] — cancel a background subagent run")
+    console.print(
+        f"[dim]Agent files live in ~/.ripperdoc/{AGENT_DIR_NAME} "
+        f"or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
+    )
+    console.print(
+        "[dim]Model can be a profile name or pointer (main/quick). Defaults to 'main'.[/dim]"
+    )
+
+
+def _render_agents_plain(console: Any) -> None:
+    agents = load_agent_definitions()
+    console.print("\n[bold]Agents:[/bold]")
+    _print_agents_usage(console)
+    if not agents.active_agents:
+        console.print("  • None configured")
+    for agent in agents.active_agents:
+        location = getattr(agent.location, "value", agent.location)
+        tools_str = "all tools" if "*" in agent.tools else ", ".join(agent.tools)
+        console.print(f"  • {escape(agent.agent_type)} ({escape(str(location))})", markup=False)
+        console.print(f"      {escape(agent.when_to_use)}", markup=False)
+        console.print(f"      tools: {escape(tools_str)}", markup=False)
+        console.print(f"      model: {escape(agent.model or 'main (default)')}", markup=False)
+    if agents.failed_files:
+        console.print("[yellow]Some agent files could not be loaded:[/yellow]")
+        for path, error in agents.failed_files:
+            console.print(f"  - {escape(str(path))}: {escape(str(error))}", markup=False)
+    console.print(
+        f"[dim]Add agents in ~/.ripperdoc/{AGENT_DIR_NAME} or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
+    )
+
+
+def _handle_agents_tui(ui: Any) -> bool:
+    console = ui.console
+    if not sys.stdin.isatty():
+        console.print("[yellow]Interactive UI requires a TTY. Showing plain list instead.[/yellow]")
+        _render_agents_plain(console)
+        return True
+
+    try:
+        from ripperdoc.cli.ui.agents_tui import run_agents_tui
+    except (ImportError, ModuleNotFoundError) as exc:
+        console.print(
+            f"[yellow]Textual UI not available ({escape(str(exc))}). Showing plain list.[/yellow]"
+        )
+        _render_agents_plain(console)
+        return True
+
+    try:
+        return bool(run_agents_tui())
+    except Exception as exc:  # noqa: BLE001 - fail safe in interactive UI
+        console.print(f"[red]Textual UI failed: {escape(str(exc))}[/red]")
+        _render_agents_plain(console)
+        return True
+
+
 def _handle(ui: Any, trimmed_arg: str) -> bool:
     console = ui.console
     tokens = trimmed_arg.split()
@@ -50,35 +123,20 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
     logger.info(
         "[agents_cmd] Handling /agents command",
         extra={
-            "subcommand": subcmd or "list",
+            "subcommand": subcmd or "tui",
             "session_id": getattr(ui, "session_id", None),
         },
     )
 
-    def print_agents_usage() -> None:
-        console.print("[bold]/agents[/bold] — list configured agents")
-        console.print(
-            "[bold]/agents create <name> [location] [model][/bold] — "
-            "create agent (location: user|project, default user)"
-        )
-        console.print("[bold]/agents edit <name> [location][/bold] — edit an existing agent")
-        console.print(
-            "[bold]/agents delete <name> [location][/bold] — "
-            "delete agent (location: user|project, default user)"
-        )
-        console.print("[bold]/agents runs[/bold] — list subagent runs")
-        console.print("[bold]/agents show <id>[/bold] — show subagent run details")
-        console.print("[bold]/agents cancel <id>[/bold] — cancel a background subagent run")
-        console.print(
-            f"[dim]Agent files live in ~/.ripperdoc/{AGENT_DIR_NAME} "
-            f"or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
-        )
-        console.print(
-            "[dim]Model can be a profile name or pointer (main/quick). Defaults to 'main'.[/dim]"
-        )
-
     if subcmd in ("help", "-h", "--help"):
-        print_agents_usage()
+        _print_agents_usage(console)
+        return True
+
+    if subcmd in ("", "tui", "ui"):
+        return _handle_agents_tui(ui)
+
+    if subcmd in ("list", "ls"):
+        _render_agents_plain(console)
         return True
 
     if subcmd in ("runs", "run", "tasks", "status"):
@@ -178,7 +236,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         agent_name = tokens[1] if len(tokens) > 1 else console.input("Agent name: ").strip()
         if not agent_name:
             console.print("[red]Agent name is required.[/red]")
-            print_agents_usage()
+            _print_agents_usage(console)
             return True
 
         description = console.input("Description (when to use this agent): ").strip()
@@ -192,7 +250,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         system_prompt = console.input("System prompt (single line, use \\n for newlines): ").strip()
         if not system_prompt:
             console.print("[red]System prompt is required.[/red]")
-            print_agents_usage()
+            _print_agents_usage(console)
             return True
 
         location_arg = tokens[2] if len(tokens) > 2 else ""
@@ -236,7 +294,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             )
         except (OSError, IOError, PermissionError, ValueError) as exc:
             console.print(f"[red]Failed to create agent: {escape(str(exc))}[/red]")
-            print_agents_usage()
+            _print_agents_usage(console)
             logger.warning(
                 "[agents_cmd] Failed to create agent: %s: %s",
                 type(exc).__name__,
@@ -251,7 +309,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         )
         if not agent_name:
             console.print("[red]Agent name is required.[/red]")
-            print_agents_usage()
+            _print_agents_usage(console)
             return True
 
         location_raw = (
@@ -269,7 +327,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             console.print(f"[yellow]{escape(str(exc))}[/yellow]")
         except (OSError, IOError, PermissionError, ValueError) as exc:
             console.print(f"[red]Failed to delete agent: {escape(str(exc))}[/red]")
-            print_agents_usage()
+            _print_agents_usage(console)
             logger.warning(
                 "[agents_cmd] Failed to delete agent: %s: %s",
                 type(exc).__name__,
@@ -282,14 +340,14 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         agent_name = tokens[1] if len(tokens) > 1 else console.input("Agent to edit: ").strip()
         if not agent_name:
             console.print("[red]Agent name is required.[/red]")
-            print_agents_usage()
+            _print_agents_usage(console)
             return True
 
         agents = load_agent_definitions()
         target_agent = next((a for a in agents.active_agents if a.agent_type == agent_name), None)
         if not target_agent:
             console.print(f"[red]Agent '{escape(agent_name)}' not found.[/red]")
-            print_agents_usage()
+            _print_agents_usage(console)
             return True
         if target_agent.location == AgentLocation.BUILT_IN:
             console.print("[yellow]Built-in agents cannot be edited.[/yellow]")
@@ -348,7 +406,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             )
         except (OSError, IOError, PermissionError, ValueError) as exc:
             console.print(f"[red]Failed to update agent: {escape(str(exc))}[/red]")
-            print_agents_usage()
+            _print_agents_usage(console)
             logger.warning(
                 "[agents_cmd] Failed to update agent: %s: %s",
                 type(exc).__name__,
@@ -357,25 +415,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             )
         return True
 
-    agents = load_agent_definitions()
-    console.print("\n[bold]Agents:[/bold]")
-    print_agents_usage()
-    if not agents.active_agents:
-        console.print("  • None configured")
-    for agent in agents.active_agents:
-        location = getattr(agent.location, "value", agent.location)
-        tools_str = "all tools" if "*" in agent.tools else ", ".join(agent.tools)
-        console.print(f"  • {escape(agent.agent_type)} ({escape(str(location))})", markup=False)
-        console.print(f"      {escape(agent.when_to_use)}", markup=False)
-        console.print(f"      tools: {escape(tools_str)}", markup=False)
-        console.print(f"      model: {escape(agent.model or 'main (default)')}", markup=False)
-    if agents.failed_files:
-        console.print("[yellow]Some agent files could not be loaded:[/yellow]")
-        for path, error in agents.failed_files:
-            console.print(f"  - {escape(str(path))}: {escape(str(error))}", markup=False)
-    console.print(
-        f"[dim]Add agents in ~/.ripperdoc/{AGENT_DIR_NAME} or ./.ripperdoc/{AGENT_DIR_NAME}[/dim]"
-    )
+    _render_agents_plain(console)
     return True
 
 
