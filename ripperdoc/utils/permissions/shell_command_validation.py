@@ -680,42 +680,29 @@ def validate_shell_command(shell_command: str) -> ValidationResult:
         # shlex will separate operators like ; & | as individual tokens
         # even when they're not surrounded by spaces
         i = 0
+        in_exec = False
         while i < len(tokens):
             token = tokens[i]
-            if token in (";", "&", "|"):
-                # Check if it's part of a safe operator (&& or ||)
-                if token in ("&", "|") and i + 1 < len(tokens) and tokens[i + 1] == token:
-                    # This is && or ||, skip both tokens
+            if token in ("-exec", "-execdir"):
+                in_exec = True
+                i += 1
+                continue
+            if token == ";":
+                if in_exec:
+                    in_exec = False
+                    i += 1
+                    continue
+                return True
+            if token == "+" and in_exec:
+                in_exec = False
+                i += 1
+                continue
+            if token in ("&", "|"):
+                if i + 1 < len(tokens) and tokens[i + 1] == token:
                     i += 2
                     continue
-                # Single ; & | are dangerous
                 return True
             i += 1
-
-        # Also check for find -exec escaped semicolon pattern
-        # shlex will have already parsed \; as separate token ';' (since escaped)
-        # We need to check if this ; is part of find -exec pattern
-        # by looking at the token context
-        for i, token in enumerate(tokens):
-            if token == ";":
-                # Check if previous tokens contain "-exec"
-                # Look backward through tokens to find "-exec"
-                j = i - 1
-                found_exec = False
-                while j >= 0:
-                    if tokens[j] == "-exec":
-                        found_exec = True
-                        break
-                    j -= 1
-                if found_exec:
-                    # This is likely find -exec ... ;, check if it's escaped in original
-                    # We need to check the original string to confirm it's \;
-                    # Build a regex to find this specific semicolon
-                    # For now, we'll assume it's the find -exec semicolon
-                    # and continue checking other tokens
-                    continue
-                # Not part of find -exec, so it's dangerous
-                return True
 
         return False
 

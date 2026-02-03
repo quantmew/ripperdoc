@@ -142,7 +142,7 @@ def _should_skip(
     path: Path,
     root_path: Path,
     patterns: list[str],
-    ignore_map: Optional[Dict[Optional[Path], List[str]]] = None,
+    ignore_map: Optional[Any] = None,
 ) -> bool:
     name = path.name
     if name.startswith("."):

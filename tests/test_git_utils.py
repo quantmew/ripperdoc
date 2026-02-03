@@ -22,8 +22,10 @@ from ripperdoc.utils.git_utils import (
     is_git_repository,
     get_git_root,
     read_gitignore_patterns,
+    read_gitignore_entries,
     parse_gitignore_pattern,
     build_ignore_patterns_map,
+    GitignoreMatcher,
     should_ignore_path,
     get_git_status_files,
     get_current_git_branch,
@@ -136,6 +138,17 @@ class TestReadGitignorePatterns:
         # Empty lines should be filtered
         assert "" not in patterns
 
+    def test_read_gitignore_entries_with_line_numbers(self, tmp_path):
+        """Should capture line numbers and sources for gitignore entries."""
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("# Comment\n*.pyc\n!keep.pyc\n")
+
+        entries = read_gitignore_entries(tmp_path)
+        patterns = {(entry.pattern, entry.negation, entry.line_number) for entry in entries}
+        assert ("*.pyc", False, 2) in patterns
+        assert ("keep.pyc", True, 3) in patterns
+
 
 class TestParseGitignorePattern:
     """Tests for parse_gitignore_pattern function."""
@@ -169,18 +182,17 @@ class TestBuildIgnorePatternsMap:
     """Tests for build_ignore_patterns_map function."""
 
     def test_builds_empty_map(self, tmp_path):
-        """Should build empty map when no patterns provided."""
+        """Should build matcher when no patterns provided."""
         subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
         result = build_ignore_patterns_map(tmp_path, user_ignore_patterns=None)
-        assert isinstance(result, dict)
+        assert isinstance(result, GitignoreMatcher)
 
     def test_includes_user_patterns(self, tmp_path):
         """Should include user-provided ignore patterns."""
         subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
         result = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["*.pyc", "*.log"])
-        assert None in result  # User patterns go under None key
-        assert "*.pyc" in result[None]
-        assert "*.log" in result[None]
+        assert should_ignore_path(tmp_path / "test.pyc", tmp_path, result) is True
+        assert should_ignore_path(tmp_path / "test.log", tmp_path, result) is True
 
     def test_includes_gitignore_patterns(self, tmp_path):
         """Should include .gitignore patterns when requested."""
@@ -189,8 +201,7 @@ class TestBuildIgnorePatternsMap:
         gitignore.write_text("*.pyc\n")
 
         result = build_ignore_patterns_map(tmp_path, include_gitignore=True)
-        # Should have patterns from .gitignore
-        assert len(result) > 0 or isinstance(result, dict)
+        assert should_ignore_path(tmp_path / "test.pyc", tmp_path, result) is True
 
     def test_skips_gitignore_when_disabled(self, tmp_path):
         """Should skip .gitignore patterns when disabled."""
@@ -199,8 +210,7 @@ class TestBuildIgnorePatternsMap:
         gitignore.write_text("*.pyc\n")
 
         result = build_ignore_patterns_map(tmp_path, include_gitignore=False)
-        # Should only have user patterns (none in this case)
-        assert result == {}
+        assert should_ignore_path(tmp_path / "test.pyc", tmp_path, result) is False
 
 
 class TestShouldIgnorePath:
@@ -208,27 +218,27 @@ class TestShouldIgnorePath:
 
     def test_matches_wildcard_pattern(self, tmp_path):
         """Should match wildcard patterns."""
-        ignore_map = {None: ["*.pyc", "*.log"]}
+        ignore_map = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["*.pyc", "*.log"])
         path = tmp_path / "test.pyc"
         assert should_ignore_path(path, tmp_path, ignore_map) is True
 
     def test_matches_directory_pattern(self, tmp_path):
         """Should match directory patterns."""
-        ignore_map = {None: ["__pycache__/"]}
+        ignore_map = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["__pycache__/"])
         cache_dir = tmp_path / "__pycache__"
         cache_dir.mkdir()
         assert should_ignore_path(cache_dir, tmp_path, ignore_map) is True
 
     def test_matches_named_file(self, tmp_path):
         """Should match exact file names."""
-        ignore_map = {None: [".DS_Store"]}
+        ignore_map = build_ignore_patterns_map(tmp_path, user_ignore_patterns=[".DS_Store"])
         ds_store = tmp_path / ".DS_Store"
         ds_store.touch()
         assert should_ignore_path(ds_store, tmp_path, ignore_map) is True
 
     def test_does_not_match_non_ignored(self, tmp_path):
         """Should not match files not in ignore list."""
-        ignore_map = {None: ["*.pyc"]}
+        ignore_map = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["*.pyc"])
         py_file = tmp_path / "test.py"
         py_file.touch()
         assert should_ignore_path(py_file, tmp_path, ignore_map) is False
@@ -238,7 +248,9 @@ class TestShouldIgnorePath:
         subdir = tmp_path / "subdir"
         subdir.mkdir()
 
-        ignore_map = {None: ["*.log"], subdir: ["*.tmp"]}
+        ignore_map = build_ignore_patterns_map(
+            tmp_path, user_ignore_patterns=["*.log", "subdir/*.tmp"]
+        )
 
         log_file = tmp_path / "test.log"
         tmp_file = subdir / "test.tmp"
@@ -446,13 +458,13 @@ class TestGitignorePatternMatching:
 
     def test_wildcard_in_filename(self, tmp_path):
         """Should match wildcards in filename."""
-        ignore_map = {None: ["*.o"]}
+        ignore_map = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["*.o"])
         object_file = tmp_path / "test.o"
         assert should_ignore_path(object_file, tmp_path, ignore_map) is True
 
     def test_wildcard_in_directory(self, tmp_path):
         """Should match wildcards in directory names."""
-        ignore_map = {None: ["*temp/"]}
+        ignore_map = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["*temp/"])
         temp_dir = tmp_path / "itemp"
         temp_dir.mkdir()
         # Note: This depends on fnmatch behavior
@@ -460,7 +472,7 @@ class TestGitignorePatternMatching:
 
     def test_recursive_pattern(self, tmp_path):
         """Should match recursive patterns (**)."""
-        ignore_map = {None: ["**/node_modules/"]}
+        ignore_map = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["**/node_modules/"])
         node_modules = tmp_path / "frontend" / "node_modules"
         node_modules.mkdir(parents=True)
         # The actual behavior depends on fnmatch implementation
@@ -482,13 +494,28 @@ class TestGitignorePatternMatching:
 
     def test_nested_directory_pattern(self, tmp_path):
         """Should handle nested directory patterns."""
-        ignore_map = {None: ["build/"]}
+        ignore_map = build_ignore_patterns_map(tmp_path, user_ignore_patterns=["build/"])
         nested_build = tmp_path / "subdir" / "build"
         nested_build.mkdir(parents=True)
         # Gitignore behavior: /build/ only matches at root
         # build/ matches anywhere
         result = should_ignore_path(nested_build, tmp_path, ignore_map)
         assert isinstance(result, bool)
+
+    def test_gitignore_directory_context_and_negation(self, tmp_path):
+        """Subdirectory .gitignore patterns should be scoped and support negation."""
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+        (tmp_path / ".gitignore").write_text("*.root\n")
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        (subdir / ".gitignore").write_text("*.sub\n!keep.sub\n")
+
+        matcher = build_ignore_patterns_map(tmp_path, include_gitignore=True)
+
+        assert should_ignore_path(tmp_path / "file.root", tmp_path, matcher) is True
+        assert should_ignore_path(tmp_path / "file.sub", tmp_path, matcher) is False
+        assert should_ignore_path(subdir / "file.sub", tmp_path, matcher) is True
+        assert should_ignore_path(subdir / "keep.sub", tmp_path, matcher) is False
 
 
 class TestErrorHandling:

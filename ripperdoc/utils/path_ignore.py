@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ripperdoc.utils.git_utils import (
+    build_ignore_patterns_map,
     get_git_root,
     is_git_repository,
-    read_gitignore_patterns,
 )
 
 
@@ -320,6 +320,11 @@ class IgnoreFilter:
 
     def __init__(self) -> None:
         self._patterns: List[Tuple[re.Pattern[str], bool]] = []  # (pattern, is_negation)
+        self._gitignore_matcher = None
+
+    def set_gitignore_matcher(self, matcher: Any) -> None:
+        """Attach a gitignore matcher for directory-context-aware checks."""
+        self._gitignore_matcher = matcher
 
     def add(self, patterns: List[str]) -> "IgnoreFilter":
         """Add patterns to the filter."""
@@ -359,6 +364,20 @@ class IgnoreFilter:
                 result = not is_negation
 
         return result
+
+    def ignores_path(self, path: Path, root_path: Path) -> bool:
+        """Check if a path should be ignored, including gitignore rules."""
+        ignored = False
+
+        if self._gitignore_matcher is not None:
+            ignored = self._gitignore_matcher.ignores(path, is_dir=path.is_dir())
+
+        try:
+            rel_path = path.relative_to(root_path).as_posix()
+        except ValueError:
+            rel_path = path.as_posix()
+
+        return ignored or self.ignores(rel_path)
 
     def test(self, path: str) -> Dict[str, Any]:
         """Check if a path should be ignored and return details.
@@ -450,20 +469,20 @@ def build_ignore_filter(
     if include_defaults:
         all_patterns.extend(DEFAULT_IGNORE_PATTERNS)
 
-    # 2. Add gitignore patterns
-    if include_gitignore and is_git_repository(root_path):
-        gitignore_patterns = read_gitignore_patterns(root_path)
-        all_patterns.extend(gitignore_patterns)
-
-    # 3. Add project patterns
+    # 2. Add project patterns
     if project_patterns:
         all_patterns.extend(project_patterns)
 
-    # 4. Add user patterns
+    # 3. Add user patterns
     if user_patterns:
         all_patterns.extend(user_patterns)
 
     ignore_filter.add(all_patterns)
+
+    if include_gitignore and is_git_repository(root_path):
+        gitignore_matcher = build_ignore_patterns_map(root_path)
+        ignore_filter.set_gitignore_matcher(gitignore_matcher)
+
     return ignore_filter
 
 
@@ -537,6 +556,9 @@ def is_path_ignored(
             include_gitignore=True,
         )
 
+    if hasattr(ignore_filter, "ignores_path"):
+        return ignore_filter.ignores_path(file_path, root_path)
+
     return ignore_filter.ignores(rel_path)
 
 
@@ -590,7 +612,10 @@ def should_skip_path(
     if ignore_filter is not None:
         try:
             rel_path = path.relative_to(root_path).as_posix()
-            if ignore_filter.ignores(rel_path):
+            if hasattr(ignore_filter, "ignores_path"):
+                if ignore_filter.ignores_path(path, root_path):
+                    return True
+            elif ignore_filter.ignores(rel_path):
                 return True
         except ValueError:
             pass

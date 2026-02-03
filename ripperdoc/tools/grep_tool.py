@@ -123,15 +123,16 @@ def _parse_count_line(
     Returns:
         (filename, count) tuple or None if parsing fails
     """
-    # Split from right by ':' - at most 1 split (count:last part)
     # Format: file:count OR just count
-    parts = line.rsplit(":", 1)
-    if len(parts) == 2 and parts[1].strip().isdigit():
-        # file:count format
-        return parts[0], int(parts[1])
-    elif len(parts) == 1 and parts[0].strip().isdigit():
-        # Just count (single file)
-        return default_file, int(parts[0])
+    # The count is always at the end, preceded by ':'
+    # Use non-greedy match to handle filenames with colons (e.g., Windows paths)
+    match = re.match(r"^(?P<file>.*?):(?P<count>\d+)$", line)
+    if match:
+        file = match.group("file") or default_file
+        return file, int(match.group("count"))
+    # Single file with just count (unlikely but possible)
+    if line.strip().isdigit():
+        return default_file, int(line.strip())
     return None
 
 
@@ -147,15 +148,13 @@ def _parse_content_line(
     Returns:
         (filename, line_number, content) tuple or None if parsing fails
     """
-    # Split from right by ':' - at most 2 splits (line:content)
     # Format: file:line:content OR line:content
-    parts = line.rsplit(":", 2)
-    if len(parts) == 3 and parts[1].strip().isdigit():
-        # file:line:content format
-        return parts[0], int(parts[1]), parts[2]
-    elif len(parts) == 2 and parts[0].strip().isdigit():
-        # line:content format (single file)
-        return default_file, int(parts[0]), parts[1]
+    # The line is always followed by ':' and then content
+    # Use non-greedy match to handle filenames/content with colons
+    match = re.match(r"^(?:(?P<file>.*?):)?(?P<line>\d+):(?P<content>.*)$", line)
+    if match:
+        file = match.group("file") or default_file
+        return file, int(match.group("line")), match.group("content")
     return None
 
 

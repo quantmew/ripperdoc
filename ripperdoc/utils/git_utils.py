@@ -6,7 +6,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 
 def is_git_repository(path: Path) -> bool:
@@ -412,52 +412,70 @@ def build_ignore_patterns_map(
     root_path: Path,
     user_ignore_patterns: Optional[List[str]] = None,
     include_gitignore: bool = True,
-) -> Dict[Optional[Path], List[str]]:
-    """Build a map of ignore patterns by root directory."""
-    ignore_map: Dict[Optional[Path], List[str]] = {}
+) -> GitignoreMatcher:
+    """Build a gitignore matcher with proper directory context."""
+    root_path = root_path.resolve()
+    git_root = get_git_root(root_path) or root_path
+    matcher = GitignoreMatcher(git_root)
 
-    # Add user-provided ignore patterns
+    rules: List[GitignoreRule] = []
+
+    if include_gitignore and is_git_repository(git_root):
+        entries = read_gitignore_entries(git_root)
+        for entry in entries:
+            rules.append(
+                _build_gitignore_rule(
+                    entry.pattern,
+                    entry.negation,
+                    entry.base_dir,
+                    git_root,
+                    entry.source,
+                    entry.line_number,
+                )
+            )
+
     if user_ignore_patterns:
         for pattern in user_ignore_patterns:
-            relative_pattern, pattern_root = parse_gitignore_pattern(pattern, root_path)
-            if pattern_root not in ignore_map:
-                ignore_map[pattern_root] = []
-            ignore_map[pattern_root].append(relative_pattern)
+            parsed = _parse_gitignore_line(pattern)
+            if not parsed:
+                continue
+            parsed_pattern, negation = parsed
+            rules.append(
+                _build_gitignore_rule(
+                    parsed_pattern,
+                    negation,
+                    root_path,
+                    git_root,
+                    None,
+                    None,
+                )
+            )
 
-    # Add .gitignore patterns
-    if include_gitignore and is_git_repository(root_path):
-        gitignore_patterns = read_gitignore_patterns(root_path)
-        for pattern in gitignore_patterns:
-            relative_pattern, pattern_root = parse_gitignore_pattern(pattern, root_path)
-            if pattern_root not in ignore_map:
-                ignore_map[pattern_root] = []
-            ignore_map[pattern_root].append(relative_pattern)
-
-    return ignore_map
+    matcher.add_rules(rules)
+    return matcher
 
 
 def should_ignore_path(
-    path: Path, root_path: Path, ignore_map: Dict[Optional[Path], List[str]]
+    path: Path,
+    root_path: Path,
+    ignore_map: Union[GitignoreMatcher, Dict[Optional[Path], List[str]]],
 ) -> bool:
     """Check if a path should be ignored based on ignore patterns."""
-    # Check against each root in the ignore map
+    if isinstance(ignore_map, GitignoreMatcher):
+        return ignore_map.ignores(path, is_dir=path.is_dir())
+
+    # Legacy map support
     for pattern_root, patterns in ignore_map.items():
-        # Determine the actual root to use for pattern matching
         actual_root = pattern_root if pattern_root is not None else root_path
 
         try:
-            # Get relative path from actual_root
             rel_path = path.relative_to(actual_root).as_posix()
         except ValueError:
-            # Path is not under this root, skip
             continue
 
-        # For directories, also check with trailing slash
         rel_path_dir = f"{rel_path}/" if path.is_dir() else rel_path
 
-        # Check each pattern
         for pattern in patterns:
-            # Handle directory-specific patterns
             if pattern.endswith("/"):
                 if not path.is_dir():
                     continue

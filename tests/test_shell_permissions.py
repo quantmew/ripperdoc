@@ -177,6 +177,12 @@ class TestValidateShellCommand:
         assert result.behavior == "passthrough"  # Changed from "ask"
         # Note: This is now allowed because ; is inside quotes
 
+    def test_find_exec_semicolon_allowed(self):
+        """find -exec terminator should not be treated as shell metacharacter."""
+        cmd = r'find . -type f -name "*.py" -exec wc -l {} \;'
+        result = validate_shell_command(cmd)
+        assert result.behavior == "passthrough"
+
 
 class TestIsComplexUnsafeShellCommand:
     """Tests for is_complex_unsafe_shell_command function."""
