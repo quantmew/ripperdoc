@@ -83,4 +83,5 @@ def test_project_config():
     assert isinstance(config.allowed_tools, list)
     assert isinstance(config.bash_allow_rules, list)
     assert isinstance(config.bash_deny_rules, list)
+    assert isinstance(config.bash_ask_rules, list)
     assert isinstance(config.working_directories, list)

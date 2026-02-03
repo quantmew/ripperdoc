@@ -212,6 +212,26 @@ def test_bash_permissions_apply_denies_from_all_scopes(tmp_path: Path, isolated_
     assert local_denied.result is False
 
 
+def test_bash_permissions_apply_ask_rules(tmp_path: Path, isolated_config):
+    """Ask rules should force prompts even for read-only commands."""
+    save_global_config(GlobalConfig(user_ask_rules=["ls"]))
+
+    prompt_calls = 0
+
+    def prompt_fn(_: str) -> str:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "n"
+
+    tool = BashTool()
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=prompt_fn)
+
+    result = asyncio.run(checker(tool, BashToolInput(command="ls")))
+
+    assert result.result is False
+    assert prompt_calls == 1
+
+
 @pytest.mark.asyncio
 async def test_mixed_format_rules_in_permission_checker(tmp_path: Path):
     """Test that permission checker handles both legacy and glob format rules."""

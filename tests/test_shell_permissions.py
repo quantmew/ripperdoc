@@ -263,6 +263,46 @@ def test_evaluate_permissions_honors_deny_rule():
         type("Req", (), {"command": "echo hi"}),
         allowed_rules=set(),
         denied_rules={"echo hi"},
+        ask_rules=set(),
+        allowed_working_dirs={cwd},
+    )
+    assert decision.behavior == "deny"
+
+
+def test_evaluate_permissions_honors_ask_rule():
+    """Ask rule should force a confirmation."""
+    cwd = safe_get_cwd()
+    decision = evaluate_shell_command_permissions(
+        type("Req", (), {"command": "ls"}),
+        allowed_rules=set(),
+        denied_rules=set(),
+        ask_rules={"ls"},
+        allowed_working_dirs={cwd},
+    )
+    assert decision.behavior == "ask"
+
+
+def test_ask_rule_overrides_allow_rule():
+    """Ask rules should take precedence over allow rules."""
+    cwd = safe_get_cwd()
+    decision = evaluate_shell_command_permissions(
+        type("Req", (), {"command": "ls"}),
+        allowed_rules={"ls"},
+        denied_rules=set(),
+        ask_rules={"ls"},
+        allowed_working_dirs={cwd},
+    )
+    assert decision.behavior == "ask"
+
+
+def test_deny_rule_overrides_ask_rule():
+    """Deny rules should take precedence over ask rules."""
+    cwd = safe_get_cwd()
+    decision = evaluate_shell_command_permissions(
+        type("Req", (), {"command": "ls"}),
+        allowed_rules={"ls"},
+        denied_rules={"ls"},
+        ask_rules={"ls"},
         allowed_working_dirs={cwd},
     )
     assert decision.behavior == "deny"
@@ -275,6 +315,7 @@ def test_evaluate_permissions_allows_read_only():
         type("Req", (), {"command": "ls"}),
         allowed_rules=set(),
         denied_rules=set(),
+        ask_rules=set(),
         allowed_working_dirs={cwd},
     )
     assert decision.behavior == "allow"
@@ -870,6 +911,7 @@ class TestFlexibleWildcardMatching:
             type("Req", (), {"command": "git status"}),
             allowed_rules=allowed_rules,
             denied_rules=set(),
+            ask_rules=set(),
             allowed_working_dirs={cwd},
         )
         assert decision.behavior == "allow"
@@ -879,6 +921,7 @@ class TestFlexibleWildcardMatching:
             type("Req", (), {"command": "npm install"}),
             allowed_rules=allowed_rules,
             denied_rules=set(),
+            ask_rules=set(),
             allowed_working_dirs={cwd},
         )
         assert decision.behavior == "allow"
@@ -888,6 +931,7 @@ class TestFlexibleWildcardMatching:
             type("Req", (), {"command": "python --help"}),
             allowed_rules=allowed_rules,
             denied_rules=set(),
+            ask_rules=set(),
             allowed_working_dirs={cwd},
         )
         assert decision.behavior == "allow"
@@ -953,6 +997,7 @@ class TestFlexibleWildcardMatching:
             type("Req", (), {"command": "rm -rf /tmp/test"}),
             allowed_rules=set(),
             denied_rules={"rm *"},
+            ask_rules=set(),
             allowed_working_dirs={cwd},
         )
         assert decision.behavior == "deny"
@@ -962,6 +1007,7 @@ class TestFlexibleWildcardMatching:
             type("Req", (), {"command": "git push --force"}),
             allowed_rules=set(),
             denied_rules={"* --force"},
+            ask_rules=set(),
             allowed_working_dirs={cwd},
         )
         assert decision.behavior == "deny"
