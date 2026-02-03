@@ -158,7 +158,7 @@ def _collect_add_profile_input(
         or max_tokens_default
     )
 
-    temp_default = existing_profile.temperature if existing_profile else 0.7
+    temp_default = existing_profile.temperature if existing_profile else 1.0
     temperature = _parse_float(
         console,
         f"Temperature [{temp_default}]: ",

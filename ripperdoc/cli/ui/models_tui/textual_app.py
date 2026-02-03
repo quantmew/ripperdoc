@@ -150,7 +150,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     id="max_tokens_input",
                 )
 
-                temp_default = self._existing_profile.temperature if self._existing_profile else 0.7
+                temp_default = self._existing_profile.temperature if self._existing_profile else 1.0
                 yield Static("Temperature", classes="field_label")
                 yield Input(
                     value=str(temp_default),
@@ -340,7 +340,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             if self._existing_profile and label == "Temperature":
                 return self._existing_profile.temperature
             if label == "Temperature":
-                return 0.7
+                return 1.0
             return None
         try:
             return float(raw)
