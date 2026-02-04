@@ -109,6 +109,100 @@ def _rule_strings(rule_suggestions: Optional[Any]) -> list[str]:
     return [rule for rule in rules if rule]
 
 
+def _serialize_permission_suggestions(rule_suggestions: Optional[Any]) -> Optional[list[Any]]:
+    """Convert rule suggestions into hook-friendly structures."""
+    if not rule_suggestions:
+        return None
+    suggestions: list[Any] = []
+    for suggestion in rule_suggestions:
+        if isinstance(suggestion, ToolRule):
+            suggestions.append(
+                {
+                    "toolName": suggestion.tool_name,
+                    "rule": suggestion.rule_content,
+                    "behavior": suggestion.behavior,
+                }
+            )
+        else:
+            suggestions.append(str(suggestion))
+    return suggestions or None
+
+
+def _apply_updated_permissions(
+    updated_permissions: Any,
+    *,
+    default_tool_name: str,
+    session_allowed_tools: Set[str],
+    session_tool_rules: dict[str, Set[str]],
+) -> None:
+    """Apply updatedPermissions output to in-session permission state."""
+    if not updated_permissions:
+        return
+
+    def _apply_entry(entry: Any) -> None:
+        if entry is None:
+            return
+        if isinstance(entry, str):
+            if default_tool_name == "Bash":
+                session_tool_rules.setdefault("Bash", set()).add(entry)
+            else:
+                session_allowed_tools.add(default_tool_name)
+            return
+        if not isinstance(entry, dict):
+            return
+
+        tool_name = (
+            entry.get("toolName")
+            or entry.get("tool_name")
+            or entry.get("tool")
+            or default_tool_name
+        )
+        behavior = (entry.get("behavior") or entry.get("decision") or "allow").lower()
+        rule = entry.get("rule") or entry.get("rule_content") or entry.get("ruleContent")
+
+        if behavior not in ("allow", "approve"):
+            return
+
+        if tool_name == "Bash":
+            if isinstance(rule, str) and rule:
+                session_tool_rules.setdefault("Bash", set()).add(rule)
+            return
+
+        if isinstance(tool_name, str) and tool_name:
+            session_allowed_tools.add(tool_name)
+
+    if isinstance(updated_permissions, list):
+        for entry in updated_permissions:
+            _apply_entry(entry)
+        return
+
+    if isinstance(updated_permissions, dict):
+        allowed_tools = updated_permissions.get("allowedTools") or updated_permissions.get(
+            "allowed_tools"
+        )
+        if isinstance(allowed_tools, list):
+            session_allowed_tools.update(
+                {str(name).strip() for name in allowed_tools if str(name).strip()}
+            )
+
+        bash_allow = (
+            updated_permissions.get("bashAllowRules")
+            or updated_permissions.get("bash_allow_rules")
+            or updated_permissions.get("allowRules")
+            or updated_permissions.get("allow_rules")
+        )
+        if isinstance(bash_allow, list):
+            session_tool_rules.setdefault("Bash", set()).update(
+                {str(rule).strip() for rule in bash_allow if str(rule).strip()}
+            )
+
+        if any(k in updated_permissions for k in ("toolName", "tool_name", "tool", "rule")):
+            _apply_entry(updated_permissions)
+        return
+
+    _apply_entry(updated_permissions)
+
+
 def make_permission_checker(
     project_path: Path,
     yolo_mode: bool,
@@ -171,17 +265,21 @@ def make_permission_checker(
 
         return await loop.run_in_executor(None, _ask)
 
-    async def can_use_tool(tool: Tool[Any, Any], parsed_input: Any) -> PermissionResult:
+    async def _evaluate_permission(
+        tool: Tool[Any, Any], parsed_input: Any, *, force_prompt: bool = False
+    ) -> PermissionResult:
         """Check and optionally persist permission for a tool invocation."""
         config = config_manager.get_project_config(project_path)
 
-        if yolo_mode:
+        if yolo_mode and not force_prompt:
             return PermissionResult(result=True)
 
         try:
             needs_permission = True
             if hasattr(tool, "needs_permissions"):
                 needs_permission = tool.needs_permissions(parsed_input)
+            if force_prompt:
+                needs_permission = True
         except (TypeError, AttributeError, ValueError) as exc:
             # Tool implementation error - log and deny for safety
             logger.warning(
@@ -276,7 +374,7 @@ def make_permission_checker(
 
         # If tool doesn't normally require permission (e.g., read-only Bash),
         # enforce deny rules but otherwise skip prompting.
-        if not needs_permission and decision.behavior != "ask":
+        if not needs_permission and decision.behavior != "ask" and not force_prompt:
             if decision.behavior == "deny":
                 return PermissionResult(
                     result=False,
@@ -290,7 +388,7 @@ def make_permission_checker(
                 decision=decision,
             )
 
-        if decision.behavior == "allow":
+        if decision.behavior == "allow" and not force_prompt:
             return PermissionResult(
                 result=True,
                 message=decision.message,
@@ -314,10 +412,19 @@ def make_permission_checker(
             else {}
         )
         try:
+            permission_suggestions = _serialize_permission_suggestions(
+                decision.rule_suggestions if decision else None
+            )
             hook_result = await hook_manager.run_permission_request_async(
-                tool.name, tool_input_dict
+                tool.name, tool_input_dict, permission_suggestions=permission_suggestions
             )
             if hook_result.outputs:
+                _apply_updated_permissions(
+                    hook_result.updated_permissions,
+                    default_tool_name=tool.name,
+                    session_allowed_tools=session_allowed_tools,
+                    session_tool_rules=session_tool_rules,
+                )
                 updated_input = hook_result.updated_input or decision.updated_input
                 if hook_result.should_allow:
                     return PermissionResult(
@@ -393,5 +500,13 @@ def make_permission_checker(
             message=decision.message or f"Permission denied for tool '{tool.name}'.",
             decision=decision,
         )
+
+    async def can_use_tool(tool: Tool[Any, Any], parsed_input: Any) -> PermissionResult:
+        return await _evaluate_permission(tool, parsed_input, force_prompt=False)
+
+    async def _force_prompt(tool: Tool[Any, Any], parsed_input: Any) -> PermissionResult:
+        return await _evaluate_permission(tool, parsed_input, force_prompt=True)
+
+    setattr(can_use_tool, "force_prompt", _force_prompt)
 
     return can_use_tool

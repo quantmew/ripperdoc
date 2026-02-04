@@ -11,7 +11,8 @@ from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optiona
 from pydantic import ValidationError
 
 from ripperdoc.core.config import ModelProfile, provider_protocol
-from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.hooks.manager import HookResult, hook_manager
+from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.providers import ProviderClient, get_provider_client
 from ripperdoc.core.query_utils import (
     build_full_system_prompt,
@@ -33,6 +34,7 @@ from ripperdoc.utils.messages import (
     ProgressMessage,
     UserMessage,
     create_assistant_message,
+    create_hook_notice_message,
     create_progress_message,
     create_user_message,
     normalize_messages_for_api,
@@ -43,7 +45,12 @@ from ripperdoc.utils.messages import (
 from .context import QueryContext, _append_hook_context, _apply_skill_context_updates
 from .errors import _format_changed_file_notice
 from .permissions import ToolPermissionCallable, _check_tool_permissions
-from .tools import _resolve_tool, _run_tool_use_generator, _run_tools_concurrently
+from .tools import (
+    _resolve_tool,
+    _run_hook_call_with_status,
+    _run_tool_use_generator,
+    _run_tools_concurrently,
+)
 
 logger = get_logger()
 
@@ -515,7 +522,12 @@ async def _run_query_iteration(
             _append_hook_context(context, f"{stop_hook}:context", stop_result.additional_context)
         logger.debug("[query] Checking system_message")
         if stop_result.system_message:
-            _append_hook_context(context, f"{stop_hook}:system", stop_result.system_message)
+            hook_event = "SubagentStop" if stop_hook == "subagent" else "Stop"
+            yield create_hook_notice_message(
+                str(stop_result.system_message),
+                hook_event=hook_event,
+                tool_name=getattr(query_context, "subagent_type", None),
+            )
         logger.debug("[query] Checking should_block")
         if stop_result.should_block:
             reason = stop_result.block_reason or stop_result.stop_reason or "Blocked by hook."
@@ -601,9 +613,113 @@ async def _run_query_iteration(
                 yield result_msg
                 continue
 
-            if not query_context.yolo_mode or can_use_tool_fn is not None:
+            tool_input_dict = (
+                parsed_input.model_dump()
+                if hasattr(parsed_input, "model_dump")
+                else dict(parsed_input)
+                if isinstance(parsed_input, dict)
+                else {}
+            )
+
+            # Run PreToolUse hooks before permission checks.
+            pre_result: Optional[HookResult] = None
+            async for item in _run_hook_call_with_status(
+                hook_manager.run_pre_tool_use_async(
+                    tool_name, tool_input_dict, tool_use_id=tool_use_id
+                ),
+                tool_use_id,
+                sibling_ids,
+            ):
+                if isinstance(item, ProgressMessage):
+                    yield item
+                else:
+                    pre_result = item
+            if pre_result is None:
+                pre_result = HookResult([])
+            if pre_result.should_block or not pre_result.should_continue:
+                reason = (
+                    pre_result.block_reason
+                    or pre_result.stop_reason
+                    or f"Blocked by hook: {tool_name}"
+                )
+                result_msg = tool_result_message(tool_use_id, f"Hook blocked: {reason}", is_error=True)
+                tool_results.append(result_msg)
+                yield result_msg
+                continue
+
+            if pre_result.updated_input:
+                logger.debug(
+                    f"[query] PreToolUse hook modified input for {tool_name}",
+                    extra={"tool_use_id": tool_use_id},
+                )
+                try:
+                    normalized_input = pre_result.updated_input
+                    if hasattr(normalized_input, "model_dump"):
+                        normalized_input = normalized_input.model_dump()
+                    elif not isinstance(normalized_input, dict):
+                        normalized_input = {"value": str(normalized_input)}
+                    parsed_input = tool.input_schema(**normalized_input)
+                    tool_input_dict = normalized_input
+                except ValidationError as ve:
+                    detail_text = format_pydantic_errors(ve)
+                    error_msg = tool_result_message(
+                        tool_use_id,
+                        f"Invalid PreToolUse-updated input for tool '{tool_name}': {detail_text}",
+                        is_error=True,
+                    )
+                    tool_results.append(error_msg)
+                    yield error_msg
+                    continue
+                except (TypeError, ValueError) as exc:
+                    logger.warning(
+                        "[query] Failed to apply updated input from PreToolUse hook: %s",
+                        exc,
+                        extra={"tool_use_id": tool_use_id},
+                    )
+                    error_msg = tool_result_message(
+                        tool_use_id,
+                        f"Invalid PreToolUse-updated input for tool '{tool_name}'.",
+                        is_error=True,
+                    )
+                    tool_results.append(error_msg)
+                    yield error_msg
+                    continue
+                validation = await tool.validate_input(parsed_input, tool_context)
+                if not validation.result:
+                    error_msg = tool_result_message(
+                        tool_use_id,
+                        validation.message or "Tool input validation failed.",
+                        is_error=True,
+                    )
+                    tool_results.append(error_msg)
+                    yield error_msg
+                    continue
+
+            if pre_result.additional_context:
+                _append_hook_context(
+                    context, f"PreToolUse:{tool_name}", pre_result.additional_context
+                )
+            if pre_result.system_message:
+                yield create_hook_notice_message(
+                    str(pre_result.system_message),
+                    hook_event="PreToolUse",
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    sibling_tool_use_ids=sibling_ids,
+                )
+
+            force_permission_prompt = pre_result.should_ask
+            bypass_permissions = pre_result.should_allow and not force_permission_prompt
+
+            if not bypass_permissions and (
+                not query_context.yolo_mode or can_use_tool_fn is not None or force_permission_prompt
+            ):
                 allowed, denial_message, updated_input = await _check_tool_permissions(
-                    tool, parsed_input, query_context, can_use_tool_fn
+                    tool,
+                    parsed_input,
+                    query_context,
+                    can_use_tool_fn,
+                    force_prompt=force_permission_prompt,
                 )
                 if not allowed:
                     logger.debug(
@@ -765,76 +881,81 @@ async def query(
     Yields:
         Messages (user, assistant, progress) as they are generated
     """
-    logger.info(
-        "[query] Starting query loop",
-        extra={
-            "message_count": len(messages),
-            "tool_count": len(query_context.tools),
-            "yolo_mode": query_context.yolo_mode,
-            "model_pointer": query_context.model,
-            "max_turns": query_context.max_turns,
-            "permission_mode": query_context.permission_mode,
-        },
-    )
-    # Work on a copy so external mutations (e.g., UI appending messages while consuming)
-    # do not interfere with the loop or normalization.
-    messages = list(messages)
-
-    for iteration in range(1, MAX_QUERY_ITERATIONS + 1):
-        # Inject any pending messages queued by background events or user interjections
-        pending_messages = query_context.drain_pending_messages()
-        if pending_messages:
-            messages.extend(pending_messages)
-            for pending in pending_messages:
-                yield pending
-
-        result = IterationResult()
-
-        async for msg in _run_query_iteration(
-            messages,
-            system_prompt,
-            context,
-            query_context,
-            can_use_tool_fn,
-            iteration,
-            result,
-        ):
-            yield msg
-
-        if result.should_stop:
-            # Before stopping, check if new pending messages arrived during this iteration.
-            trailing_pending = query_context.drain_pending_messages()
-            if trailing_pending:
-                # type: ignore[operator,list-item]
-                next_messages = (
-                    messages + [result.assistant_message] + result.tool_results
-                    if result.assistant_message is not None
-                    else messages + result.tool_results  # type: ignore[operator]
-                )  # type: ignore[operator]
-                next_messages = next_messages + trailing_pending  # type: ignore[operator,list-item]
-                for pending in trailing_pending:
-                    yield pending
-                messages = next_messages
-                continue
-            return
-
-        # Update messages for next iteration
-        if result.assistant_message is not None:
-            messages = messages + [result.assistant_message] + result.tool_results  # type: ignore[operator]
-        else:
-            messages = messages + result.tool_results  # type: ignore[operator]
-
-        logger.debug(
-            f"[query] Continuing loop with {len(messages)} messages after tools; "
-            f"tool_results_count={len(result.tool_results)}"
+    with bind_pending_message_queue(query_context.pending_message_queue):
+        logger.info(
+            "[query] Starting query loop",
+            extra={
+                "message_count": len(messages),
+                "tool_count": len(query_context.tools),
+                "yolo_mode": query_context.yolo_mode,
+                "model_pointer": query_context.model,
+                "max_turns": query_context.max_turns,
+                "permission_mode": query_context.permission_mode,
+            },
         )
+        # Work on a copy so external mutations (e.g., UI appending messages while consuming)
+        # do not interfere with the loop or normalization.
+        messages = list(messages)
 
-    # Reached max iterations
-    logger.warning(
-        f"[query] Reached maximum iterations ({MAX_QUERY_ITERATIONS}), stopping query loop"
-    )
-    yield create_assistant_message(
-        f"Reached maximum query iterations ({MAX_QUERY_ITERATIONS}). "
-        "Please continue the conversation to proceed.",
-        model=model_profile.model,
-    )
+        max_iterations = MAX_QUERY_ITERATIONS
+        if query_context.max_turns and query_context.max_turns > 0:
+            max_iterations = min(MAX_QUERY_ITERATIONS, query_context.max_turns)
+
+        for iteration in range(1, max_iterations + 1):
+            # Inject any pending messages queued by background events or user interjections
+            pending_messages = query_context.drain_pending_messages()
+            if pending_messages:
+                messages.extend(pending_messages)
+                for pending in pending_messages:
+                    yield pending
+
+            result = IterationResult()
+
+            async for msg in _run_query_iteration(
+                messages,
+                system_prompt,
+                context,
+                query_context,
+                can_use_tool_fn,
+                iteration,
+                result,
+            ):
+                yield msg
+
+            if result.should_stop:
+                # Before stopping, check if new pending messages arrived during this iteration.
+                trailing_pending = query_context.drain_pending_messages()
+                if trailing_pending:
+                    # type: ignore[operator,list-item]
+                    next_messages = (
+                        messages + [result.assistant_message] + result.tool_results
+                        if result.assistant_message is not None
+                        else messages + result.tool_results  # type: ignore[operator]
+                    )  # type: ignore[operator]
+                    next_messages = next_messages + trailing_pending  # type: ignore[operator,list-item]
+                    for pending in trailing_pending:
+                        yield pending
+                    messages = next_messages
+                    continue
+                return
+
+            # Update messages for next iteration
+            if result.assistant_message is not None:
+                messages = messages + [result.assistant_message] + result.tool_results  # type: ignore[operator]
+            else:
+                messages = messages + result.tool_results  # type: ignore[operator]
+
+            logger.debug(
+                f"[query] Continuing loop with {len(messages)} messages after tools; "
+                f"tool_results_count={len(result.tool_results)}"
+            )
+
+        # Reached max iterations
+        logger.warning(
+            f"[query] Reached maximum iterations ({max_iterations}), stopping query loop"
+        )
+        yield create_assistant_message(
+            f"Reached maximum query iterations ({max_iterations}). "
+            "Please continue the conversation to proceed.",
+            model=model_profile.model,
+        )

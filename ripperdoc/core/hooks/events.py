@@ -100,6 +100,10 @@ class PermissionRequestInput(HookInput):
     tool_name: str = ""
     tool_input: Dict[str, Any] = Field(default_factory=dict)
     tool_use_id: Optional[str] = None
+    # Suggested permission rules (e.g., from tool checks).
+    permission_suggestions: Optional[list[Any]] = Field(
+        default=None, alias="permissionSuggestions"
+    )
 
 
 class PostToolUseInput(HookInput):
@@ -290,6 +294,7 @@ class PermissionRequestDecision(BaseModel):
 
     behavior: str = ""  # "allow" or "deny"
     updated_input: Optional[Dict[str, Any]] = Field(default=None, alias="updatedInput")
+    updated_permissions: Optional[Any] = Field(default=None, alias="updatedPermissions")
     message: Optional[str] = None
     interrupt: bool = False
 
@@ -301,6 +306,7 @@ class PermissionRequestHookOutput(BaseModel):
 
     hook_event_name: Literal["PermissionRequest"] = "PermissionRequest"
     decision: Optional[PermissionRequestDecision] = None
+    updated_permissions: Optional[Any] = Field(default=None, alias="updatedPermissions")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -310,6 +316,9 @@ class PostToolUseHookOutput(BaseModel):
 
     hook_event_name: Literal["PostToolUse"] = "PostToolUse"
     additional_context: Optional[str] = Field(default=None, alias="additionalContext")
+    updated_mcp_tool_output: Optional[Any] = Field(
+        default=None, alias="updatedMCPToolOutput"
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -384,7 +393,13 @@ class HookOutput(BaseModel):
 
     @classmethod
     def from_raw(
-        cls, stdout: str, stderr: str, exit_code: int, timed_out: bool = False
+        cls,
+        stdout: str,
+        stderr: str,
+        exit_code: int,
+        timed_out: bool = False,
+        *,
+        allow_raw_output_context: bool = True,
     ) -> "HookOutput":
         """Parse hook output from raw command output.
 
@@ -425,9 +440,10 @@ class HookOutput(BaseModel):
         except json.JSONDecodeError:
             pass
 
-        # Not JSON, treat as raw output / additional context
+        # Not JSON, treat as raw output (optional additional context)
         output.raw_output = stdout
-        output.additional_context = stdout
+        if allow_raw_output_context:
+            output.additional_context = stdout
         return output
 
     @classmethod
@@ -454,6 +470,13 @@ class HookOutput(BaseModel):
 
         output.reason = data.get("reason")
 
+        # Claude-style ok field (for prompt/agent hooks)
+        ok_value = data.get("ok")
+        if isinstance(ok_value, bool) and output.decision is None:
+            output.decision = HookDecision.ALLOW if ok_value else HookDecision.DENY
+            if output.reason is None:
+                output.reason = data.get("reason") or data.get("message")
+
         # Parse hook-specific output
         if "hookSpecificOutput" in data:
             hso = data["hookSpecificOutput"]
@@ -468,6 +491,8 @@ class HookOutput(BaseModel):
                         updatedInput=hso.get("updatedInput"),
                         additionalContext=hso.get("additionalContext"),
                     )
+                    if hso.get("additionalContext"):
+                        output.additional_context = hso["additionalContext"]
                     # Map permissionDecision to decision
                     perm_decision = hso.get("permissionDecision")
                     if perm_decision:
@@ -488,6 +513,7 @@ class HookOutput(BaseModel):
                         decision_data = PermissionRequestDecision(
                             behavior=decision_obj.get("behavior", ""),
                             updatedInput=decision_obj.get("updatedInput"),
+                            updatedPermissions=decision_obj.get("updatedPermissions"),
                             message=decision_obj.get("message"),
                             interrupt=decision_obj.get("interrupt", False),
                         )
@@ -500,12 +526,15 @@ class HookOutput(BaseModel):
                             output.reason = decision_obj.get("message")
                     output.hook_specific_output = PermissionRequestHookOutput(
                         decision=decision_data,
+                        updatedPermissions=hso.get("updatedPermissions")
+                        or (decision_obj.get("updatedPermissions") if isinstance(decision_obj, dict) else None),
                     )
 
                 # Handle PostToolUse specific fields
                 elif event_name == "PostToolUse":
                     output.hook_specific_output = PostToolUseHookOutput(
                         additionalContext=hso.get("additionalContext"),
+                        updatedMCPToolOutput=hso.get("updatedMCPToolOutput"),
                     )
                     if hso.get("additionalContext"):
                         output.additional_context = hso["additionalContext"]
@@ -569,6 +598,28 @@ class HookOutput(BaseModel):
                 return decision.updated_input
         if isinstance(self.hook_specific_output, dict):
             return self.hook_specific_output.get("updatedInput")
+        return None
+
+    @property
+    def updated_permissions(self) -> Optional[Any]:
+        """Get updated permissions from PermissionRequest hook output."""
+        if isinstance(self.hook_specific_output, PermissionRequestHookOutput):
+            if self.hook_specific_output.updated_permissions is not None:
+                return self.hook_specific_output.updated_permissions
+            decision = self.hook_specific_output.decision
+            if decision and decision.updated_permissions is not None:
+                return decision.updated_permissions
+        if isinstance(self.hook_specific_output, dict):
+            return self.hook_specific_output.get("updatedPermissions")
+        return None
+
+    @property
+    def updated_mcp_tool_output(self) -> Optional[Any]:
+        """Get updated MCP tool output from PostToolUse hook output."""
+        if isinstance(self.hook_specific_output, PostToolUseHookOutput):
+            return self.hook_specific_output.updated_mcp_tool_output
+        if isinstance(self.hook_specific_output, dict):
+            return self.hook_specific_output.get("updatedMCPToolOutput")
         return None
 
 

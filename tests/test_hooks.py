@@ -102,6 +102,14 @@ class TestHookOutputParsing:
         output = HookOutput.from_raw(json_output, "", 0)
         assert output.decision == HookDecision.ALLOW
 
+    def test_json_ok_boolean(self):
+        """JSON with ok=true/false should map to allow/deny."""
+        output = HookOutput.from_raw(json.dumps({"ok": True}), "", 0)
+        assert output.decision == HookDecision.ALLOW
+        output = HookOutput.from_raw(json.dumps({"ok": False, "reason": "Nope"}), "", 0)
+        assert output.decision == HookDecision.DENY
+        assert output.reason == "Nope"
+
     def test_exit_code_2_blocking_error(self):
         """Exit code 2 should treat stderr as blocking error."""
         output = HookOutput.from_raw("", "Dangerous operation detected", 2)
@@ -183,12 +191,16 @@ class TestHookOutputParsing:
                         "updatedInput": {"path": "/tmp/safe"},
                         "message": "Auto-allowed for temp directory",
                     },
+                    "updatedPermissions": [
+                        {"toolName": "Bash", "rule": "ls:*", "behavior": "allow"}
+                    ],
                 }
             }
         )
         output = HookOutput.from_raw(json_output, "", 0)
         assert output.decision == HookDecision.ALLOW
         assert output.reason == "Auto-allowed for temp directory"
+        assert output.updated_permissions is not None
 
     def test_hook_specific_output_post_tool_use(self):
         """JSON with hookSpecificOutput for PostToolUse should parse correctly."""
@@ -197,11 +209,13 @@ class TestHookOutputParsing:
                 "hookSpecificOutput": {
                     "hookEventName": "PostToolUse",
                     "additionalContext": "Code quality check passed",
+                    "updatedMCPToolOutput": {"content": "sanitized"},
                 }
             }
         )
         output = HookOutput.from_raw(json_output, "", 0)
         assert output.additional_context == "Code quality check passed"
+        assert output.updated_mcp_tool_output == {"content": "sanitized"}
 
     def test_should_block_property(self):
         """should_block property should return True for DENY and BLOCK."""
@@ -383,8 +397,154 @@ class TestHooksConfig:
         assert hook.prompt == "Should continue? $ARGUMENTS"
         assert hook.timeout == 20
 
-    def test_prompt_hook_on_unsupported_event_skipped(self, tmp_path):
-        """Prompt hook on unsupported event should be skipped."""
+    def test_load_async_command_hook(self, tmp_path):
+        """Loading async command hook should parse correctly."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "echo done",
+                                        "timeout": 10,
+                                        "async": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        config = load_hooks_config(config_path)
+        hook = config.hooks["PostToolUse"][0].hooks[0]
+        assert hook.type == "command"
+        assert hook.command == "echo done"
+        assert hook.timeout == 10
+        assert hook.run_async is True
+
+    def test_load_status_message(self, tmp_path):
+        """Loading statusMessage should parse correctly."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "echo hi",
+                                        "statusMessage": "Checking...",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        config = load_hooks_config(config_path)
+        hook = config.hooks["PreToolUse"][0].hooks[0]
+        assert hook.status_message == "Checking..."
+
+    def test_load_once_hook_with_id(self, tmp_path):
+        """Loading once hook with id should parse correctly."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {
+                                        "id": "once-check",
+                                        "type": "command",
+                                        "command": "echo once",
+                                        "once": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        config = load_hooks_config(config_path)
+        hook = config.hooks["PreToolUse"][0].hooks[0]
+        assert hook.hook_id == "once-check"
+        assert hook.run_once is True
+
+    def test_load_agent_hook(self, tmp_path):
+        """Loading agent hook should parse correctly."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {
+                                        "type": "agent",
+                                        "prompt": "Check this: $ARGUMENTS",
+                                        "timeout": 45,
+                                        "model": "quick",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        config = load_hooks_config(config_path)
+        hook = config.hooks["PreToolUse"][0].hooks[0]
+        assert hook.type == "agent"
+        assert hook.prompt == "Check this: $ARGUMENTS"
+        assert hook.timeout == 45
+        assert hook.model == "quick"
+
+    def test_agent_hook_ignores_once(self, tmp_path):
+        """Agent hooks should ignore once=true."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {
+                                        "type": "agent",
+                                        "prompt": "Check",
+                                        "once": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        config = load_hooks_config(config_path)
+        hook = config.hooks["PreToolUse"][0].hooks[0]
+        assert hook.type == "agent"
+        assert hook.run_once is False
+
+    def test_prompt_hook_on_session_end_allowed(self, tmp_path):
+        """Prompt hook on SessionEnd should be allowed."""
         config_path = tmp_path / "hooks.json"
         config_path.write_text(
             json.dumps(
@@ -396,8 +556,26 @@ class TestHooksConfig:
             )
         )
         config = load_hooks_config(config_path)
-        # SessionEnd doesn't support prompt hooks, should be empty
-        assert "SessionEnd" not in config.hooks or len(config.hooks.get("SessionEnd", [])) == 0
+        assert "SessionEnd" in config.hooks
+        hook = config.hooks["SessionEnd"][0].hooks[0]
+        assert hook.type == "prompt"
+
+    def test_agent_hook_on_session_end_allowed(self, tmp_path):
+        """Agent hook on SessionEnd should be allowed."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionEnd": [{"hooks": [{"type": "agent", "prompt": "Test agent"}]}]
+                    }
+                }
+            )
+        )
+        config = load_hooks_config(config_path)
+        assert "SessionEnd" in config.hooks
+        hook = config.hooks["SessionEnd"][0].hooks[0]
+        assert hook.type == "agent"
 
     def test_unknown_event_skipped(self, tmp_path):
         """Unknown event names should be skipped with warning."""
@@ -548,6 +726,11 @@ class TestHookDefinition:
         assert hook.command is None
         assert hook.prompt is None
         assert hook.timeout == DEFAULT_HOOK_TIMEOUT
+        assert hook.model is None
+        assert hook.run_async is False
+        assert hook.run_once is False
+        assert hook.hook_id is None
+        assert hook.status_message is None
 
     def test_command_hook(self):
         """Command hook should be identified correctly."""
@@ -561,6 +744,13 @@ class TestHookDefinition:
         assert hook.is_command_hook() is False
         assert hook.is_prompt_hook() is True
 
+    def test_agent_hook(self):
+        """Agent hook should be identified correctly."""
+        hook = HookDefinition(type="agent", prompt="Evaluate with tools: $ARGUMENTS")
+        assert hook.is_command_hook() is False
+        assert hook.is_prompt_hook() is False
+        assert hook.is_agent_hook() is True
+
     def test_incomplete_command_hook(self):
         """Command hook without command should not be valid."""
         hook = HookDefinition(type="command", command=None)
@@ -570,6 +760,11 @@ class TestHookDefinition:
         """Prompt hook without prompt should not be valid."""
         hook = HookDefinition(type="prompt", prompt=None)
         assert hook.is_prompt_hook() is False
+
+    def test_incomplete_agent_hook(self):
+        """Agent hook without prompt should not be valid."""
+        hook = HookDefinition(type="agent", prompt=None)
+        assert hook.is_agent_hook() is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -681,6 +876,17 @@ class TestHookExecutor:
         """Prompt hooks should be skipped in sync mode."""
         executor = HookExecutor(project_dir=tmp_path)
         hook = HookDefinition(type="prompt", prompt="Test prompt")
+        input_data = StopInput()
+
+        output = executor.execute_sync(hook, input_data)
+
+        # Should return empty output, not error
+        assert output.error is None
+
+    def test_execute_sync_agent_hook_skipped(self, tmp_path):
+        """Agent hooks should be skipped in sync mode."""
+        executor = HookExecutor(project_dir=tmp_path)
+        hook = HookDefinition(type="agent", prompt="Test prompt")
         input_data = StopInput()
 
         output = executor.execute_sync(hook, input_data)
@@ -906,6 +1112,84 @@ class TestHookManager:
         result = manager.run_pre_tool_use("Bash", {"command": "ls"})
 
         assert result.should_allow is True
+
+    def test_run_pre_tool_use_once_per_session(self, tmp_path, monkeypatch):
+        """once hooks should run once per session."""
+        monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
+
+        config_dir = tmp_path / ".ripperdoc"
+        config_dir.mkdir(parents=True)
+        json_output = json.dumps({"decision": "allow"})
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": f"echo '{json_output}'",
+                                        "once": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        manager = HookManager(project_dir=tmp_path, session_id="s1")
+        first = manager.run_pre_tool_use("Bash", {"command": "ls"})
+        second = manager.run_pre_tool_use("Bash", {"command": "ls"})
+        assert len(first.outputs) == 1
+        assert len(second.outputs) == 0
+
+        manager.set_session_id("s2")
+        third = manager.run_pre_tool_use("Bash", {"command": "ls"})
+        assert len(third.outputs) == 1
+
+    def test_status_message_emitted(self, tmp_path, monkeypatch):
+        """statusMessage should emit through the hook status emitter."""
+        from ripperdoc.core.hooks.state import bind_hook_status_emitter
+
+        monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
+
+        config_dir = tmp_path / ".ripperdoc"
+        config_dir.mkdir(parents=True)
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "echo ok",
+                                        "statusMessage": "Checking hook",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        manager = HookManager(project_dir=tmp_path)
+        seen: list[str] = []
+
+        def _emit(msg: str) -> None:
+            seen.append(msg)
+
+        with bind_hook_status_emitter(_emit):
+            _ = manager.run_pre_tool_use("Bash", {"command": "ls"})
+
+        assert seen == ["Checking hook"]
 
     @pytest.mark.asyncio
     async def test_run_pre_tool_use_async(self, tmp_path, monkeypatch):
@@ -2023,6 +2307,55 @@ class TestHookManagerAsyncMethods:
         assert len(result.outputs) == 1
 
     @pytest.mark.asyncio
+    async def test_async_command_hook_enqueues_output(self, tmp_path, monkeypatch):
+        """Async command hooks should enqueue hook notices."""
+        from ripperdoc.utils.pending_messages import PendingMessageQueue
+        from ripperdoc.core.hooks.state import bind_pending_message_queue
+        from ripperdoc.utils.messages import is_hook_notice_payload
+
+        monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
+
+        config_dir = tmp_path / ".ripperdoc"
+        config_dir.mkdir(parents=True)
+        payload = json.dumps({"systemMessage": "Async hook completed"})
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": f"echo '{payload}'",
+                                        "async": True,
+                                        "timeout": 5,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        manager = HookManager(project_dir=tmp_path)
+        queue = PendingMessageQueue()
+
+        with bind_pending_message_queue(queue):
+            await manager.run_post_tool_use_async("Bash", {}, "output")
+            await asyncio.sleep(0.1)
+
+        messages = queue.drain()
+        assert any(
+            getattr(msg, "type", "") == "progress"
+            and is_hook_notice_payload(getattr(msg, "content", None))
+            and msg.content.get("text") == "Async hook completed"
+            for msg in messages
+        )
+
+    @pytest.mark.asyncio
     async def test_run_user_prompt_submit_async(self, tmp_path, monkeypatch):
         """run_user_prompt_submit_async should execute hooks."""
         monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
@@ -2164,6 +2497,41 @@ class TestHookManagerAsyncMethods:
 
         assert len(result.outputs) == 1
         manager.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_session_start_env_applied(self, tmp_path, monkeypatch):
+        """SessionStart should load and apply env vars from RIPPERDOC_ENV_FILE."""
+        monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
+
+        config_dir = tmp_path / ".ripperdoc"
+        config_dir.mkdir(parents=True)
+        env_key = "RIPPERDOC_SESSION_ENV_TEST"
+        command = (
+            "python -c \"import os, json; "
+            "json.dump({\\\"%s\\\": \\\"1\\\"}, open(os.environ['RIPPERDOC_ENV_FILE'], 'w'))\""
+            % env_key
+        )
+        (config_dir / "hooks.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {"hooks": [{"type": "command", "command": command}]}
+                        ]
+                    }
+                }
+            )
+        )
+
+        manager = HookManager(project_dir=tmp_path)
+        try:
+            if env_key in os.environ:
+                monkeypatch.delenv(env_key, raising=False)
+            await manager.run_session_start_async("startup")
+            assert os.environ.get(env_key) == "1"
+        finally:
+            monkeypatch.delenv(env_key, raising=False)
+            manager.cleanup()
 
     @pytest.mark.asyncio
     async def test_run_session_end_async(self, tmp_path, monkeypatch):

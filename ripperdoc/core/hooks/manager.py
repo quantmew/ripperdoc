@@ -5,6 +5,9 @@ throughout the application lifecycle.
 """
 
 import os
+import asyncio
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +35,12 @@ from ripperdoc.core.hooks.events import (
     SetupInput,
 )
 from ripperdoc.core.hooks.executor import HookExecutor, LLMCallback
+from ripperdoc.core.hooks.state import (
+    hooks_suspended,
+    get_pending_message_queue,
+    get_hook_status_emitter,
+)
+from ripperdoc.utils.messages import create_hook_notice_message, create_user_message
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -109,6 +118,22 @@ class HookResult:
         return None
 
     @property
+    def updated_permissions(self) -> Optional[Any]:
+        """Get updated permissions from PermissionRequest hooks, if any."""
+        for o in self.outputs:
+            if o.updated_permissions is not None:
+                return o.updated_permissions
+        return None
+
+    @property
+    def updated_mcp_tool_output(self) -> Optional[Any]:
+        """Get updated MCP tool output from PostToolUse hooks, if any."""
+        for o in self.outputs:
+            if o.updated_mcp_tool_output is not None:
+                return o.updated_mcp_tool_output
+        return None
+
+    @property
     def has_errors(self) -> bool:
         """Check if any hook had an error."""
         return any(o.error for o in self.outputs)
@@ -153,6 +178,7 @@ class HookManager:
         self._config: Optional[HooksConfig] = None
         self._executor: Optional[HookExecutor] = None
         self._setup_ran_for_project: Optional[Path] = None
+        self._once_executed: set[str] = set()
 
     @property
     def config(self) -> HooksConfig:
@@ -186,6 +212,8 @@ class HookManager:
 
     def set_session_id(self, session_id: Optional[str]) -> None:
         """Update the session ID."""
+        if session_id != self.session_id:
+            self._once_executed.clear()
         self.session_id = session_id
         if self._executor:
             self._executor.session_id = session_id
@@ -245,12 +273,190 @@ class HookManager:
         self, event: HookEvent, matcher_value: Optional[str] = None
     ) -> List[HookDefinition]:
         """Get hooks that should run for an event."""
-        return self.config.get_hooks_for_event(event, matcher_value)
+        if hooks_suspended():
+            return []
+        hooks = self.config.get_hooks_for_event(event, matcher_value)
+        return self._select_hooks_for_execution(event, hooks)
+
+    def _hook_identity(self, event: HookEvent, hook: HookDefinition) -> str:
+        if hook.hook_id:
+            return f"id:{hook.hook_id}"
+        payload = {
+            "event": event.value,
+            "type": hook.type,
+            "command": hook.command,
+            "prompt": hook.prompt,
+            "model": hook.model,
+            "timeout": hook.timeout,
+            "async": hook.run_async,
+            "once": hook.run_once,
+            "statusMessage": hook.status_message,
+        }
+        encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _select_hooks_for_execution(
+        self, event: HookEvent, hooks: List[HookDefinition]
+    ) -> List[HookDefinition]:
+        selected: List[HookDefinition] = []
+        seen: set[str] = set()
+        for hook in hooks:
+            key = self._hook_identity(event, hook)
+            if key in seen:
+                continue
+            seen.add(key)
+            if hook.run_once:
+                if key in self._once_executed:
+                    continue
+                # Mark once as soon as we schedule it to avoid concurrent re-entry.
+                self._once_executed.add(key)
+            selected.append(hook)
+        return selected
+
+    def _enqueue_async_hook_output(
+        self,
+        output: HookOutput,
+        input_data: Any,
+    ) -> None:
+        queue = get_pending_message_queue()
+        if queue is None:
+            logger.debug("[hook_manager] Async hook output dropped: no pending message queue")
+            return
+
+        event = getattr(input_data, "hook_event_name", "Hook")
+        detail = event
+        tool_name = getattr(input_data, "tool_name", None)
+        if tool_name:
+            detail = f"{detail}:{tool_name}"
+        metadata = {"source": "hook_async", "hook_event": event, "tool_name": tool_name}
+
+        if output.system_message:
+            notice = create_hook_notice_message(
+                str(output.system_message),
+                hook_event=event,
+                tool_name=tool_name,
+            )
+            try:
+                queue.enqueue(notice)  # ProgressMessage is filtered from model input.
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "[hook_manager] Failed to enqueue async hook notice: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+
+        if output.additional_context:
+            try:
+                message = create_user_message(
+                    f"[async hook {detail}]\n{output.additional_context}"
+                )
+                message.message.metadata.update(metadata)
+                queue.enqueue(message)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "[hook_manager] Failed to enqueue async hook output: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+
+    def _start_async_command_hook(self, hook: HookDefinition, input_data: Any) -> None:
+        async def _runner() -> None:
+            try:
+                output = await self.executor._execute_command_async(hook, input_data)
+                self._enqueue_async_hook_output(output, input_data)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "[hook_manager] Async hook failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+
+        try:
+            task = asyncio.create_task(_runner())
+        except RuntimeError as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "[hook_manager] Async hook requested but no running loop: %s", exc
+            )
+            return
+
+        def _handle_task_done(t: asyncio.Task[None]) -> None:
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc:
+                logger.warning(
+                    "[hook_manager] Async hook task error: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+
+        task.add_done_callback(_handle_task_done)
+
+    async def _execute_hooks_async(
+        self,
+        hooks: List[HookDefinition],
+        input_data: Any,
+    ) -> List[HookOutput]:
+        results: List[HookOutput] = []
+        for hook in hooks:
+            self._emit_status(hook, input_data)
+            if hook.is_command_hook() and hook.run_async:
+                self._start_async_command_hook(hook, input_data)
+                results.append(HookOutput())
+                continue
+            results.append(await self.executor.execute_async(hook, input_data))
+        return results
+
+    def _execute_hooks_sync(
+        self,
+        hooks: List[HookDefinition],
+        input_data: Any,
+    ) -> List[HookOutput]:
+        results: List[HookOutput] = []
+        for hook in hooks:
+            self._emit_status(hook, input_data)
+            results.append(self.executor.execute_sync(hook, input_data))
+        return results
+
+    def _emit_status(self, hook: HookDefinition, input_data: Any) -> None:
+        if not hook.status_message:
+            return
+        emitter = get_hook_status_emitter()
+        if emitter:
+            try:
+                emitter(str(hook.status_message))
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(
+                    "[hook_manager] status emitter failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+        logger.info(
+            "[hook_manager] %s",
+            hook.status_message,
+            extra={
+                "hook_event": getattr(input_data, "hook_event_name", None),
+                "hook_type": hook.type,
+            },
+        )
 
     def cleanup(self) -> None:
         """Clean up resources (call on session end)."""
         if self._executor:
             self._executor.cleanup_env_file()
+
+    def _apply_session_env(self) -> None:
+        """Load and apply environment variables produced by SessionStart hooks."""
+        if not self._executor:
+            return
+        updates = self._executor.load_env_from_file()
+        if not updates:
+            return
+        os.environ.update(updates)
+        logger.info(
+            "[hook_manager] Loaded SessionStart environment updates",
+            extra={"count": len(updates)},
+        )
 
     # --- Pre Tool Use ---
 
@@ -284,7 +490,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_pre_tool_use_async(
@@ -308,7 +514,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Permission Request ---
@@ -318,6 +524,7 @@ class HookManager:
         tool_name: str,
         tool_input: Dict[str, Any],
         tool_use_id: Optional[str] = None,
+        permission_suggestions: Optional[List[Any]] = None,
     ) -> HookResult:
         """Run PermissionRequest hooks synchronously.
 
@@ -337,13 +544,14 @@ class HookManager:
             tool_name=tool_name,
             tool_input=tool_input,
             tool_use_id=tool_use_id,
+            permission_suggestions=permission_suggestions,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_permission_request_async(
@@ -351,6 +559,7 @@ class HookManager:
         tool_name: str,
         tool_input: Dict[str, Any],
         tool_use_id: Optional[str] = None,
+        permission_suggestions: Optional[List[Any]] = None,
     ) -> HookResult:
         """Run PermissionRequest hooks asynchronously."""
         hooks = self._get_hooks(HookEvent.PERMISSION_REQUEST, tool_name)
@@ -361,13 +570,14 @@ class HookManager:
             tool_name=tool_name,
             tool_input=tool_input,
             tool_use_id=tool_use_id,
+            permission_suggestions=permission_suggestions,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Post Tool Use ---
@@ -395,7 +605,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_post_tool_use_async(
@@ -421,7 +631,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Post Tool Use Failure ---
@@ -456,7 +666,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_post_tool_use_failure_async(
@@ -489,7 +699,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- User Prompt Submit ---
@@ -508,7 +718,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_user_prompt_submit_async(self, prompt: str) -> HookResult:
@@ -525,7 +735,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Notification ---
@@ -557,7 +767,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_notification_async(
@@ -581,7 +791,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Stop ---
@@ -613,7 +823,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_stop_async(
@@ -642,7 +852,7 @@ class HookManager:
         )
 
         logger.debug("[hook_manager] run_stop_async: calling executor.execute_hooks_async")
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         logger.debug("[hook_manager] run_stop_async: execute_hooks_async returned")
         return HookResult(outputs)
 
@@ -673,7 +883,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_subagent_start_async(
@@ -701,7 +911,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Subagent Stop ---
@@ -730,7 +940,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_subagent_stop_async(
@@ -752,7 +962,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Setup ---
@@ -771,7 +981,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_setup_async(self, trigger: str = "init") -> HookResult:
@@ -788,7 +998,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Pre Compact ---
@@ -813,7 +1023,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_pre_compact_async(
@@ -833,7 +1043,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
     # --- Session Start ---
@@ -858,7 +1068,8 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
+        self._apply_session_env()
         return HookResult(outputs)
 
     async def run_session_start_async(self, source: str) -> HookResult:
@@ -877,7 +1088,8 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
+        self._apply_session_env()
         return HookResult(outputs)
 
     # --- Session End ---
@@ -909,7 +1121,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        outputs = self._execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
     async def run_session_end_async(
@@ -933,7 +1145,7 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
 

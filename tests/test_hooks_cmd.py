@@ -36,6 +36,8 @@ def test_hooks_add_creates_local_file(tmp_path, monkeypatch):
             "",  # matcher: match all
             "",  # hook type: command
             "echo hello",  # command
+            "",  # status message
+            "",  # run in background? (default no)
             "15",  # timeout
         ]
     )
@@ -81,6 +83,8 @@ def test_hooks_edit_updates_existing_entry(tmp_path, monkeypatch):
             "1",  # hook index
             "",  # hook type: keep command
             "echo after",  # new command
+            "",  # status message
+            "",  # run in background? (default no)
             "25",  # new timeout
         ]
     )

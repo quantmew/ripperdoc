@@ -4,15 +4,17 @@ import asyncio
 import os
 import sys
 from asyncio import CancelledError
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Awaitable, Dict, List, Optional, Union
 
-from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.hooks.manager import HookResult, hook_manager
+from ripperdoc.core.hooks.state import bind_hook_status_emitter
 from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.utils.log import get_logger
 from ripperdoc.core.query_utils import tool_result_message
 from ripperdoc.utils.messages import (
     ProgressMessage,
     UserMessage,
+    create_hook_notice_message,
     create_progress_message,
     create_user_message,
 )
@@ -42,6 +44,63 @@ def _resolve_tool(
     )
 
 
+async def _run_hook_call_with_status(
+    awaitable: Awaitable[HookResult],
+    tool_use_id: str,
+    sibling_ids: set[str],
+) -> AsyncGenerator[Union[ProgressMessage, HookResult], None]:
+    """Run a hook call while streaming statusMessage updates as progress."""
+    status_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def _emit_status(message: str) -> None:
+        try:
+            status_queue.put_nowait(message)
+        except asyncio.QueueFull:
+            pass
+
+    async def _drain_status_queue() -> AsyncGenerator[ProgressMessage, None]:
+        while not status_queue.empty():
+            msg = status_queue.get_nowait()
+            yield create_progress_message(
+                tool_use_id=tool_use_id,
+                sibling_tool_use_ids=sibling_ids,
+                content=msg,
+            )
+
+    with bind_hook_status_emitter(_emit_status):
+        task = asyncio.create_task(awaitable)
+        while True:
+            if task.done():
+                break
+            get_task = asyncio.create_task(status_queue.get())
+            done, pending = await asyncio.wait(
+                {task, get_task}, timeout=0.2, return_when=asyncio.FIRST_COMPLETED
+            )
+            if get_task in done:
+                msg = get_task.result()
+                yield create_progress_message(
+                    tool_use_id=tool_use_id,
+                    sibling_tool_use_ids=sibling_ids,
+                    content=msg,
+                )
+            if task in done:
+                for p in pending:
+                    p.cancel()
+                break
+            for p in pending:
+                if p is not task:
+                    p.cancel()
+                    try:
+                        await p
+                    except asyncio.CancelledError:
+                        pass
+
+        async for pending in _drain_status_queue():
+            yield pending
+        result = await task
+        yield result
+
+
 async def _run_tool_use_generator(
     tool: Tool[Any, Any],
     tool_use_id: str,
@@ -66,53 +125,9 @@ async def _run_tool_use_generator(
         else {}
     )
 
-    # Run PreToolUse hooks
-    pre_result = await hook_manager.run_pre_tool_use_async(
-        tool_name, tool_input_dict, tool_use_id=tool_use_id
-    )
-    if pre_result.should_block:
-        block_reason = pre_result.block_reason or f"Blocked by hook: {tool_name}"
-        logger.info(
-            f"[query] Tool {tool_name} blocked by PreToolUse hook",
-            extra={"tool_use_id": tool_use_id, "reason": block_reason},
-        )
-        yield tool_result_message(tool_use_id, f"Hook blocked: {block_reason}", is_error=True)
-        return
-
-    # Handle updated input from hooks
-    if pre_result.updated_input:
-        logger.debug(
-            f"[query] PreToolUse hook modified input for {tool_name}",
-            extra={"tool_use_id": tool_use_id},
-        )
-        # Re-parse the input with the updated values
-        try:
-            # Ensure updated_input is a dict, not a Pydantic model
-            updated_input = pre_result.updated_input
-            if hasattr(updated_input, "model_dump"):
-                updated_input = updated_input.model_dump()
-            elif not isinstance(updated_input, dict):
-                updated_input = {"value": str(updated_input)}
-            parsed_input = tool.input_schema(**updated_input)
-            tool_input_dict = updated_input
-        except (ValueError, TypeError) as exc:
-            logger.warning(
-                f"[query] Failed to apply updated input from hook: {exc}",
-                extra={"tool_use_id": tool_use_id},
-            )
-
-    # Add hook context if provided
-    if pre_result.additional_context:
-        logger.debug(
-            f"[query] PreToolUse hook added context for {tool_name}",
-            extra={"context": pre_result.additional_context[:100]},
-        )
-        _append_hook_context(context, f"PreToolUse:{tool_name}", pre_result.additional_context)
-    if pre_result.system_message:
-        _append_hook_context(context, f"PreToolUse:{tool_name}:system", pre_result.system_message)
-
     tool_output = None
     tool_error: Optional[str] = None
+    pending_results: List[tuple[Any, str]] = []
 
     try:
         logger.debug("[query] _run_tool_use_generator: BEFORE tool.call() for '%s'", tool_name)
@@ -138,10 +153,7 @@ async def _run_tool_use_generator(
                     elif isinstance(output, ToolResult):
                         tool_output = output.data
                         result_content = output.result_for_assistant or str(output.data)
-                        result_msg = tool_result_message(
-                            tool_use_id, result_content, tool_use_result=output.data
-                        )
-                        yield result_msg
+                        pending_results.append((output.data, result_content))
                         logger.debug(
                             f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
                             f"result_len={len(result_content)}"
@@ -176,14 +188,25 @@ async def _run_tool_use_generator(
 
     if tool_error:
         is_interrupt = False
-        post_failure_result = await hook_manager.run_post_tool_use_failure_async(
-            tool_name,
-            tool_input_dict,
-            tool_response=tool_output,
-            error=tool_error,
-            is_interrupt=is_interrupt,
-            tool_use_id=tool_use_id,
-        )
+        post_failure_result: Optional[HookResult] = None
+        async for item in _run_hook_call_with_status(
+            hook_manager.run_post_tool_use_failure_async(
+                tool_name,
+                tool_input_dict,
+                tool_response=tool_output,
+                error=tool_error,
+                is_interrupt=is_interrupt,
+                tool_use_id=tool_use_id,
+            ),
+            tool_use_id,
+            sibling_ids,
+        ):
+            if isinstance(item, ProgressMessage):
+                yield item
+            else:
+                post_failure_result = item
+        if post_failure_result is None:
+            post_failure_result = HookResult([])
         if post_failure_result.additional_context:
             _append_hook_context(
                 context,
@@ -191,12 +214,14 @@ async def _run_tool_use_generator(
                 post_failure_result.additional_context,
             )
         if post_failure_result.system_message:
-            _append_hook_context(
-                context,
-                f"PostToolUseFailure:{tool_name}:system",
-                post_failure_result.system_message,
+            yield create_hook_notice_message(
+                str(post_failure_result.system_message),
+                hook_event="PostToolUseFailure",
+                tool_name=tool_name,
+                tool_use_id=tool_use_id,
+                sibling_tool_use_ids=sibling_ids,
             )
-        if post_failure_result.should_block:
+        if post_failure_result.should_block or not post_failure_result.should_continue:
             reason = (
                 post_failure_result.block_reason
                 or post_failure_result.stop_reason
@@ -206,14 +231,71 @@ async def _run_tool_use_generator(
         return
 
     # Run PostToolUse hooks
-    post_result = await hook_manager.run_post_tool_use_async(
-        tool_name, tool_input_dict, tool_response=tool_output, tool_use_id=tool_use_id
-    )
+    post_result: Optional[HookResult] = None
+    async for item in _run_hook_call_with_status(
+        hook_manager.run_post_tool_use_async(
+            tool_name, tool_input_dict, tool_response=tool_output, tool_use_id=tool_use_id
+        ),
+        tool_use_id,
+        sibling_ids,
+    ):
+        if isinstance(item, ProgressMessage):
+            yield item
+        else:
+            post_result = item
+    if post_result is None:
+        post_result = HookResult([])
+    # Apply updated MCP tool output before emitting tool results.
+    if pending_results and post_result.updated_mcp_tool_output is not None:
+        updated = post_result.updated_mcp_tool_output
+        if getattr(tool, "is_mcp", False):
+            current_output, current_text = pending_results[-1]
+            updated_output = current_output
+            updated_text: Optional[str] = None
+            try:
+                if isinstance(updated, dict) and hasattr(current_output, "model_copy"):
+                    updated_output = current_output.model_copy(update=updated)
+                elif isinstance(updated, str) and hasattr(current_output, "model_copy"):
+                    updated_output = current_output.model_copy(
+                        update={"content": updated, "text": updated}
+                    )
+                    updated_text = updated
+                elif isinstance(updated, dict):
+                    updated_output = updated
+                elif isinstance(updated, str):
+                    updated_output = {"content": updated, "text": updated}
+                    updated_text = updated
+                else:
+                    updated_output = updated
+            except Exception:
+                updated_output = current_output
+
+            if updated_text is None:
+                try:
+                    updated_text = tool.render_result_for_assistant(updated_output)
+                except Exception:
+                    updated_text = None
+            pending_results[-1] = (
+                updated_output,
+                updated_text or current_text,
+            )
+
+    for result_data, result_text in pending_results:
+        result_msg = tool_result_message(
+            tool_use_id, result_text, tool_use_result=result_data
+        )
+        yield result_msg
     if post_result.additional_context:
         _append_hook_context(context, f"PostToolUse:{tool_name}", post_result.additional_context)
     if post_result.system_message:
-        _append_hook_context(context, f"PostToolUse:{tool_name}:system", post_result.system_message)
-    if post_result.should_block:
+        yield create_hook_notice_message(
+            str(post_result.system_message),
+            hook_event="PostToolUse",
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            sibling_tool_use_ids=sibling_ids,
+        )
+    if post_result.should_block or not post_result.should_continue:
         reason = post_result.block_reason or post_result.stop_reason or "Blocked by hook."
         yield create_user_message(f"PostToolUse hook blocked: {reason}")
 

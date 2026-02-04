@@ -246,6 +246,55 @@ class ProgressMessage(BaseModel):
         super().__init__(**data)
 
 
+HOOK_NOTICE_TYPE = "hook_notice"
+
+
+def create_hook_notice_payload(
+    text: str,
+    hook_event: str,
+    tool_name: Optional[str] = None,
+    level: str = "info",
+) -> Dict[str, Any]:
+    """Create a structured hook notice payload for user-facing messages."""
+    payload: Dict[str, Any] = {
+        "type": HOOK_NOTICE_TYPE,
+        "text": text,
+        "hook_event": hook_event,
+        "level": level,
+    }
+    if tool_name:
+        payload["tool_name"] = tool_name
+    return payload
+
+
+def is_hook_notice_payload(content: Any) -> bool:
+    """Check whether a progress content payload is a hook notice."""
+    return isinstance(content, dict) and content.get("type") == HOOK_NOTICE_TYPE
+
+
+def create_hook_notice_message(
+    text: str,
+    hook_event: str,
+    *,
+    tool_name: Optional[str] = None,
+    level: str = "info",
+    tool_use_id: str = "hook_notice",
+    sibling_tool_use_ids: Optional[set[str]] = None,
+) -> ProgressMessage:
+    """Create a progress message for hook notices that should be shown to the user."""
+    payload = create_hook_notice_payload(
+        text=text,
+        hook_event=hook_event,
+        tool_name=tool_name,
+        level=level,
+    )
+    return create_progress_message(
+        tool_use_id=tool_use_id,
+        sibling_tool_use_ids=sibling_tool_use_ids or set(),
+        content=payload,
+    )
+
+
 def create_user_message(
     content: Union[str, List[Dict[str, Any]]],
     tool_use_result: Optional[object] = None,

@@ -21,6 +21,7 @@ from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
 from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
+from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
 from ripperdoc.core.hooks.manager import hook_manager
@@ -315,13 +316,21 @@ class RichUI:
 
     def _collect_hook_contexts(self, hook_result: Any) -> List[str]:
         contexts: List[str] = []
-        system_message = getattr(hook_result, "system_message", None)
         additional_context = getattr(hook_result, "additional_context", None)
-        if system_message:
-            contexts.append(str(system_message))
         if additional_context:
             contexts.append(str(additional_context))
         return contexts
+
+    def _display_hook_system_message(
+        self, hook_result: Any, event: str, tool_name: Optional[str] = None
+    ) -> None:
+        system_message = getattr(hook_result, "system_message", None)
+        if not system_message:
+            return
+        label = f"{event}:{tool_name}" if tool_name else event
+        self.console.print(
+            f"[yellow]Hook {escape(str(label))}[/yellow] {escape(str(system_message))}"
+        )
 
     def _set_session_hook_contexts(self, hook_result: Any) -> None:
         self._session_hook_contexts = self._collect_hook_contexts(hook_result)
@@ -330,7 +339,13 @@ class RichUI:
 
     def _run_session_start(self, source: str) -> None:
         try:
-            result = self._run_async(hook_manager.run_session_start_async(source))
+            queue = (
+                self.query_context.pending_message_queue
+                if self.query_context is not None
+                else None
+            )
+            with bind_pending_message_queue(queue):
+                result = self._run_async(hook_manager.run_session_start_async(source))
         except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
             logger.warning(
                 "[ui] SessionStart hook failed: %s: %s",
@@ -339,11 +354,18 @@ class RichUI:
                 extra={"session_id": self.session_id, "source": source},
             )
             return
+        self._display_hook_system_message(result, "SessionStart")
         self._set_session_hook_contexts(result)
 
     async def _run_session_start_async(self, source: str) -> None:
         try:
-            result = await hook_manager.run_session_start_async(source)
+            queue = (
+                self.query_context.pending_message_queue
+                if self.query_context is not None
+                else None
+            )
+            with bind_pending_message_queue(queue):
+                result = await hook_manager.run_session_start_async(source)
         except (OSError, RuntimeError, ConnectionError, ValueError, TypeError) as exc:
             logger.warning(
                 "[ui] SessionStart hook failed: %s: %s",
@@ -352,6 +374,7 @@ class RichUI:
                 extra={"session_id": self.session_id, "source": source},
             )
             return
+        self._display_hook_system_message(result, "SessionStart")
         self._set_session_hook_contexts(result)
 
     def _run_session_end(self, reason: str) -> None:
@@ -655,8 +678,11 @@ class RichUI:
     def _print_replay_user(self, text: str) -> None:
         """Render restored user messages with a prompt-style prefix."""
         lines = text.splitlines() or [text]
-        for line in lines:
-            self.console.print(f"> {line}", markup=False)
+        for i, line in enumerate(lines):
+            if i == 0:
+                self.console.print(f"> {line}", markup=False)
+            else:
+                self.console.print(line, markup=False)
 
     def get_default_tools(self) -> list:
         """Get the default set of tools, filtered by allowed_tools if specified."""
@@ -865,8 +891,10 @@ class RichUI:
                         or hook_result.stop_reason
                         or "Compaction blocked by hook."
                     )
-                    console.print(f"[yellow]{escape(str(reason))}[/yellow]")
-                    return messages
+                    console.print(
+                        f"[yellow]PreCompact hook warning (ignored): {escape(str(reason))}[/yellow]"
+                    )
+                self._display_hook_system_message(hook_result, "PreCompact")
                 hook_contexts = self._collect_hook_contexts(hook_result)
                 if hook_contexts:
                     hook_instructions = "\n\n".join(hook_contexts)
@@ -942,13 +970,20 @@ class RichUI:
         )
 
         try:
-            hook_result = await hook_manager.run_user_prompt_submit_async(user_input)
+            queue = (
+                self.query_context.pending_message_queue
+                if self.query_context is not None
+                else None
+            )
+            with bind_pending_message_queue(queue):
+                hook_result = await hook_manager.run_user_prompt_submit_async(user_input)
             if hook_result.should_block or not hook_result.should_continue:
                 reason = (
                     hook_result.block_reason or hook_result.stop_reason or "Prompt blocked by hook."
                 )
                 self.console.print(f"[red]{escape(str(reason))}[/red]")
                 return
+            self._display_hook_system_message(hook_result, "UserPromptSubmit")
             hook_instructions = self._collect_hook_contexts(hook_result)
 
             # Prepare context and system prompt
@@ -1439,8 +1474,10 @@ class RichUI:
                     or hook_result.stop_reason
                     or "Compaction blocked by hook."
                 )
-                self.console.print(f"[yellow]{escape(str(reason))}[/yellow]")
-                return
+                self.console.print(
+                    f"[yellow]PreCompact hook warning (ignored): {escape(str(reason))}[/yellow]"
+                )
+            self._display_hook_system_message(hook_result, "PreCompact")
             hook_contexts = self._collect_hook_contexts(hook_result)
             if hook_contexts:
                 hook_instructions = "\n\n".join(hook_contexts)

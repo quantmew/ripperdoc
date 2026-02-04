@@ -15,12 +15,20 @@ Configuration format:
           {
             "type": "command",
             "command": "your-command-here",
+            "async": false,
+            "statusMessage": "Running hook command",
             "timeout": 100
           },
           {
             "type": "prompt",
             "prompt": "Evaluate if this should proceed: $ARGUMENTS",
             "timeout": 30
+          },
+          {
+            "type": "agent",
+            "prompt": "Verify with tools: $ARGUMENTS",
+            "model": "quick",
+            "timeout": 60
           }
         ]
       }
@@ -33,7 +41,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ripperdoc.core.hooks.events import HookEvent
 from ripperdoc.utils.log import get_logger
@@ -43,14 +51,11 @@ logger = get_logger()
 # Default timeout for hook commands (in seconds)
 DEFAULT_HOOK_TIMEOUT = 60
 
-# Hook events that support prompt-based hooks
-PROMPT_SUPPORTED_EVENTS = {
-    "Stop",
-    "SubagentStop",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PermissionRequest",
-}
+# Prompt/agent hooks are supported for all hook events.
+PROMPT_SUPPORTED_EVENTS = {event.value for event in HookEvent}
+
+# Agent hooks support the same events as prompt hooks.
+AGENT_SUPPORTED_EVENTS = set(PROMPT_SUPPORTED_EVENTS)
 
 # Hook events that match on tool names (tool_name in input).
 TOOL_MATCHER_EVENTS = {
@@ -90,15 +95,23 @@ ALWAYS_MATCHER_EVENTS = {
 class HookDefinition(BaseModel):
     """Definition of a single hook.
 
-    Supports two types:
+    Supports hook types:
     - command: Execute a shell command
-    - prompt: Use LLM to evaluate (for supported events only)
+    - prompt: Use LLM to evaluate
+    - agent: Spawn a subagent to evaluate with tool access
     """
 
-    type: Literal["command", "prompt"] = "command"
+    type: Literal["command", "prompt", "agent"] = "command"
     command: Optional[str] = None  # Shell command (for type="command")
     prompt: Optional[str] = None  # LLM prompt (for type="prompt"), use $ARGUMENTS for input JSON
     timeout: int = DEFAULT_HOOK_TIMEOUT  # Timeout in seconds
+    model: Optional[str] = None  # Model pointer for agent hooks (e.g., "quick")
+    run_async: bool = Field(default=False, alias="async")  # Background execution (command only)
+    run_once: bool = Field(default=False, alias="once")  # Execute only once per session
+    hook_id: Optional[str] = Field(default=None, alias="id")  # Optional stable hook identity
+    status_message: Optional[str] = Field(default=None, alias="statusMessage")
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def is_command_hook(self) -> bool:
         """Check if this is a command-based hook."""
@@ -107,6 +120,10 @@ class HookDefinition(BaseModel):
     def is_prompt_hook(self) -> bool:
         """Check if this is a prompt-based hook."""
         return self.type == "prompt" and self.prompt is not None
+
+    def is_agent_hook(self) -> bool:
+        """Check if this is an agent-based hook."""
+        return self.type == "agent" and self.prompt is not None
 
 
 class HookMatcher(BaseModel):
@@ -134,7 +151,7 @@ class HookMatcher(BaseModel):
             return True
 
         if matcher_value is None:
-            return False
+            return True
 
         # Try exact match first (case-sensitive)
         if self.matcher == matcher_value:
@@ -244,7 +261,7 @@ def _parse_hooks_file(data: Dict[str, Any]) -> HooksConfig:
                 hook_type = hook_data.get("type", "command")
 
                 # Validate hook type
-                if hook_type not in ("command", "prompt"):
+                if hook_type not in ("command", "prompt", "agent"):
                     logger.warning(f"Unknown hook type: {hook_type}")
                     continue
 
@@ -256,21 +273,45 @@ def _parse_hooks_file(data: Dict[str, Any]) -> HooksConfig:
                         type="command",
                         command=hook_data["command"],
                         timeout=hook_data.get("timeout", DEFAULT_HOOK_TIMEOUT),
+                        run_async=bool(hook_data.get("async", False)),
+                        run_once=bool(hook_data.get("once", False)),
+                        hook_id=hook_data.get("id"),
+                        status_message=hook_data.get("statusMessage"),
                     )
-                # For prompt hooks, require prompt field and validate event
+                # For prompt hooks, require prompt field
                 elif hook_type == "prompt":
                     if "prompt" not in hook_data:
                         continue
-                    # Warn if prompt hooks used on unsupported events
-                    if event_name not in PROMPT_SUPPORTED_EVENTS:
+                    if hook_data.get("async"):
                         logger.warning(
-                            f"Prompt hooks not supported for {event_name} event, skipping"
+                            "Async hooks are only supported for type='command'; ignoring async flag."
                         )
-                        continue
                     hook_def = HookDefinition(
                         type="prompt",
                         prompt=hook_data["prompt"],
                         timeout=hook_data.get("timeout", DEFAULT_HOOK_TIMEOUT),
+                        run_once=bool(hook_data.get("once", False)),
+                        hook_id=hook_data.get("id"),
+                        status_message=hook_data.get("statusMessage"),
+                    )
+                # For agent hooks, require prompt field and validate event
+                elif hook_type == "agent":
+                    if "prompt" not in hook_data:
+                        continue
+                    if hook_data.get("async"):
+                        logger.warning(
+                            "Async hooks are only supported for type='command'; ignoring async flag."
+                        )
+                    if hook_data.get("once"):
+                        logger.warning("once is not supported for agent hooks; ignoring.")
+                    hook_def = HookDefinition(
+                        type="agent",
+                        prompt=hook_data["prompt"],
+                        timeout=hook_data.get("timeout", DEFAULT_HOOK_TIMEOUT),
+                        model=hook_data.get("model"),
+                        run_once=False,
+                        hook_id=hook_data.get("id"),
+                        status_message=hook_data.get("statusMessage"),
                     )
                 else:
                     continue

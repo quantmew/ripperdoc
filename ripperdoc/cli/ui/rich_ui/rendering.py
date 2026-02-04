@@ -11,8 +11,10 @@ from ripperdoc.utils.messages import (
     ProgressMessage,
     INTERRUPT_MESSAGE,
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
+    is_hook_notice_payload,
 )
 from ripperdoc.utils.token_estimation import estimate_tokens
+from rich.markup import escape
 
 
 def simplify_progress_suffix(content: Any) -> str:
@@ -147,6 +149,18 @@ def handle_progress_message(
     output_token_est: int,
 ) -> int:
     """Handle a progress message and update spinner."""
+    if is_hook_notice_payload(message.content):
+        payload = message.content
+        hook_event = payload.get("hook_event") or "Hook"
+        tool_name = payload.get("tool_name")
+        label = f"{hook_event}:{tool_name}" if tool_name else str(hook_event)
+        text = payload.get("text", "")
+        with spinner.paused():
+            ui.console.print(
+                f"[yellow]Hook {escape(str(label))}[/yellow] {escape(str(text))}"
+            )
+        return output_token_est
+
     if ui.verbose:
         with spinner.paused():
             ui.display_message("System", f"Progress: {message.content}", is_tool=True)

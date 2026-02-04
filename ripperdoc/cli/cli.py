@@ -23,6 +23,7 @@ from ripperdoc.core.default_tools import (
     get_default_tools,
 )
 from ripperdoc.core.query import query, QueryContext
+from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, load_all_skills
 from ripperdoc.core.hooks.manager import hook_manager
@@ -132,13 +133,16 @@ async def run_query(
 
     def _collect_hook_contexts(result: Any) -> List[str]:
         contexts: List[str] = []
-        system_message = getattr(result, "system_message", None)
         additional_context = getattr(result, "additional_context", None)
-        if system_message:
-            contexts.append(str(system_message))
         if additional_context:
             contexts.append(str(additional_context))
         return contexts
+
+    def _print_hook_system_message(result: Any, event: str) -> None:
+        system_message = getattr(result, "system_message", None)
+        if not system_message:
+            return
+        console.print(f"[yellow]Hook {event}: {escape(str(system_message))}[/yellow]")
 
     # Create initial user message
     from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMessage
@@ -177,23 +181,26 @@ async def run_query(
         if memory_instructions:
             additional_instructions.append(memory_instructions)
 
-        session_start_result = await hook_manager.run_session_start_async("startup")
-        session_hook_contexts = _collect_hook_contexts(session_start_result)
-        if session_hook_contexts:
-            additional_instructions.extend(session_hook_contexts)
+        with bind_pending_message_queue(query_context.pending_message_queue):
+            session_start_result = await hook_manager.run_session_start_async("startup")
+            _print_hook_system_message(session_start_result, "SessionStart")
+            session_hook_contexts = _collect_hook_contexts(session_start_result)
+            if session_hook_contexts:
+                additional_instructions.extend(session_hook_contexts)
 
-        prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
-        if prompt_hook_result.should_block or not prompt_hook_result.should_continue:
-            reason = (
-                prompt_hook_result.block_reason
-                or prompt_hook_result.stop_reason
-                or "Prompt blocked by hook."
-            )
-            console.print(f"[red]{escape(str(reason))}[/red]")
-            return
-        prompt_hook_contexts = _collect_hook_contexts(prompt_hook_result)
-        if prompt_hook_contexts:
-            additional_instructions.extend(prompt_hook_contexts)
+            prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
+            if prompt_hook_result.should_block or not prompt_hook_result.should_continue:
+                reason = (
+                    prompt_hook_result.block_reason
+                    or prompt_hook_result.stop_reason
+                    or "Prompt blocked by hook."
+                )
+                console.print(f"[red]{escape(str(reason))}[/red]")
+                return
+            _print_hook_system_message(prompt_hook_result, "UserPromptSubmit")
+            prompt_hook_contexts = _collect_hook_contexts(prompt_hook_result)
+            if prompt_hook_contexts:
+                additional_instructions.extend(prompt_hook_contexts)
 
         # Build system prompt based on options:
         # - custom_system_prompt: replaces the default entirely
@@ -223,6 +230,19 @@ async def run_query(
             async for message in query(
                 messages, system_prompt, context, query_context, can_use_tool
             ):
+                if message.type == "progress":
+                    content = getattr(message, "content", None)
+                    from ripperdoc.utils.messages import is_hook_notice_payload
+
+                    if is_hook_notice_payload(content):
+                        event = content.get("hook_event", "Hook")
+                        tool_name = content.get("tool_name")
+                        label = f"{event}:{tool_name}" if tool_name else str(event)
+                        text = content.get("text", "")
+                        console.print(
+                            f"[yellow]Hook {escape(str(label))}[/yellow] {escape(str(text))}"
+                        )
+
                 if message.type == "assistant" and hasattr(message, "message"):
                     # Collect assistant message text for final output
                     if isinstance(message.message.content, str):

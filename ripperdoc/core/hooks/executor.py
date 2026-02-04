@@ -3,9 +3,10 @@
 This module handles the actual execution of hook commands,
 including environment setup, input passing, and output parsing.
 
-Supports two hook types:
+Supports hook types:
 - command: Execute a shell command
 - prompt: Use LLM to evaluate (requires LLM callback)
+- agent: Spawn a subagent to evaluate with tool access
 """
 
 import asyncio
@@ -17,10 +18,59 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Awaitable
 
 from ripperdoc.core.hooks.config import HookDefinition
-from ripperdoc.core.hooks.events import AnyHookInput, HookOutput, HookDecision, SessionStartInput
+from ripperdoc.core.hooks.events import (
+    AnyHookInput,
+    HookOutput,
+    SessionStartInput,
+    UserPromptSubmitInput,
+)
+from ripperdoc.core.hooks.state import suspend_hooks
+from ripperdoc.core.system_prompt import build_environment_prompt
+from ripperdoc.tools.bash_output_tool import BashOutputTool
+from ripperdoc.tools.bash_tool import BashTool
+from ripperdoc.tools.file_read_tool import FileReadTool
+from ripperdoc.tools.glob_tool import GlobTool
+from ripperdoc.tools.grep_tool import GrepTool
+from ripperdoc.tools.kill_bash_tool import KillBashTool
+from ripperdoc.tools.ls_tool import LSTool
+from ripperdoc.tools.lsp_tool import LspTool
+from ripperdoc.utils.messages import AssistantMessage, create_user_message
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
+
+HOOK_AGENT_MAX_TURNS = 50
+HOOK_AGENT_DEFAULT_MODEL = "quick"
+
+
+def _extract_message_text(message: AssistantMessage) -> str:
+    content = message.message.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            text = getattr(block, "text", None) or (
+                block.get("text") if isinstance(block, dict) else None
+            )
+            if text:
+                parts.append(str(text))
+        return "\n".join(parts)
+    return ""
+
+
+def _build_hook_agent_tools():
+    """Create a constrained toolset for agent-based hooks."""
+    return [
+        FileReadTool(),
+        GlobTool(),
+        GrepTool(),
+        LSTool(),
+        BashTool(),
+        BashOutputTool(),
+        KillBashTool(),
+        LspTool(),
+    ]
 
 # Type for LLM callback used by prompt hooks
 # Takes prompt string, returns LLM response string
@@ -143,7 +193,9 @@ class HookExecutor:
         prompt = prompt.replace("${ARGUMENTS}", input_json)
         return prompt
 
-    def _parse_prompt_response(self, response: str) -> HookOutput:
+    def _parse_prompt_response(
+        self, response: str, *, allow_raw_output_context: bool = True
+    ) -> HookOutput:
         """Parse LLM response from a prompt hook.
 
         Expected response format (JSON):
@@ -155,7 +207,8 @@ class HookExecutor:
             "systemMessage": "warning"    // optional
         }
 
-        Or plain text (treated as additional context with no decision).
+        Or plain text (treated as raw output; for SessionStart/UserPromptSubmit it is
+        also added as additional context).
         """
         response = response.strip()
         if not response:
@@ -165,33 +218,111 @@ class HookExecutor:
         try:
             data = json.loads(response)
             if isinstance(data, dict):
-                output = HookOutput()
-
-                # Parse decision
-                decision_str = data.get("decision", "").lower()
-                if decision_str == "approve":
-                    output.decision = HookDecision.ALLOW
-                elif decision_str == "block":
-                    output.decision = HookDecision.BLOCK
-                elif decision_str == "allow":
-                    output.decision = HookDecision.ALLOW
-                elif decision_str == "deny":
-                    output.decision = HookDecision.DENY
-                elif decision_str == "ask":
-                    output.decision = HookDecision.ASK
-
-                output.reason = data.get("reason")
-                output.continue_execution = data.get("continue", True)
-                output.stop_reason = data.get("stopReason")
-                output.system_message = data.get("systemMessage")
-                output.additional_context = data.get("additionalContext")
-
-                return output
+                return HookOutput._parse_json_output(data, "")
         except json.JSONDecodeError:
             pass
 
-        # Not JSON, treat as additional context
-        return HookOutput(raw_output=response, additionalContext=response)
+        # Not JSON, treat as raw output (and optional additional context)
+        return HookOutput(
+            raw_output=response,
+            additional_context=response if allow_raw_output_context else None,
+        )
+
+    def _allow_raw_output_context(self, input_data: AnyHookInput) -> bool:
+        """Return True if non-JSON stdout should be injected as context."""
+        return isinstance(input_data, (SessionStartInput, UserPromptSubmitInput))
+
+    def _build_agent_system_prompt(self, tool_names: str) -> str:
+        """Build the system prompt for agent-based hooks."""
+        return "\n\n".join(
+            [
+                (
+                    "You are a hook verification subagent. "
+                    "Use the allowed tools to inspect the codebase and determine whether the hook should allow or block. "
+                    "Do not modify files. Do not ask the user questions. "
+                    "When you are done, respond with a single JSON object and nothing else.\n\n"
+                    "Response schema:\n"
+                    '- {"ok": true}\n'
+                    '- {"ok": false, "reason": "..."}\n\n'
+                    "If you are unsure, return ok=false with a clear reason."
+                ),
+                f"Allowed tools: {tool_names}",
+                build_environment_prompt(),
+            ]
+        )
+
+    async def _execute_agent_async(
+        self,
+        hook: HookDefinition,
+        input_data: AnyHookInput,
+    ) -> HookOutput:
+        """Execute an agent-based hook asynchronously."""
+        if not hook.prompt:
+            logger.warning("Agent hook has no prompt template")
+            return HookOutput(error="Agent hook missing prompt template")
+
+        # Expand the prompt template
+        prompt = self._expand_prompt(hook.prompt, input_data)
+        model = hook.model or HOOK_AGENT_DEFAULT_MODEL
+
+        logger.debug(
+            "Executing agent hook",
+            extra={
+                "event": input_data.hook_event_name,
+                "timeout": hook.timeout,
+                "model": model,
+                "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+            },
+        )
+
+        tools = _build_hook_agent_tools()
+        tool_names = ", ".join(tool.name for tool in tools if getattr(tool, "name", None))
+        system_prompt = self._build_agent_system_prompt(tool_names)
+
+        async def _run_agent() -> str:
+            assistant_messages: list[AssistantMessage] = []
+            from ripperdoc.core.query import QueryContext, query
+
+            query_context = QueryContext(
+                tools=tools,
+                yolo_mode=True,
+                model=model,
+                max_turns=HOOK_AGENT_MAX_TURNS,
+                permission_mode=input_data.permission_mode,
+            )
+            with suspend_hooks():
+                async for message in query(
+                    [create_user_message(prompt)],
+                    system_prompt,
+                    {},
+                    query_context,
+                    None,
+                ):
+                    if getattr(message, "type", "") == "assistant":
+                        if isinstance(message, AssistantMessage):
+                            assistant_messages.append(message)
+            if not assistant_messages:
+                return ""
+            return _extract_message_text(assistant_messages[-1]).strip()
+
+        try:
+            response = await asyncio.wait_for(_run_agent(), timeout=hook.timeout)
+            output = self._parse_prompt_response(
+                response, allow_raw_output_context=self._allow_raw_output_context(input_data)
+            )
+            logger.debug(
+                "Agent hook completed",
+                extra={
+                    "decision": output.decision.value if output.decision else None,
+                },
+            )
+            return output
+        except asyncio.TimeoutError:
+            logger.warning(f"Agent hook timed out after {hook.timeout}s")
+            return HookOutput.from_raw("", "", 1, timed_out=True)
+        except Exception as exc:
+            logger.error(f"Agent hook execution failed: {exc}")
+            return HookOutput(error=str(exc), exit_code=1)
 
     async def execute_prompt_async(
         self,
@@ -239,7 +370,9 @@ class HookExecutor:
                 timeout=hook.timeout,
             )
 
-            output = self._parse_prompt_response(response)
+            output = self._parse_prompt_response(
+                response, allow_raw_output_context=self._allow_raw_output_context(input_data)
+            )
 
             logger.debug(
                 "Prompt hook completed",
@@ -275,9 +408,11 @@ class HookExecutor:
         Returns:
             HookOutput containing the result or error
         """
-        # Prompt hooks require async - skip in sync mode
-        if hook.is_prompt_hook():
-            logger.warning("Prompt hook skipped in sync mode. Use execute_async for prompt hooks.")
+        # Prompt and agent hooks require async - skip in sync mode
+        if hook.is_prompt_hook() or hook.is_agent_hook():
+            logger.warning(
+                "Prompt/agent hook skipped in sync mode. Use execute_async for prompt/agent hooks."
+            )
             return HookOutput()
 
         return self._execute_command_sync(hook, input_data)
@@ -330,6 +465,7 @@ class HookExecutor:
                 stdout=result.stdout,
                 stderr=result.stderr,
                 exit_code=result.returncode,
+                allow_raw_output_context=self._allow_raw_output_context(input_data),
             )
 
             logger.debug(
@@ -371,6 +507,8 @@ class HookExecutor:
         """
         if hook.is_prompt_hook():
             return await self.execute_prompt_async(hook, input_data)
+        if hook.is_agent_hook():
+            return await self._execute_agent_async(hook, input_data)
 
         return await self._execute_command_async(hook, input_data)
 
@@ -426,6 +564,7 @@ class HookExecutor:
                     stdout=stdout.decode(),
                     stderr=stderr.decode(),
                     exit_code=process.returncode or 0,
+                    allow_raw_output_context=self._allow_raw_output_context(input_data),
                 )
 
                 logger.debug(

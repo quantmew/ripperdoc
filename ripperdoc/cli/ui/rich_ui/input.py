@@ -13,6 +13,7 @@ from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
+from prompt_toolkit.lexers import SimpleLexer
 
 from ripperdoc.cli.commands import CustomCommandDefinition, slash_command_completions
 from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
@@ -209,4 +210,5 @@ def build_prompt_session(ui: object, ignore_filter: Any) -> PromptSession:
         input=input_obj,
         style=prompt_style,
         rprompt=ui._get_rprompt,
+        lexer=SimpleLexer('bg:#444444 #ffffff')
     )

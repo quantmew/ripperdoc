@@ -19,6 +19,7 @@ from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.permissions import make_permission_checker
 from ripperdoc.core.query import QueryContext, query
+from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.query_utils import resolve_model_profile
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.protocol.models import (
@@ -41,7 +42,11 @@ from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async, shutdown_mcp_runtime
-from ripperdoc.utils.messages import create_user_message
+from ripperdoc.utils.messages import (
+    create_hook_notice_payload,
+    create_user_message,
+    is_hook_notice_payload,
+)
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.session_history import SessionHistory
 
@@ -464,48 +469,61 @@ class StdioProtocolHandler:
 
             # Build system prompt
             additional_instructions: list[str] = []
+            hook_notices: list[dict[str, Any]] = []
 
-            # Run session start hooks with timeout
-            try:
-                async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
-                    session_start_result = await hook_manager.run_session_start_async("startup")
-                    if hasattr(session_start_result, "system_message"):
-                        if session_start_result.system_message:
-                            additional_instructions.append(str(session_start_result.system_message))
-                    if hasattr(session_start_result, "additional_context"):
-                        if session_start_result.additional_context:
-                            additional_instructions.append(str(session_start_result.additional_context))
-            except asyncio.TimeoutError:
-                logger.warning(f"[stdio] Session start hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
-            except Exception as e:
-                logger.warning(f"[stdio] Session start hook failed: {e}")
+            queue = self._query_context.pending_message_queue if self._query_context else None
+            with bind_pending_message_queue(queue):
+                # Run session start hooks with timeout
+                try:
+                    async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
+                        session_start_result = await hook_manager.run_session_start_async("startup")
+                        if hasattr(session_start_result, "system_message"):
+                            if session_start_result.system_message:
+                                hook_notices.append(
+                                    create_hook_notice_payload(
+                                        text=str(session_start_result.system_message),
+                                        hook_event="SessionStart",
+                                    )
+                                )
+                        if hasattr(session_start_result, "additional_context"):
+                            if session_start_result.additional_context:
+                                additional_instructions.append(str(session_start_result.additional_context))
+                except asyncio.TimeoutError:
+                    logger.warning(f"[stdio] Session start hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
+                except Exception as e:
+                    logger.warning(f"[stdio] Session start hook failed: {e}")
 
-            # Run prompt submit hooks with timeout
-            try:
-                async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
-                    prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
-                    if hasattr(prompt_hook_result, "should_block") and prompt_hook_result.should_block:
-                        reason = (
-                            prompt_hook_result.block_reason
-                            if hasattr(prompt_hook_result, "block_reason")
-                            else "Prompt blocked by hook."
-                        )
-                        await self._write_control_response(request_id, error=str(reason))
-                        return
-                    if (
-                        hasattr(prompt_hook_result, "system_message")
-                        and prompt_hook_result.system_message
-                    ):
-                        additional_instructions.append(str(prompt_hook_result.system_message))
-                    if (
-                        hasattr(prompt_hook_result, "additional_context")
-                        and prompt_hook_result.additional_context
-                    ):
-                        additional_instructions.append(str(prompt_hook_result.additional_context))
-            except asyncio.TimeoutError:
-                logger.warning(f"[stdio] Prompt submit hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
-            except Exception as e:
-                logger.warning(f"[stdio] Prompt submit hook failed: {e}")
+                # Run prompt submit hooks with timeout
+                try:
+                    async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
+                        prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
+                        if hasattr(prompt_hook_result, "should_block") and prompt_hook_result.should_block:
+                            reason = (
+                                prompt_hook_result.block_reason
+                                if hasattr(prompt_hook_result, "block_reason")
+                                else "Prompt blocked by hook."
+                            )
+                            await self._write_control_response(request_id, error=str(reason))
+                            return
+                        if (
+                            hasattr(prompt_hook_result, "system_message")
+                            and prompt_hook_result.system_message
+                        ):
+                            hook_notices.append(
+                                create_hook_notice_payload(
+                                    text=str(prompt_hook_result.system_message),
+                                    hook_event="UserPromptSubmit",
+                                )
+                            )
+                        if (
+                            hasattr(prompt_hook_result, "additional_context")
+                            and prompt_hook_result.additional_context
+                        ):
+                            additional_instructions.append(str(prompt_hook_result.additional_context))
+                except asyncio.TimeoutError:
+                    logger.warning(f"[stdio] Prompt submit hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
+                except Exception as e:
+                    logger.warning(f"[stdio] Prompt submit hook failed: {e}")
 
             # Build final system prompt
             servers = await load_mcp_servers_async(self._project_path)
@@ -523,6 +541,21 @@ class StdioProtocolHandler:
             await self._write_control_response(
                 request_id, response={"status": "querying", "session_id": self._session_id}
             )
+            for notice in hook_notices:
+                await self._write_message_stream(
+                    {
+                        "type": "user",
+                        "message": {
+                            "content": notice.get("text", ""),
+                            "metadata": {
+                                "hook_notice": True,
+                                "hook_event": notice.get("hook_event"),
+                                "tool_name": notice.get("tool_name"),
+                                "level": notice.get("level"),
+                            },
+                        },
+                    }
+                )
 
             # Execute query with comprehensive timeout and error handling
             try:
@@ -560,6 +593,23 @@ class StdioProtocolHandler:
 
                             # Handle progress messages
                             if msg_type == "progress":
+                                notice_content = getattr(message, "content", None)
+                                if is_hook_notice_payload(notice_content):
+                                    await self._write_message_stream(
+                                        {
+                                            "type": "user",
+                                            "message": {
+                                                "content": notice_content.get("text", ""),
+                                                "metadata": {
+                                                    "hook_notice": True,
+                                                    "hook_event": notice_content.get("hook_event"),
+                                                    "tool_name": notice_content.get("tool_name"),
+                                                    "level": notice_content.get("level"),
+                                                },
+                                            },
+                                        }
+                                    )
+                                    continue
                                 # Check if this is a subagent message that should be forwarded to SDK
                                 is_subagent_msg = getattr(message, "is_subagent_message", False)
                                 if is_subagent_msg:

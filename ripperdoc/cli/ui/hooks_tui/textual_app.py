@@ -13,7 +13,7 @@ from textual.app import App, ComposeResult
 from textual import events
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, OptionList, Select, Static, TextArea
+from textual.widgets import Button, Checkbox, Footer, Header, Input, OptionList, Select, Static, TextArea
 from textual.widgets.option_list import Option
 
 from ripperdoc.core.default_tools import BUILTIN_TOOL_NAMES
@@ -303,7 +303,7 @@ class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
         with Container(id="form_dialog"):
             yield Static(title, id="form_title")
             with VerticalScroll(id="form_fields"):
-                if self._hook_type == "prompt":
+                if self._hook_type in ("prompt", "agent"):
                     prompt_default = self._existing_hook.get("prompt", "")
                     yield Static("Prompt template (use $ARGUMENTS for JSON input)", classes="field_label")
                     yield TextArea(
@@ -311,6 +311,14 @@ class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
                         placeholder="Prompt template",
                         id="prompt_input",
                     )
+                    if self._hook_type == "agent":
+                        model_default = self._existing_hook.get("model", "")
+                        yield Static("Model pointer (optional)", classes="field_label")
+                        yield Input(
+                            value=model_default,
+                            placeholder="quick",
+                            id="model_input",
+                        )
                 else:
                     command_default = self._existing_hook.get("command", "")
                     yield Static("Command to run", classes="field_label")
@@ -319,6 +327,31 @@ class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
                         placeholder="Command to run",
                         id="command_input",
                     )
+
+                # Options section
+                yield Static("", classes="field_label")
+                yield Static("Options", classes="field_label")
+                if self._hook_type == "command":
+                    yield Checkbox(
+                        label="Run asynchronously (don't block)",
+                        value=self._existing_hook.get("async", False),
+                        id="async_checkbox",
+                    )
+                if self._hook_type in ("command", "prompt"):
+                    once_hint = " Skills only" if self._hook_type == "prompt" else ""
+                    yield Checkbox(
+                        label=f"Run once per session{once_hint}",
+                        value=self._existing_hook.get("once", False),
+                        id="once_checkbox",
+                    )
+
+                status_message_default = self._existing_hook.get("statusMessage", "")
+                yield Static("Status message (optional)", classes="field_label")
+                yield Input(
+                    value=status_message_default,
+                    placeholder="Custom spinner message while hook runs",
+                    id="status_message_input",
+                )
 
                 timeout_default = str(
                     self._existing_hook.get("timeout", DEFAULT_HOOK_TIMEOUT)
@@ -335,7 +368,7 @@ class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
                 yield Button("Cancel", id="form_cancel")
 
     def on_mount(self) -> None:
-        if self._hook_type == "prompt":
+        if self._hook_type in ("prompt", "agent"):
             self.query_one("#prompt_input", TextArea).focus()
         else:
             self.query_one("#command_input", Input).focus()
@@ -350,18 +383,40 @@ class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
         if event.button.id != "form_save":
             return
 
-        if self._hook_type == "prompt":
+        if self._hook_type in ("prompt", "agent"):
             prompt_text = (self.query_one("#prompt_input", TextArea).text or "").strip()
             if not prompt_text:
                 self._set_error("Prompt text is required.")
                 return
-            hook: Dict[str, Any] = {"type": "prompt", "prompt": prompt_text}
+            hook_type = "prompt" if self._hook_type == "prompt" else "agent"
+            hook = {"type": hook_type, "prompt": prompt_text}
+            if hook_type == "agent":
+                model_text = (self.query_one("#model_input", Input).value or "").strip()
+                if model_text:
+                    hook["model"] = model_text
         else:
             command_text = (self.query_one("#command_input", Input).value or "").strip()
             if not command_text:
                 self._set_error("Command is required.")
                 return
             hook = {"type": "command", "command": command_text}
+
+        # Handle async option (command only)
+        if self._hook_type == "command":
+            async_checkbox = self.query_one("#async_checkbox", Checkbox)
+            if async_checkbox.value:
+                hook["async"] = True
+
+        # Handle once option (command and prompt)
+        if self._hook_type in ("command", "prompt"):
+            once_checkbox = self.query_one("#once_checkbox", Checkbox)
+            if once_checkbox.value:
+                hook["once"] = True
+
+        # Handle statusMessage (all types)
+        status_message = (self.query_one("#status_message_input", Input).value or "").strip()
+        if status_message:
+            hook["statusMessage"] = status_message
 
         timeout_raw = (self.query_one("#timeout_input", Input).value or "").strip()
         if timeout_raw:
@@ -660,6 +715,9 @@ class HooksApp(App[None]):
             return
         if option_id == "action:add_prompt":
             self._open_hook_form("prompt")
+            return
+        if option_id == "action:add_agent":
+            self._open_hook_form("agent")
             return
         if option_id.startswith("hook:"):
             hook_index = int(option_id.split(":", 1)[1])
@@ -1218,6 +1276,11 @@ class HooksApp(App[None]):
             )
             self._option_ids.append("action:add_prompt")
             option_index += 1
+            option_list.add_option(
+                Option(f"{option_index}. + Add agent hook...", id="action:add_agent")
+            )
+            self._option_ids.append("action:add_agent")
+            option_index += 1
 
         hooks = matcher.get("hooks", [])
         if not hooks:
@@ -1493,6 +1556,9 @@ def _summarize_hook(hook: Dict[str, Any]) -> str:
     if hook_type == "prompt":
         text = hook.get("prompt", "") or "(prompt missing)"
         label = "prompt"
+    elif hook_type == "agent":
+        text = hook.get("prompt", "") or "(prompt missing)"
+        label = "agent"
     else:
         text = hook.get("command", "") or "(command missing)"
         label = "command"
@@ -1502,7 +1568,30 @@ def _summarize_hook(hook: Dict[str, Any]) -> str:
         text = text[:57] + "..."
 
     timeout = hook.get("timeout", DEFAULT_HOOK_TIMEOUT)
-    return f"{label}: {text} ({timeout}s)"
+    model = hook.get("model") if hook_type == "agent" else None
+    is_async = hook.get("async", False)
+    run_once = hook.get("once", False)
+    status_msg = hook.get("statusMessage", "")
+
+    # Build options suffix
+    options = []
+    if is_async:
+        options.append("async")
+    if run_once:
+        options.append("once")
+    if status_msg:
+        truncated_msg = status_msg[:15] + "..." if len(status_msg) > 15 else status_msg
+        options.append(f"msg:{truncated_msg}")
+
+    # Build base label
+    base = f"{label}: {text} ({timeout}s)"
+    if model:
+        base += f", model={model}"
+
+    # Append options if present
+    if options:
+        return f"{base}, [{', '.join(options)}]"
+    return base
 
 
 def _count_hooks(hooks: Dict[str, List[Dict[str, Any]]]) -> int:

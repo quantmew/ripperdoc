@@ -29,11 +29,16 @@ async def _check_tool_permissions(
     parsed_input: Any,
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable],
+    *,
+    force_prompt: bool = False,
 ) -> tuple[bool, Optional[str], Optional[Any]]:
     """Evaluate whether a tool call is allowed."""
     try:
         if can_use_tool_fn is not None:
-            decision = can_use_tool_fn(tool, parsed_input)
+            decision_fn = can_use_tool_fn
+            if force_prompt and hasattr(can_use_tool_fn, "force_prompt"):
+                decision_fn = getattr(can_use_tool_fn, "force_prompt")
+            decision = decision_fn(tool, parsed_input)
             if inspect.isawaitable(decision):
                 decision = await decision
             if isinstance(decision, PermissionResult):
@@ -48,7 +53,7 @@ async def _check_tool_permissions(
                 return bool(decision[0]), decision[1], None
             return bool(decision), None, None
 
-        if not query_context.yolo_mode and tool.needs_permissions(parsed_input):
+        if force_prompt or (not query_context.yolo_mode and tool.needs_permissions(parsed_input)):
             loop = asyncio.get_running_loop()
             input_preview = (
                 parsed_input.model_dump()

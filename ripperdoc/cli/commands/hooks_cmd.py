@@ -229,12 +229,14 @@ def _save_hooks_json(console: Any, path: Path, hooks: Dict[str, List[Dict[str, A
 def _summarize_hook(hook: Dict[str, Any]) -> str:
     """Return a short human-friendly summary of a hook."""
     hook_type = hook.get("type", "command")
-    if hook_type == "prompt":
+    if hook_type in ("prompt", "agent"):
         text = hook.get("prompt", "") or "(prompt missing)"
-        label = "prompt"
+        label = hook_type
     else:
         text = hook.get("command", "") or "(command missing)"
         label = "command"
+        if hook.get("async"):
+            label = "command (async)"
 
     text = text.replace("\n", "\\n")
     if len(text) > 60:
@@ -297,7 +299,11 @@ def _render_hooks_overview(ui: Any, project_path: Path) -> bool:
             matcher_str = matcher.matcher or "*"
             for i, hook in enumerate(matcher.hooks):
                 cmd_text = hook.command or hook.prompt or ""
-                prefix = "[prompt] " if hook.prompt and not hook.command else ""
+                prefix = ""
+                if hook.prompt and not hook.command:
+                    prefix = "[prompt] " if hook.type == "prompt" else "[agent] "
+                elif hook.type == "command" and getattr(hook, "run_async", False):
+                    prefix = "[async] "
                 if len(cmd_text) > 60:
                     cmd_text = cmd_text[:57] + "..."
 
@@ -422,7 +428,7 @@ def _prompt_hook_details(
     """Collect hook details (type, command/prompt, timeout)."""
     allowed_types = ["command"]
     if event_name in PROMPT_SUPPORTED_EVENTS:
-        allowed_types.append("prompt")
+        allowed_types.extend(["prompt", "agent"])
 
     default_type = (existing_hook or {}).get("type", allowed_types[0])
     if default_type not in allowed_types:
@@ -431,7 +437,8 @@ def _prompt_hook_details(
     type_label = "/".join(allowed_types)
     console.print(
         "[dim]Hook type: 'command' runs a shell command; "
-        "'prompt' asks the model to evaluate (supported on selected events).[/dim]"
+        "'prompt' asks the model to evaluate; "
+        "'agent' runs a subagent with tool access.[/dim]"
     )
     while True:
         hook_type = (
@@ -444,7 +451,7 @@ def _prompt_hook_details(
 
     timeout_default = (existing_hook or {}).get("timeout", DEFAULT_HOOK_TIMEOUT)
 
-    if hook_type == "prompt":
+    if hook_type in ("prompt", "agent"):
         existing_prompt = (existing_hook or {}).get("prompt", "")
         if existing_prompt:
             console.print(f"[dim]Current prompt:[/dim] {escape(existing_prompt)}", markup=False)
@@ -456,8 +463,26 @@ def _prompt_hook_details(
             if prompt_text:
                 break
             console.print("[red]Prompt text is required for prompt hooks.[/red]")
+        existing_status = (existing_hook or {}).get("statusMessage", "")
+        if existing_status:
+            console.print(
+                f"[dim]Current status message:[/dim] {escape(existing_status)}", markup=False
+            )
+        status_text = console.input("Status message (optional): ").strip() or existing_status
+        model_value = (existing_hook or {}).get("model", "")
+        if hook_type == "agent":
+            model_value = (
+                console.input(f"Model pointer for agent [default {model_value or 'quick'}]: ")
+                .strip()
+                or model_value
+            )
         timeout = _prompt_timeout(console, timeout_default)
-        return {"type": "prompt", "prompt": prompt_text, "timeout": timeout}
+        hook_def = {"type": hook_type, "prompt": prompt_text, "timeout": timeout}
+        if hook_type == "agent" and model_value:
+            hook_def["model"] = model_value
+        if status_text:
+            hook_def["statusMessage"] = status_text
+        return hook_def
 
     # Command hook
     existing_command = (existing_hook or {}).get("command", "")
@@ -472,8 +497,29 @@ def _prompt_hook_details(
             break
         console.print("[red]Command is required for command hooks.[/red]")
 
+    existing_status = (existing_hook or {}).get("statusMessage", "")
+    if existing_status:
+        console.print(
+            f"[dim]Current status message:[/dim] {escape(existing_status)}", markup=False
+        )
+    status_text = console.input("Status message (optional): ").strip() or existing_status
+
+    async_default = bool((existing_hook or {}).get("async"))
+    async_hint = "y" if async_default else "N"
+    async_choice = console.input(
+        f"Run in background? [y/N, default {async_hint}]: "
+    ).strip().lower()
+    if not async_choice:
+        async_choice = "y" if async_default else "n"
+    run_async = async_choice in ("y", "yes")
+
     timeout = _prompt_timeout(console, timeout_default)
-    return {"type": "command", "command": command, "timeout": timeout}
+    hook_def: Dict[str, Any] = {"type": "command", "command": command, "timeout": timeout}
+    if run_async:
+        hook_def["async"] = True
+    if status_text:
+        hook_def["statusMessage"] = status_text
+    return hook_def
 
 
 def _select_hook(console: Any, matcher: Dict[str, Any]) -> Optional[int]:

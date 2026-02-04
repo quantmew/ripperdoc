@@ -23,7 +23,7 @@ from ripperdoc.core.agents import (
     resolve_agent_tools,
     summarize_agent,
 )
-from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.hooks.manager import HookResult, hook_manager
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.system_prompt import build_environment_prompt
 from ripperdoc.core.tool import (
@@ -34,7 +34,12 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ValidationResult,
 )
-from ripperdoc.utils.messages import AssistantMessage, UserMessage, create_user_message
+from ripperdoc.utils.messages import (
+    AssistantMessage,
+    UserMessage,
+    create_hook_notice_payload,
+    create_user_message,
+)
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -378,7 +383,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         prompt: Optional[str],
         resume: Optional[str],
         run_in_background: bool,
-    ) -> None:
+    ) -> HookResult:
         result = await hook_manager.run_subagent_start_async(
             subagent_type=subagent_type,
             prompt=prompt,
@@ -386,12 +391,13 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             run_in_background=run_in_background,
             tool_use_id=context.message_id,
         )
-        if result.should_block:
-            reason = result.block_reason or result.stop_reason or "Blocked by hook."
-            raise ValueError(f"SubagentStart hook blocked: {reason}")
-        if result.should_ask:
-            reason = result.block_reason or result.stop_reason or "User confirmation required."
-            raise ValueError(f"SubagentStart hook requires confirmation: {reason}")
+        return result
+
+    def _build_subagent_hook_context(self, result: HookResult) -> Dict[str, str]:
+        context: Dict[str, str] = {}
+        if result.additional_context:
+            context["Hook:SubagentStart"] = result.additional_context
+        return context
 
     async def call(
         self,
@@ -445,13 +451,36 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 )
                 return
 
-            await self._run_subagent_start_hook(
+            hook_result = await self._run_subagent_start_hook(
                 context,
                 subagent_type=record.agent_type,
                 prompt=input_data.prompt,
                 resume=input_data.resume,
                 run_in_background=False,
             )
+            if hook_result.should_block or hook_result.should_ask or not hook_result.should_continue:
+                reason = (
+                    hook_result.block_reason
+                    or hook_result.stop_reason
+                    or "SubagentStart hook requested to stop."
+                )
+                yield ToolProgress(
+                    content=create_hook_notice_payload(
+                        text=f"SubagentStart hook warning (ignored): {reason}",
+                        hook_event="SubagentStart",
+                        tool_name=record.agent_type,
+                        level="warning",
+                    )
+                )
+            if hook_result.system_message:
+                yield ToolProgress(
+                    content=create_hook_notice_payload(
+                        text=str(hook_result.system_message),
+                        hook_event="SubagentStart",
+                        tool_name=record.agent_type,
+                    )
+                )
+            hook_context = self._build_subagent_hook_context(hook_result)
 
             record.history.append(create_user_message(input_data.prompt))
             record.start_time = time.time()
@@ -481,7 +510,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             async for message in query(
                 record.history,  # type: ignore[arg-type]
                 record.system_prompt,
-                {},
+                hook_context,
                 subagent_context,
                 context.permission_checker,
             ):
@@ -548,13 +577,36 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 f"Missing or unknown tools: {', '.join(missing_tools) if missing_tools else 'none'}"
             )
 
-        await self._run_subagent_start_hook(
+        hook_result = await self._run_subagent_start_hook(
             context,
             subagent_type=target_agent.agent_type,
             prompt=input_data.prompt,
             resume=None,
             run_in_background=input_data.run_in_background,
         )
+        if hook_result.should_block or hook_result.should_ask or not hook_result.should_continue:
+            reason = (
+                hook_result.block_reason
+                or hook_result.stop_reason
+                or "SubagentStart hook requested to stop."
+            )
+            yield ToolProgress(
+                content=create_hook_notice_payload(
+                    text=f"SubagentStart hook warning (ignored): {reason}",
+                    hook_event="SubagentStart",
+                    tool_name=target_agent.agent_type,
+                    level="warning",
+                )
+            )
+        if hook_result.system_message:
+            yield ToolProgress(
+                content=create_hook_notice_payload(
+                    text=str(hook_result.system_message),
+                    hook_event="SubagentStart",
+                    tool_name=target_agent.agent_type,
+                )
+            )
+        hook_context = self._build_subagent_hook_context(hook_result)
 
         # Type conversion: List[object] -> List[Tool[Any, Any]]
         from ripperdoc.core.tool import Tool
@@ -603,6 +655,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                     record,
                     subagent_context,
                     context.permission_checker,
+                    hook_context,
                 )
             )
             output = self._output_from_record(
@@ -626,7 +679,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         async for message in query(
             record.history,  # type: ignore[arg-type]
             agent_system_prompt,
-            {},
+            hook_context,
             subagent_context,
             context.permission_checker,
         ):
@@ -774,6 +827,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         record: AgentRunRecord,
         subagent_context: QueryContext,
         permission_checker: Any,
+        hook_context: Optional[Dict[str, str]] = None,
     ) -> None:
         assistant_messages: List[AssistantMessage] = []
         tool_use_count = 0
@@ -781,7 +835,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             async for message in query(
                 record.history,  # type: ignore[arg-type]
                 record.system_prompt,
-                {},
+                hook_context or {},
                 subagent_context,
                 permission_checker,
             ):
