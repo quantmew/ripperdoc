@@ -423,6 +423,7 @@ class ModelsApp(App[None]):
     """
 
     BINDINGS = [
+        ("escape", "quit", "Quit"),
         ("a", "add", "Add"),
         ("e", "edit", "Edit"),
         ("d", "delete", "Delete"),

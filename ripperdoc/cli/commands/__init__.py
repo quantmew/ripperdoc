@@ -21,6 +21,7 @@ from .memory_cmd import command as memory_command
 from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
 from .permissions_cmd import command as permissions_command
+from .rewind_cmd import command as rewind_command
 from .resume_cmd import command as resume_command
 from .skills_cmd import command as skills_command
 from .stats_cmd import command as stats_command
@@ -69,6 +70,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     fork_command,
     resume_command,
     skills_command,
+    rewind_command,
     agents_command,
     themes_command,
 ]
