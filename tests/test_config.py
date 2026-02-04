@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 
 from ripperdoc.core.config import (
-    GlobalConfig,
+    UserConfig,
     ProjectConfig,
     ModelProfile,
     ProviderType,
@@ -12,9 +12,9 @@ from ripperdoc.core.config import (
 )
 
 
-def test_global_config_creation():
-    """Test creating a global config."""
-    config = GlobalConfig()
+def test_user_config_creation():
+    """Test creating a user config."""
+    config = UserConfig()
     assert not config.has_completed_onboarding
     assert config.theme == "dark"
     assert not config.verbose
@@ -59,7 +59,7 @@ def test_config_manager():
 
         # Get default config
         config = manager.get_global_config()
-        assert isinstance(config, GlobalConfig)
+        assert isinstance(config, UserConfig)
 
         # Modify and save
         config.has_completed_onboarding = True

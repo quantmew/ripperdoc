@@ -112,6 +112,7 @@ async def _run_tool_use_generator(
         _append_hook_context(context, f"PreToolUse:{tool_name}:system", pre_result.system_message)
 
     tool_output = None
+    tool_error: Optional[str] = None
 
     try:
         logger.debug("[query] _run_tool_use_generator: BEFORE tool.call() for '%s'", tool_name)
@@ -150,12 +151,14 @@ async def _run_tool_use_generator(
                 f"[query] Tool '{tool_name}' timed out after {DEFAULT_TOOL_TIMEOUT_SEC}s",
                 extra={"tool": tool_name, "tool_use_id": tool_use_id},
             )
+            tool_error = (
+                f"Tool '{tool_name}' timed out after {DEFAULT_TOOL_TIMEOUT_SEC:.0f} seconds"
+            )
             yield tool_result_message(
                 tool_use_id,
-                f"Tool '{tool_name}' timed out after {DEFAULT_TOOL_TIMEOUT_SEC:.0f} seconds",
+                tool_error,
                 is_error=True,
             )
-            return  # Exit early on timeout
         logger.debug("[query] _run_tool_use_generator: AFTER tool.call() loop for '%s'", tool_name)
     except CancelledError:
         logger.debug("[query] _run_tool_use_generator: tool='%s' CANCELLED", tool_name)
@@ -168,7 +171,37 @@ async def _run_tool_use_generator(
             exc,
             extra={"tool": tool_name, "tool_use_id": tool_use_id},
         )
-        yield tool_result_message(tool_use_id, f"Error executing tool: {str(exc)}", is_error=True)
+        tool_error = f"Error executing tool: {str(exc)}"
+        yield tool_result_message(tool_use_id, tool_error, is_error=True)
+
+    if tool_error:
+        post_failure_result = await hook_manager.run_post_tool_use_failure_async(
+            tool_name,
+            tool_input_dict,
+            tool_response=tool_output,
+            tool_error=tool_error,
+            tool_use_id=tool_use_id,
+        )
+        if post_failure_result.additional_context:
+            _append_hook_context(
+                context,
+                f"PostToolUseFailure:{tool_name}",
+                post_failure_result.additional_context,
+            )
+        if post_failure_result.system_message:
+            _append_hook_context(
+                context,
+                f"PostToolUseFailure:{tool_name}:system",
+                post_failure_result.system_message,
+            )
+        if post_failure_result.should_block:
+            reason = (
+                post_failure_result.block_reason
+                or post_failure_result.stop_reason
+                or "Blocked by hook."
+            )
+            yield create_user_message(f"PostToolUseFailure hook blocked: {reason}")
+        return
 
     # Run PostToolUse hooks
     post_result = await hook_manager.run_post_tool_use_async(

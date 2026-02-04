@@ -15,7 +15,7 @@ from ripperdoc.cli.ui.provider_options import (
     default_model_for_protocol,
 )
 from ripperdoc.core.config import (
-    GlobalConfig,
+    UserConfig,
     ModelProfile,
     ProviderType,
     get_global_config,
@@ -65,7 +65,7 @@ def check_onboarding() -> bool:
     return run_onboarding_wizard(config)
 
 
-def run_onboarding_wizard(config: GlobalConfig) -> bool:
+def run_onboarding_wizard(config: UserConfig) -> bool:
     """Run interactive onboarding wizard."""
     provider_keys = list(KNOWN_PROVIDERS.keys()) + ["custom"]
     default_choice_key = KNOWN_PROVIDERS.default_choice.key

@@ -208,8 +208,8 @@ class ModelPointers(BaseModel):
     quick: str = "default"
 
 
-class GlobalConfig(BaseModel):
-    """Global configuration stored in ~/.ripperdoc.json"""
+class UserConfig(BaseModel):
+    """User configuration stored in ~/.ripperdoc.json"""
 
     model_config = {"protected_namespaces": (), "populate_by_name": True}
 
@@ -297,24 +297,24 @@ class ProjectLocalConfig(BaseModel):
 
 
 class ConfigManager:
-    """Manages global and project-specific configuration."""
+    """Manages user and project-specific configuration."""
 
     def __init__(self) -> None:
         self.global_config_path = Path.home() / ".ripperdoc.json"
         self.current_project_path: Optional[Path] = None
-        self._global_config: Optional[GlobalConfig] = None
+        self._global_config: Optional[UserConfig] = None
         self._project_config: Optional[ProjectConfig] = None
         self._project_local_config: Optional[ProjectLocalConfig] = None
 
-    def get_global_config(self) -> GlobalConfig:
-        """Load and return global configuration."""
+    def get_global_config(self) -> UserConfig:
+        """Load and return user configuration."""
         if self._global_config is None:
             if self.global_config_path.exists():
                 try:
                     data = json.loads(self.global_config_path.read_text())
-                    self._global_config = GlobalConfig(**data)
+                    self._global_config = UserConfig(**data)
                     logger.debug(
-                        "[config] Loaded global configuration",
+                        "[config] Loaded user configuration",
                         extra={
                             "path": str(self.global_config_path),
                             "profile_count": len(self._global_config.model_profiles),
@@ -329,26 +329,26 @@ class ConfigManager:
                     TypeError,
                 ) as e:
                     logger.warning(
-                        "Error loading global config: %s: %s",
+                        "Error loading user config: %s: %s",
                         type(e).__name__,
                         e,
                         extra={"error": str(e)},
                     )
-                    self._global_config = GlobalConfig()
+                    self._global_config = UserConfig()
             else:
-                self._global_config = GlobalConfig()
+                self._global_config = UserConfig()
                 logger.debug(
-                    "[config] Global config not found; using defaults",
+                    "[config] User config not found; using defaults",
                     extra={"path": str(self.global_config_path)},
                 )
         return self._global_config
 
-    def save_global_config(self, config: GlobalConfig) -> None:
-        """Save global configuration."""
+    def save_global_config(self, config: UserConfig) -> None:
+        """Save user configuration."""
         self._global_config = config
         self.global_config_path.write_text(config.model_dump_json(indent=2))
         logger.debug(
-            "[config] Saved global configuration",
+            "[config] Saved user configuration",
             extra={
                 "path": str(self.global_config_path),
                 "profile_count": len(config.model_profiles),
@@ -538,7 +538,7 @@ class ConfigManager:
             if env_var in os.environ:
                 return os.environ[env_var]
 
-        # Then check global config
+        # Then check user config
         global_config = self.get_global_config()
         for profile in global_config.model_profiles.values():
             if profile.provider == provider and profile.api_key:
@@ -571,7 +571,7 @@ class ConfigManager:
         profile: ModelProfile,
         overwrite: bool = False,
         set_as_main: bool = False,
-    ) -> GlobalConfig:
+    ) -> UserConfig:
         """Add or replace a model profile and optionally set it as the main pointer."""
         config = self.get_global_config()
         if not overwrite and name in config.model_profiles:
@@ -584,7 +584,7 @@ class ConfigManager:
         self.save_global_config(config)
         return config
 
-    def delete_model_profile(self, name: str) -> GlobalConfig:
+    def delete_model_profile(self, name: str) -> UserConfig:
         """Delete a model profile and repair pointers that referenced it."""
         config = self.get_global_config()
         if name not in config.model_profiles:
@@ -601,7 +601,7 @@ class ConfigManager:
         self.save_global_config(config)
         return config
 
-    def set_model_pointer(self, pointer: str, profile_name: str) -> GlobalConfig:
+    def set_model_pointer(self, pointer: str, profile_name: str) -> UserConfig:
         """Point a logical model slot (e.g., main/quick) to a profile name."""
         if pointer not in ModelPointers.model_fields:
             raise ValueError(f"Unknown model pointer '{pointer}'.")
@@ -619,13 +619,13 @@ class ConfigManager:
 config_manager = ConfigManager()
 
 
-def get_global_config() -> GlobalConfig:
-    """Get global configuration."""
+def get_global_config() -> UserConfig:
+    """Get user configuration."""
     return config_manager.get_global_config()
 
 
-def save_global_config(config: GlobalConfig) -> None:
-    """Save global configuration."""
+def save_global_config(config: UserConfig) -> None:
+    """Save user configuration."""
     config_manager.save_global_config(config)
 
 
@@ -644,7 +644,7 @@ def add_model_profile(
     profile: ModelProfile,
     overwrite: bool = False,
     set_as_main: bool = False,
-) -> GlobalConfig:
+) -> UserConfig:
     """Add or replace a model profile and persist the update."""
     return config_manager.add_model_profile(
         name,
@@ -654,12 +654,12 @@ def add_model_profile(
     )
 
 
-def delete_model_profile(name: str) -> GlobalConfig:
+def delete_model_profile(name: str) -> UserConfig:
     """Remove a model profile and update pointers as needed."""
     return config_manager.delete_model_profile(name)
 
 
-def set_model_pointer(pointer: str, profile_name: str) -> GlobalConfig:
+def set_model_pointer(pointer: str, profile_name: str) -> UserConfig:
     """Update a model pointer (e.g., main/quick) to target a profile."""
     return config_manager.set_model_pointer(pointer, profile_name)
 

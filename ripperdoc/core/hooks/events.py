@@ -17,6 +17,7 @@ class HookEvent(str, Enum):
     PRE_TOOL_USE = "PreToolUse"
     PERMISSION_REQUEST = "PermissionRequest"
     POST_TOOL_USE = "PostToolUse"
+    POST_TOOL_USE_FAILURE = "PostToolUseFailure"
 
     # User interaction events
     USER_PROMPT_SUBMIT = "UserPromptSubmit"
@@ -24,12 +25,14 @@ class HookEvent(str, Enum):
 
     # Completion events
     STOP = "Stop"
+    SUBAGENT_START = "SubagentStart"
     SUBAGENT_STOP = "SubagentStop"
 
     # Session lifecycle events
     PRE_COMPACT = "PreCompact"
     SESSION_START = "SessionStart"
     SESSION_END = "SessionEnd"
+    SETUP = "Setup"
 
 
 class HookDecision(str, Enum):
@@ -112,6 +115,20 @@ class PostToolUseInput(HookInput):
     tool_use_id: Optional[str] = None
 
 
+class PostToolUseFailureInput(HookInput):
+    """Input data for PostToolUseFailure hooks.
+
+    Runs immediately after a tool fails.
+    """
+
+    hook_event_name: str = "PostToolUseFailure"
+    tool_name: str = ""
+    tool_input: Dict[str, Any] = Field(default_factory=dict)
+    tool_response: Any = None  # Tool's response/output (if any)
+    tool_error: Optional[str] = None
+    tool_use_id: Optional[str] = None
+
+
 class UserPromptSubmitInput(HookInput):
     """Input data for UserPromptSubmit hooks.
 
@@ -150,6 +167,20 @@ class StopInput(HookInput):
     stop_hook_active: bool = False  # True if already continuing from a stop hook
     reason: Optional[str] = None
     stop_sequence: Optional[str] = None
+
+
+class SubagentStartInput(HookInput):
+    """Input data for SubagentStart hooks.
+
+    Runs when a subagent (Task tool call) is about to start.
+    """
+
+    hook_event_name: str = "SubagentStart"
+    subagent_type: str = ""
+    prompt: Optional[str] = None
+    resume: Optional[str] = None
+    run_in_background: bool = False
+    tool_use_id: Optional[str] = None
 
 
 class SubagentStopInput(HookInput):
@@ -212,6 +243,15 @@ class SessionEndInput(HookInput):
     reason: str = ""  # "clear", "logout", "prompt_input_exit", "other"
     duration_seconds: Optional[float] = None
     message_count: Optional[int] = None
+
+
+class SetupInput(HookInput):
+    """Input data for Setup hooks.
+
+    Runs when repository setup/maintenance is triggered.
+    """
+
+    hook_event_name: str = "Setup"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -529,11 +569,14 @@ AnyHookInput = Union[
     PreToolUseInput,
     PermissionRequestInput,
     PostToolUseInput,
+    PostToolUseFailureInput,
     UserPromptSubmitInput,
     NotificationInput,
     StopInput,
+    SubagentStartInput,
     SubagentStopInput,
     PreCompactInput,
     SessionStartInput,
     SessionEndInput,
+    SetupInput,
 ]

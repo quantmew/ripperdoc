@@ -17,7 +17,7 @@ from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from ripperdoc.core.config import (
-    GlobalConfig,
+    UserConfig,
     ProjectConfig,
     ProjectLocalConfig,
     get_global_config,
@@ -404,7 +404,7 @@ class PermissionsApp(App[None]):
 
     def _get_rules_for_scope(self, scope: ScopeType) -> tuple[list[str], list[str], list[str]]:
         if scope == "user":
-            user_config: GlobalConfig = get_global_config()
+            user_config: UserConfig = get_global_config()
             return (
                 list(user_config.user_allow_rules),
                 list(user_config.user_deny_rules),
@@ -426,7 +426,7 @@ class PermissionsApp(App[None]):
 
     def _add_rule(self, scope: ScopeType, rule_type: RuleType, rule: str) -> bool:
         if scope == "user":
-            user_config: GlobalConfig = get_global_config()
+            user_config: UserConfig = get_global_config()
             if rule_type == "allow":
                 rules = user_config.user_allow_rules
             elif rule_type == "deny":
@@ -466,7 +466,7 @@ class PermissionsApp(App[None]):
 
     def _remove_rule(self, scope: ScopeType, rule_type: RuleType, rule: str) -> bool:
         if scope == "user":
-            user_config: GlobalConfig = get_global_config()
+            user_config: UserConfig = get_global_config()
             if rule_type == "allow":
                 rules = user_config.user_allow_rules
             elif rule_type == "deny":

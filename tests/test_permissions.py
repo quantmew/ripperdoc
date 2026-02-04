@@ -12,7 +12,7 @@ from ripperdoc.core.permissions import (
     make_permission_checker,
 )
 from ripperdoc.core.config import (
-    GlobalConfig,
+    UserConfig,
     ProjectLocalConfig,
     config_manager,
     save_global_config,
@@ -180,7 +180,7 @@ def test_dict_permission_result_is_handled(tmp_path: Path):
 
 def test_bash_permissions_include_global_and_local_rules(tmp_path: Path, isolated_config):
     """Global and local allow rules should be honored for Bash permissions."""
-    save_global_config(GlobalConfig(user_allow_rules=["rm -rf /tmp/allowed"]))
+    save_global_config(UserConfig(user_allow_rules=["rm -rf /tmp/allowed"]))
     save_project_local_config(
         ProjectLocalConfig(local_allow_rules=["touch /tmp/local"]), project_path=tmp_path
     )
@@ -197,7 +197,7 @@ def test_bash_permissions_include_global_and_local_rules(tmp_path: Path, isolate
 
 def test_bash_permissions_apply_denies_from_all_scopes(tmp_path: Path, isolated_config):
     """Deny rules from any scope should block Bash commands."""
-    save_global_config(GlobalConfig(user_deny_rules=["rm -rf /tmp/deny"]))
+    save_global_config(UserConfig(user_deny_rules=["rm -rf /tmp/deny"]))
     save_project_local_config(
         ProjectLocalConfig(local_deny_rules=["echo local-deny"]), project_path=tmp_path
     )
@@ -214,7 +214,7 @@ def test_bash_permissions_apply_denies_from_all_scopes(tmp_path: Path, isolated_
 
 def test_bash_permissions_apply_ask_rules(tmp_path: Path, isolated_config):
     """Ask rules should force prompts even for read-only commands."""
-    save_global_config(GlobalConfig(user_ask_rules=["ls"]))
+    save_global_config(UserConfig(user_ask_rules=["ls"]))
 
     prompt_calls = 0
 

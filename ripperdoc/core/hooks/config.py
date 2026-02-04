@@ -1,7 +1,7 @@
 """Hook configuration loading and management.
 
 This module handles loading hooks configuration from:
-- ~/.ripperdoc/hooks.json (global/user-level)
+- ~/.ripperdoc/hooks.json (user-level)
 - .ripperdoc/hooks.json (project-level, checked into git)
 - .ripperdoc/hooks.local.json (local, git-ignored)
 
@@ -10,7 +10,7 @@ Configuration format:
   "hooks": {
     "EventName": [
       {
-        "matcher": "ToolPattern",  // Only for PreToolUse/PermissionRequest/PostToolUse
+        "matcher": "ToolPattern",  // Only for PreToolUse/PermissionRequest/PostToolUse/PostToolUseFailure
         "hooks": [
           {
             "type": "command",
@@ -78,7 +78,7 @@ class HookDefinition(BaseModel):
 class HookMatcher(BaseModel):
     """A matcher that groups hooks for a specific pattern.
 
-    For PreToolUse/PostToolUse events, the matcher can be:
+    For PreToolUse/PermissionRequest/PostToolUse/PostToolUseFailure events, the matcher can be:
     - A specific tool name (e.g., "Bash", "Write", "Edit")
     - A regex pattern (e.g., "Edit|Write", "mcp__.*__write.*")
     - "*" or "" to match all tools
@@ -264,7 +264,7 @@ def load_hooks_config(config_path: Path) -> HooksConfig:
 
 
 def get_global_hooks_path() -> Path:
-    """Get the path to the global hooks configuration."""
+    """Get the path to the user-level hooks configuration."""
     return Path.home() / ".ripperdoc" / "hooks.json"
 
 
@@ -282,11 +282,11 @@ def get_merged_hooks_config(project_path: Optional[Path] = None) -> HooksConfig:
     """Get the merged hooks configuration from all sources.
 
     Order of precedence (later overrides earlier):
-    1. Global config (~/.ripperdoc/hooks.json)
+    1. User config (~/.ripperdoc/hooks.json)
     2. Project config (.ripperdoc/hooks.json)
     3. Local project config (.ripperdoc/hooks.local.json)
     """
-    # Start with global config
+    # Start with user config
     config = load_hooks_config(get_global_hooks_path())
 
     # Merge project config if available

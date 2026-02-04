@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ripperdoc.core.config import (
-    GlobalConfig,
+    UserConfig,
     ProjectConfig,
     ProjectLocalConfig,
     get_global_config,
@@ -46,7 +46,7 @@ def _shorten_path(path: Path, project_path: Path) -> str:
 def _get_scope_info(scope: ScopeType, project_path: Path) -> tuple[str, str]:
     """Return (heading, config_path) for a given scope."""
     if scope == "user":
-        return "User (global)", str(Path.home() / ".ripperdoc.json")
+        return "User settings", str(Path.home() / ".ripperdoc.json")
     elif scope == "project":
         return "Project (shared)", str(project_path / ".ripperdoc" / "config.json")
     else:  # local
@@ -58,7 +58,7 @@ def _get_rules_for_scope(
 ) -> tuple[List[str], List[str], List[str]]:
     """Return (allow_rules, deny_rules, ask_rules) for a given scope."""
     if scope == "user":
-        user_config: GlobalConfig = get_global_config()
+        user_config: UserConfig = get_global_config()
         return (
             list(user_config.user_allow_rules),
             list(user_config.user_deny_rules),
@@ -88,7 +88,7 @@ def _add_rule(
 ) -> bool:
     """Add a rule to the specified scope. Returns True if added, False if already exists."""
     if scope == "user":
-        user_config: GlobalConfig = get_global_config()
+        user_config: UserConfig = get_global_config()
         if rule_type == "allow":
             rules = user_config.user_allow_rules
         elif rule_type == "deny":
@@ -134,7 +134,7 @@ def _remove_rule(
 ) -> bool:
     """Remove a rule from the specified scope. Returns True if removed, False if not found."""
     if scope == "user":
-        user_config: GlobalConfig = get_global_config()
+        user_config: UserConfig = get_global_config()
         if rule_type == "allow":
             rules = user_config.user_allow_rules
         elif rule_type == "deny":
@@ -203,7 +203,7 @@ def _render_all_rules(console: Any, project_path: Path) -> None:
 
     console.print()
     console.print("[dim]Scopes (in priority order):[/dim]")
-    console.print("[dim]  - user: Global rules (~/.ripperdoc.json)[/dim]")
+    console.print("[dim]  - user: User rules (~/.ripperdoc.json)[/dim]")
     console.print("[dim]  - project: Shared project rules (.ripperdoc/config.json)[/dim]")
     console.print("[dim]  - local: Private project rules (.ripperdoc/config.local.json)[/dim]")
 

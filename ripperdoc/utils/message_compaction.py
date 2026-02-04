@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Union
 
-from ripperdoc.core.config import GlobalConfig, ModelProfile, get_global_config
+from ripperdoc.core.config import UserConfig, ModelProfile, get_global_config
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.messages import (
@@ -278,7 +278,7 @@ def get_remaining_context_tokens(
     return max(MIN_CONTEXT_TOKENS, context_limit - max(0, max_output_tokens))
 
 
-def resolve_auto_compact_enabled(config: GlobalConfig) -> bool:
+def resolve_auto_compact_enabled(config: UserConfig) -> bool:
     env_override = os.getenv("RIPPERDOC_AUTO_COMPACT")
     if env_override is not None:
         normalized = env_override.strip().lower()

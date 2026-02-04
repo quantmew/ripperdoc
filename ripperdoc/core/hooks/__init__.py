@@ -16,7 +16,7 @@ Hook events:
 - SessionEnd: When a session ends
 
 Configuration is stored in:
-- ~/.ripperdoc/hooks.json (global)
+- ~/.ripperdoc/hooks.json (user)
 - .ripperdoc/hooks.json (project)
 - .ripperdoc/hooks.local.json (local, git-ignored)
 """

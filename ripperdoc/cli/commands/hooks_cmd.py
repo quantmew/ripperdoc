@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -27,19 +28,23 @@ MATCHER_EVENTS = {
     HookEvent.PRE_TOOL_USE.value,
     HookEvent.PERMISSION_REQUEST.value,
     HookEvent.POST_TOOL_USE.value,
+    HookEvent.POST_TOOL_USE_FAILURE.value,
 }
 
 EVENT_DESCRIPTIONS: Dict[str, str] = {
     HookEvent.PRE_TOOL_USE.value: "Before a tool runs (can block or edit input)",
     HookEvent.PERMISSION_REQUEST.value: "When a permission dialog is shown",
     HookEvent.POST_TOOL_USE.value: "After a tool finishes running",
+    HookEvent.POST_TOOL_USE_FAILURE.value: "After a tool fails",
     HookEvent.USER_PROMPT_SUBMIT.value: "When you submit a prompt",
     HookEvent.NOTIFICATION.value: "When Ripperdoc sends a notification",
     HookEvent.STOP.value: "When the agent stops responding",
+    HookEvent.SUBAGENT_START.value: "Before a Task/subagent starts",
     HookEvent.SUBAGENT_STOP.value: "When a Task/subagent stops",
     HookEvent.PRE_COMPACT.value: "Before compacting the conversation",
     HookEvent.SESSION_START.value: "When a session starts or resumes",
     HookEvent.SESSION_END.value: "When a session ends",
+    HookEvent.SETUP.value: "When repository setup/maintenance runs",
 }
 
 
@@ -55,14 +60,16 @@ class HookConfigTarget:
 
 def _print_usage(console: Any) -> None:
     """Display available subcommands."""
-    console.print("[bold]/hooks[/bold] — show configured hooks")
-    console.print("[bold]/hooks add [scope][/bold] — guided creator (scope: local|project|global)")
+    console.print("[bold]/hooks[/bold] — open interactive hooks UI")
+    console.print("[bold]/hooks tui[/bold] — open interactive hooks UI")
+    console.print("[bold]/hooks list[/bold] — show configured hooks (plain)")
+    console.print("[bold]/hooks add [scope][/bold] — guided creator (scope: local|project|user)")
     console.print("[bold]/hooks edit [scope][/bold] — step-by-step edit of an existing hook")
     console.print("[bold]/hooks delete [scope][/bold] — remove a hook entry (alias: del)")
     console.print(
         "[dim]Scopes: local=.ripperdoc/hooks.local.json (git-ignored), "
         "project=.ripperdoc/hooks.json (shared), "
-        "global=~/.ripperdoc/hooks.json (all projects)[/dim]"
+        "user=~/.ripperdoc/hooks.json (all projects)[/dim]"
     )
 
 
@@ -82,8 +89,8 @@ def _get_targets(project_path: Path) -> List[HookConfigTarget]:
             description="Shared hooks committed to the repo",
         ),
         HookConfigTarget(
-            key="global",
-            label="Global (~/.ripperdoc/hooks.json)",
+            key="user",
+            label="User (~/.ripperdoc/hooks.json)",
             path=get_global_hooks_path(),
             description="Applies to all projects on this machine",
         ),
@@ -97,10 +104,10 @@ def _select_target(
     targets = _get_targets(project_path)
 
     if scope_hint:
-        match = next(
-            (t for t in targets if t.key.startswith(scope_hint.lower())),
-            None,
-        )
+        normalized = scope_hint.lower()
+        if normalized.startswith("global"):
+            normalized = "user"
+        match = next((t for t in targets if t.key.startswith(normalized)), None)
         if match:
             return match
         console.print(
@@ -579,6 +586,9 @@ def _handle(ui: Any, arg: str) -> bool:
     tokens = arg.split()
     subcmd = tokens[0].lower() if tokens else ""
 
+    if subcmd in ("", "tui", "ui"):
+        return _handle_hooks_tui(ui)
+
     if subcmd in ("help", "-h", "--help"):
         _print_usage(ui.console)
         return True
@@ -592,12 +602,37 @@ def _handle(ui: Any, arg: str) -> bool:
     if subcmd in ("delete", "del", "remove", "rm"):
         return _handle_delete(ui, tokens[1:], project_path)
 
+    if subcmd in ("list", "ls"):
+        return _render_hooks_overview(ui, project_path)
+
     if subcmd:
         ui.console.print(f"[red]Unknown hooks subcommand '{escape(subcmd)}'.[/red]")
         _print_usage(ui.console)
         return True
 
     return _render_hooks_overview(ui, project_path)
+
+
+def _handle_hooks_tui(ui: Any) -> bool:
+    project_path = getattr(ui, "project_path", Path.cwd())
+    console = ui.console
+    if not sys.stdin.isatty():
+        console.print("[yellow]Interactive UI requires a TTY. Showing plain list instead.[/yellow]")
+        return _render_hooks_overview(ui, project_path)
+
+    try:
+        from ripperdoc.cli.ui.hooks_tui import run_hooks_tui
+    except (ImportError, ModuleNotFoundError) as exc:
+        console.print(
+            f"[yellow]Textual UI not available ({escape(str(exc))}). Showing plain list.[/yellow]"
+        )
+        return _render_hooks_overview(ui, project_path)
+
+    try:
+        return bool(run_hooks_tui(project_path))
+    except Exception as exc:  # noqa: BLE001 - fail safe in interactive UI
+        console.print(f"[red]Textual UI failed: {escape(str(exc))}[/red]")
+        return _render_hooks_overview(ui, project_path)
 
 
 command = SlashCommand(

@@ -96,7 +96,15 @@ class HookInterceptor:
         Returns:
             Tuple of (should_continue, block_reason, additional_context)
         """
-        result = self.manager.run_post_tool_use(tool_name, tool_input, tool_output, tool_error)
+        if tool_error:
+            result = self.manager.run_post_tool_use_failure(
+                tool_name,
+                tool_input,
+                tool_response=tool_output,
+                tool_error=tool_error,
+            )
+        else:
+            result = self.manager.run_post_tool_use(tool_name, tool_input, tool_output)
 
         if result.should_block:
             return False, result.block_reason, result.additional_context
@@ -111,9 +119,15 @@ class HookInterceptor:
         tool_error: Optional[str] = None,
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """Async version of run_post_tool_use."""
-        result = await self.manager.run_post_tool_use_async(
-            tool_name, tool_input, tool_output, tool_error
-        )
+        if tool_error:
+            result = await self.manager.run_post_tool_use_failure_async(
+                tool_name,
+                tool_input,
+                tool_response=tool_output,
+                tool_error=tool_error,
+            )
+        else:
+            result = await self.manager.run_post_tool_use_async(tool_name, tool_input, tool_output)
 
         if result.should_block:
             return False, result.block_reason, result.additional_context

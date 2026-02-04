@@ -20,13 +20,16 @@ from ripperdoc.core.hooks.events import (
     PreToolUseInput,
     PermissionRequestInput,
     PostToolUseInput,
+    PostToolUseFailureInput,
     UserPromptSubmitInput,
     NotificationInput,
     StopInput,
+    SubagentStartInput,
     SubagentStopInput,
     PreCompactInput,
     SessionStartInput,
     SessionEndInput,
+    SetupInput,
 )
 from ripperdoc.core.hooks.executor import HookExecutor, LLMCallback
 from ripperdoc.utils.log import get_logger
@@ -149,6 +152,7 @@ class HookManager:
         self.llm_callback = llm_callback
         self._config: Optional[HooksConfig] = None
         self._executor: Optional[HookExecutor] = None
+        self._setup_ran_for_project: Optional[Path] = None
 
     @property
     def config(self) -> HooksConfig:
@@ -201,6 +205,34 @@ class HookManager:
         self.llm_callback = callback
         if self._executor:
             self._executor.llm_callback = callback
+
+    def _run_setup_if_needed(self) -> None:
+        if not self.project_dir or self.project_dir == self._setup_ran_for_project:
+            return
+        try:
+            self.run_setup()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning(
+                "[hook_manager] Setup hook failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"project_dir": str(self.project_dir)},
+            )
+        self._setup_ran_for_project = self.project_dir
+
+    async def _run_setup_if_needed_async(self) -> None:
+        if not self.project_dir or self.project_dir == self._setup_ran_for_project:
+            return
+        try:
+            await self.run_setup_async()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning(
+                "[hook_manager] Setup hook failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"project_dir": str(self.project_dir)},
+            )
+        self._setup_ran_for_project = self.project_dir
 
     def _get_cwd(self) -> Optional[str]:
         """Get current working directory."""
@@ -390,6 +422,64 @@ class HookManager:
         outputs = await self.executor.execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 
+    # --- Post Tool Use Failure ---
+
+    def run_post_tool_use_failure(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        tool_response: Any = None,
+        tool_error: Optional[str] = None,
+        tool_use_id: Optional[str] = None,
+    ) -> HookResult:
+        """Run PostToolUseFailure hooks synchronously."""
+        hooks = self._get_hooks(HookEvent.POST_TOOL_USE_FAILURE, tool_name)
+        if not hooks:
+            return HookResult([])
+
+        input_data = PostToolUseFailureInput(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_response=tool_response,
+            tool_error=tool_error,
+            tool_use_id=tool_use_id,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+
+        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        return HookResult(outputs)
+
+    async def run_post_tool_use_failure_async(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        tool_response: Any = None,
+        tool_error: Optional[str] = None,
+        tool_use_id: Optional[str] = None,
+    ) -> HookResult:
+        """Run PostToolUseFailure hooks asynchronously."""
+        hooks = self._get_hooks(HookEvent.POST_TOOL_USE_FAILURE, tool_name)
+        if not hooks:
+            return HookResult([])
+
+        input_data = PostToolUseFailureInput(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_response=tool_response,
+            tool_error=tool_error,
+            tool_use_id=tool_use_id,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+
+        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        return HookResult(outputs)
+
     # --- User Prompt Submit ---
 
     def run_user_prompt_submit(self, prompt: str) -> HookResult:
@@ -533,6 +623,64 @@ class HookManager:
         logger.debug("[hook_manager] run_stop_async: execute_hooks_async returned")
         return HookResult(outputs)
 
+    # --- Subagent Start ---
+
+    def run_subagent_start(
+        self,
+        subagent_type: str,
+        prompt: Optional[str] = None,
+        resume: Optional[str] = None,
+        run_in_background: bool = False,
+        tool_use_id: Optional[str] = None,
+    ) -> HookResult:
+        """Run SubagentStart hooks synchronously."""
+        hooks = self._get_hooks(HookEvent.SUBAGENT_START)
+        if not hooks:
+            return HookResult([])
+
+        input_data = SubagentStartInput(
+            subagent_type=subagent_type,
+            prompt=prompt,
+            resume=resume,
+            run_in_background=run_in_background,
+            tool_use_id=tool_use_id,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+
+        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        return HookResult(outputs)
+
+    async def run_subagent_start_async(
+        self,
+        subagent_type: str,
+        prompt: Optional[str] = None,
+        resume: Optional[str] = None,
+        run_in_background: bool = False,
+        tool_use_id: Optional[str] = None,
+    ) -> HookResult:
+        """Run SubagentStart hooks asynchronously."""
+        hooks = self._get_hooks(HookEvent.SUBAGENT_START)
+        if not hooks:
+            return HookResult([])
+
+        input_data = SubagentStartInput(
+            subagent_type=subagent_type,
+            prompt=prompt,
+            resume=resume,
+            run_in_background=run_in_background,
+            tool_use_id=tool_use_id,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+
+        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        return HookResult(outputs)
+
     # --- Subagent Stop ---
 
     def run_subagent_stop(self, stop_hook_active: bool = False) -> HookResult:
@@ -564,6 +712,40 @@ class HookManager:
 
         input_data = SubagentStopInput(
             stop_hook_active=stop_hook_active,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+
+        outputs = await self.executor.execute_hooks_async(hooks, input_data)
+        return HookResult(outputs)
+
+    # --- Setup ---
+
+    def run_setup(self) -> HookResult:
+        """Run Setup hooks synchronously."""
+        hooks = self._get_hooks(HookEvent.SETUP)
+        if not hooks:
+            return HookResult([])
+
+        input_data = SetupInput(
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+
+        outputs = self.executor.execute_hooks_sync(hooks, input_data)
+        return HookResult(outputs)
+
+    async def run_setup_async(self) -> HookResult:
+        """Run Setup hooks asynchronously."""
+        hooks = self._get_hooks(HookEvent.SETUP)
+        if not hooks:
+            return HookResult([])
+
+        input_data = SetupInput(
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),
@@ -626,6 +808,8 @@ class HookManager:
         Args:
             source: "startup", "resume", "clear", or "compact"
         """
+        if source == "startup":
+            self._run_setup_if_needed()
         hooks = self._get_hooks(HookEvent.SESSION_START)
         if not hooks:
             return HookResult([])
@@ -643,6 +827,8 @@ class HookManager:
 
     async def run_session_start_async(self, source: str) -> HookResult:
         """Run SessionStart hooks asynchronously."""
+        if source == "startup":
+            await self._run_setup_if_needed_async()
         hooks = self._get_hooks(HookEvent.SESSION_START)
         if not hooks:
             return HookResult([])

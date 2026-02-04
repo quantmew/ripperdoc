@@ -23,6 +23,7 @@ from ripperdoc.core.agents import (
     resolve_agent_tools,
     summarize_agent,
 )
+from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.system_prompt import build_environment_prompt
 from ripperdoc.core.tool import (
@@ -369,6 +370,29 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             label += " (background)"
         return label
 
+    async def _run_subagent_start_hook(
+        self,
+        context: ToolUseContext,
+        *,
+        subagent_type: str,
+        prompt: Optional[str],
+        resume: Optional[str],
+        run_in_background: bool,
+    ) -> None:
+        result = await hook_manager.run_subagent_start_async(
+            subagent_type=subagent_type,
+            prompt=prompt,
+            resume=resume,
+            run_in_background=run_in_background,
+            tool_use_id=context.message_id,
+        )
+        if result.should_block:
+            reason = result.block_reason or result.stop_reason or "Blocked by hook."
+            raise ValueError(f"SubagentStart hook blocked: {reason}")
+        if result.should_ask:
+            reason = result.block_reason or result.stop_reason or "User confirmation required."
+            raise ValueError(f"SubagentStart hook requires confirmation: {reason}")
+
     async def call(
         self,
         input_data: TaskToolInput,
@@ -420,6 +444,14 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                     data=output, result_for_assistant=self.render_result_for_assistant(output)
                 )
                 return
+
+            await self._run_subagent_start_hook(
+                context,
+                subagent_type=record.agent_type,
+                prompt=input_data.prompt,
+                resume=input_data.resume,
+                run_in_background=False,
+            )
 
             record.history.append(create_user_message(input_data.prompt))
             record.start_time = time.time()
@@ -514,6 +546,14 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 f"Agent '{target_agent.agent_type}' has no usable tools. "
                 f"Missing or unknown tools: {', '.join(missing_tools) if missing_tools else 'none'}"
             )
+
+        await self._run_subagent_start_hook(
+            context,
+            subagent_type=target_agent.agent_type,
+            prompt=input_data.prompt,
+            resume=None,
+            run_in_background=input_data.run_in_background,
+        )
 
         # Type conversion: List[object] -> List[Tool[Any, Any]]
         from ripperdoc.core.tool import Tool
