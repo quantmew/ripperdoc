@@ -288,6 +288,19 @@ def load_all_custom_commands(
     return CustomCommandLoadResult(commands=list(commands_by_name.values()), errors=errors)
 
 
+def load_custom_commands_by_scope(
+    project_path: Optional[Path] = None, home: Optional[Path] = None
+) -> CustomCommandLoadResult:
+    """Load custom commands without de-duplicating between scopes."""
+    commands: List[CustomCommandDefinition] = []
+    errors: List[CustomCommandLoadError] = []
+    for directory, location in command_directories(project_path=project_path, home=home):
+        loaded, dir_errors = _load_commands_from_dir(directory, location)
+        commands.extend(loaded)
+        errors.extend(dir_errors)
+    return CustomCommandLoadResult(commands=commands, errors=errors)
+
+
 def find_custom_command(
     command_name: str, project_path: Optional[Path] = None, home: Optional[Path] = None
 ) -> Optional[CustomCommandDefinition]:
@@ -297,6 +310,69 @@ def find_custom_command(
         return None
     result = load_all_custom_commands(project_path=project_path, home=home)
     return next((cmd for cmd in result.commands if cmd.name == normalized), None)
+
+
+def normalize_command_name(raw: str) -> str:
+    """Normalize a command name (strip /, trim, convert / to : for nesting)."""
+    normalized = raw.strip().lstrip("/")
+    normalized = normalized.replace("/", ":")
+    return normalized
+
+
+def validate_command_name(command_name: str) -> Optional[str]:
+    """Validate a command name and return an error message if invalid."""
+    normalized = normalize_command_name(command_name)
+    if not normalized:
+        return "Command name cannot be empty."
+    for segment in normalized.split(":"):
+        if not _COMMAND_NAME_RE.match(segment):
+            return (
+                "Invalid command name. Use lowercase letters, digits, '-' or '_' "
+                "(1-64 chars per segment)."
+            )
+    return None
+
+
+def command_name_to_path(command_name: str, base_commands_dir: Path) -> Path:
+    """Convert a command name into its .md file path under a commands directory."""
+    error = validate_command_name(command_name)
+    if error:
+        raise ValueError(error)
+    normalized = normalize_command_name(command_name)
+    parts = normalized.split(":")
+    return base_commands_dir.joinpath(*parts).with_suffix(COMMAND_FILE_SUFFIX)
+
+
+def parse_command_markdown(raw_text: str) -> Tuple[Dict[str, Any], str, Optional[str]]:
+    """Parse frontmatter/body from a command markdown string."""
+    frontmatter, body = _split_frontmatter(raw_text)
+    error: Optional[str] = None
+    if "__error__" in frontmatter:
+        error = str(frontmatter.get("__error__"))
+        frontmatter = {}
+    if not isinstance(frontmatter, dict):
+        frontmatter = {}
+    return frontmatter, body, error
+
+
+def render_command_markdown(frontmatter: Dict[str, Any], body: str) -> str:
+    """Render a command markdown string from frontmatter and body."""
+    cleaned = {
+        key: value
+        for key, value in frontmatter.items()
+        if value not in (None, "", [], {})
+    }
+    body_text = body.rstrip("\n")
+    if not cleaned:
+        return f"{body_text}\n" if body_text else ""
+    yaml_text = yaml.safe_dump(
+        cleaned,
+        sort_keys=False,
+        allow_unicode=True,
+    ).strip()
+    if body_text:
+        return f"---\n{yaml_text}\n---\n{body_text}\n"
+    return f"---\n{yaml_text}\n---\n"
 
 
 def _execute_bash_command(command: str, cwd: Optional[Path] = None) -> str:
@@ -404,9 +480,15 @@ __all__ = [
     "CustomCommandLoadResult",
     "CommandLocation",
     "COMMAND_DIR_NAME",
+    "command_name_to_path",
+    "load_custom_commands_by_scope",
+    "normalize_command_name",
+    "parse_command_markdown",
+    "render_command_markdown",
     "load_all_custom_commands",
     "find_custom_command",
     "expand_command_content",
     "build_custom_command_summary",
     "command_directories",
+    "validate_command_name",
 ]

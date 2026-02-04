@@ -1346,8 +1346,8 @@ class RichUI:
                     abort_controller.set()
 
             if self.session_id and self.conversation_messages:
-                self.console.print("Resume this session with:")
-                self.console.print(f"ripperdoc --resume {self.session_id}")
+                self.console.print("[dim]Resume this session with:[/dim]")
+                self.console.print(f"[dim]ripperdoc --resume {self.session_id}[/dim]")
 
             self._run_session_end(exit_reason)
 

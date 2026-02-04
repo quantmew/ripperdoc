@@ -9,6 +9,7 @@ from .base import SlashCommand
 from .agents_cmd import command as agents_command
 from .clear_cmd import command as clear_command
 from .compact_cmd import command as compact_command
+from .commands_cmd import command as commands_command
 from .config_cmd import command as config_command
 from .cost_cmd import command as cost_command
 from .context_cmd import command as context_command
@@ -51,6 +52,7 @@ def _build_registry(commands: List[SlashCommand]) -> Dict[str, SlashCommand]:
 ALL_COMMANDS: List[SlashCommand] = [
     help_command,
     clear_command,
+    commands_command,
     config_command,
     tools_command,
     models_command,
