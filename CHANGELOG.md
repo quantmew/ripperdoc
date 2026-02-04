@@ -5,6 +5,33 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-02-04
+
+### Added
+- **Conversation history picker** - Add interactive conversation history picker accessible via double-Esc shortcut for quick access to previous messages
+- **Session fork and resume** - Add `/fork` command to create new session branches from current conversation state and resume capability
+- **Interactive hooks management TUI** - Add comprehensive terminal UI for managing hooks with visual interface
+- **New hook events** - Add new hook events for enhanced extensibility
+- **ESC key to quit TUIs** - Add ESC key binding to quit agents and models management TUIs
+- **OLDPWD validation** - Add validation support for `cd -` command to prevent directory traversal issues
+- **Enhanced user tips** - Add new commands and improved descriptions to random tips system
+
+### Changed
+- **Default temperature** - Update default model temperature from 0.7 to 1.0 for more creative responses
+- **Hooks system improvements** - Improve hook system architecture with manager and better integration
+
+### Fixed
+- **Double exception during tool cancellation** - Avoid raising double exceptions during concurrent tool cancellation
+- **Grep output parsing** - Improve output parsing for paths with colons and Windows paths
+- **Gitignore matcher** - Implement directory-aware gitignore matcher with proper pattern scoping
+- **Rich UI modularization** - Split rich_ui.py into modular components for better maintainability
+
+### Refactored
+- **Query module** - Split query module into package structure (context, errors, loop, permissions, tools)
+- **Protocol module** - Reorganize stdio protocol into package structure (command, handler, timeouts, watchdog)
+- **Git utilities** - Implement directory-aware gitignore matcher with proper pattern scoping
+- **Permissions system** - Refactor permission interpreter and add shell command validation
+
 ## [0.3.2] - 2026-02-03
 
 ### Added
@@ -241,6 +268,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple command execution
 - Basic project navigation
 
+[0.3.3]: https://github.com/quantmew/Ripperdoc/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/quantmew/Ripperdoc/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/quantmew/Ripperdoc/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/quantmew/Ripperdoc/compare/v0.2.10...v0.3.0
