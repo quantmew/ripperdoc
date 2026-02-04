@@ -6,7 +6,7 @@ import asyncio
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Union
 from uuid import uuid4
 
@@ -24,6 +24,7 @@ from ripperdoc.core.agents import (
     summarize_agent,
 )
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
+from ripperdoc.core.hooks.config import HooksConfig
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.system_prompt import build_environment_prompt
 from ripperdoc.core.tool import (
@@ -67,6 +68,7 @@ class AgentRunRecord:
     error: Optional[str] = None
     task: Optional[asyncio.Task] = None
     is_background: bool = False
+    hook_scopes: List[HooksConfig] = field(default_factory=list)
 
 
 _AGENT_RUNS: Dict[str, AgentRunRecord] = {}
@@ -498,6 +500,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 model=record.model_used or "main",
                 stop_hook="subagent",
                 subagent_type=record.agent_type,
+                hook_scopes=record.hook_scopes,
             )
 
             yield ToolProgress(content=f"Resuming subagent '{record.agent_type}'")
@@ -627,6 +630,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         ]
 
         agent_id = _new_agent_id()
+        agent_hook_scopes: List[HooksConfig] = (
+            [target_agent.hooks] if target_agent.hooks and target_agent.hooks.hooks else []
+        )
         record = AgentRunRecord(
             agent_id=agent_id,
             agent_type=target_agent.agent_type,
@@ -637,6 +643,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             model_used=target_agent.model or "main",
             start_time=time.time(),
             is_background=bool(input_data.run_in_background),
+            hook_scopes=agent_hook_scopes,
         )
         _register_agent_run(record)
 
@@ -647,6 +654,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             model=target_agent.model or "main",
             stop_hook="subagent",
             subagent_type=target_agent.agent_type,
+            hook_scopes=agent_hook_scopes,
         )
 
         if input_data.run_in_background:

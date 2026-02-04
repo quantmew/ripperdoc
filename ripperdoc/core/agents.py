@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
+from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.log import get_logger
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
@@ -97,6 +98,7 @@ class AgentDefinition:
     color: Optional[str] = None
     filename: Optional[str] = None
     fork_context: bool = False
+    hooks: HooksConfig = field(default_factory=HooksConfig)
 
 
 @dataclass
@@ -314,6 +316,32 @@ def _normalize_tools(value: object) -> List[str]:
     return ["*"]
 
 
+def _convert_stop_hook_to_subagent(hooks_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert Stop hooks to SubagentStop for subagent-scoped hooks."""
+    if "Stop" not in hooks_data:
+        return hooks_data
+    converted = dict(hooks_data)
+    stop_matchers = converted.pop("Stop")
+    existing = converted.get("SubagentStop")
+    if existing is None:
+        converted["SubagentStop"] = stop_matchers
+    elif isinstance(existing, list) and isinstance(stop_matchers, list):
+        converted["SubagentStop"] = existing + stop_matchers
+    elif isinstance(stop_matchers, list):
+        converted["SubagentStop"] = stop_matchers
+    return converted
+
+
+def _normalize_agent_hooks(raw_hooks: object) -> object:
+    if not isinstance(raw_hooks, dict):
+        return raw_hooks
+    if "hooks" in raw_hooks and isinstance(raw_hooks.get("hooks"), dict):
+        wrapped = dict(raw_hooks)
+        wrapped["hooks"] = _convert_stop_hook_to_subagent(wrapped["hooks"])
+        return wrapped
+    return _convert_stop_hook_to_subagent(raw_hooks)
+
+
 def _parse_agent_file(
     path: Path, location: AgentLocation
 ) -> Tuple[Optional[AgentDefinition], Optional[str]]:
@@ -347,6 +375,9 @@ def _parse_agent_file(
     model = model_value if isinstance(model_value, str) else None
     color = color_value if isinstance(color_value, str) else None
     fork_context = parse_boolish(frontmatter.get("fork_context") or frontmatter.get("fork-context"))
+    hooks = parse_hooks_config(
+        _normalize_agent_hooks(frontmatter.get("hooks")), source=f"agent:{agent_name.strip()}"
+    )
 
     agent = AgentDefinition(
         agent_type=agent_name.strip(),
@@ -358,6 +389,7 @@ def _parse_agent_file(
         color=color,
         filename=path.stem,
         fork_context=fork_context,
+        hooks=hooks,
     )
     return agent, None
 

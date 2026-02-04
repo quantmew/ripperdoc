@@ -37,6 +37,7 @@ from ripperdoc.core.hooks.events import (
 from ripperdoc.core.hooks.executor import HookExecutor, LLMCallback
 from ripperdoc.core.hooks.state import (
     hooks_suspended,
+    get_hook_scopes,
     get_pending_message_queue,
     get_hook_status_emitter,
 )
@@ -275,7 +276,12 @@ class HookManager:
         """Get hooks that should run for an event."""
         if hooks_suspended():
             return []
-        hooks = self.config.get_hooks_for_event(event, matcher_value)
+        config = self.config
+        scoped = get_hook_scopes()
+        if scoped:
+            for scope in scoped:
+                config = config.merge_with(scope)
+        hooks = config.get_hooks_for_event(event, matcher_value)
         return self._select_hooks_for_execution(event, hooks)
 
     def _hook_identity(self, event: HookEvent, hook: HookDefinition) -> str:

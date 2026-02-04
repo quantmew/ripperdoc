@@ -2,7 +2,9 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Callable, Generator, Optional
+from typing import Any, Callable, Generator, Optional, Sequence, List
+
+from ripperdoc.core.hooks.config import HooksConfig
 
 from ripperdoc.utils.pending_messages import PendingMessageQueue
 
@@ -12,6 +14,9 @@ _pending_message_queue: ContextVar[Optional[PendingMessageQueue]] = ContextVar(
 )
 _status_emitter: ContextVar[Optional[Callable[[str], None]]] = ContextVar(
     "ripperdoc_hook_status_emitter", default=None
+)
+_hook_scopes: ContextVar[Optional[Sequence[HooksConfig]]] = ContextVar(
+    "ripperdoc_hook_scopes", default=None
 )
 
 
@@ -62,3 +67,23 @@ def bind_hook_status_emitter(
 def get_hook_status_emitter() -> Optional[Callable[[str], None]]:
     """Get the currently bound hook status emitter."""
     return _status_emitter.get()
+
+
+@contextmanager
+def bind_hook_scopes(
+    scopes: Optional[Sequence[HooksConfig]],
+) -> Generator[None, None, None]:
+    """Bind additional hook scopes for the current execution context."""
+    token = _hook_scopes.set(scopes)
+    try:
+        yield
+    finally:
+        _hook_scopes.reset(token)
+
+
+def get_hook_scopes() -> List[HooksConfig]:
+    """Get any hook scopes bound to the current execution context."""
+    scopes = _hook_scopes.get()
+    if not scopes:
+        return []
+    return list(scopes)

@@ -190,6 +190,52 @@ async def test_skill_tool_applies_context_hints(tmp_path: Path) -> None:
     assert query_context.max_thinking_tokens == 512
 
 
+@pytest.mark.asyncio
+async def test_skill_tool_registers_hook_scopes(tmp_path: Path) -> None:
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_skill(
+        project_dir,
+        "secure-ops",
+        "Security checks before commands",
+        "Use with care.",
+        extra_frontmatter=(
+            "hooks:\n"
+            "  PreToolUse:\n"
+            "    - matcher: \"Bash\"\n"
+            "      hooks:\n"
+            "        - type: command\n"
+            "          command: \"./scripts/security-check.sh\""
+        ),
+    )
+
+    tool = SkillTool(project_path=project_dir, home=home_dir)
+    input_data = SkillToolInput(skill="secure-ops")
+    outputs = []
+    async for output in tool.call(input_data, ToolUseContext()):
+        outputs.append(output)
+
+    assert outputs, "SkillTool should yield a result"
+    skill_result = outputs[0]
+    msg = tool_result_message(
+        "test-skill-hooks",
+        skill_result.result_for_assistant or "",
+        tool_use_result=skill_result.data,
+    )
+
+    query_context = QueryContext(tools=[], max_thinking_tokens=0, model="main")
+    _apply_skill_context_updates([msg], query_context)
+
+    assert len(query_context.hook_scopes) == 1
+    hooks_config = query_context.hook_scopes[0]
+    assert "PreToolUse" in hooks_config.hooks
+    hook = hooks_config.hooks["PreToolUse"][0].hooks[0]
+    assert hook.command == "./scripts/security-check.sh"
+
+
 def test_build_skill_summary_handles_empty() -> None:
     summary = build_skill_summary([])
     assert "No skills detected" in summary

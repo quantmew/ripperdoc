@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from ripperdoc.core.config import ModelProfile, provider_protocol
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
-from ripperdoc.core.hooks.state import bind_pending_message_queue
+from ripperdoc.core.hooks.state import bind_hook_scopes, bind_pending_message_queue
 from ripperdoc.core.providers import ProviderClient, get_provider_client
 from ripperdoc.core.query_utils import (
     build_full_system_prompt,
@@ -881,7 +881,9 @@ async def query(
     Yields:
         Messages (user, assistant, progress) as they are generated
     """
-    with bind_pending_message_queue(query_context.pending_message_queue):
+    with bind_pending_message_queue(query_context.pending_message_queue), bind_hook_scopes(
+        query_context.hook_scopes
+    ):
         logger.info(
             "[query] Starting query loop",
             extra={

@@ -7,7 +7,7 @@ assistant can pull in specialized instructions only when needed.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -45,6 +45,7 @@ class SkillToolOutput(BaseModel):
     max_thinking_tokens: Optional[int] = None
     skill_type: str = "prompt"
     disable_model_invocation: bool = False
+    hooks: Optional[Dict[str, Any]] = None
     content: str
 
 
@@ -189,6 +190,11 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
         return result + files_section
 
     def _to_output(self, skill: SkillDefinition) -> SkillToolOutput:
+        hooks_payload: Optional[Dict[str, Any]] = None
+        if skill.hooks and skill.hooks.hooks:
+            hooks_payload = (
+                skill.hooks.model_dump(by_alias=True, exclude_none=True).get("hooks") or None
+            )
         return SkillToolOutput(
             success=True,
             skill=skill.name,
@@ -201,6 +207,7 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             max_thinking_tokens=skill.max_thinking_tokens,
             skill_type=skill.skill_type,
             disable_model_invocation=skill.disable_model_invocation,
+            hooks=hooks_payload,
             content=skill.content,
         )
 

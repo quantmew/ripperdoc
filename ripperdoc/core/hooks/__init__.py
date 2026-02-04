@@ -53,8 +53,7 @@ from ripperdoc.core.hooks.config import (
     get_project_hooks_path,
     get_project_local_hooks_path,
 )
-from ripperdoc.core.hooks.executor import HookExecutor, LLMCallback
-from ripperdoc.core.hooks.manager import HookManager, HookResult, hook_manager, init_hook_manager
+from typing import Any
 
 __all__ = [
     # Events
@@ -88,12 +87,29 @@ __all__ = [
     "get_global_hooks_path",
     "get_project_hooks_path",
     "get_project_local_hooks_path",
-    # Executor
+    # Executor (lazy)
     "HookExecutor",
     "LLMCallback",
-    # Manager
+    # Manager (lazy)
     "HookManager",
     "HookResult",
     "hook_manager",
     "init_hook_manager",
 ]
+
+
+def __getattr__(name: str) -> Any:  # pragma: no cover - import-time lazy loading
+    if name in {"HookExecutor", "LLMCallback"}:
+        from ripperdoc.core.hooks.executor import HookExecutor, LLMCallback
+
+        return {"HookExecutor": HookExecutor, "LLMCallback": LLMCallback}[name]
+    if name in {"HookManager", "HookResult", "hook_manager", "init_hook_manager"}:
+        from ripperdoc.core.hooks.manager import HookManager, HookResult, hook_manager, init_hook_manager
+
+        return {
+            "HookManager": HookManager,
+            "HookResult": HookResult,
+            "hook_manager": hook_manager,
+            "init_hook_manager": init_hook_manager,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

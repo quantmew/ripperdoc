@@ -11,18 +11,20 @@ fields include:
 - disable-model-invocation: If true, block the Skill tool from loading this
   skill.
 - type: Skill kind (defaults to "prompt").
+- hooks: Hook definitions (same format as hooks.json) scoped to this skill.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
+from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_boolish, parse_optional_int
 from ripperdoc.utils.log import get_logger
 
@@ -56,6 +58,7 @@ class SkillDefinition:
     max_thinking_tokens: Optional[int] = None
     skill_type: str = "prompt"
     disable_model_invocation: bool = False
+    hooks: HooksConfig = field(default_factory=HooksConfig)
 
 
 @dataclass
@@ -163,6 +166,7 @@ def _load_skill_file(
     disable_model_invocation = parse_boolish(
         frontmatter.get("disable-model-invocation") or frontmatter.get("disable_model_invocation")
     )
+    hooks = parse_hooks_config(frontmatter.get("hooks"), source=f"skill:{raw_name.strip()}")
 
     skill = SkillDefinition(
         name=raw_name.strip(),
@@ -176,6 +180,7 @@ def _load_skill_file(
         max_thinking_tokens=max_thinking_tokens,
         skill_type=skill_type or "prompt",
         disable_model_invocation=disable_model_invocation,
+        hooks=hooks,
     )
     return skill, None
 

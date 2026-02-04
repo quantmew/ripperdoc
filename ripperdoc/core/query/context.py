@@ -4,6 +4,7 @@ import asyncio
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from ripperdoc.core.tool import Tool
+from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.file_watch import BoundedFileCache
 from ripperdoc.utils.log import get_logger
@@ -164,6 +165,12 @@ def _apply_skill_context_updates(
             )
             query_context.max_thinking_tokens = parsed_max
 
+        hooks_payload = data.get("hooks")
+        if hooks_payload:
+            hooks_config = parse_hooks_config(hooks_payload, source=f"skill:{skill_name}")
+            if hooks_config.hooks:
+                query_context.add_hook_scope(f"skill:{skill_name}", hooks_config)
+
 
 def _append_hook_context(context: Dict[str, str], label: str, payload: Optional[str]) -> None:
     """Append hook-supplied context to the shared context dict."""
@@ -196,6 +203,7 @@ class QueryContext:
         pending_message_queue: Optional[PendingMessageQueue] = None,
         max_turns: Optional[int] = None,
         permission_mode: str = "default",
+        hook_scopes: Optional[List[HooksConfig]] = None,
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
@@ -218,6 +226,8 @@ class QueryContext:
         self.subagent_type = subagent_type
         self.max_turns = max_turns
         self.permission_mode = permission_mode
+        self.hook_scopes: List[HooksConfig] = list(hook_scopes) if hook_scopes else []
+        self._hook_scope_ids: set[str] = set()
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:
@@ -236,6 +246,16 @@ class QueryContext:
     def all_tools(self) -> List[Tool[Any, Any]]:
         """Return all known tools (active + deferred)."""
         return self.tool_registry.all_tools
+
+    def add_hook_scope(self, scope_id: str, hooks: HooksConfig) -> bool:
+        """Register a hook scope by id (idempotent)."""
+        if not hooks or not hooks.hooks:
+            return False
+        if scope_id in self._hook_scope_ids:
+            return False
+        self._hook_scope_ids.add(scope_id)
+        self.hook_scopes.append(hooks)
+        return True
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """Return memory usage statistics for monitoring."""

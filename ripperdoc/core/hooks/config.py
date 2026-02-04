@@ -327,6 +327,28 @@ def _parse_hooks_file(data: Dict[str, Any]) -> HooksConfig:
     return HooksConfig(hooks=parsed_hooks)
 
 
+def parse_hooks_config(data: Any, *, source: Optional[str] = None) -> HooksConfig:
+    """Parse hooks configuration from in-memory data.
+
+    Accepts either a full hooks payload (with optional "hooks" wrapper) or a
+    mapping of event names to matcher lists.
+    """
+    if data is None:
+        return HooksConfig()
+    if not isinstance(data, dict):
+        label = f" for {source}" if source else ""
+        logger.warning(f"Invalid hooks config{label}: expected mapping")
+        return HooksConfig()
+    try:
+        return _parse_hooks_file(data)
+    except Exception as exc:  # pragma: no cover - defensive
+        label = f" for {source}" if source else ""
+        logger.warning(
+            f"Failed to parse hooks config{label}: {type(exc).__name__}: {exc}"
+        )
+        return HooksConfig()
+
+
 def load_hooks_config(config_path: Path) -> HooksConfig:
     """Load hooks configuration from a file."""
     if not config_path.exists():
