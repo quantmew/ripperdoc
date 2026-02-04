@@ -77,6 +77,8 @@ class StdioProtocolHandler:
     - Message streaming for query results
     """
 
+    _PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions"}
+
     def __init__(self, input_format: str = "stream-json", output_format: str = "stream-json"):
         """Initialize the protocol handler.
 
@@ -96,6 +98,26 @@ class StdioProtocolHandler:
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []
+
+    def _normalize_permission_mode(self, mode: Any) -> str:
+        """Normalize permission mode to a supported value."""
+        if isinstance(mode, str) and mode in self._PERMISSION_MODES:
+            return mode
+        return "default"
+
+    def _apply_permission_mode(self, mode: str) -> None:
+        """Apply permission mode across query context, hooks, and permissions."""
+        yolo_mode = mode == "bypassPermissions"
+        if self._query_context:
+            self._query_context.yolo_mode = yolo_mode
+            self._query_context.permission_mode = mode
+
+        hook_manager.set_permission_mode(mode)
+
+        if yolo_mode:
+            self._can_use_tool = None
+        else:
+            self._can_use_tool = make_permission_checker(self._project_path, yolo_mode=False)
 
     async def _write_message(self, message: dict[str, Any]) -> None:
         """Write a JSON message to stdout.
@@ -272,12 +294,10 @@ class StdioProtocolHandler:
                 tools = get_default_tools(allowed_tools=allowed_tools)
 
             # Parse permission mode
-            permission_mode = options.get("permission_mode", "default")
+            permission_mode = self._normalize_permission_mode(
+                options.get("permission_mode", "default")
+            )
             yolo_mode = permission_mode == "bypassPermissions"
-
-            # Create permission checker
-            if not yolo_mode:
-                self._can_use_tool = make_permission_checker(self._project_path, yolo_mode=False)
 
             # Setup model
             model = options.get("model") or "main"
@@ -299,6 +319,7 @@ class StdioProtocolHandler:
                 yolo_mode=yolo_mode,
                 verbose=options.get("verbose", False),
                 model=model,
+                permission_mode=permission_mode,
             )
 
             # Initialize hook manager
@@ -342,6 +363,9 @@ class StdioProtocolHandler:
                 additional_instructions=additional_instructions or None,
                 mcp_instructions=mcp_instructions,
             )
+
+            # Apply permission mode to runtime state (checker + query context)
+            self._apply_permission_mode(permission_mode)
 
             # Mark as initialized
             self._initialized = True
@@ -1045,11 +1069,8 @@ class StdioProtocolHandler:
             request: The set_permission_mode request data.
             request_id: The request ID.
         """
-        mode = request.get("mode", "default")
-        # Update the permission mode in the query context
-        if self._query_context:
-            # Map string mode to yolo_mode boolean
-            self._query_context.yolo_mode = mode == "bypassPermissions"
+        mode = self._normalize_permission_mode(request.get("mode", "default"))
+        self._apply_permission_mode(mode)
 
         await self._write_control_response(
             request_id, response={"status": "permission_mode_set", "mode": mode}
