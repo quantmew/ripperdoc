@@ -14,6 +14,7 @@ from .cost_cmd import command as cost_command
 from .context_cmd import command as context_command
 from .doctor_cmd import command as doctor_command
 from .exit_cmd import command as exit_command
+from .fork_cmd import command as fork_command
 from .help_cmd import command as help_command
 from .hooks_cmd import command as hooks_command
 from .memory_cmd import command as memory_command
@@ -65,6 +66,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     cost_command,
     context_command,
     compact_command,
+    fork_command,
     resume_command,
     skills_command,
     agents_command,

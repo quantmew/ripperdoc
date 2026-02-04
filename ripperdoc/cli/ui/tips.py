@@ -41,6 +41,7 @@ TIPS: List[str] = [
     "Use /permissions add/remove to tune tool permission prompts.",
     "Use /context to view context usage and token budget.",
     "Use /resume to continue your most recent conversation.",
+    "Use /fork to branch the current conversation into a new session.",
 
     # Productivity
     "Use /exit to cleanly shut down Ripperdoc and save your session.",

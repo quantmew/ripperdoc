@@ -387,6 +387,24 @@ class RichUI:
                 extra={"session_id": self.session_id},
             )
 
+    def _seed_session_history(self, messages: List[ConversationMessage]) -> None:
+        """Persist the provided messages into the current session log."""
+        for msg in messages:
+            self._log_message(msg)
+
+    def _fork_session(self) -> tuple[str, str]:
+        """Fork the current session into a new session id and seed history."""
+        old_session_id = self.session_id
+        new_session_id = str(uuid.uuid4())
+        self._set_session(new_session_id)
+        self._saved_conversation = None
+        self._seed_session_history(self.conversation_messages)
+        try:
+            self._run_session_start("resume")
+        except (AttributeError, RuntimeError, ValueError):
+            pass
+        return old_session_id, new_session_id
+
     def _append_prompt_history(self, text: str) -> None:
         """Append text to the interactive prompt history."""
         if not text or not text.strip():
@@ -528,15 +546,23 @@ class RichUI:
         role = "You" if msg_type == "user" else "Ripperdoc"
         original_len = len(self.conversation_messages)
         self.conversation_messages = list(self.conversation_messages[: target_index + 1])
-        self.console.print(
-            f"[green]✓ Rolled back to {role} message #{target_index + 1} "
-            f"({original_len} -> {len(self.conversation_messages)} messages).[/green]"
-        )
+
+        # Fork a new session so the original transcript remains intact.
+        old_session_id, new_session_id = self._fork_session()
+
         try:
             self.console.clear()
         except (OSError, RuntimeError, ValueError):
             pass
         self.replay_conversation(self.conversation_messages)
+        self.console.print(
+            f"[green]✓ Rolled back to {role} message #{target_index + 1} "
+            f"({original_len} -> {len(self.conversation_messages)} messages).[/green]"
+        )
+        self.console.print(
+            f"[dim]Forked new session {new_session_id[:8]}... "
+            f"(previous {old_session_id[:8]}... preserved).[/dim]"
+        )
         logger.info(
             "[ui] Rolled back conversation",
             extra={
@@ -544,6 +570,7 @@ class RichUI:
                 "target_index": target_index,
                 "original_len": original_len,
                 "new_len": len(self.conversation_messages),
+                "previous_session_id": old_session_id,
             },
         )
 
@@ -617,13 +644,19 @@ class RichUI:
             if not text:
                 continue
             if msg_type == "user" and not has_tool_result:
-                self.display_message("You", text)
+                self._print_replay_user(text)
                 self._append_prompt_history(text)
             elif msg_type == "user" and has_tool_result:
                 # Tool results are part of the conversation but should not enter prompt history.
                 self.display_message("Tool", text, is_tool=True, tool_type="result")
             elif msg_type == "assistant":
                 self.display_message("Ripperdoc", text)
+
+    def _print_replay_user(self, text: str) -> None:
+        """Render restored user messages with a prompt-style prefix."""
+        lines = text.splitlines() or [text]
+        for line in lines:
+            self.console.print(f"> {line}", markup=False)
 
     def get_default_tools(self) -> list:
         """Get the default set of tools, filtered by allowed_tools if specified."""
@@ -1180,6 +1213,10 @@ class RichUI:
         random_tip = get_random_tip()
         console.print(f"[dim italic]💡 {random_tip}[/dim italic]\n")
 
+        if self.conversation_messages:
+            self.replay_conversation(self.conversation_messages)
+            console.print()
+
         session = self.get_prompt_session()
         logger.info(
             "[ui] Starting interactive loop",
@@ -1307,6 +1344,10 @@ class RichUI:
                 abort_controller = getattr(self.query_context, "abort_controller", None)
                 if abort_controller is not None:
                     abort_controller.set()
+
+            if self.session_id and self.conversation_messages:
+                self.console.print("Resume this session with:")
+                self.console.print(f"ripperdoc --resume {self.session_id}")
 
             self._run_session_end(exit_reason)
 

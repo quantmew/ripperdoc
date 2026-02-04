@@ -344,6 +344,14 @@ async def run_query(
     is_flag=True,
     help="Continue the most recent conversation in the current directory.",
 )
+@click.option(
+    "-r",
+    "--resume",
+    "resume_session",
+    type=str,
+    default=None,
+    help="Resume a specific session by id prefix.",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -357,6 +365,7 @@ def cli(
     append_system_prompt: Optional[str],
     model: Optional[str],
     continue_session: bool,
+    resume_session: Optional[str],
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
@@ -373,8 +382,26 @@ def cli(
 
     # Handle --continue option: load the most recent session
     resume_messages = None
+    resumed_summary = None
     most_recent = None
-    if continue_session:
+    if resume_session:
+        summaries = list_session_summaries(project_path)
+        if summaries:
+            match = next(
+                (s for s in summaries if s.session_id.startswith(resume_session)), None
+            )
+            if match:
+                resumed_summary = match
+                session_id = match.session_id
+                resume_messages = load_session_messages(project_path, session_id)
+                console.print(f"[dim]Resuming session: {match.last_prompt}[/dim]")
+            else:
+                raise click.ClickException(
+                    f"No session found matching '{resume_session}'."
+                )
+        else:
+            raise click.ClickException("No previous sessions found in this directory.")
+    elif continue_session:
         summaries = list_session_summaries(project_path)
         if summaries:
             most_recent = summaries[0]
@@ -392,7 +419,17 @@ def cli(
             extra={"cwd": cwd_changed, "session_id": session_id},
         )
 
-    if most_recent:
+    if resumed_summary:
+        logger.info(
+            "[cli] Resuming session",
+            extra={
+                "session_id": session_id,
+                "message_count": len(resume_messages) if resume_messages else 0,
+                "last_prompt": resumed_summary.last_prompt,
+                "log_file": str(log_file),
+            },
+        )
+    elif most_recent:
         logger.info(
             "[cli] Continuing session",
             extra={
