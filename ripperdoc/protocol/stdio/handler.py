@@ -95,6 +95,8 @@ class StdioProtocolHandler:
         self._can_use_tool: Any | None = None
         self._hooks: dict[str, list[dict[str, Any]]] = {}
         self._pending_requests: dict[str, Any] = {}
+        self._custom_system_prompt: str | None = None
+        self._skill_instructions: str | None = None
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []
@@ -118,6 +120,34 @@ class StdioProtocolHandler:
             self._can_use_tool = None
         else:
             self._can_use_tool = make_permission_checker(self._project_path, yolo_mode=False)
+
+    def _resolve_system_prompt(
+        self,
+        tools: list[Any],
+        prompt: str,
+        mcp_instructions: str | None,
+        hook_instructions: list[str] | None = None,
+    ) -> str:
+        """Resolve the system prompt for the current session/query."""
+        if self._custom_system_prompt:
+            return self._custom_system_prompt
+
+        additional_instructions: list[str] = []
+        if self._skill_instructions:
+            additional_instructions.append(self._skill_instructions)
+        memory_instructions = build_memory_instructions()
+        if memory_instructions:
+            additional_instructions.append(memory_instructions)
+        if hook_instructions:
+            additional_instructions.extend([text for text in hook_instructions if text])
+
+        return build_system_prompt(
+            tools,
+            prompt,
+            {},
+            additional_instructions=additional_instructions or None,
+            mcp_instructions=mcp_instructions,
+        )
 
     async def _write_message(self, message: dict[str, Any]) -> None:
         """Write a JSON message to stdout.
@@ -269,6 +299,17 @@ class StdioProtocolHandler:
             # Extract options from request
             options = request.get("options", {})
             self._session_id = options.get("session_id") or str(uuid.uuid4())
+            self._custom_system_prompt = options.get("system_prompt")
+            raw_max_turns = options.get("max_turns")
+            max_turns: int | None = None
+            if raw_max_turns is not None:
+                try:
+                    max_turns = int(raw_max_turns)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "[stdio] Invalid max_turns %r; ignoring",
+                        raw_max_turns,
+                    )
 
             # Setup working directory
             cwd = options.get("cwd")
@@ -319,6 +360,7 @@ class StdioProtocolHandler:
                 yolo_mode=yolo_mode,
                 verbose=options.get("verbose", False),
                 model=model,
+                max_turns=max_turns,
                 permission_mode=permission_mode,
             )
 
@@ -346,22 +388,12 @@ class StdioProtocolHandler:
             from ripperdoc.core.skills import load_all_skills, build_skill_summary
 
             skill_result = load_all_skills(self._project_path)
-            skill_instructions = build_skill_summary(skill_result.skills)
+            self._skill_instructions = build_skill_summary(skill_result.skills)
 
-            additional_instructions: list[str] = []
-            if skill_instructions:
-                additional_instructions.append(skill_instructions)
-
-            memory_instructions = build_memory_instructions()
-            if memory_instructions:
-                additional_instructions.append(memory_instructions)
-
-            system_prompt = build_system_prompt(
+            system_prompt = self._resolve_system_prompt(
                 tools,
                 "",  # Will be set per query
-                {},
-                additional_instructions=additional_instructions or None,
-                mcp_instructions=mcp_instructions,
+                mcp_instructions,
             )
 
             # Apply permission mode to runtime state (checker + query context)
@@ -373,9 +405,6 @@ class StdioProtocolHandler:
             # Send success response with available tools
             # Use simple list format for Claude SDK compatibility
             # Get skill info for agents list
-            from ripperdoc.core.skills import load_all_skills
-
-            skill_result = load_all_skills(self._project_path)
             agent_names = [s.name for s in skill_result.skills] if skill_result.skills else []
 
             init_response = InitializeResponseData(
@@ -554,12 +583,11 @@ class StdioProtocolHandler:
             servers = await load_mcp_servers_async(self._project_path)
             mcp_instructions = format_mcp_instructions(servers)
 
-            system_prompt = build_system_prompt(
+            system_prompt = self._resolve_system_prompt(
                 self._query_context.tools if self._query_context else [],
                 prompt,
-                {},
-                additional_instructions=additional_instructions or None,
-                mcp_instructions=mcp_instructions,
+                mcp_instructions,
+                additional_instructions,
             )
 
             # Send acknowledgment that query is starting
