@@ -160,7 +160,6 @@ class AgentGenerateScreen(ModalScreen[Optional[str]]):
                 "Describe what this agent should do and when it should be used.",
                 id="generate_subtitle",
             )
-            yield Static("", id="generate_error")
             yield Static("", id="generate_status")
             with VerticalScroll(id="generate_fields"):
                 yield TextArea(
@@ -194,11 +193,14 @@ class AgentGenerateScreen(ModalScreen[Optional[str]]):
             app.start_agent_generation(description, self)
 
     def _set_error(self, message: str) -> None:
-        error_widget = self.query_one("#generate_error", Static)
-        error_widget.update(message)
+        if not message:
+            return
+        app = getattr(self, "app", None)
+        if app:
+            app.notify(message, title="Validation error", severity="error", timeout=6)
 
     def clear_error(self) -> None:
-        self._set_error("")
+        return
 
     def set_error(self, message: str) -> None:
         self._set_error(message)
@@ -252,7 +254,6 @@ class AgentFormScreen(ModalScreen[Optional[AgentFormResult]]):
         title = "Add agent" if self._mode == "add" else "Edit agent"
         with Container(id="form_dialog"):
             yield Static(title, id="form_title")
-            yield Static("", id="form_error")
             with VerticalScroll(id="form_fields"):
                 if self._mode == "add":
                     name_default = self._draft.name if self._draft else ""
@@ -384,8 +385,9 @@ class AgentFormScreen(ModalScreen[Optional[AgentFormResult]]):
         )
 
     def _set_error(self, message: str) -> None:
-        error_widget = self.query_one("#form_error", Static)
-        error_widget.update(message)
+        app = getattr(self, "app", None)
+        if app:
+            app.notify(message, title="Validation error", severity="error", timeout=6)
 
 
 def _extract_assistant_text(message: Any) -> str:
@@ -519,11 +521,6 @@ class AgentsApp(App[None]):
 
     #form_title, #info_title, #method_title, #generate_title {
         text-style: bold;
-        padding: 0 0 1 0;
-    }
-
-    #form_error, #generate_error {
-        color: $error;
         padding: 0 0 1 0;
     }
 

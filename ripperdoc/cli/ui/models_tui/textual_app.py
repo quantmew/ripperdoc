@@ -88,7 +88,6 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         title = "Add model" if self._mode == "add" else "Edit model"
         with Container(id="form_dialog"):
             yield Static(title, id="form_title")
-            yield Static("", id="form_error")
             with VerticalScroll(id="form_fields"):
                 if self._mode == "add":
                     yield Static("Profile name", classes="field_label")
@@ -315,8 +314,9 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         )
 
     def _set_error(self, message: str) -> None:
-        error_widget = self.query_one("#form_error", Static)
-        error_widget.update(message)
+        app = getattr(self, "app", None)
+        if app:
+            app.notify(message, title="Validation error", severity="error", timeout=6)
 
     def _parse_int(self, raw: str, label: str) -> Optional[int]:
         raw = (raw or "").strip()
@@ -382,11 +382,6 @@ class ModelsApp(App[None]):
 
     #form_title {
         text-style: bold;
-        padding: 0 0 1 0;
-    }
-
-    #form_error {
-        color: $error;
         padding: 0 0 1 0;
     }
 

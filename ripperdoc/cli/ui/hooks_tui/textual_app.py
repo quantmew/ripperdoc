@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import textwrap
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from textual.app import App, ComposeResult
+from textual import events
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, OptionList, Static, TextArea
@@ -140,7 +142,6 @@ class MatcherScreen(ModalScreen[Optional[str]]):
         tools_hint = self._tool_name_hint()
         with Container(id="form_dialog"):
             yield Static(title, id="form_title")
-            yield Static("", id="form_error")
             with VerticalScroll(id="form_fields"):
                 if tools_hint:
                     yield Static("Possible matcher values for field tool_name:", classes="field_label")
@@ -208,7 +209,6 @@ class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
         title = "Add hook" if not self._existing_hook else "Edit hook"
         with Container(id="form_dialog"):
             yield Static(title, id="form_title")
-            yield Static("", id="form_error")
             with VerticalScroll(id="form_fields"):
                 if self._hook_type == "prompt":
                     prompt_default = self._existing_hook.get("prompt", "")
@@ -282,7 +282,9 @@ class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
         self.dismiss(HookFormResult(hook=hook))
 
     def _set_error(self, message: str) -> None:
-        self.query_one("#form_error", Static).update(message)
+        app = getattr(self, "app", None)
+        if app:
+            app.notify(message, title="Validation error", severity="error", timeout=6)
 
 
 class HooksApp(App[None]):
@@ -330,11 +332,6 @@ class HooksApp(App[None]):
 
     #form_title {
         text-style: bold;
-        padding: 0 0 1 0;
-    }
-
-    #form_error {
-        color: $error;
         padding: 0 0 1 0;
     }
 
@@ -406,6 +403,10 @@ class HooksApp(App[None]):
         self._status_text = ""
         self._show_merged: bool = True
         self._pending_matcher: Optional[str] = None
+        self._last_select_option_id: Optional[str] = None
+        self._last_select_time: float = 0.0
+        self._next_select_is_keyboard: bool = False
+        self._double_click_threshold = 0.45
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -480,7 +481,11 @@ class HooksApp(App[None]):
             self._delete_hook(hook_index)
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id != "hooks_list":
+            return
         option_id = event.option.id or ""
+        if not self._should_activate_option(option_id):
+            return
         if self._view_mode == "events":
             if option_id.startswith("event:"):
                 self._event_name = option_id.split(":", 1)[1]
@@ -495,6 +500,32 @@ class HooksApp(App[None]):
 
         if self._view_mode == "hooks":
             self._handle_hook_selection(option_id)
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "enter" and self._hooks_list_focused():
+            self._next_select_is_keyboard = True
+
+    def _hooks_list_focused(self) -> bool:
+        focused = getattr(self.screen, "focused", None)
+        return getattr(focused, "id", None) == "hooks_list"
+
+    def _should_activate_option(self, option_id: str) -> bool:
+        if not option_id:
+            return False
+        if self._next_select_is_keyboard:
+            self._next_select_is_keyboard = False
+            return True
+        now = time.monotonic()
+        if (
+            option_id == self._last_select_option_id
+            and (now - self._last_select_time) <= self._double_click_threshold
+        ):
+            self._last_select_option_id = None
+            self._last_select_time = 0.0
+            return True
+        self._last_select_option_id = option_id
+        self._last_select_time = now
+        return False
 
     def _handle_matcher_selection(self, option_id: str) -> None:
         if not self._event_name:
@@ -969,11 +1000,11 @@ class HooksApp(App[None]):
     def _update_hint_bar(self) -> None:
         hint = self.query_one("#hint_bar", Static)
         if self._view_mode == "events":
-            hint.update("Enter to open | S to switch scope | A to toggle all | Q to quit")
+            hint.update("Double-click/Enter to open | S to switch scope | A to toggle all | Q to quit")
         elif self._view_mode == "matchers":
-            hint.update("Enter to open | D to delete matcher | A to toggle all | Esc to go back")
+            hint.update("Double-click/Enter to open | D to delete matcher | A to toggle all | Esc to go back")
         else:
-            hint.update("Enter to edit | D to delete | A to toggle all | Esc to go back")
+            hint.update("Double-click/Enter to edit | D to delete | A to toggle all | Esc to go back")
 
     def _refresh_list(self) -> None:
         option_list = self.query_one("#hooks_list", OptionList)
