@@ -210,7 +210,7 @@ class HookManager:
         if not self.project_dir or self.project_dir == self._setup_ran_for_project:
             return
         try:
-            self.run_setup()
+            self.run_setup("init")
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning(
                 "[hook_manager] Setup hook failed: %s: %s",
@@ -224,7 +224,7 @@ class HookManager:
         if not self.project_dir or self.project_dir == self._setup_ran_for_project:
             return
         try:
-            await self.run_setup_async()
+            await self.run_setup_async("init")
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning(
                 "[hook_manager] Setup hook failed: %s: %s",
@@ -241,9 +241,11 @@ class HookManager:
         except OSError:
             return str(self.project_dir) if self.project_dir else None
 
-    def _get_hooks(self, event: HookEvent, tool_name: Optional[str] = None) -> List[HookDefinition]:
+    def _get_hooks(
+        self, event: HookEvent, matcher_value: Optional[str] = None
+    ) -> List[HookDefinition]:
         """Get hooks that should run for an event."""
-        return self.config.get_hooks_for_event(event, tool_name)
+        return self.config.get_hooks_for_event(event, matcher_value)
 
     def cleanup(self) -> None:
         """Clean up resources (call on session end)."""
@@ -431,17 +433,22 @@ class HookManager:
         tool_response: Any = None,
         tool_error: Optional[str] = None,
         tool_use_id: Optional[str] = None,
+        *,
+        error: Optional[str] = None,
+        is_interrupt: Optional[bool] = None,
     ) -> HookResult:
         """Run PostToolUseFailure hooks synchronously."""
         hooks = self._get_hooks(HookEvent.POST_TOOL_USE_FAILURE, tool_name)
         if not hooks:
             return HookResult([])
 
+        error_value = error if error is not None else tool_error
         input_data = PostToolUseFailureInput(
             tool_name=tool_name,
             tool_input=tool_input,
             tool_response=tool_response,
-            tool_error=tool_error,
+            error=error_value,
+            is_interrupt=is_interrupt,
             tool_use_id=tool_use_id,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
@@ -459,17 +466,22 @@ class HookManager:
         tool_response: Any = None,
         tool_error: Optional[str] = None,
         tool_use_id: Optional[str] = None,
+        *,
+        error: Optional[str] = None,
+        is_interrupt: Optional[bool] = None,
     ) -> HookResult:
         """Run PostToolUseFailure hooks asynchronously."""
         hooks = self._get_hooks(HookEvent.POST_TOOL_USE_FAILURE, tool_name)
         if not hooks:
             return HookResult([])
 
+        error_value = error if error is not None else tool_error
         input_data = PostToolUseFailureInput(
             tool_name=tool_name,
             tool_input=tool_input,
             tool_response=tool_response,
-            tool_error=tool_error,
+            error=error_value,
+            is_interrupt=is_interrupt,
             tool_use_id=tool_use_id,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
@@ -484,7 +496,7 @@ class HookManager:
 
     def run_user_prompt_submit(self, prompt: str) -> HookResult:
         """Run UserPromptSubmit hooks synchronously."""
-        hooks = self._get_hooks(HookEvent.USER_PROMPT_SUBMIT)
+        hooks = self._get_hooks(HookEvent.USER_PROMPT_SUBMIT, prompt)
         if not hooks:
             return HookResult([])
 
@@ -501,7 +513,7 @@ class HookManager:
 
     async def run_user_prompt_submit_async(self, prompt: str) -> HookResult:
         """Run UserPromptSubmit hooks asynchronously."""
-        hooks = self._get_hooks(HookEvent.USER_PROMPT_SUBMIT)
+        hooks = self._get_hooks(HookEvent.USER_PROMPT_SUBMIT, prompt)
         if not hooks:
             return HookResult([])
 
@@ -518,19 +530,26 @@ class HookManager:
 
     # --- Notification ---
 
-    def run_notification(self, message: str, notification_type: str = "info") -> HookResult:
+    def run_notification(
+        self,
+        message: str,
+        notification_type: str = "info",
+        title: Optional[str] = None,
+    ) -> HookResult:
         """Run Notification hooks synchronously.
 
         Args:
             message: The notification message
             notification_type: Type of notification (permission_prompt, idle_prompt, auth_success, elicitation_dialog)
+            title: Optional notification title
         """
-        hooks = self._get_hooks(HookEvent.NOTIFICATION)
+        hooks = self._get_hooks(HookEvent.NOTIFICATION, notification_type)
         if not hooks:
             return HookResult([])
 
         input_data = NotificationInput(
             message=message,
+            title=title,
             notification_type=notification_type,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
@@ -542,15 +561,19 @@ class HookManager:
         return HookResult(outputs)
 
     async def run_notification_async(
-        self, message: str, notification_type: str = "info"
+        self,
+        message: str,
+        notification_type: str = "info",
+        title: Optional[str] = None,
     ) -> HookResult:
         """Run Notification hooks asynchronously."""
-        hooks = self._get_hooks(HookEvent.NOTIFICATION)
+        hooks = self._get_hooks(HookEvent.NOTIFICATION, notification_type)
         if not hooks:
             return HookResult([])
 
         input_data = NotificationInput(
             message=message,
+            title=title,
             notification_type=notification_type,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
@@ -576,7 +599,7 @@ class HookManager:
             reason: Reason for stopping
             stop_sequence: Stop sequence that triggered the stop
         """
-        hooks = self._get_hooks(HookEvent.STOP)
+        hooks = self._get_hooks(HookEvent.STOP, reason)
         if not hooks:
             return HookResult([])
 
@@ -601,7 +624,7 @@ class HookManager:
     ) -> HookResult:
         """Run Stop hooks asynchronously."""
         logger.debug("[hook_manager] run_stop_async ENTER")
-        hooks = self._get_hooks(HookEvent.STOP)
+        hooks = self._get_hooks(HookEvent.STOP, reason)
         logger.debug(f"[hook_manager] run_stop_async: got {len(hooks)} hooks")
         if not hooks:
             logger.debug("[hook_manager] run_stop_async: no hooks, returning empty HookResult")
@@ -634,7 +657,7 @@ class HookManager:
         tool_use_id: Optional[str] = None,
     ) -> HookResult:
         """Run SubagentStart hooks synchronously."""
-        hooks = self._get_hooks(HookEvent.SUBAGENT_START)
+        hooks = self._get_hooks(HookEvent.SUBAGENT_START, subagent_type)
         if not hooks:
             return HookResult([])
 
@@ -662,7 +685,7 @@ class HookManager:
         tool_use_id: Optional[str] = None,
     ) -> HookResult:
         """Run SubagentStart hooks asynchronously."""
-        hooks = self._get_hooks(HookEvent.SUBAGENT_START)
+        hooks = self._get_hooks(HookEvent.SUBAGENT_START, subagent_type)
         if not hooks:
             return HookResult([])
 
@@ -683,17 +706,23 @@ class HookManager:
 
     # --- Subagent Stop ---
 
-    def run_subagent_stop(self, stop_hook_active: bool = False) -> HookResult:
+    def run_subagent_stop(
+        self,
+        stop_hook_active: bool = False,
+        subagent_type: Optional[str] = None,
+    ) -> HookResult:
         """Run SubagentStop hooks synchronously.
 
         Args:
             stop_hook_active: True if already continuing from a stop hook
+            subagent_type: Subagent type name
         """
-        hooks = self._get_hooks(HookEvent.SUBAGENT_STOP)
+        hooks = self._get_hooks(HookEvent.SUBAGENT_STOP, subagent_type)
         if not hooks:
             return HookResult([])
 
         input_data = SubagentStopInput(
+            subagent_type=subagent_type or "",
             stop_hook_active=stop_hook_active,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
@@ -704,13 +733,18 @@ class HookManager:
         outputs = self.executor.execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
-    async def run_subagent_stop_async(self, stop_hook_active: bool = False) -> HookResult:
+    async def run_subagent_stop_async(
+        self,
+        stop_hook_active: bool = False,
+        subagent_type: Optional[str] = None,
+    ) -> HookResult:
         """Run SubagentStop hooks asynchronously."""
-        hooks = self._get_hooks(HookEvent.SUBAGENT_STOP)
+        hooks = self._get_hooks(HookEvent.SUBAGENT_STOP, subagent_type)
         if not hooks:
             return HookResult([])
 
         input_data = SubagentStopInput(
+            subagent_type=subagent_type or "",
             stop_hook_active=stop_hook_active,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
@@ -723,13 +757,14 @@ class HookManager:
 
     # --- Setup ---
 
-    def run_setup(self) -> HookResult:
+    def run_setup(self, trigger: str = "init") -> HookResult:
         """Run Setup hooks synchronously."""
-        hooks = self._get_hooks(HookEvent.SETUP)
+        hooks = self._get_hooks(HookEvent.SETUP, trigger)
         if not hooks:
             return HookResult([])
 
         input_data = SetupInput(
+            trigger=trigger,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),
@@ -739,13 +774,14 @@ class HookManager:
         outputs = self.executor.execute_hooks_sync(hooks, input_data)
         return HookResult(outputs)
 
-    async def run_setup_async(self) -> HookResult:
+    async def run_setup_async(self, trigger: str = "init") -> HookResult:
         """Run Setup hooks asynchronously."""
-        hooks = self._get_hooks(HookEvent.SETUP)
+        hooks = self._get_hooks(HookEvent.SETUP, trigger)
         if not hooks:
             return HookResult([])
 
         input_data = SetupInput(
+            trigger=trigger,
             session_id=self.session_id,
             transcript_path=self.transcript_path,
             cwd=self._get_cwd(),
@@ -764,7 +800,7 @@ class HookManager:
             trigger: "manual" or "auto"
             custom_instructions: Custom instructions passed to /compact
         """
-        hooks = self._get_hooks(HookEvent.PRE_COMPACT)
+        hooks = self._get_hooks(HookEvent.PRE_COMPACT, trigger)
         if not hooks:
             return HookResult([])
 
@@ -784,7 +820,7 @@ class HookManager:
         self, trigger: str, custom_instructions: str = ""
     ) -> HookResult:
         """Run PreCompact hooks asynchronously."""
-        hooks = self._get_hooks(HookEvent.PRE_COMPACT)
+        hooks = self._get_hooks(HookEvent.PRE_COMPACT, trigger)
         if not hooks:
             return HookResult([])
 
@@ -810,7 +846,7 @@ class HookManager:
         """
         if source == "startup":
             self._run_setup_if_needed()
-        hooks = self._get_hooks(HookEvent.SESSION_START)
+        hooks = self._get_hooks(HookEvent.SESSION_START, source)
         if not hooks:
             return HookResult([])
 
@@ -829,7 +865,7 @@ class HookManager:
         """Run SessionStart hooks asynchronously."""
         if source == "startup":
             await self._run_setup_if_needed_async()
-        hooks = self._get_hooks(HookEvent.SESSION_START)
+        hooks = self._get_hooks(HookEvent.SESSION_START, source)
         if not hooks:
             return HookResult([])
 
@@ -859,7 +895,7 @@ class HookManager:
             duration_seconds: How long the session lasted
             message_count: Number of messages in the session
         """
-        hooks = self._get_hooks(HookEvent.SESSION_END)
+        hooks = self._get_hooks(HookEvent.SESSION_END, reason)
         if not hooks:
             return HookResult([])
 
@@ -883,7 +919,7 @@ class HookManager:
         message_count: Optional[int] = None,
     ) -> HookResult:
         """Run SessionEnd hooks asynchronously."""
-        hooks = self._get_hooks(HookEvent.SESSION_END)
+        hooks = self._get_hooks(HookEvent.SESSION_END, reason)
         if not hooks:
             return HookResult([])
 

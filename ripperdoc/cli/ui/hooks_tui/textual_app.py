@@ -13,7 +13,7 @@ from textual.app import App, ComposeResult
 from textual import events
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, OptionList, Static, TextArea
+from textual.widgets import Button, Footer, Header, Input, OptionList, Select, Static, TextArea
 from textual.widgets.option_list import Option
 
 from ripperdoc.core.default_tools import BUILTIN_TOOL_NAMES
@@ -23,15 +23,15 @@ from ripperdoc.core.hooks import (
     get_project_hooks_path,
     get_project_local_hooks_path,
 )
-from ripperdoc.core.hooks.config import DEFAULT_HOOK_TIMEOUT, PROMPT_SUPPORTED_EVENTS
-
-
-MATCHER_EVENTS = {
-    HookEvent.PRE_TOOL_USE.value,
-    HookEvent.PERMISSION_REQUEST.value,
-    HookEvent.POST_TOOL_USE.value,
-    HookEvent.POST_TOOL_USE_FAILURE.value,
-}
+from ripperdoc.core.agents import load_agent_definitions
+from ripperdoc.core.hooks.config import (
+    DEFAULT_HOOK_TIMEOUT,
+    PROMPT_SUPPORTED_EVENTS,
+    ALWAYS_MATCHER_EVENTS,
+    MATCHER_VALUE_OPTIONS,
+    TEXT_MATCHER_EVENTS,
+    TOOL_MATCHER_EVENTS,
+)
 
 EVENT_DESCRIPTIONS: Dict[str, str] = {
     HookEvent.PRE_TOOL_USE.value: "Before a tool runs (can block or edit input)",
@@ -48,6 +48,41 @@ EVENT_DESCRIPTIONS: Dict[str, str] = {
     HookEvent.SESSION_END.value: "When a session ends",
     HookEvent.SETUP.value: "When repository setup/maintenance runs",
 }
+
+MATCHER_FIELD_NAMES: Dict[str, str] = {
+    HookEvent.PRE_TOOL_USE.value: "tool_name",
+    HookEvent.PERMISSION_REQUEST.value: "tool_name",
+    HookEvent.POST_TOOL_USE.value: "tool_name",
+    HookEvent.POST_TOOL_USE_FAILURE.value: "tool_name",
+    HookEvent.USER_PROMPT_SUBMIT.value: "prompt",
+    HookEvent.NOTIFICATION.value: "notification_type",
+    HookEvent.PRE_COMPACT.value: "trigger",
+    HookEvent.SESSION_START.value: "source",
+    HookEvent.SESSION_END.value: "reason",
+    HookEvent.SETUP.value: "trigger",
+    HookEvent.SUBAGENT_START.value: "subagent_type",
+    HookEvent.SUBAGENT_STOP.value: "subagent_type",
+}
+
+
+def _matcher_mode(event_name: str) -> str:
+    if event_name in TOOL_MATCHER_EVENTS:
+        return "tool"
+    if event_name in MATCHER_VALUE_OPTIONS:
+        return "enum"
+    if event_name in TEXT_MATCHER_EVENTS:
+        return "text"
+    if event_name in ALWAYS_MATCHER_EVENTS:
+        return "always"
+    return "none"
+
+
+def _matcher_choices(event_name: str) -> List[str]:
+    return list(MATCHER_VALUE_OPTIONS.get(event_name, []))
+
+
+def _matcher_field_name(event_name: str) -> str:
+    return MATCHER_FIELD_NAMES.get(event_name, "matcher")
 
 
 @dataclass(frozen=True)
@@ -136,32 +171,64 @@ class MatcherScreen(ModalScreen[Optional[str]]):
         super().__init__()
         self._event_name = event_name
         self._existing = existing or ""
+        self._mode = _matcher_mode(event_name)
+        self._choices = _matcher_choices(event_name)
 
     def compose(self) -> ComposeResult:
         title = f"{'Edit' if self._existing else 'Add'} matcher for {self._event_name}"
         tools_hint = self._tool_name_hint()
+        agent_hint = self._agent_type_hint()
         with Container(id="form_dialog"):
             yield Static(title, id="form_title")
             with VerticalScroll(id="form_fields"):
                 if tools_hint:
                     yield Static("Possible matcher values for field tool_name:", classes="field_label")
                     yield Static(tools_hint, classes="field_value")
+                if agent_hint:
+                    yield Static(
+                        "Possible matcher values for field subagent_type:",
+                        classes="field_label",
+                    )
+                    yield Static(agent_hint, classes="field_value")
 
-                yield Static("Matcher (blank for '*')", classes="field_label")
-                yield Input(
-                    value=self._existing,
-                    placeholder="Matcher pattern",
-                    id="matcher_input",
-                )
-                yield Static("Example matchers:", classes="field_label")
-                yield Static("Write (single tool) | Write|Edit (multiple) | Web.* (regex)", classes="field_value")
+                field_name = _matcher_field_name(self._event_name)
+                if self._mode == "enum" and self._choices:
+                    yield Static(f"Matcher ({field_name})", classes="field_label")
+                    options, default_value = self._build_select_options()
+                    yield Select(options, value=default_value, id="matcher_select")
+                else:
+                    yield Static("Matcher (blank for '*')", classes="field_label")
+                    yield Input(
+                        value=self._existing,
+                        placeholder="Matcher pattern",
+                        id="matcher_input",
+                    )
+                    if self._mode == "tool":
+                        yield Static("Example matchers:", classes="field_label")
+                        yield Static(
+                            "Write (single tool) | Write|Edit (multiple) | Web.* (regex)",
+                            classes="field_value",
+                        )
+                    elif self._mode == "text":
+                        yield Static(
+                            f"Matcher values map to {field_name}. Leave blank for all.",
+                            classes="field_value",
+                        )
+                    elif self._mode == "always":
+                        yield Static(
+                            "Matcher is ignored for this event; all hooks will run.",
+                            classes="field_value",
+                        )
 
             with Horizontal(id="form_buttons"):
                 yield Button("Save", id="form_save", variant="primary")
                 yield Button("Cancel", id="form_cancel")
 
     def on_mount(self) -> None:
-        self.query_one("#matcher_input", Input).focus()
+        if self._mode == "enum" and self._choices:
+            self.query_one("#matcher_select", Select).focus()
+        else:
+            self.query_one("#matcher_input", Input).focus()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -171,6 +238,10 @@ class MatcherScreen(ModalScreen[Optional[str]]):
             self.dismiss(None)
             return
         if event.button.id != "form_save":
+            return
+        if self._mode == "enum" and self._choices:
+            selected = (self.query_one("#matcher_select", Select).value or "").strip()
+            self.dismiss(selected or "*")
             return
         raw = (self.query_one("#matcher_input", Input).value or "").strip()
         self.dismiss(raw or "*")
@@ -182,10 +253,32 @@ class MatcherScreen(ModalScreen[Optional[str]]):
         self.dismiss(raw or "*")
 
     def _tool_name_hint(self) -> str:
-        if self._event_name not in MATCHER_EVENTS:
+        if self._event_name not in TOOL_MATCHER_EVENTS:
             return ""
         tools = ", ".join(sorted(BUILTIN_TOOL_NAMES))
         return textwrap.fill(tools, width=84)
+
+    def _agent_type_hint(self) -> str:
+        if self._event_name not in TEXT_MATCHER_EVENTS:
+            return ""
+        try:
+            agents = load_agent_definitions().active_agents
+        except Exception:
+            return ""
+        names = sorted({agent.agent_type for agent in agents if agent.agent_type})
+        if not names:
+            return ""
+        return textwrap.fill(", ".join(names), width=84)
+
+    def _build_select_options(self) -> tuple[list[tuple[str, str]], str]:
+        options: list[tuple[str, str]] = [("All (*)", "*")]
+        for value in self._choices:
+            options.append((value, value))
+        existing = (self._existing or "").strip()
+        if existing and existing not in {value for _, value in options}:
+            options.append((existing, existing))
+        default_value = existing or "*"
+        return options, default_value
 
 
 class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
@@ -596,8 +689,8 @@ class HooksApp(App[None]):
         if not matcher or not self._event_name:
             return
         if self._show_merged:
-            if self._event_name not in MATCHER_EVENTS:
-                self._set_status("Matchers are ignored for this event.")
+            if _matcher_mode(self._event_name) == "none":
+                self._set_status("Matchers are fixed to match-all for this event.")
                 self._refresh_view()
                 return
             self._prompt_matcher_target(matcher, self._target_index)
@@ -936,9 +1029,13 @@ class HooksApp(App[None]):
             title_bar.update("Hooks")
             return
         if self._view_mode == "matchers" and self._event_name:
-            title = f"{self._event_name} - Tool Matchers"
-            if self._event_name not in MATCHER_EVENTS:
+            matcher_mode = _matcher_mode(self._event_name)
+            if matcher_mode == "tool":
+                title = f"{self._event_name} - Tool Matchers"
+            elif matcher_mode == "none":
                 title = f"{self._event_name} - Hook Groups"
+            else:
+                title = f"{self._event_name} - Matchers"
             title_bar.update(title)
             return
         if self._view_mode == "hooks" and self._event_name:
@@ -982,8 +1079,23 @@ class HooksApp(App[None]):
             lines.append(description)
         if self._show_merged:
             lines.append("Merged view: entries include Project/Project (Local)/User settings labels.")
-        if self._event_name not in MATCHER_EVENTS:
-            lines.append("Matchers are ignored for this event.")
+        matcher_mode = _matcher_mode(self._event_name)
+        if matcher_mode == "tool":
+            lines.append("Matcher: tool_name (regex ok). Blank/'*' matches all tools.")
+        elif matcher_mode == "enum":
+            choices = _matcher_choices(self._event_name)
+            if choices:
+                lines.append(
+                    "Matcher values: " + ", ".join(choices) + " (blank/'*' matches all)."
+                )
+        elif matcher_mode == "text":
+            lines.append(
+                f"Matcher: {_matcher_field_name(self._event_name)} (blank/'*' matches all)."
+            )
+        elif matcher_mode == "always":
+            lines.append("Matcher: ignored for this event (all match).")
+        else:
+            lines.append("Matcher: match-all only for this event.")
         lines.extend(
             [
                 "Input to command is JSON of hook input.",
@@ -1036,9 +1148,10 @@ class HooksApp(App[None]):
         if not self._event_name:
             return
         matchers = self._hooks.get(self._event_name, [])
+        allow_matchers = _matcher_mode(self._event_name) != "none"
         if self._show_merged:
             display_index = 1
-            if self._event_name in MATCHER_EVENTS:
+            if allow_matchers:
                 option_list.add_option(Option("1. + Add new matcher...", id="action:add_matcher"))
                 self._option_ids.append("action:add_matcher")
                 display_index += 1
@@ -1059,7 +1172,7 @@ class HooksApp(App[None]):
                 option_list.add_option(Option(label, id=option_id))
                 display_index += 1
             return
-        if self._event_name in MATCHER_EVENTS:
+        if allow_matchers:
             option_list.add_option(Option("1. + Add new matcher...", id="action:add_matcher"))
             self._option_ids.append("action:add_matcher")
             option_list.add_option(Option("2. + Match all (no filter)", id="action:match_all"))

@@ -101,7 +101,7 @@ class HookInterceptor:
                 tool_name,
                 tool_input,
                 tool_response=tool_output,
-                tool_error=tool_error,
+                error=tool_error,
             )
         else:
             result = self.manager.run_post_tool_use(tool_name, tool_input, tool_output)
@@ -124,7 +124,7 @@ class HookInterceptor:
                 tool_name,
                 tool_input,
                 tool_response=tool_output,
-                tool_error=tool_error,
+                error=tool_error,
             )
         else:
             result = await self.manager.run_post_tool_use_async(tool_name, tool_input, tool_output)

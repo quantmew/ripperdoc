@@ -352,6 +352,24 @@ async def run_query(
     default=None,
     help="Resume a specific session by id prefix.",
 )
+@click.option(
+    "--init",
+    "setup_init",
+    is_flag=True,
+    help="Run initialization hooks and start interactive mode.",
+)
+@click.option(
+    "--init-only",
+    "setup_init_only",
+    is_flag=True,
+    help="Run initialization hooks and exit (no interactive session).",
+)
+@click.option(
+    "--maintenance",
+    "setup_maintenance",
+    is_flag=True,
+    help="Run maintenance hooks and exit.",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -366,6 +384,9 @@ def cli(
     model: Optional[str],
     continue_session: bool,
     resume_session: Optional[str],
+    setup_init: bool,
+    setup_init_only: bool,
+    setup_maintenance: bool,
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
@@ -466,6 +487,30 @@ def cli(
     yolo_mode = yolo
     # Parse --tools option
     allowed_tools = parse_tools_option(tools)
+
+    setup_flags = [setup_init, setup_init_only, setup_maintenance]
+    if sum(1 for flag in setup_flags if flag) > 1:
+        raise click.ClickException(
+            "Use only one of --init, --init-only, or --maintenance."
+        )
+
+    setup_trigger: Optional[str] = None
+    if setup_init or setup_init_only:
+        setup_trigger = "init"
+    elif setup_maintenance:
+        setup_trigger = "maintenance"
+
+    if setup_trigger:
+        hook_manager.set_project_dir(project_path)
+        hook_manager.set_session_id(session_id)
+        hook_manager.set_llm_callback(build_hook_llm_callback())
+        session_history = SessionHistory(project_path, session_id)
+        hook_manager.set_transcript_path(str(session_history.path))
+        hook_manager.run_setup(setup_trigger)
+        if setup_trigger == "init":
+            hook_manager._setup_ran_for_project = project_path
+        if setup_init_only or setup_maintenance:
+            return
 
     # Handle piped stdin input
     # - With -p flag: Not applicable (prompt comes from -p argument)

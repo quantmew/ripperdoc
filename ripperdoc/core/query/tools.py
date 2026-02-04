@@ -175,11 +175,13 @@ async def _run_tool_use_generator(
         yield tool_result_message(tool_use_id, tool_error, is_error=True)
 
     if tool_error:
+        is_interrupt = False
         post_failure_result = await hook_manager.run_post_tool_use_failure_async(
             tool_name,
             tool_input_dict,
             tool_response=tool_output,
-            tool_error=tool_error,
+            error=tool_error,
+            is_interrupt=is_interrupt,
             tool_use_id=tool_use_id,
         )
         if post_failure_result.additional_context:

@@ -19,17 +19,46 @@ from ripperdoc.core.hooks import (
     get_project_hooks_path,
     get_project_local_hooks_path,
 )
-from ripperdoc.core.hooks.config import DEFAULT_HOOK_TIMEOUT, PROMPT_SUPPORTED_EVENTS
+from ripperdoc.core.hooks.config import (
+    DEFAULT_HOOK_TIMEOUT,
+    PROMPT_SUPPORTED_EVENTS,
+    ALWAYS_MATCHER_EVENTS,
+    MATCHER_VALUE_OPTIONS,
+    TEXT_MATCHER_EVENTS,
+    TOOL_MATCHER_EVENTS,
+)
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
-MATCHER_EVENTS = {
-    HookEvent.PRE_TOOL_USE.value,
-    HookEvent.PERMISSION_REQUEST.value,
-    HookEvent.POST_TOOL_USE.value,
-    HookEvent.POST_TOOL_USE_FAILURE.value,
-}
+def _matcher_mode(event_name: str) -> str:
+    if event_name in TOOL_MATCHER_EVENTS:
+        return "tool"
+    if event_name in MATCHER_VALUE_OPTIONS:
+        return "enum"
+    if event_name in TEXT_MATCHER_EVENTS:
+        return "text"
+    if event_name in ALWAYS_MATCHER_EVENTS:
+        return "always"
+    return "none"
+
+
+def _prompt_enum_matcher(console: Any, event_name: str) -> str:
+    choices = ["*"] + list(MATCHER_VALUE_OPTIONS.get(event_name, []))
+    console.print("\nSelect matcher value:")
+    for idx, value in enumerate(choices, start=1):
+        label = "all (*)" if value == "*" else value
+        console.print(f"  [{idx}] {escape(label)}")
+    default_choice = 1
+    while True:
+        choice = console.input(f"Matcher [1-{len(choices)}, default {default_choice}]: ").strip()
+        if not choice:
+            choice = str(default_choice)
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(choices):
+                return choices[idx - 1]
+        console.print("[red]Choose a matcher number from the list.[/red]")
 
 EVENT_DESCRIPTIONS: Dict[str, str] = {
     HookEvent.PRE_TOOL_USE.value: "Before a tool runs (can block or edit input)",
@@ -328,7 +357,8 @@ def _prompt_matcher_selection(
     matchers: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """Prompt for matcher selection or creation."""
-    if event_name not in MATCHER_EVENTS:
+    mode = _matcher_mode(event_name)
+    if mode == "none":
         if matchers:
             return matchers[0]
         default_matcher: Dict[str, Any] = {"matcher": None, "hooks": []}
@@ -336,8 +366,11 @@ def _prompt_matcher_selection(
         return default_matcher
 
     if not matchers:
-        console.print("\nMatcher (tool name or regex). Leave empty to match all tools (*).")
-        pattern = console.input("Matcher: ").strip() or "*"
+        if mode == "enum":
+            pattern = _prompt_enum_matcher(console, event_name)
+        else:
+            console.print("\nMatcher (blank for '*').")
+            pattern = console.input("Matcher: ").strip() or "*"
         first_matcher: Dict[str, Any] = {"matcher": pattern, "hooks": []}
         matchers.append(first_matcher)
         return first_matcher
@@ -360,7 +393,10 @@ def _prompt_matcher_selection(
             if 1 <= idx <= len(matchers):
                 return matchers[idx - 1]
             if idx == new_idx:
-                pattern = console.input("New matcher (blank for '*'): ").strip() or "*"
+                if mode == "enum":
+                    pattern = _prompt_enum_matcher(console, event_name)
+                else:
+                    pattern = console.input("New matcher (blank for '*'): ").strip() or "*"
                 created_matcher: Dict[str, Any] = {"matcher": pattern, "hooks": []}
                 matchers.append(created_matcher)
                 return created_matcher

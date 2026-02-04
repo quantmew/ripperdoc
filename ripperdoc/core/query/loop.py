@@ -503,7 +503,8 @@ async def _run_query_iteration(
         logger.debug("[query] BEFORE calling hook_manager.run_stop_async")
         stop_result = (
             await hook_manager.run_subagent_stop_async(
-                stop_hook_active=query_context.stop_hook_active
+                stop_hook_active=query_context.stop_hook_active,
+                subagent_type=getattr(query_context, "subagent_type", None),
             )
             if stop_hook == "subagent"
             else await hook_manager.run_stop_async(stop_hook_active=query_context.stop_hook_active)

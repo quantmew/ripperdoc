@@ -468,6 +468,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 verbose=context.verbose,
                 model=record.model_used or "main",
                 stop_hook="subagent",
+                subagent_type=record.agent_type,
             )
 
             yield ToolProgress(content=f"Resuming subagent '{record.agent_type}'")
@@ -593,6 +594,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             verbose=context.verbose,
             model=target_agent.model or "main",
             stop_hook="subagent",
+            subagent_type=target_agent.agent_type,
         )
 
         if input_data.run_in_background:

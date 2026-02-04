@@ -10,7 +10,7 @@ Configuration format:
   "hooks": {
     "EventName": [
       {
-        "matcher": "ToolPattern",  // Only for PreToolUse/PermissionRequest/PostToolUse/PostToolUseFailure
+        "matcher": "Pattern",  // Optional per event; see matcher rules below
         "hooks": [
           {
             "type": "command",
@@ -52,6 +52,40 @@ PROMPT_SUPPORTED_EVENTS = {
     "PermissionRequest",
 }
 
+# Hook events that match on tool names (tool_name in input).
+TOOL_MATCHER_EVENTS = {
+    HookEvent.PRE_TOOL_USE.value,
+    HookEvent.PERMISSION_REQUEST.value,
+    HookEvent.POST_TOOL_USE.value,
+    HookEvent.POST_TOOL_USE_FAILURE.value,
+}
+
+# Hook events with fixed matcher value options.
+MATCHER_VALUE_OPTIONS: Dict[str, List[str]] = {
+    HookEvent.SESSION_START.value: ["startup", "resume", "clear", "compact"],
+    HookEvent.PRE_COMPACT.value: ["manual", "auto"],
+    HookEvent.NOTIFICATION.value: [
+        "permission_prompt",
+        "idle_prompt",
+        "auth_success",
+        "elicitation_dialog",
+    ],
+    HookEvent.SESSION_END.value: ["clear", "logout", "prompt_input_exit", "other"],
+    HookEvent.SETUP.value: ["init", "maintenance"],
+}
+
+# Hook events that allow free-text matchers (non-tool).
+TEXT_MATCHER_EVENTS = {
+    HookEvent.USER_PROMPT_SUBMIT.value,
+    HookEvent.SUBAGENT_START.value,
+    HookEvent.SUBAGENT_STOP.value,
+}
+
+# Hook events where matchers are accepted but ignored (always match).
+ALWAYS_MATCHER_EVENTS = {
+    HookEvent.STOP.value,
+}
+
 
 class HookDefinition(BaseModel):
     """Definition of a single hook.
@@ -78,34 +112,38 @@ class HookDefinition(BaseModel):
 class HookMatcher(BaseModel):
     """A matcher that groups hooks for a specific pattern.
 
-    For PreToolUse/PermissionRequest/PostToolUse/PostToolUseFailure events, the matcher can be:
-    - A specific tool name (e.g., "Bash", "Write", "Edit")
-    - A regex pattern (e.g., "Edit|Write", "mcp__.*__write.*")
-    - "*" or "" to match all tools
+    Matcher value depends on event:
+    - Tool lifecycle events: tool_name (exact match or regex).
+    - Notification: notification_type
+    - PreCompact: trigger ("manual" or "auto")
+    - SessionStart: source ("startup", "resume", "clear", "compact")
+    - SessionEnd: reason ("clear", "logout", "prompt_input_exit", "other")
+    - Setup: trigger ("init" or "maintenance")
+    - SubagentStart: subagent_type
+    - UserPromptSubmit: prompt text
+
+    Use "*" or "" to match all.
     """
 
     matcher: Optional[str] = None  # None or empty means match all
     hooks: List[HookDefinition] = Field(default_factory=list)
 
-    def matches(self, tool_name: Optional[str] = None) -> bool:
-        """Check if this matcher matches the given tool name.
-
-        For events that don't use tool names, always returns True if matcher is empty.
-        """
+    def matches(self, matcher_value: Optional[str] = None) -> bool:
+        """Check if this matcher matches the given matcher value."""
         if not self.matcher or self.matcher == "*":
             return True
 
-        if tool_name is None:
-            return True
+        if matcher_value is None:
+            return False
 
         # Try exact match first (case-sensitive)
-        if self.matcher == tool_name:
+        if self.matcher == matcher_value:
             return True
 
         # Try regex match
         try:
             pattern = re.compile(self.matcher)
-            return bool(pattern.match(tool_name))
+            return bool(pattern.match(matcher_value))
         except re.error:
             # Invalid regex, fall back to simple string comparison
             return False
@@ -117,16 +155,22 @@ class HooksConfig(BaseModel):
     hooks: Dict[str, List[HookMatcher]] = Field(default_factory=dict)
 
     def get_hooks_for_event(
-        self, event: HookEvent, tool_name: Optional[str] = None
+        self, event: HookEvent, matcher_value: Optional[str] = None
     ) -> List[HookDefinition]:
-        """Get all hooks that should run for a given event and optional tool name."""
+        """Get all hooks that should run for a given event and optional matcher value."""
         event_name = event.value
         if event_name not in self.hooks:
             return []
 
+        if event_name in ALWAYS_MATCHER_EVENTS:
+            result: List[HookDefinition] = []
+            for matcher in self.hooks[event_name]:
+                result.extend(matcher.hooks)
+            return result
+
         result = []
         for matcher in self.hooks[event_name]:
-            if matcher.matches(tool_name):
+            if matcher.matches(matcher_value):
                 result.extend(matcher.hooks)
         return result
 

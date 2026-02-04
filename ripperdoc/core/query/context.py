@@ -190,6 +190,7 @@ class QueryContext:
         pause_ui: Optional[Callable[[], None]] = None,
         resume_ui: Optional[Callable[[], None]] = None,
         stop_hook: str = "stop",
+        subagent_type: Optional[str] = None,
         file_cache_max_entries: int = 500,
         file_cache_max_memory_mb: float = 50.0,
         pending_message_queue: Optional[PendingMessageQueue] = None,
@@ -214,6 +215,7 @@ class QueryContext:
         self.resume_ui = resume_ui
         self.stop_hook = stop_hook
         self.stop_hook_active = False
+        self.subagent_type = subagent_type
         self.max_turns = max_turns
         self.permission_mode = permission_mode
 

@@ -7,7 +7,7 @@ as well as the input/output data structures for each event type.
 import json
 from enum import Enum
 from typing import Any, Dict, Literal, Optional, Union
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class HookEvent(str, Enum):
@@ -125,7 +125,9 @@ class PostToolUseFailureInput(HookInput):
     tool_name: str = ""
     tool_input: Dict[str, Any] = Field(default_factory=dict)
     tool_response: Any = None  # Tool's response/output (if any)
-    tool_error: Optional[str] = None
+    error: Optional[str] = Field(default=None, validation_alias=AliasChoices("error", "tool_error"))
+    # True when the failure was due to a user interrupt (if known).
+    is_interrupt: Optional[bool] = None
     tool_use_id: Optional[str] = None
 
 
@@ -153,6 +155,7 @@ class NotificationInput(HookInput):
 
     hook_event_name: str = "Notification"
     message: str = ""
+    title: Optional[str] = None
     notification_type: str = ""  # Used as matcher
 
 
@@ -190,6 +193,7 @@ class SubagentStopInput(HookInput):
     """
 
     hook_event_name: str = "SubagentStop"
+    subagent_type: str = ""
     stop_hook_active: bool = False
 
 
@@ -252,6 +256,10 @@ class SetupInput(HookInput):
     """
 
     hook_event_name: str = "Setup"
+    # trigger values:
+    # - init: initial setup for a repo
+    # - maintenance: follow-up maintenance run
+    trigger: str = "init"  # "init" or "maintenance"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
