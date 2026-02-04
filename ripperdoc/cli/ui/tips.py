@@ -17,6 +17,7 @@ TIPS: List[str] = [
     "Type / then press Tab to see all available slash commands.",
     "Press Ctrl+C once to clear the current input without exiting.",
     "Double-press Ctrl+C to quickly exit Ripperdoc.",
+    "Double-press Esc to open history and roll back to a previous message.",
 
     # Slash Commands
     "Use /help to see all available commands and get started.",

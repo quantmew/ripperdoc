@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -95,7 +96,7 @@ def build_prompt_session(ui: object, ignore_filter: Any) -> PromptSession:
         """Insert newline on Alt+Enter."""
         event.current_buffer.insert_text("\n")
 
-    # Capture self for use in Ctrl+C handler closure
+    # Capture self for use in key binding closures
     ui_instance = ui
 
     @key_bindings.add("c-c")
@@ -133,6 +134,34 @@ def build_prompt_session(ui: object, ignore_filter: Any) -> PromptSession:
 
         # Clear the buffer after printing
         buf.reset()
+
+    @key_bindings.add("escape", "escape")
+    async def _(event: Any) -> None:
+        """Open the conversation history picker on double ESC."""
+        from prompt_toolkit.application import in_terminal
+
+        buf = event.current_buffer
+        current_text = buf.text
+        cursor_pos = buf.cursor_position
+
+        async with in_terminal():
+            handler = getattr(ui_instance, "_open_history_picker_async", None)
+            if callable(handler):
+                result = handler()
+                if inspect.isawaitable(result):
+                    did_rollback = bool(await result)
+                else:
+                    did_rollback = bool(result)
+            else:
+                did_rollback = False
+
+        # Restore or clear input after returning from the picker.
+        if did_rollback:
+            buf.text = ""
+            buf.cursor_position = 0
+        else:
+            buf.text = current_text
+            buf.cursor_position = min(cursor_pos, len(current_text))
 
     # If stdin is not a TTY (e.g., piped input), try to use /dev/tty for interactive input
     # This allows the user to continue interacting after processing piped content

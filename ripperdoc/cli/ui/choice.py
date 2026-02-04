@@ -15,6 +15,7 @@ from prompt_toolkit.filters import is_done
 from prompt_toolkit.formatted_text import HTML, fragment_list_to_text, to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.shortcuts import choice
+from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
@@ -276,6 +277,72 @@ def prompt_choice(
     # when show_frame=~is_done, so we should not include frame borders here.
     term_width = _terminal_width()
     message_width = max(1, term_width - 2)  # account for label padding
+    lines_to_clear = _count_display_lines(formatted_prompt, message_width)
+    lines_to_clear += len(choice_options_formatted)
+
+    for _ in range(lines_to_clear):
+        print("\033[F\033[2K", end="", flush=True)
+
+    return result
+
+
+async def prompt_choice_async(
+    message: str,
+    options: list[ChoiceOption] | list[tuple[str, str]],
+    *,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    warning: Optional[str] = None,
+    allow_esc: bool = True,
+    esc_value: Optional[str] = None,
+    style: Optional[Style] = None,
+) -> str:
+    """Async variant of prompt_choice for use inside running event loops."""
+    choice_options: list[ChoiceOption] = []
+    for opt in options:
+        if isinstance(opt, ChoiceOption):
+            choice_options.append(opt)
+        else:
+            value, label = opt
+            choice_options.append(ChoiceOption(value, label))
+
+    prompt_html = ""
+    if title:
+        prompt_html += f"<title>{html.escape(title)}</title>\n"
+    if description:
+        prompt_html += f"<description>{html.escape(description)}</description>\n"
+    prompt_html += message
+    if warning:
+        prompt_html += f"\n<warning>{html.escape(warning)}</warning>"
+
+    formatted_prompt = HTML(f"\n{prompt_html}\n")
+
+    choice_options_formatted = []
+    for opt in choice_options:
+        label = opt.label
+        if opt.is_default:
+            label = f"{label} <default>*</default>"
+        choice_options_formatted.append((opt.value, HTML(label) if "<" in label else label))
+
+    key_bindings = KeyBindings()
+    if allow_esc:
+        default_esc_value = esc_value or (choice_options[0].value if choice_options else "")
+        result_on_esc = default_esc_value
+
+        @key_bindings.add("escape", eager=True)
+        def _esc_handler(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
+            event.app.exit(result=result_on_esc, style="class:aborting")
+
+    result = await ChoiceInput(
+        message=formatted_prompt,
+        options=choice_options_formatted,
+        style=style or _choice_style(),
+        show_frame=~is_done,
+        key_bindings=key_bindings if allow_esc else None,
+    ).prompt_async()
+
+    term_width = _terminal_width()
+    message_width = max(1, term_width - 2)
     lines_to_clear = _count_display_lines(formatted_prompt, message_width)
     lines_to_clear += len(choice_options_formatted)
 

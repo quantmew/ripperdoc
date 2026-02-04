@@ -75,6 +75,7 @@ def print_shortcuts(console: Console) -> None:
         ("? for shortcuts", "! for bash mode"),
         ("/ for commands", "@ for file mention"),
         ("Alt+Enter for newline", "Enter to submit"),
+        ("Esc Esc for history", ""),
     ]
     muted = theme_color("text_secondary")
     console.print(f"[{muted}]Shortcuts[/{muted}]")

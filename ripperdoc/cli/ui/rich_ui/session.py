@@ -4,6 +4,7 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 """
 
 import asyncio
+import html
 import json
 import sys
 import time
@@ -400,6 +401,199 @@ class RichUI:
                 exc,
                 extra={"session_id": self.session_id},
             )
+
+    def _extract_visible_text(self, content: Any) -> str:
+        """Extract user-visible text from a message content payload."""
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: List[str] = []
+            for block in content:
+                block_type = getattr(block, "type", None)
+                if block_type is None and isinstance(block, dict):
+                    block_type = block.get("type")
+                if block_type == "text":
+                    text_val = getattr(block, "text", None)
+                    if text_val is None and isinstance(block, dict):
+                        text_val = block.get("text")
+                    if text_val:
+                        parts.append(str(text_val))
+                elif block_type == "image":
+                    parts.append("[image]")
+            return "\n".join(part for part in parts if part)
+        return ""
+
+    def _message_has_block(self, content: Any, block_type_name: str) -> bool:
+        if not isinstance(content, list):
+            return False
+        for block in content:
+            block_type = getattr(block, "type", None)
+            if block_type is None and isinstance(block, dict):
+                block_type = block.get("type")
+            if block_type == block_type_name:
+                return True
+        return False
+
+    def _is_tool_result_only(self, content: Any) -> bool:
+        if not isinstance(content, list):
+            return False
+        has_tool_result = False
+        has_visible_text = False
+        for block in content:
+            block_type = getattr(block, "type", None)
+            if block_type is None and isinstance(block, dict):
+                block_type = block.get("type")
+            if block_type == "tool_result":
+                has_tool_result = True
+                continue
+            if block_type == "text":
+                text_val = getattr(block, "text", None)
+                if text_val is None and isinstance(block, dict):
+                    text_val = block.get("text")
+                if text_val and str(text_val).strip():
+                    has_visible_text = True
+            elif block_type == "image":
+                has_visible_text = True
+        return has_tool_result and not has_visible_text
+
+    def _format_history_preview(self, text: str, max_len: int = 80) -> str:
+        preview = " ".join(text.strip().split())
+        if not preview:
+            return "(empty)"
+        if len(preview) > max_len:
+            preview = preview[: max_len - 3].rstrip() + "..."
+        return preview
+
+    def _build_history_candidates(self) -> List[dict[str, Any]]:
+        candidates: List[dict[str, Any]] = []
+        for idx, msg in enumerate(self.conversation_messages):
+            msg_type = getattr(msg, "type", "")
+            if msg_type != "user":
+                continue
+            message_payload = getattr(msg, "message", None)
+            content = getattr(message_payload, "content", None) if message_payload else None
+            if content is None:
+                content = getattr(msg, "content", None)
+            visible_text = self._extract_visible_text(content)
+            if not visible_text.strip():
+                continue
+            if msg_type == "user" and self._is_tool_result_only(content):
+                continue
+            preview = self._format_history_preview(visible_text)
+            candidates.append(
+                {
+                    "index": idx,
+                    "uuid": getattr(msg, "uuid", None),
+                    "preview": preview,
+                }
+            )
+        return candidates
+
+    def _is_real_user_message(self, msg: Any) -> bool:
+        msg_type = getattr(msg, "type", "")
+        if msg_type != "user":
+            return False
+        message_payload = getattr(msg, "message", None)
+        content = getattr(message_payload, "content", None) if message_payload else None
+        if content is None:
+            content = getattr(msg, "content", None)
+        if not content:
+            return False
+        if self._is_tool_result_only(content):
+            return False
+        return bool(self._extract_visible_text(content).strip())
+
+    def _resolve_turn_end_index(self, selected_index: int) -> int:
+        if selected_index < 0 or selected_index >= len(self.conversation_messages):
+            return selected_index
+        # Include messages until right before the next real user message.
+        for idx in range(selected_index + 1, len(self.conversation_messages)):
+            if self._is_real_user_message(self.conversation_messages[idx]):
+                return idx - 1
+        return len(self.conversation_messages) - 1
+
+    def _rollback_to_index(self, target_index: int) -> None:
+        if target_index < 0 or target_index >= len(self.conversation_messages):
+            self.console.print("[red]Invalid history selection.[/red]")
+            return
+        msg = self.conversation_messages[target_index]
+        if self._is_real_user_message(msg):
+            target_index = self._resolve_turn_end_index(target_index)
+        if target_index == len(self.conversation_messages) - 1:
+            self.console.print("[dim]Already at the selected message.[/dim]")
+            return
+        msg_type = getattr(msg, "type", "")
+        role = "You" if msg_type == "user" else "Ripperdoc"
+        original_len = len(self.conversation_messages)
+        self.conversation_messages = list(self.conversation_messages[: target_index + 1])
+        self.console.print(
+            f"[green]✓ Rolled back to {role} message #{target_index + 1} "
+            f"({original_len} -> {len(self.conversation_messages)} messages).[/green]"
+        )
+        try:
+            self.console.clear()
+        except (OSError, RuntimeError, ValueError):
+            pass
+        self.replay_conversation(self.conversation_messages)
+        logger.info(
+            "[ui] Rolled back conversation",
+            extra={
+                "session_id": self.session_id,
+                "target_index": target_index,
+                "original_len": original_len,
+                "new_len": len(self.conversation_messages),
+            },
+        )
+
+    async def _open_history_picker_async(self) -> bool:
+        from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async, theme_style
+
+        if self._query_in_progress:
+            self.console.print("[yellow]Cannot open history while a query is running.[/yellow]")
+            return False
+        candidates = self._build_history_candidates()
+        if not candidates:
+            self.console.print("[yellow]No message history available yet.[/yellow]")
+            return False
+
+        options: List[ChoiceOption] = []
+        for candidate in candidates:
+            idx = candidate["index"]
+            preview = candidate["preview"]
+            label = (
+                f"<info>#{idx + 1}</info> You "
+                f"<dim>{html.escape(preview)}</dim>"
+            )
+            value = candidate.get("uuid") or str(idx)
+            options.append(ChoiceOption(str(value), label))
+
+        try:
+            result = await prompt_choice_async(
+                message="<question>Select a message to roll back to</question>",
+                options=options,
+                title="History",
+                allow_esc=True,
+                esc_value="__cancel__",
+                style=theme_style(),
+            )
+        except (EOFError, KeyboardInterrupt):
+            return False
+
+        if result == "__cancel__":
+            return False
+
+        target_index = None
+        for candidate in candidates:
+            value = candidate.get("uuid") or str(candidate["index"])
+            if str(value) == str(result):
+                target_index = candidate["index"]
+                break
+        if target_index is None:
+            return False
+        self._rollback_to_index(target_index)
+        return True
 
     def replay_conversation(self, messages: List[Dict[str, Any]]) -> None:
         """Render a conversation history in the console and seed prompt history."""
