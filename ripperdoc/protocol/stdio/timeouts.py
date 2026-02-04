@@ -14,6 +14,7 @@ from ripperdoc.utils.asyncio_compat import asyncio_timeout
 logger = logging.getLogger(__name__)
 
 # Timeout constants for stdio operations
+# Idle read timeout for stdin; timeout does not close the session (use 0 to disable)
 STDIO_READ_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_READ_TIMEOUT", "300"))  # 5 minutes default
 STDIO_QUERY_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_STDIO_QUERY_TIMEOUT", "600"))  # 10 minutes default
 STDIO_WATCHDOG_INTERVAL_SEC = float(os.getenv("RIPPERDOC_STDIO_WATCHDOG_INTERVAL", "30"))  # 30 seconds

@@ -84,8 +84,15 @@ class StdioProtocolHandler:
 
         Args:
             input_format: Input format ("stream-json" or "auto")
-            output_format: Output format ("stream-json")
+            output_format: Output format ("stream-json" or "json")
         """
+        if input_format not in {"stream-json", "auto"}:
+            logger.warning("[stdio] Unsupported input_format %r; falling back to stream-json", input_format)
+            input_format = "stream-json"
+        if output_format not in {"stream-json", "json"}:
+            logger.warning("[stdio] Unsupported output_format %r; falling back to stream-json", output_format)
+            output_format = "stream-json"
+
         self._input_format = input_format
         self._output_format = output_format
         self._initialized = False
@@ -97,6 +104,7 @@ class StdioProtocolHandler:
         self._pending_requests: dict[str, Any] = {}
         self._custom_system_prompt: str | None = None
         self._skill_instructions: str | None = None
+        self._output_buffer: list[dict[str, Any]] = []
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []
@@ -155,12 +163,38 @@ class StdioProtocolHandler:
         Args:
             message: The message dictionary to write.
         """
-        json_data = json.dumps(message, ensure_ascii=False)
         msg_type = message.get("type", "unknown")
-        logger.debug(f"[stdio] Writing message: type={msg_type}, json_length={len(json_data)}")
+        if self._output_format == "stream-json":
+            json_data = json.dumps(message, ensure_ascii=False)
+            logger.debug(f"[stdio] Writing message: type={msg_type}, json_length={len(json_data)}")
+            sys.stdout.write(json_data + "\n")
+            sys.stdout.flush()
+            logger.debug(f"[stdio] Flushed message: type={msg_type}")
+            return
+
+        if self._output_format == "json":
+            logger.debug(f"[stdio] Buffering message: type={msg_type}")
+            self._output_buffer.append(message)
+            return
+
+        json_data = json.dumps(message, ensure_ascii=False)
+        logger.warning(
+            "[stdio] Unknown output_format %r; falling back to stream-json",
+            self._output_format,
+        )
         sys.stdout.write(json_data + "\n")
         sys.stdout.flush()
-        logger.debug(f"[stdio] Flushed message: type={msg_type}")
+
+    async def flush_output(self) -> None:
+        """Flush buffered output if using non-stream output formats."""
+        if self._output_format != "json":
+            return
+        if not self._output_buffer:
+            return
+        json_data = json.dumps(self._output_buffer, ensure_ascii=False)
+        sys.stdout.write(json_data + "\n")
+        sys.stdout.flush()
+        self._output_buffer.clear()
 
     async def _write_control_response(
         self,
@@ -205,24 +239,29 @@ class StdioProtocolHandler:
         """Read a single line from stdin with timeout.
 
         Returns:
-            The line content, or None if EOF or timeout.
+            The line content, or None if EOF.
         """
-        try:
-            # Wrap the blocking readline with timeout
-            line = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
-                timeout=STDIO_READ_TIMEOUT_SEC,
-            )
-            if not line:
+        while True:
+            try:
+                # Wrap the blocking readline with timeout (idle timeout should not close the session)
+                if STDIO_READ_TIMEOUT_SEC <= 0:
+                    line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
+                else:
+                    line = await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
+                        timeout=STDIO_READ_TIMEOUT_SEC,
+                    )
+                if not line:
+                    return None
+                return line.rstrip("\n\r")  # type: ignore[no-any-return]
+            except asyncio.TimeoutError:
+                logger.debug(
+                    f"[stdio] stdin read timed out after {STDIO_READ_TIMEOUT_SEC}s; continuing to wait"
+                )
+                continue
+            except (OSError, IOError) as e:
+                logger.error(f"Error reading from stdin: {e}")
                 return None
-            return line.rstrip("\n\r")  # type: ignore[no-any-return]
-        except asyncio.TimeoutError:
-            logger.error(f"[stdio] stdin read timed out after {STDIO_READ_TIMEOUT_SEC}s")
-            # Signal EOF to allow graceful shutdown
-            return None
-        except (OSError, IOError) as e:
-            logger.error(f"Error reading from stdin: {e}")
-            return None
 
     async def _read_messages(self) -> AsyncIterator[dict[str, Any]]:
         """Read and parse JSON messages from stdin with comprehensive error handling.
@@ -231,6 +270,7 @@ class StdioProtocolHandler:
             Parsed JSON message dictionaries.
         """
         json_buffer = ""
+        decoder = json.JSONDecoder()
         consecutive_empty_lines = 0
         max_empty_lines = 100  # Prevent infinite loop on empty input
 
@@ -260,22 +300,62 @@ class StdioProtocolHandler:
                     if not json_line:
                         continue
 
+                    if self._input_format == "auto" and not json_buffer:
+                        if json_line[:1] not in '{["':
+                            for msg in self._coerce_auto_messages(json_line):
+                                yield msg
+                            continue
+
                     json_buffer += json_line
 
-                    try:
-                        data = json.loads(json_buffer)
+                    # Limit buffer size to prevent memory issues
+                    if len(json_buffer) > 10_000_000:  # 10MB limit
+                        logger.error("[stdio] JSON buffer too large, resetting")
                         json_buffer = ""
-                        logger.debug(
-                            f"[stdio] Successfully parsed message, type={data.get('type', 'unknown')}"
-                        )
-                        yield data
-                    except json.JSONDecodeError:
-                        # Keep buffering - might be incomplete JSON
-                        # But limit buffer size to prevent memory issues
-                        if len(json_buffer) > 10_000_000:  # 10MB limit
-                            logger.error("[stdio] JSON buffer too large, resetting")
-                            json_buffer = ""
                         continue
+
+                    # Attempt to parse as many JSON objects as possible
+                    while json_buffer:
+                        try:
+                            data, index = decoder.raw_decode(json_buffer)
+                        except json.JSONDecodeError as decode_error:
+                            buffer_stripped = json_buffer.lstrip()
+                            starts_like_json = buffer_stripped[:1] in '{["'
+                            # If error is at/near the end and the buffer looks like JSON, keep buffering
+                            if decode_error.pos >= len(json_buffer) - 1 and starts_like_json:
+                                break
+                            if self._input_format == "auto" and not starts_like_json:
+                                for msg in self._coerce_auto_messages(buffer_stripped):
+                                    yield msg
+                                json_buffer = ""
+                                break
+                            # Otherwise treat as invalid JSON and reset buffer to recover
+                            logger.warning(
+                                "[stdio] Invalid JSON encountered, resetting buffer",
+                                exc_info=False,
+                            )
+                            json_buffer = ""
+                            break
+                        else:
+                            json_buffer = json_buffer[index:].lstrip()
+                            if self._input_format == "auto":
+                                for msg in self._coerce_auto_messages(data):
+                                    yield msg
+                            else:
+                                if isinstance(data, list):
+                                    logger.warning(
+                                        "[stdio] Received JSON array in stream-json mode; skipping"
+                                    )
+                                    continue
+                                if not isinstance(data, dict):
+                                    logger.warning(
+                                        "[stdio] Received non-object JSON in stream-json mode; skipping"
+                                    )
+                                    continue
+                                logger.debug(
+                                    f"[stdio] Successfully parsed message, type={data.get('type', 'unknown')}"
+                                )
+                                yield data
 
         except asyncio.CancelledError:
             logger.info("[stdio] Message reader cancelled")
@@ -283,6 +363,60 @@ class StdioProtocolHandler:
         except Exception as e:
             logger.error(f"[stdio] Error in message reader: {type(e).__name__}: {e}", exc_info=True)
             raise
+
+    def _generate_auto_request_id(self) -> str:
+        """Generate a request id for auto input format."""
+        return f"auto_{uuid.uuid4().hex}"
+
+    def _coerce_auto_messages(self, data: Any) -> list[dict[str, Any]]:
+        """Coerce auto input into control_request messages."""
+        messages: list[dict[str, Any]] = []
+
+        if isinstance(data, list):
+            for item in data:
+                messages.extend(self._coerce_auto_messages(item))
+            return messages
+
+        if isinstance(data, dict):
+            if "type" in data:
+                return [data]
+
+            request_id = data.get("request_id") or self._generate_auto_request_id()
+            if "request" in data:
+                request_payload = data.get("request") or {}
+                return [
+                    {
+                        "type": "control_request",
+                        "request_id": request_id,
+                        "request": request_payload,
+                    }
+                ]
+
+            if any(key in data for key in ("subtype", "prompt", "options", "mode", "model")):
+                request_payload = {k: v for k, v in data.items() if k != "request_id"}
+                return [
+                    {
+                        "type": "control_request",
+                        "request_id": request_id,
+                        "request": request_payload,
+                    }
+                ]
+
+            return messages
+
+        if isinstance(data, str):
+            prompt = data.strip()
+            if not prompt:
+                return messages
+            return [
+                {
+                    "type": "control_request",
+                    "request_id": self._generate_auto_request_id(),
+                    "request": {"subtype": "query", "prompt": prompt},
+                }
+            ]
+
+        return messages
 
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
@@ -437,10 +571,8 @@ class StdioProtocolHandler:
             request: The query request data.
             request_id: The request ID.
         """
-        if not self._initialized:
-            await self._write_control_response(request_id, error="Not initialized")
-            return
-
+        start_time = time.time()
+        result_message_sent = [False]  # [bool] - Track if we've sent ResultMessage
         # Variables to track query state (using lists for mutable reference across async contexts)
         num_turns = [0]  # [int]
         is_error = [False]  # [bool]
@@ -451,9 +583,6 @@ class StdioProtocolHandler:
         total_output_tokens = [0]  # [int]
         total_cache_read_tokens = [0]  # [int]
         total_cache_creation_tokens = [0]  # [int]
-
-        start_time = time.time()
-        result_message_sent = [False]  # [bool] - Track if we've sent ResultMessage
 
         async def send_final_result(result: ResultMessage) -> None:
             """Send ResultMessage and mark as sent."""
@@ -490,10 +619,25 @@ class StdioProtocolHandler:
             )
             await send_final_result(result)
 
+        async def fail_request(error_msg: str, exc: Exception | None = None) -> None:
+            """Send control error response and always follow with ResultMessage."""
+            try:
+                await self._write_control_response(request_id, error=error_msg)
+            except Exception as write_error:
+                logger.error(
+                    f"[stdio] Failed to send control response: {write_error}",
+                    exc_info=True,
+                )
+            await send_error_result(error_msg, exc)
+
+        if not self._initialized:
+            await fail_request("Not initialized")
+            return
+
         try:
             prompt = request.get("prompt", "")
             if not prompt:
-                await self._write_control_response(request_id, error="Prompt is required")
+                await fail_request("Prompt is required")
                 return
 
             logger.info(
@@ -557,7 +701,7 @@ class StdioProtocolHandler:
                                 if hasattr(prompt_hook_result, "block_reason")
                                 else "Prompt blocked by hook."
                             )
-                            await self._write_control_response(request_id, error=str(reason))
+                            await fail_request(str(reason))
                             return
                         if (
                             hasattr(prompt_hook_result, "system_message")
@@ -626,7 +770,7 @@ class StdioProtocolHandler:
                 # Create watchdog for monitoring query progress
                 async with OperationWatchdog(
                     timeout_sec=STDIO_QUERY_TIMEOUT_SEC, check_interval=STDIO_WATCHDOG_INTERVAL_SEC
-                ):
+                ) as watchdog:
                     # Execute query with overall timeout
                     async with asyncio_timeout(STDIO_QUERY_TIMEOUT_SEC):
                         async for message in query(
@@ -636,6 +780,7 @@ class StdioProtocolHandler:
                             self._query_context or {},  # type: ignore[arg-type]
                             self._can_use_tool,
                         ):
+                            watchdog.ping()
                             msg_type = getattr(message, "type", None)
                             logger.debug(
                                 f"[stdio] Received message of type: {msg_type}, "
@@ -1064,6 +1209,8 @@ class StdioProtocolHandler:
                 await self._handle_initialize(request, request_id)
 
             elif request_subtype == "query":
+                if not self._initialized and self._input_format == "auto":
+                    await self._handle_initialize({"options": {}}, f"{request_id}_init")
                 await self._handle_query(request, request_id)
 
             elif request_subtype == "set_permission_mode":
@@ -1238,6 +1385,11 @@ class StdioProtocolHandler:
         finally:
             # Comprehensive cleanup with timeout
             logger.info("Stdio protocol handler shutting down...")
+
+            try:
+                await self.flush_output()
+            except Exception as e:
+                logger.error(f"[cleanup] Error flushing output: {e}")
 
             cleanup_tasks = []
 

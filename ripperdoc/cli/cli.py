@@ -651,7 +651,7 @@ def config_cmd() -> None:
 )
 @click.option(
     "--output-format",
-    type=click.Choice(["stream-json"]),
+    type=click.Choice(["stream-json", "json"]),
     default="stream-json",
     help="Output format for messages.",
 )

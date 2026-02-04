@@ -18,7 +18,7 @@ from .handler import StdioProtocolHandler
 )
 @click.option(
     "--output-format",
-    type=click.Choice(["stream-json"]),
+    type=click.Choice(["stream-json", "json"]),
     default="stream-json",
     help="Output format for messages.",
 )
@@ -139,6 +139,7 @@ async def _run_stdio(
             "prompt": prompt,
         }
         await handler._handle_query(query_request, f"{request_id}_query")
+        await handler.flush_output()
 
         return
 
