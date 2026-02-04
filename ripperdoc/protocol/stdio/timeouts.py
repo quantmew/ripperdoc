@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
 import os
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Callable
+
+from ripperdoc.utils.asyncio_compat import asyncio_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ async def timeout_wrapper(
         asyncio.TimeoutError: If operation exceeds timeout
     """
     try:
-        async with asyncio.timeout(timeout_sec):
+        async with asyncio_timeout(timeout_sec):
             yield
     except asyncio.TimeoutError:
         error_msg = f"{operation_name} timed out after {timeout_sec:.1f}s"

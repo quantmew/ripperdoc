@@ -47,6 +47,7 @@ from ripperdoc.utils.messages import (
     create_user_message,
     is_hook_notice_payload,
 )
+from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.session_history import SessionHistory
 
@@ -475,7 +476,7 @@ class StdioProtocolHandler:
             with bind_pending_message_queue(queue):
                 # Run session start hooks with timeout
                 try:
-                    async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
+                    async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
                         session_start_result = await hook_manager.run_session_start_async("startup")
                         if hasattr(session_start_result, "system_message"):
                             if session_start_result.system_message:
@@ -495,7 +496,7 @@ class StdioProtocolHandler:
 
                 # Run prompt submit hooks with timeout
                 try:
-                    async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
+                    async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
                         prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
                         if hasattr(prompt_hook_result, "should_block") and prompt_hook_result.should_block:
                             reason = (
@@ -575,7 +576,7 @@ class StdioProtocolHandler:
                     timeout_sec=STDIO_QUERY_TIMEOUT_SEC, check_interval=STDIO_WATCHDOG_INTERVAL_SEC
                 ):
                     # Execute query with overall timeout
-                    async with asyncio.timeout(STDIO_QUERY_TIMEOUT_SEC):
+                    async with asyncio_timeout(STDIO_QUERY_TIMEOUT_SEC):
                         async for message in query(
                             messages,
                             system_prompt,
@@ -737,7 +738,7 @@ class StdioProtocolHandler:
             logger.debug("[stdio] Running session end hooks")
             try:
                 duration = time.time() - start_time
-                async with asyncio.timeout(STDIO_HOOK_TIMEOUT_SEC):
+                async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
                     await hook_manager.run_session_end_async(
                         "other",
                         duration_seconds=duration,
@@ -1194,7 +1195,7 @@ class StdioProtocolHandler:
             # Add MCP runtime shutdown
             async def cleanup_mcp():
                 try:
-                    async with asyncio.timeout(10):
+                    async with asyncio_timeout(10):
                         await shutdown_mcp_runtime()
                 except asyncio.TimeoutError:
                     logger.warning("[cleanup] MCP runtime shutdown timed out")
@@ -1206,7 +1207,7 @@ class StdioProtocolHandler:
             # Add LSP manager shutdown
             async def cleanup_lsp():
                 try:
-                    async with asyncio.timeout(10):
+                    async with asyncio_timeout(10):
                         await shutdown_lsp_manager()
                 except asyncio.TimeoutError:
                     logger.warning("[cleanup] LSP manager shutdown timed out")
@@ -1226,7 +1227,7 @@ class StdioProtocolHandler:
 
             # Wait for all cleanup tasks with overall timeout
             try:
-                async with asyncio.timeout(30):
+                async with asyncio_timeout(30):
                     results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
                     # Check for any exceptions that occurred
                     for i, result in enumerate(results):

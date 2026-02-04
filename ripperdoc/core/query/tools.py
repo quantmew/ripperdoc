@@ -11,6 +11,7 @@ from ripperdoc.core.hooks.state import bind_hook_status_emitter
 from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.utils.log import get_logger
 from ripperdoc.core.query_utils import tool_result_message
+from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.messages import (
     ProgressMessage,
     UserMessage,
@@ -133,7 +134,7 @@ async def _run_tool_use_generator(
         logger.debug("[query] _run_tool_use_generator: BEFORE tool.call() for '%s'", tool_name)
         # Wrap tool execution with timeout to prevent hangs
         try:
-            async with asyncio.timeout(DEFAULT_TOOL_TIMEOUT_SEC):
+            async with asyncio_timeout(DEFAULT_TOOL_TIMEOUT_SEC):
                 async for output in tool.call(parsed_input, tool_context):
                     logger.debug(
                         "[query] _run_tool_use_generator: tool='%s' yielded output type=%s",
@@ -457,7 +458,7 @@ async def _run_concurrent_tool_uses(
 
     try:
         # Add overall timeout for entire concurrent execution
-        async with asyncio.timeout(DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC):
+        async with asyncio_timeout(DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC):
             while active:
                 logger.debug(
                     "[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active
