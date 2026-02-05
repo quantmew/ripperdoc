@@ -99,9 +99,10 @@ class HookDefinition(BaseModel):
     - command: Execute a shell command
     - prompt: Use LLM to evaluate
     - agent: Spawn a subagent to evaluate with tool access
+    - callback: Invoke an external hook callback (e.g. SDK hooks)
     """
 
-    type: Literal["command", "prompt", "agent"] = "command"
+    type: Literal["command", "prompt", "agent", "callback"] = "command"
     command: Optional[str] = None  # Shell command (for type="command")
     prompt: Optional[str] = None  # LLM prompt (for type="prompt"), use $ARGUMENTS for input JSON
     timeout: int = DEFAULT_HOOK_TIMEOUT  # Timeout in seconds
@@ -109,6 +110,7 @@ class HookDefinition(BaseModel):
     run_async: bool = Field(default=False, alias="async")  # Background execution (command only)
     run_once: bool = Field(default=False, alias="once")  # Execute only once per session
     hook_id: Optional[str] = Field(default=None, alias="id")  # Optional stable hook identity
+    callback_id: Optional[str] = Field(default=None, alias="callbackId")
     status_message: Optional[str] = Field(default=None, alias="statusMessage")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -124,6 +126,10 @@ class HookDefinition(BaseModel):
     def is_agent_hook(self) -> bool:
         """Check if this is an agent-based hook."""
         return self.type == "agent" and self.prompt is not None
+
+    def is_callback_hook(self) -> bool:
+        """Check if this is a callback-based hook."""
+        return self.type == "callback" and self.callback_id is not None
 
 
 class HookMatcher(BaseModel):
@@ -261,7 +267,7 @@ def _parse_hooks_file(data: Dict[str, Any]) -> HooksConfig:
                 hook_type = hook_data.get("type", "command")
 
                 # Validate hook type
-                if hook_type not in ("command", "prompt", "agent"):
+                if hook_type not in ("command", "prompt", "agent", "callback"):
                     logger.warning(f"Unknown hook type: {hook_type}")
                     continue
 
@@ -310,6 +316,22 @@ def _parse_hooks_file(data: Dict[str, Any]) -> HooksConfig:
                         timeout=hook_data.get("timeout", DEFAULT_HOOK_TIMEOUT),
                         model=hook_data.get("model"),
                         run_once=False,
+                        hook_id=hook_data.get("id"),
+                        status_message=hook_data.get("statusMessage"),
+                    )
+                elif hook_type == "callback":
+                    callback_id = hook_data.get("callbackId") or hook_data.get("callback_id")
+                    if not callback_id:
+                        continue
+                    if hook_data.get("async"):
+                        logger.warning(
+                            "Async hooks are only supported for type='command'; ignoring async flag."
+                        )
+                    hook_def = HookDefinition(
+                        type="callback",
+                        callback_id=str(callback_id),
+                        timeout=hook_data.get("timeout", DEFAULT_HOOK_TIMEOUT),
+                        run_once=bool(hook_data.get("once", False)),
                         hook_id=hook_data.get("id"),
                         status_message=hook_data.get("statusMessage"),
                     )

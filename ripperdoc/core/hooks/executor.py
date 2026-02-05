@@ -7,6 +7,7 @@ Supports hook types:
 - command: Execute a shell command
 - prompt: Use LLM to evaluate (requires LLM callback)
 - agent: Spawn a subagent to evaluate with tool access
+- callback: Invoke an external hook callback
 """
 
 import asyncio
@@ -15,7 +16,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Callable, Dict, Optional, Awaitable
+from typing import Callable, Dict, Optional, Awaitable, Any
 
 from ripperdoc.core.hooks.config import HookDefinition
 from ripperdoc.core.hooks.events import (
@@ -76,13 +77,22 @@ def _build_hook_agent_tools():
 # Takes prompt string, returns LLM response string
 LLMCallback = Callable[[str], Awaitable[str]]
 
+# Type for external hook callbacks (e.g., SDK hooks)
+# Takes (callback_id, input_data, tool_use_id, timeout_sec) and returns HookOutput or raw dict
+HookCallback = Callable[
+    [str, Dict[str, Any], Optional[str], Optional[float]],
+    Awaitable[HookOutput | Dict[str, Any] | None],
+]
+
 
 class HookExecutor:
     """Executes hook commands with proper environment and I/O handling.
 
-    Supports two hook types:
+    Supports hook types:
     - command: Execute shell commands
     - prompt: Use LLM to evaluate (requires llm_callback to be set)
+    - agent: Spawn a subagent to evaluate with tool access
+    - callback: Invoke an external hook callback
     """
 
     def __init__(
@@ -91,6 +101,7 @@ class HookExecutor:
         session_id: Optional[str] = None,
         transcript_path: Optional[str] = None,
         llm_callback: Optional[LLMCallback] = None,
+        hook_callback: Optional[HookCallback] = None,
     ):
         """Initialize the executor.
 
@@ -102,11 +113,13 @@ class HookExecutor:
             llm_callback: Async callback for prompt-based hooks. Takes prompt string,
                          returns LLM response string. If not set, prompt hooks will
                          be skipped with a warning.
+            hook_callback: Async callback for external hook execution (e.g., SDK hooks).
         """
         self.project_dir = project_dir
         self.session_id = session_id
         self.transcript_path = transcript_path
         self.llm_callback = llm_callback
+        self.hook_callback = hook_callback
         self._env_file: Optional[Path] = None
 
     def _get_env_file(self) -> Path:
@@ -408,10 +421,10 @@ class HookExecutor:
         Returns:
             HookOutput containing the result or error
         """
-        # Prompt and agent hooks require async - skip in sync mode
-        if hook.is_prompt_hook() or hook.is_agent_hook():
+        # Prompt, agent, and callback hooks require async - skip in sync mode
+        if hook.is_prompt_hook() or hook.is_agent_hook() or hook.is_callback_hook():
             logger.warning(
-                "Prompt/agent hook skipped in sync mode. Use execute_async for prompt/agent hooks."
+                "Prompt/agent/callback hook skipped in sync mode. Use execute_async for prompt/agent/callback hooks."
             )
             return HookOutput()
 
@@ -509,8 +522,60 @@ class HookExecutor:
             return await self.execute_prompt_async(hook, input_data)
         if hook.is_agent_hook():
             return await self._execute_agent_async(hook, input_data)
+        if hook.is_callback_hook():
+            return await self._execute_callback_async(hook, input_data)
 
         return await self._execute_command_async(hook, input_data)
+
+    async def _execute_callback_async(
+        self,
+        hook: HookDefinition,
+        input_data: AnyHookInput,
+    ) -> HookOutput:
+        """Execute an external callback-based hook asynchronously."""
+        if not hook.callback_id:
+            logger.warning("Callback hook missing callback_id")
+            return HookOutput(error="Callback hook missing callback_id", exit_code=1)
+        if not self.hook_callback:
+            logger.warning("Callback hook invoked without a configured hook callback")
+            return HookOutput(error="Hook callback not configured", exit_code=1)
+
+        input_payload: Dict[str, Any]
+        if hasattr(input_data, "model_dump"):
+            input_payload = input_data.model_dump()
+        elif isinstance(input_data, dict):
+            input_payload = dict(input_data)
+        else:
+            input_payload = {}
+
+        tool_use_id = getattr(input_data, "tool_use_id", None)
+
+        try:
+            result = await self.hook_callback(
+                hook.callback_id,
+                input_payload,
+                tool_use_id,
+                float(hook.timeout) if hook.timeout is not None else None,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Callback hook timed out after %ss", hook.timeout)
+            return HookOutput.from_raw("", "", 1, timed_out=True)
+        except Exception as exc:
+            logger.error("Callback hook execution failed: %s", exc)
+            return HookOutput(error=str(exc), exit_code=1)
+
+        if result is None:
+            return HookOutput()
+        if isinstance(result, HookOutput):
+            return result
+        if isinstance(result, dict):
+            return HookOutput.from_raw(
+                stdout=json.dumps(result),
+                stderr="",
+                exit_code=0,
+                allow_raw_output_context=self._allow_raw_output_context(input_data),
+            )
+        return HookOutput()
 
     async def _execute_command_async(
         self,

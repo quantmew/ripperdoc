@@ -961,6 +961,30 @@ class TestHookExecutor:
         assert output.timed_out is True
 
     @pytest.mark.asyncio
+    async def test_execute_async_callback_hook(self, tmp_path):
+        """Async callback hooks should invoke the external callback handler."""
+        seen: dict[str, object] = {}
+
+        async def hook_callback(
+            callback_id: str, input_data: dict[str, object], tool_use_id: str | None, timeout: float | None
+        ) -> dict[str, object]:
+            seen["callback_id"] = callback_id
+            seen["tool_use_id"] = tool_use_id
+            seen["input"] = input_data
+            seen["timeout"] = timeout
+            return {"decision": "allow", "reason": "SDK ok"}
+
+        executor = HookExecutor(project_dir=tmp_path, hook_callback=hook_callback)
+        hook = HookDefinition(type="callback", callback_id="cb_1", timeout=5)
+        input_data = PreToolUseInput(tool_name="Test", tool_input={}, tool_use_id="tool_1")
+
+        output = await executor.execute_async(hook, input_data)
+
+        assert output.decision == HookDecision.ALLOW
+        assert seen["callback_id"] == "cb_1"
+        assert seen["tool_use_id"] == "tool_1"
+
+    @pytest.mark.asyncio
     async def test_execute_hooks_async_multiple(self, tmp_path):
         """Multiple hooks should execute in sequence."""
         executor = HookExecutor(project_dir=tmp_path)

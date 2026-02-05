@@ -34,7 +34,7 @@ from ripperdoc.core.hooks.events import (
     SessionEndInput,
     SetupInput,
 )
-from ripperdoc.core.hooks.executor import HookExecutor, LLMCallback
+from ripperdoc.core.hooks.executor import HookExecutor, LLMCallback, HookCallback
 from ripperdoc.core.hooks.state import (
     hooks_suspended,
     get_hook_scopes,
@@ -168,6 +168,7 @@ class HookManager:
         transcript_path: Optional[str] = None,
         permission_mode: str = "default",
         llm_callback: Optional[LLMCallback] = None,
+        hook_callback: Optional["HookCallback"] = None,
     ):
         """Initialize the hook manager.
 
@@ -179,12 +180,14 @@ class HookManager:
             llm_callback: Async callback for prompt-based hooks. Takes prompt string,
                          returns LLM response string. If not set, prompt hooks will
                          be skipped with a warning.
+            hook_callback: Async callback for external hook execution (e.g., SDK hooks).
         """
         self.project_dir = project_dir
         self.session_id = session_id
         self.transcript_path = transcript_path
         self.permission_mode = permission_mode
         self.llm_callback = llm_callback
+        self.hook_callback = hook_callback
         self._config: Optional[HooksConfig] = None
         self._executor: Optional[HookExecutor] = None
         self._setup_ran_for_project: Optional[Path] = None
@@ -206,6 +209,7 @@ class HookManager:
                 session_id=self.session_id,
                 transcript_path=self.transcript_path,
                 llm_callback=self.llm_callback,
+                hook_callback=self.hook_callback,
             )
         return self._executor
 
@@ -243,6 +247,12 @@ class HookManager:
         self.llm_callback = callback
         if self._executor:
             self._executor.llm_callback = callback
+
+    def set_hook_callback(self, callback: Optional["HookCallback"]) -> None:
+        """Update the external hook callback handler."""
+        self.hook_callback = callback
+        if self._executor:
+            self._executor.hook_callback = callback
 
     def _run_setup_if_needed(self) -> None:
         if not self.project_dir or self.project_dir == self._setup_ran_for_project:
@@ -306,6 +316,7 @@ class HookManager:
             "async": hook.run_async,
             "once": hook.run_once,
             "statusMessage": hook.status_message,
+            "callbackId": hook.callback_id,
         }
         encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
@@ -1179,6 +1190,7 @@ def init_hook_manager(
     transcript_path: Optional[str] = None,
     permission_mode: str = "default",
     llm_callback: Optional[LLMCallback] = None,
+    hook_callback: Optional[HookCallback] = None,
 ) -> HookManager:
     """Initialize the global hook manager with project context.
 
@@ -1188,6 +1200,7 @@ def init_hook_manager(
         transcript_path: Path to the conversation transcript JSON
         permission_mode: Current permission mode
         llm_callback: Async callback for prompt-based hooks
+        hook_callback: Async callback for external hook execution
 
     Returns:
         The initialized global hook manager
@@ -1197,4 +1210,5 @@ def init_hook_manager(
     hook_manager.set_transcript_path(transcript_path)
     hook_manager.set_permission_mode(permission_mode)
     hook_manager.set_llm_callback(llm_callback)
+    hook_manager.set_hook_callback(hook_callback)
     return hook_manager

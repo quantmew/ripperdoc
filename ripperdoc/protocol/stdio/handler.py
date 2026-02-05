@@ -19,9 +19,11 @@ from ripperdoc.core.config import get_project_config, get_effective_model_profil
 from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.hooks.config import HookDefinition, HookMatcher, HooksConfig, DEFAULT_HOOK_TIMEOUT
+from ripperdoc.core.hooks.events import HookOutput
 from ripperdoc.core.permissions import make_permission_checker
 from ripperdoc.core.query import QueryContext, query
-from ripperdoc.core.hooks.state import bind_pending_message_queue
+from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
 from ripperdoc.core.query_utils import resolve_model_profile
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
@@ -113,7 +115,10 @@ class StdioProtocolHandler:
         self._query_context: QueryContext | None = None
         self._can_use_tool: Any | None = None
         self._hooks: dict[str, list[dict[str, Any]]] = {}
+        self._sdk_hook_scope: HooksConfig | None = None
         self._pending_requests: dict[str, Any] = {}
+        self._request_lock = asyncio.Lock()
+        self._inflight_tasks: set[asyncio.Task[None]] = set()
         self._custom_system_prompt: str | None = None
         self._skill_instructions: str | None = None
         self._output_buffer: list[dict[str, Any]] = []
@@ -235,6 +240,133 @@ class StdioProtocolHandler:
         message = ControlResponseMessage(response=response_data)
 
         await self._write_message(model_to_dict(message))
+
+    async def _handle_control_response(self, message: dict[str, Any]) -> None:
+        """Handle control_response messages from the SDK."""
+        response = message.get("response") or {}
+        request_id = response.get("request_id")
+        if not request_id:
+            logger.warning("[stdio] control_response missing request_id")
+            return
+        future = self._pending_requests.pop(request_id, None)
+        if future is None:
+            logger.debug("[stdio] No pending request for control_response %s", request_id)
+            return
+        if response.get("subtype") == "error":
+            error_msg = response.get("error", "Unknown error")
+            future.set_exception(RuntimeError(error_msg))
+            return
+        future.set_result(response.get("response"))
+
+    async def _send_control_request(
+        self,
+        request: dict[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> Any:
+        """Send a control_request to the SDK and await the response."""
+        if self._output_format != "stream-json":
+            raise RuntimeError("control_request requires stream-json output mode")
+        request_id = f"cli_{uuid.uuid4().hex}"
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Any] = loop.create_future()
+        self._pending_requests[request_id] = future
+        await self._write_message(
+            {
+                "type": "control_request",
+                "request_id": request_id,
+                "request": request,
+            }
+        )
+        try:
+            return await asyncio.wait_for(
+                future, timeout=timeout if timeout is not None else STDIO_HOOK_TIMEOUT_SEC
+            )
+        except asyncio.TimeoutError:
+            self._pending_requests.pop(request_id, None)
+            raise
+
+    def _build_sdk_hook_scope(self, hooks: Any) -> HooksConfig:
+        """Convert SDK hook config into a HooksConfig scope."""
+        if not hooks or not isinstance(hooks, dict):
+            return HooksConfig()
+        parsed: dict[str, list[HookMatcher]] = {}
+        for event_name, matchers in hooks.items():
+            if not isinstance(matchers, list):
+                continue
+            parsed_matchers: list[HookMatcher] = []
+            for matcher in matchers:
+                if not isinstance(matcher, dict):
+                    continue
+                callback_ids = (
+                    matcher.get("hookCallbackIds")
+                    or matcher.get("hook_callback_ids")
+                    or []
+                )
+                if not isinstance(callback_ids, list) or not callback_ids:
+                    continue
+                timeout = matcher.get("timeout", DEFAULT_HOOK_TIMEOUT)
+                hook_defs: list[HookDefinition] = []
+                for callback_id in callback_ids:
+                    if not isinstance(callback_id, str) or not callback_id:
+                        continue
+                    hook_defs.append(
+                        HookDefinition(
+                            type="callback",
+                            callback_id=callback_id,
+                            timeout=timeout,
+                        )
+                    )
+                if hook_defs:
+                    parsed_matchers.append(
+                        HookMatcher(matcher=matcher.get("matcher"), hooks=hook_defs)
+                    )
+            if parsed_matchers:
+                parsed[event_name] = parsed_matchers
+        return HooksConfig(hooks=parsed)
+
+    def _configure_sdk_hooks(self, hooks: Any) -> None:
+        """Register SDK-provided hooks for this session."""
+        self._hooks = hooks or {}
+        self._sdk_hook_scope = self._build_sdk_hook_scope(self._hooks)
+        if self._query_context:
+            self._query_context.add_hook_scope("sdk_hooks", self._sdk_hook_scope)
+        if self._sdk_hook_scope and self._sdk_hook_scope.hooks:
+            hook_manager.set_hook_callback(self._run_sdk_hook_callback)
+        else:
+            hook_manager.set_hook_callback(None)
+
+    async def _run_sdk_hook_callback(
+        self,
+        callback_id: str,
+        input_data: dict[str, Any],
+        tool_use_id: str | None,
+        timeout: float | None,
+    ) -> HookOutput:
+        """Invoke an SDK hook callback via control protocol."""
+        safe_input = self._sanitize_for_json(input_data)
+        try:
+            response = await self._send_control_request(
+                {
+                    "subtype": "hook_callback",
+                    "callback_id": callback_id,
+                    "input": safe_input,
+                    "tool_use_id": tool_use_id,
+                },
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[stdio] SDK hook callback timed out")
+            return HookOutput.from_raw("", "", 1, timed_out=True)
+        except Exception as exc:
+            logger.error("[stdio] SDK hook callback failed: %s", exc)
+            return HookOutput(error=str(exc), exit_code=1)
+
+        if response is None:
+            return HookOutput()
+        if isinstance(response, dict):
+            return HookOutput.from_raw(json.dumps(response), "", 0)
+        return HookOutput()
 
     async def _write_message_stream(
         self,
@@ -516,9 +648,11 @@ class StdioProtocolHandler:
             hook_manager.set_session_id(self._session_id)
             hook_manager.set_llm_callback(build_hook_llm_callback())
 
-            # Store hooks configuration
-            hooks = options.get("hooks", {})
-            self._hooks = hooks
+            # Configure SDK-provided hooks (if any)
+            hooks = request.get("hooks", None)
+            if hooks is None:
+                hooks = options.get("hooks", {})
+            self._configure_sdk_hooks(hooks)
 
             # Load MCP servers and dynamic tools
             servers = await load_mcp_servers_async(self._project_path)
@@ -729,7 +863,8 @@ class StdioProtocolHandler:
             hook_notices: list[dict[str, Any]] = []
 
             queue = self._query_context.pending_message_queue if self._query_context else None
-            with bind_pending_message_queue(queue):
+            hook_scopes = self._query_context.hook_scopes if self._query_context else []
+            with bind_pending_message_queue(queue), bind_hook_scopes(hook_scopes):
                 # Run session start hooks with timeout
                 try:
                     async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
@@ -999,12 +1134,13 @@ class StdioProtocolHandler:
             logger.debug("[stdio] Running session end hooks")
             try:
                 duration = time.time() - start_time
-                async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
-                    await hook_manager.run_session_end_async(
-                        "other",
-                        duration_seconds=duration,
-                        message_count=len(messages),
-                    )
+                with bind_hook_scopes(hook_scopes):
+                    async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
+                        await hook_manager.run_session_end_async(
+                            "other",
+                            duration_seconds=duration,
+                            message_count=len(messages),
+                        )
                 logger.debug("[stdio] Session end hooks completed")
             except asyncio.TimeoutError:
                 logger.warning(f"[stdio] Session end hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
@@ -1379,38 +1515,39 @@ class StdioProtocolHandler:
         request_id = message.get("request_id", "")
         request_subtype = request.get("subtype", "")
 
-        try:
-            if request_subtype == "initialize":
-                await self._handle_initialize(request, request_id)
+        async with self._request_lock:
+            try:
+                if request_subtype == "initialize":
+                    await self._handle_initialize(request, request_id)
 
-            elif request_subtype == "query":
-                if not self._initialized and self._input_format == "auto":
-                    await self._handle_initialize({"options": {}}, f"{request_id}_init")
-                await self._handle_query(request, request_id)
+                elif request_subtype == "query":
+                    if not self._initialized and self._input_format == "auto":
+                        await self._handle_initialize({"options": {}}, f"{request_id}_init")
+                    await self._handle_query(request, request_id)
 
-            elif request_subtype == "set_permission_mode":
-                await self._handle_set_permission_mode(request, request_id)
+                elif request_subtype == "set_permission_mode":
+                    await self._handle_set_permission_mode(request, request_id)
 
-            elif request_subtype == "set_model":
-                await self._handle_set_model(request, request_id)
+                elif request_subtype == "set_model":
+                    await self._handle_set_model(request, request_id)
 
-            elif request_subtype == "rewind_files":
-                await self._handle_rewind_files(request, request_id)
+                elif request_subtype == "rewind_files":
+                    await self._handle_rewind_files(request, request_id)
 
-            elif request_subtype == "hook_callback":
-                await self._handle_hook_callback(request, request_id)
+                elif request_subtype == "hook_callback":
+                    await self._handle_hook_callback(request, request_id)
 
-            elif request_subtype == "can_use_tool":
-                await self._handle_can_use_tool(request, request_id)
+                elif request_subtype == "can_use_tool":
+                    await self._handle_can_use_tool(request, request_id)
 
-            else:
-                await self._write_control_response(
-                    request_id, error=f"Unknown request subtype: {request_subtype}"
-                )
+                else:
+                    await self._write_control_response(
+                        request_id, error=f"Unknown request subtype: {request_subtype}"
+                    )
 
-        except Exception as e:
-            logger.error(f"Error handling control request: {e}", exc_info=True)
-            await self._write_control_response(request_id, error=str(e))
+            except Exception as e:
+                logger.error(f"Error handling control request: {e}", exc_info=True)
+                await self._write_control_response(request_id, error=str(e))
 
     async def _handle_set_permission_mode(self, request: dict[str, Any], request_id: str) -> None:
         """Handle set_permission_mode request from SDK.
@@ -1463,18 +1600,10 @@ class StdioProtocolHandler:
             request: The hook_callback request data.
             request_id: The request ID.
         """
-        # Get callback info
-        _callback_id = request.get("callback_id")
-        _input_data = request.get("input", {})
-        _tool_use_id = request.get("tool_use_id")
-
-        # For now, return a basic response
-        # Full hook support would require integration with hook_manager
+        logger.warning("[stdio] hook_callback requests are not supported by the CLI")
         await self._write_control_response(
             request_id,
-            response={
-                "continue": True,
-            },
+            error="hook_callback requests must be initiated by the CLI (SDK hooks).",
         )
 
     async def _handle_can_use_tool(self, request: dict[str, Any], request_id: str) -> None:
@@ -1545,11 +1674,31 @@ class StdioProtocolHandler:
             async for message in self._read_messages():
                 msg_type = message.get("type")
 
+                if msg_type == "control_response":
+                    await self._handle_control_response(message)
+                    continue
+
                 if msg_type == "control_request":
-                    await self._handle_control_request(message)
-                else:
-                    # Unknown message type
-                    logger.warning(f"Unknown message type: {msg_type}")
+                    task = asyncio.create_task(self._handle_control_request(message))
+                    self._inflight_tasks.add(task)
+
+                    def _cleanup_task(t: asyncio.Task[None]) -> None:
+                        self._inflight_tasks.discard(t)
+                        if t.cancelled():
+                            return
+                        exc = t.exception()
+                        if exc:
+                            logger.error(
+                                "[stdio] control_request task failed: %s: %s",
+                                type(exc).__name__,
+                                exc,
+                            )
+
+                    task.add_done_callback(_cleanup_task)
+                    continue
+
+                # Unknown message type
+                logger.warning(f"Unknown message type: {msg_type}")
 
         except (OSError, IOError, json.JSONDecodeError) as e:
             logger.error(f"Error in stdio loop: {e}", exc_info=True)
@@ -1565,6 +1714,14 @@ class StdioProtocolHandler:
                 await self.flush_output()
             except Exception as e:
                 logger.error(f"[cleanup] Error flushing output: {e}")
+
+            if self._inflight_tasks:
+                for task in list(self._inflight_tasks):
+                    task.cancel()
+                try:
+                    await asyncio.gather(*self._inflight_tasks, return_exceptions=True)
+                except Exception:
+                    pass
 
             cleanup_tasks = []
 
