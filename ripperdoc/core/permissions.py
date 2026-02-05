@@ -426,13 +426,6 @@ def make_permission_checker(
                     session_tool_rules=session_tool_rules,
                 )
                 updated_input = hook_result.updated_input or decision.updated_input
-                if hook_result.should_allow:
-                    return PermissionResult(
-                        result=True,
-                        message=decision.message,
-                        updated_input=updated_input,
-                        decision=decision,
-                    )
                 if hook_result.should_block or not hook_result.should_continue:
                     reason = (
                         hook_result.block_reason
@@ -443,6 +436,13 @@ def make_permission_checker(
                     return PermissionResult(
                         result=False,
                         message=reason,
+                        updated_input=updated_input,
+                        decision=decision,
+                    )
+                if hook_result.should_allow:
+                    return PermissionResult(
+                        result=True,
+                        message=decision.message,
                         updated_input=updated_input,
                         decision=decision,
                     )

@@ -64,8 +64,17 @@ class HookResult:
 
     @property
     def should_allow(self) -> bool:
-        """Check if any hook returned an allow decision."""
-        return any(o.decision == HookDecision.ALLOW for o in self.outputs)
+        """Check if hooks collectively allow execution.
+
+        A deny/block decision always takes priority over allow.
+        """
+        has_allow = False
+        for output in self.outputs:
+            if output.decision in (HookDecision.DENY, HookDecision.BLOCK):
+                return False
+            if output.decision in (HookDecision.ALLOW, HookDecision.APPROVE):
+                has_allow = True
+        return has_allow
 
     @property
     def should_ask(self) -> bool:

@@ -1,6 +1,7 @@
 """Tests for the permission system."""
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from ripperdoc.core.permissions import (
     PermissionResult,
     make_permission_checker,
 )
+from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.config import (
     UserConfig,
     ProjectLocalConfig,
@@ -268,3 +270,65 @@ async def test_mixed_format_rules_in_permission_checker(tmp_path: Path):
     # Test glob pattern matching
     result = await can_use_tool(tool, BashToolInput(command="python --version"))
     assert result.result is True
+
+
+def test_permission_request_hooks_deny_overrides_allow(tmp_path: Path, monkeypatch):
+    """PermissionRequest hook deny/block should override allow decisions."""
+    monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
+
+    allow_output = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {"behavior": "allow", "message": "Allowed by policy"},
+            }
+        }
+    )
+    deny_output = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {"behavior": "deny", "message": "Denied by policy"},
+            }
+        }
+    )
+
+    config_dir = tmp_path / ".ripperdoc"
+    config_dir.mkdir(parents=True)
+    (config_dir / "hooks.local.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PermissionRequest": [
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {"type": "command", "command": f"echo '{allow_output}'"},
+                                {"type": "command", "command": f"echo '{deny_output}'"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        )
+    )
+
+    original_project_dir = hook_manager.project_dir
+    try:
+        hook_manager.set_project_dir(tmp_path)
+        hook_manager.reload_config()
+
+        tool = DummyTool()
+        parsed_input = DummyInput(command="echo hi")
+        checker = make_permission_checker(
+            tmp_path,
+            yolo_mode=False,
+            prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+        )
+        result = asyncio.run(checker(tool, parsed_input))
+        assert result.result is False
+        assert result.message is not None
+        assert "denied by policy" in result.message.lower()
+    finally:
+        hook_manager.set_project_dir(original_project_dir)
+        hook_manager.reload_config()

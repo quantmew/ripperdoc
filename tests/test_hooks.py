@@ -1382,6 +1382,16 @@ class TestHookResult:
         result = HookResult(outputs)
         assert result.should_allow is True
 
+    def test_should_allow_denied_when_block_present(self):
+        """Allow should not override deny/block decisions."""
+        outputs = [
+            HookOutput(decision=HookDecision.ALLOW),
+            HookOutput(decision=HookDecision.DENY, reason="Denied"),
+        ]
+        result = HookResult(outputs)
+        assert result.should_block is True
+        assert result.should_allow is False
+
     def test_should_ask(self):
         """Result should ask if any output has ASK."""
         outputs = [
