@@ -74,6 +74,27 @@ async def test_file_write_tool():
 
 
 @pytest.mark.asyncio
+async def test_file_write_tool_disables_gitignore_warnings(monkeypatch, tmp_path):
+    """Write tool should suppress warnings for gitignored-only paths."""
+    tool = FileWriteTool()
+    file_path = tmp_path / "ignored.cj"
+    input_data = FileWriteToolInput(file_path=str(file_path), content="content\n")
+    context = ToolUseContext()
+    captured: dict[str, bool] = {}
+
+    def fake_check_path_for_tool(path, tool_name="unknown", warn_only=True, warn_on_gitignore=True):
+        captured["warn_on_gitignore"] = warn_on_gitignore
+        return True, None
+
+    monkeypatch.setattr("ripperdoc.tools.file_write_tool.check_path_for_tool", fake_check_path_for_tool)
+
+    result = await tool.validate_input(input_data, context)
+
+    assert result.result is True
+    assert captured["warn_on_gitignore"] is False
+
+
+@pytest.mark.asyncio
 async def test_file_edit_tool():
     """Test editing a file."""
     tool = FileEditTool()

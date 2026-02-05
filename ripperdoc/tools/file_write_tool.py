@@ -144,7 +144,7 @@ NEVER write new files unless explicitly required by the user."""
 
         file_path_obj = Path(file_path)
         should_proceed, warning_msg = check_path_for_tool(
-            file_path_obj, tool_name="Write", warn_only=True
+            file_path_obj, tool_name="Write", warn_only=True, warn_on_gitignore=False
         )
         if warning_msg:
             logger.warning("[file_write_tool] %s", warning_msg)
