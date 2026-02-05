@@ -273,6 +273,25 @@ class TestValidateInput:
         assert result.result is False
         assert "different" in result.message.lower()
 
+    async def test_validate_empty_old_string(self, tmp_path):
+        """Should fail validation when old_string is empty."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+
+        tool = FileEditTool()
+        input_data = FileEditToolInput(
+            file_path=str(test_file),
+            old_string="",
+            new_string="new",
+        )
+
+        context = MagicMock()
+        context.file_state_cache = {}
+
+        result = await tool.validate_input(input_data, context)
+        assert result.result is False
+        assert "non-empty" in result.message.lower()
+
     async def test_validate_file_not_read_yet(self, tmp_path):
         """Should fail validation when file hasn't been read."""
         test_file = tmp_path / "test.txt"

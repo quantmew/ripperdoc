@@ -170,6 +170,12 @@ match exactly (including whitespace and indentation)."""
                 error_code=3,
             )
 
+        if not input_data.old_string:
+            return ValidationResult(
+                result=False,
+                message="old_string must be non-empty",
+            )
+
         # Check if file has been read before editing
         file_state_cache = getattr(context, "file_state_cache", {}) if context else {}
         file_path = os.path.abspath(input_data.file_path)

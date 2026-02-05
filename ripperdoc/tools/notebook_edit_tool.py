@@ -4,6 +4,7 @@ Allows performing insert/replace/delete operations on Jupyter notebook cells.
 """
 
 import json
+import os
 import random
 import string
 from textwrap import dedent
