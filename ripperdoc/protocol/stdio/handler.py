@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import sys
@@ -21,10 +22,11 @@ from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.config import HookDefinition, HookMatcher, HooksConfig, DEFAULT_HOOK_TIMEOUT
 from ripperdoc.core.hooks.events import HookOutput
-from ripperdoc.core.permissions import make_permission_checker
+from pydantic import ValidationError
+from ripperdoc.core.permissions import PermissionResult, make_permission_checker
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
-from ripperdoc.core.query_utils import resolve_model_profile
+from ripperdoc.core.query_utils import format_pydantic_errors, resolve_model_profile
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.protocol.models import (
@@ -122,6 +124,9 @@ class StdioProtocolHandler:
         self._custom_system_prompt: str | None = None
         self._skill_instructions: str | None = None
         self._output_buffer: list[dict[str, Any]] = []
+        self._allowed_tools: list[str] | None = None
+        self._disallowed_tools: list[str] | None = None
+        self._tools_list: list[str] | None = None
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []
@@ -136,6 +141,56 @@ class StdioProtocolHandler:
         if isinstance(mode, str) and mode in self._PERMISSION_MODES:
             return mode
         return "default"
+
+    def _normalize_tool_list(self, value: Any) -> list[str] | None:
+        """Normalize tool list inputs from SDK/CLI options."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw == "":
+                return []
+            return [item.strip() for item in raw.split(",") if item.strip()]
+        if isinstance(value, (list, tuple, set)):
+            names: list[str] = []
+            for item in value:
+                if item is None:
+                    continue
+                name = str(item).strip()
+                if name:
+                    names.append(name)
+            return names
+        return None
+
+    def _apply_tool_filters(
+        self,
+        tools: list[Any],
+        *,
+        allowed_tools: list[str] | None,
+        disallowed_tools: list[str] | None,
+        tools_list: list[str] | None,
+    ) -> list[Any]:
+        """Apply SDK tool filters while keeping Task tool consistent."""
+        if tools_list is None and allowed_tools is None and not disallowed_tools:
+            return tools
+
+        tool_names = [getattr(tool, "name", tool.__class__.__name__) for tool in tools]
+        allow_set: set[str] | None = None
+
+        if tools_list is not None:
+            allow_set = set(tools_list)
+        if allowed_tools is not None:
+            allow_set = set(allowed_tools) if allow_set is None else allow_set & set(allowed_tools)
+
+        if disallowed_tools:
+            if allow_set is None:
+                allow_set = set(tool_names)
+            allow_set -= set(disallowed_tools)
+
+        if allow_set is None:
+            return tools
+
+        return filter_tools_by_names(tools, list(allow_set))
 
     def _apply_permission_mode(self, mode: str) -> None:
         """Apply permission mode across query context, hooks, and permissions."""
@@ -634,17 +689,18 @@ class StdioProtocolHandler:
             get_project_config(self._project_path)
 
             # Parse tool options
-            allowed_tools = options.get("allowed_tools")
-            _disallowed_tools = options.get("disallowed_tools")
-            tools_list = options.get("tools")
+            self._allowed_tools = self._normalize_tool_list(options.get("allowed_tools"))
+            self._disallowed_tools = self._normalize_tool_list(options.get("disallowed_tools"))
+            self._tools_list = self._normalize_tool_list(options.get("tools"))
 
-            # Get the tool list
-            if tools_list is not None:
-                # SDK provided explicit tool list
-                # For now, use default tools
-                tools = get_default_tools(allowed_tools=allowed_tools)
-            else:
-                tools = get_default_tools(allowed_tools=allowed_tools)
+            # Get the tool list (apply SDK filters)
+            tools = get_default_tools()
+            tools = self._apply_tool_filters(
+                tools,
+                allowed_tools=self._allowed_tools,
+                disallowed_tools=self._disallowed_tools,
+                tools_list=self._tools_list,
+            )
 
             # Parse permission mode
             permission_mode = self._normalize_permission_mode(
@@ -721,8 +777,12 @@ class StdioProtocolHandler:
             dynamic_tools = await load_dynamic_mcp_tools_async(self._project_path)
             if dynamic_tools:
                 tools = merge_tools_with_dynamic(tools, dynamic_tools)
-                if allowed_tools is not None:
-                    tools = filter_tools_by_names(tools, allowed_tools)
+                tools = self._apply_tool_filters(
+                    tools,
+                    allowed_tools=self._allowed_tools,
+                    disallowed_tools=self._disallowed_tools,
+                    tools_list=self._tools_list,
+                )
                 self._query_context.tools = tools
 
             mcp_instructions = format_mcp_instructions(servers)
@@ -1111,7 +1171,7 @@ class StdioProtocolHandler:
                             await self._write_message_stream(message_dict)
 
                             # Add to conversation history
-                            if msg_type == "assistant":
+                            if msg_type in ("assistant", "user"):
                                 self._conversation_messages.append(message)
 
                             # Add to local history and session history
@@ -1635,43 +1695,99 @@ class StdioProtocolHandler:
             request: The can_use_tool request data.
             request_id: The request ID.
         """
-        tool_name = request.get("tool_name", "")
-        tool_input = request.get("input", {})
+        tool_name = request.get("tool_name") or request.get("toolName") or ""
+        tool_input = request.get("input")
+        if tool_input is None:
+            tool_input = request.get("tool_input", {})
+        if tool_input is None:
+            tool_input = {}
+
+        if not tool_name:
+            await self._write_control_response(request_id, error="Missing tool_name")
+            return
+
+        if not self._query_context:
+            await self._write_control_response(request_id, error="Session not initialized")
+            return
+
+        tool = self._query_context.tool_registry.get(tool_name)
+        if tool is None:
+            perm_response = PermissionResponseDeny(message=f"Tool '{tool_name}' not found")
+            await self._write_control_response(request_id, response=model_to_dict(perm_response))
+            return
+
+        if tool_input and hasattr(tool_input, "model_dump"):
+            tool_input = tool_input.model_dump()
+        elif tool_input and hasattr(tool_input, "dict") and callable(getattr(tool_input, "dict")):
+            tool_input = tool_input.dict()
+        if not isinstance(tool_input, dict):
+            tool_input = {"value": str(tool_input)}
+        if tool_name == "Task" and isinstance(tool_input, dict):
+            tool_input = self._normalize_task_tool_input(tool_input)
+
+        try:
+            parsed_input = tool.input_schema(**tool_input)
+        except ValidationError as ve:
+            detail = format_pydantic_errors(ve)
+            perm_response = PermissionResponseDeny(
+                message=f"Invalid input for tool '{tool_name}': {detail}"
+            )
+            await self._write_control_response(request_id, response=model_to_dict(perm_response))
+            return
+        except (TypeError, ValueError) as exc:
+            perm_response = PermissionResponseDeny(
+                message=f"Invalid input for tool '{tool_name}': {exc}"
+            )
+            await self._write_control_response(request_id, response=model_to_dict(perm_response))
+            return
 
         # Use the permission checker if available
         if self._can_use_tool:
             try:
-                # Call the permission checker
-                from ripperdoc_agent_sdk.types import ToolPermissionContext  # type: ignore[import-not-found]
+                result = self._can_use_tool(tool, parsed_input)
+                if inspect.isawaitable(result):
+                    result = await result
 
-                context = ToolPermissionContext(
-                    signal=None,
-                    suggestions=[],
-                )
+                allowed = False
+                message = None
+                updated_input = None
 
-                result = await self._can_use_tool(tool_name, tool_input, context)
+                if isinstance(result, PermissionResult):
+                    allowed = bool(result.result)
+                    message = result.message
+                    updated_input = result.updated_input
+                elif isinstance(result, dict) and "result" in result:
+                    allowed = bool(result.get("result"))
+                    message = result.get("message")
+                    updated_input = result.get("updated_input") or result.get("updatedInput")
+                elif isinstance(result, tuple) and len(result) == 2:
+                    allowed = bool(result[0])
+                    message = result[1]
+                else:
+                    allowed = bool(result)
 
-                # Convert result to response format
-                from ripperdoc_agent_sdk.types import PermissionResultAllow
-
-                if isinstance(result, PermissionResultAllow):
+                if allowed:
+                    normalized_input = tool_input if updated_input is None else updated_input
+                    if normalized_input and hasattr(normalized_input, "model_dump"):
+                        normalized_input = normalized_input.model_dump()
+                    elif normalized_input and hasattr(normalized_input, "dict") and callable(
+                        getattr(normalized_input, "dict")
+                    ):
+                        normalized_input = normalized_input.dict()
+                    if not isinstance(normalized_input, dict):
+                        normalized_input = {"value": str(normalized_input)}
+                    if tool_name == "Task" and isinstance(normalized_input, dict):
+                        normalized_input = self._normalize_task_tool_input(normalized_input)
                     perm_response = PermissionResponseAllow(
-                        updatedInput=result.updated_input or tool_input,
-                    )
-                    await self._write_control_response(
-                        request_id,
-                        response=model_to_dict(perm_response),
+                        updatedInput=normalized_input,
                     )
                 else:
-                    perm_response: PermissionResponseAllow | PermissionResponseDeny = (
-                        PermissionResponseDeny(  # type: ignore[assignment,no-redef]
-                            message=result.message if hasattr(result, "message") else "",
-                        )
-                    )
-                    await self._write_control_response(
-                        request_id,
-                        response=model_to_dict(perm_response),
-                    )
+                    perm_response = PermissionResponseDeny(message=message or "")
+
+                await self._write_control_response(
+                    request_id,
+                    response=model_to_dict(perm_response),
+                )
             except Exception as e:
                 logger.error(f"Error in permission check: {e}")
                 await self._write_control_response(request_id, error=str(e))
