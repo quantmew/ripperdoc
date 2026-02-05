@@ -13,6 +13,8 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from ripperdoc import __version__
+from ripperdoc.core.agents import load_agent_definitions
 from ripperdoc.core.config import get_project_config, get_effective_model_profile
 from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
@@ -22,6 +24,7 @@ from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.query_utils import resolve_model_profile
 from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.protocol.models import (
     AssistantMessageData,
     AssistantStreamMessage,
@@ -30,9 +33,11 @@ from ripperdoc.protocol.models import (
     ControlResponseSuccess,
     InitializeResponseData,
     MCPServerInfo,
+    MCPServerStatusInfo,
     PermissionResponseAllow,
     PermissionResponseDeny,
     ResultMessage,
+    SystemStreamMessage,
     UsageInfo,
     UserMessageData,
     UserStreamMessage,
@@ -79,12 +84,18 @@ class StdioProtocolHandler:
 
     _PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions"}
 
-    def __init__(self, input_format: str = "stream-json", output_format: str = "stream-json"):
+    def __init__(
+        self,
+        input_format: str = "stream-json",
+        output_format: str = "stream-json",
+        default_options: dict[str, Any] | None = None,
+    ):
         """Initialize the protocol handler.
 
         Args:
             input_format: Input format ("stream-json" or "auto")
             output_format: Output format ("stream-json" or "json")
+            default_options: Default options applied if initialize request omits them.
         """
         if input_format not in {"stream-json", "auto"}:
             logger.warning("[stdio] Unsupported input_format %r; falling back to stream-json", input_format)
@@ -95,6 +106,7 @@ class StdioProtocolHandler:
 
         self._input_format = input_format
         self._output_format = output_format
+        self._default_options = default_options or {}
         self._initialized = False
         self._session_id: str | None = None
         self._project_path: Path = Path.cwd()
@@ -431,7 +443,8 @@ class StdioProtocolHandler:
 
         try:
             # Extract options from request
-            options = request.get("options", {})
+            request_options = request.get("options", {}) or {}
+            options = {**self._default_options, **request_options}
             self._session_id = options.get("session_id") or str(uuid.uuid4())
             self._custom_system_prompt = options.get("system_prompt")
             raw_max_turns = options.get("max_turns")
@@ -524,6 +537,8 @@ class StdioProtocolHandler:
             skill_result = load_all_skills(self._project_path)
             self._skill_instructions = build_skill_summary(skill_result.skills)
 
+            agent_result = load_agent_definitions()
+
             system_prompt = self._resolve_system_prompt(
                 tools,
                 "",  # Will be set per query
@@ -538,19 +553,62 @@ class StdioProtocolHandler:
 
             # Send success response with available tools
             # Use simple list format for Claude SDK compatibility
-            # Get skill info for agents list
-            agent_names = [s.name for s in skill_result.skills] if skill_result.skills else []
+            def _display_agent_name(agent_type: str) -> str:
+                if agent_type in ("explore", "plan"):
+                    return agent_type.title()
+                return agent_type
+
+            agent_names = [
+                _display_agent_name(agent.agent_type) for agent in agent_result.active_agents
+            ]
+            skill_names = [skill.name for skill in skill_result.skills] if skill_result.skills else []
+
+            slash_commands = [cmd.name for cmd in list_slash_commands()]
+            for custom_cmd in list_custom_commands(self._project_path):
+                if custom_cmd.name not in slash_commands:
+                    slash_commands.append(custom_cmd.name)
+
+            resolved_model_profile = resolve_model_profile(model or "main")
+            resolved_model = resolved_model_profile.model if resolved_model_profile else (model or "main")
 
             init_response = InitializeResponseData(
                 session_id=self._session_id or "",
                 system_prompt=system_prompt,
                 tools=[t.name for t in tools],
                 mcp_servers=[MCPServerInfo(name=s.name) for s in servers] if servers else [],
-                slash_commands=[],
+                slash_commands=slash_commands,
+                claude_code_version=__version__,
                 agents=agent_names,
-                skills=[],
+                skills=skill_names,
                 plugins=[],
             )
+
+            # Emit a system/init stream message first (Claude CLI compatibility)
+            try:
+                system_message = SystemStreamMessage(
+                    uuid=str(uuid.uuid4()),
+                    session_id=self._session_id or "",
+                    api_key_source=init_response.apiKeySource,
+                    cwd=str(self._project_path),
+                    tools=[t.name for t in tools],
+                    mcp_servers=[
+                        MCPServerStatusInfo(name=s.name, status=getattr(s, "status", "unknown"))
+                        for s in servers
+                    ]
+                    if servers
+                    else [],
+                    model=resolved_model,
+                    permission_mode=permission_mode,
+                    slash_commands=slash_commands,
+                    claude_code_version=init_response.claude_code_version,
+                    output_style=init_response.output_style,
+                    agents=agent_names,
+                    skills=skill_names,
+                    plugins=[],
+                )
+                await self._write_message_stream(model_to_dict(system_message))
+            except Exception as e:
+                logger.warning(f"[stdio] Failed to emit system init message: {e}")
 
             await self._write_control_response(
                 request_id,
@@ -610,6 +668,7 @@ class StdioProtocolHandler:
                 duration_ms=int((time.time() - start_time) * 1000),
                 duration_api_ms=0,
                 is_error=True,
+                subtype="error_during_execution",
                 num_turns=num_turns[0],
                 session_id=self._session_id or "",
                 total_cost_usd=None,
@@ -742,7 +801,9 @@ class StdioProtocolHandler:
                 await self._write_message_stream(
                     {
                         "type": "user",
+                        "session_id": self._session_id,
                         "message": {
+                            "role": "user",
                             "content": notice.get("text", ""),
                             "metadata": {
                                 "hook_notice": True,
@@ -796,7 +857,9 @@ class StdioProtocolHandler:
                                     await self._write_message_stream(
                                         {
                                             "type": "user",
+                                            "session_id": self._session_id,
                                             "message": {
+                                                "role": "user",
                                                 "content": notice_content.get("text", ""),
                                                 "metadata": {
                                                     "hook_notice": True,
@@ -922,6 +985,7 @@ class StdioProtocolHandler:
                     duration_ms=duration_ms,
                     duration_api_ms=duration_api_ms,
                     is_error=is_error[0],
+                    subtype="success",
                     num_turns=num_turns[0],
                     session_id=self._session_id or "",
                     total_cost_usd=round(total_cost_usd, 8) if total_cost_usd > 0 else None,
@@ -1000,7 +1064,10 @@ class StdioProtocolHandler:
                     elif isinstance(content, list):
                         for block in content:
                             if isinstance(block, dict):
-                                content_blocks.append(block)
+                                if block.get("type") == "tool_use":
+                                    content_blocks.append(self._normalize_tool_use_block(block))
+                                else:
+                                    content_blocks.append(block)
                             else:
                                 # Convert MessageContent (Pydantic model) to dict
                                 block_dict = self._convert_content_block(block)
@@ -1027,41 +1094,70 @@ class StdioProtocolHandler:
                     content=content_blocks,
                     model=actual_model,
                 ),
+                session_id=self._session_id,
                 parent_tool_use_id=getattr(message, "parent_tool_use_id", None),
+                uuid=getattr(message, "uuid", None),
             )
             return model_to_dict(stream_message)
 
         if msg_type == "user":
             msg_content = getattr(message, "message", None)
             content = getattr(msg_content, "content", "") if msg_content else ""
+            tool_result_text: str | None = None
+            tool_result_is_error = False
 
             # If content is a list of MessageContent objects (e.g., tool results),
-            # convert it to a string for the SDK format
+            # convert it to SDK content blocks
             if isinstance(content, list):
-                # For tool results, the content is a list of MessageContent objects.
-                # Convert to a string representation. For tool_result types, use empty string
-                # since the actual result data is in tool_use_result field.
-                content_str = ""
+                content_blocks = []
                 for block in content:
                     if isinstance(block, dict):
                         block_type = block.get("type", "")
-                        if block_type == "text" and block.get("text"):
-                            content_str = block.get("text", "")
-                            break
-                    elif hasattr(block, "type"):
-                        block_type = getattr(block, "type", "")
-                        if block_type == "text" and getattr(block, "text", None):
-                            content_str = getattr(block, "text", "")
-                            break
-                        # For tool_result types, we typically use empty string
-                        # since the data is in tool_use_result field
-                content = content_str
+                        if block_type == "tool_result":
+                            tool_use_id = block.get("tool_use_id") or block.get("id") or ""
+                            text_value = self._normalize_tool_result_text(
+                                block.get("text"), block.get("content")
+                            )
+                            normalized_block: dict[str, Any] = {
+                                "type": "tool_result",
+                                "tool_use_id": tool_use_id,
+                                "content": text_value,
+                            }
+                            if "is_error" in block:
+                                normalized_block["is_error"] = block.get("is_error")
+                                tool_result_is_error = bool(block.get("is_error"))
+                            content_blocks.append(normalized_block)
+                            if tool_result_text is None:
+                                tool_result_text = str(text_value) if text_value is not None else ""
+                        else:
+                            if block_type == "tool_use":
+                                content_blocks.append(self._normalize_tool_use_block(block))
+                            else:
+                                content_blocks.append(block)
+                    else:
+                        block_dict = self._convert_content_block(block)
+                        if block_dict:
+                            if block_dict.get("type") == "tool_result":
+                                if tool_result_text is None:
+                                    tool_result_text = str(block_dict.get("content") or "")
+                                tool_result_is_error = bool(block_dict.get("is_error", False))
+                            content_blocks.append(block_dict)
+                content = content_blocks
 
             stream_message: UserStreamMessage | AssistantStreamMessage = UserStreamMessage(  # type: ignore[assignment,no-redef]
                 message=UserMessageData(content=content),
                 uuid=getattr(message, "uuid", None),
+                session_id=self._session_id,
                 parent_tool_use_id=getattr(message, "parent_tool_use_id", None),
-                tool_use_result=self._sanitize_for_json(getattr(message, "tool_use_result", None)),
+                tool_use_result=(
+                    (
+                        self._format_tool_use_result(tool_result_text, tool_result_is_error)
+                        if isinstance(content, list)
+                        and tool_result_is_error
+                        and tool_result_text is not None
+                        else self._sanitize_for_json(getattr(message, "tool_use_result", None))
+                    )
+                ),
             )
             return model_to_dict(stream_message)
 
@@ -1118,6 +1214,68 @@ class StdioProtocolHandler:
         except Exception:
             return None
 
+    def _normalize_tool_result_text(self, text_value: Any, content_value: Any) -> str:
+        if isinstance(text_value, str):
+            return text_value
+        if isinstance(content_value, str):
+            return content_value
+        if isinstance(content_value, list):
+            for item in content_value:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    return str(item.get("text") or "")
+            if content_value:
+                return str(content_value[0])
+        if content_value is None:
+            return ""
+        return str(content_value)
+
+    def _format_tool_use_result(self, text_value: str | None, is_error: bool) -> str | None:
+        if text_value is None:
+            return None
+        if is_error and not text_value.startswith("Error: "):
+            return f"Error: {text_value}"
+        return text_value
+
+    def _summarize_task_prompt(self, prompt: str) -> str:
+        line = prompt.strip().splitlines()[0] if prompt else ""
+        if len(line) > 120:
+            return f"{line[:117]}..."
+        return line
+
+    def _normalize_task_tool_input(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(input_data)
+        subagent_type = normalized.get("subagent_type")
+        if isinstance(subagent_type, str) and subagent_type in ("explore", "plan"):
+            normalized["subagent_type"] = subagent_type.title()
+        if "description" not in normalized:
+            prompt = normalized.get("prompt")
+            if isinstance(prompt, str) and prompt.strip():
+                normalized["description"] = self._summarize_task_prompt(prompt)
+        return normalized
+
+    def _normalize_tool_use_block(self, block: dict[str, Any]) -> dict[str, Any]:
+        tool_id = block.get("id") or block.get("tool_use_id") or ""
+        name = block.get("name") or ""
+        input_value = block.get("input") or {}
+        if hasattr(input_value, "model_dump"):
+            input_value = input_value.model_dump()
+        elif hasattr(input_value, "dict"):
+            input_value = input_value.dict()
+        if not isinstance(input_value, dict):
+            input_value = {"value": str(input_value)}
+        if name == "Task":
+            input_value = self._normalize_task_tool_input(input_value)
+        normalized = dict(block)
+        normalized.update(
+            {
+                "type": "tool_use",
+                "id": tool_id,
+                "name": name,
+                "input": input_value,
+            }
+        )
+        return normalized
+
     def _convert_content_block(self, block: Any) -> dict[str, Any] | None:
         """Convert a MessageContent block to dictionary.
 
@@ -1149,22 +1307,39 @@ class StdioProtocolHandler:
             # Use the same id extraction logic as _content_block_to_api
             # Try id first, then tool_use_id, then empty string
             tool_id = getattr(block, "id", None) or getattr(block, "tool_use_id", None) or ""
+            name = getattr(block, "name", None) or ""
+            input_value = getattr(block, "input", None) or {}
+            if hasattr(input_value, "model_dump"):
+                input_value = input_value.model_dump()
+            elif hasattr(input_value, "dict"):
+                input_value = input_value.dict()
+            if not isinstance(input_value, dict):
+                input_value = {"value": str(input_value)}
+            if name == "Task" and isinstance(input_value, dict):
+                input_value = self._normalize_task_tool_input(input_value)
             return {
                 "type": "tool_use",
                 "id": tool_id,
-                "name": getattr(block, "name", None) or "",
-                "input": getattr(block, "input", None) or {},
+                "name": name,
+                "input": input_value,
             }
 
         if block_type == "tool_result":
-            return {
+            text_value = (
+                getattr(block, "text", None)
+                or self._normalize_tool_result_text(None, getattr(block, "content", None))
+                or ""
+            )
+            result_block: dict[str, Any] = {
                 "type": "tool_result",
                 "tool_use_id": getattr(block, "tool_use_id", None)
                 or getattr(block, "id", None)
                 or "",
-                "content": getattr(block, "text", None) or getattr(block, "content", None) or "",
-                "is_error": getattr(block, "is_error", None),
+                "content": text_value,
             }
+            if getattr(block, "is_error", None) is not None:
+                result_block["is_error"] = getattr(block, "is_error", None)
+            return result_block
 
         if block_type == "image":
             return {

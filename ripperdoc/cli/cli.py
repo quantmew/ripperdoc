@@ -91,6 +91,16 @@ def parse_tools_option(tools_arg: Optional[str]) -> Optional[List[str]]:
     return tool_names if tool_names else None
 
 
+def parse_csv_option(raw_value: Optional[str]) -> Optional[List[str]]:
+    """Parse a comma-separated CLI option into a list."""
+    if raw_value is None:
+        return None
+    value = raw_value.strip()
+    if value == "":
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 async def run_query(
     prompt: str,
     tools: list,
@@ -315,7 +325,10 @@ async def run_query(
         logger.debug("[cli] Shutdown MCP runtime", extra={"session_id": session_id})
 
 
-@click.group(invoke_without_command=True)
+@click.group(
+    invoke_without_command=True,
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
 @click.version_option(version=__version__)
 @click.option("--cwd", type=click.Path(exists=True), help="Working directory")
 @click.option(
@@ -329,7 +342,161 @@ async def run_query(
     default=None,
     help="Show full reasoning content instead of truncated preview",
 )
+@click.option(
+    "--input-format",
+    type=click.Choice(["stream-json", "auto"]),
+    default="stream-json",
+    help="Input format for messages.",
+)
 @click.option("-p", "--prompt", type=str, help="Direct prompt (non-interactive)")
+@click.option(
+    "--output-format",
+    type=click.Choice(["text", "json", "stream-json"]),
+    default="text",
+    help=(
+        'Output format (SDK/--print): "text" (default), "json" '
+        '(single result), or "stream-json" (realtime streaming)'
+    ),
+)
+@click.option(
+    "--print",
+    "print_mode",
+    is_flag=True,
+    help="Print mode (for single prompt queries).",
+)
+@click.option(
+    "--",
+    "print_prompt",
+    type=str,
+    default=None,
+    help="Direct prompt (for print mode).",
+)
+@click.option(
+    "--permission-mode",
+    type=click.Choice(["default", "acceptEdits", "plan", "bypassPermissions"]),
+    default="default",
+    help="Permission mode for tool usage.",
+)
+@click.option(
+    "--max-turns",
+    type=int,
+    default=None,
+    help="Maximum number of conversation turns.",
+)
+@click.option(
+    "--allowedTools",
+    "allowed_tools_csv",
+    type=str,
+    default=None,
+    help="Allowed tool list (comma-separated, SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--disallowedTools",
+    "disallowed_tools_csv",
+    type=str,
+    default=None,
+    help="Disallowed tool list (comma-separated, SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--permission-prompt-tool",
+    type=str,
+    default=None,
+    help="Permission prompt tool name (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--settings",
+    type=str,
+    default=None,
+    help="Settings JSON or path (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--add-dir",
+    "add_dirs",
+    multiple=True,
+    type=click.Path(),
+    help="Additional directories (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--mcp-config",
+    type=str,
+    default=None,
+    help="MCP config JSON or path (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--include-partial-messages",
+    is_flag=True,
+    help="Include partial messages (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--fork-session",
+    is_flag=True,
+    help="Fork session on resume (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--agents",
+    type=str,
+    default=None,
+    help="Agents JSON (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--setting-sources",
+    type=str,
+    default=None,
+    help="Setting sources (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--plugin-dir",
+    "plugin_dirs",
+    multiple=True,
+    type=click.Path(),
+    help="Plugin directory (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--betas",
+    type=str,
+    default=None,
+    help="SDK beta flags (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--fallback-model",
+    type=str,
+    default=None,
+    help="Fallback model (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--max-budget-usd",
+    type=float,
+    default=None,
+    help="Max budget (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--max-thinking-tokens",
+    type=int,
+    default=None,
+    help="Max thinking tokens (SDK only).",
+    hidden=True,
+)
+@click.option(
+    "--json-schema",
+    type=str,
+    default=None,
+    help="JSON schema for output (SDK only).",
+    hidden=True,
+)
 @click.option(
     "--tools",
     type=str,
@@ -397,7 +564,29 @@ def cli(
     yolo: bool,
     verbose: bool,
     show_full_thinking: Optional[bool],
+    input_format: str,
     prompt: Optional[str],
+    output_format: str,
+    print_mode: bool,
+    print_prompt: Optional[str],
+    permission_mode: str,
+    max_turns: Optional[int],
+    allowed_tools_csv: Optional[str],
+    disallowed_tools_csv: Optional[str],
+    permission_prompt_tool: Optional[str],
+    settings: Optional[str],
+    add_dirs: tuple[str, ...],
+    mcp_config: Optional[str],
+    include_partial_messages: bool,
+    fork_session: bool,
+    agents: Optional[str],
+    setting_sources: Optional[str],
+    plugin_dirs: tuple[str, ...],
+    betas: Optional[str],
+    fallback_model: Optional[str],
+    max_budget_usd: Optional[float],
+    max_thinking_tokens: Optional[int],
+    json_schema: Optional[str],
     tools: Optional[str],
     system_prompt: Optional[str],
     append_system_prompt: Optional[str],
@@ -411,6 +600,18 @@ def cli(
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
     cwd_changed: Optional[str] = None
+    extra_args = list(ctx.args) if ctx.args else []
+
+    if ctx.invoked_subcommand is None and extra_args:
+        if print_mode:
+            if print_prompt is None:
+                print_prompt = " ".join(extra_args).strip()
+        else:
+            first = extra_args[0]
+            if first.startswith("-"):
+                ctx.fail(f"No such option: {first}")
+            else:
+                ctx.fail(f"No such command '{first}'")
 
     # Set working directory
     if cwd:
@@ -420,6 +621,49 @@ def cli(
         cwd_changed = cwd
 
     project_path = Path.cwd()
+
+    if ctx.invoked_subcommand is None and (
+        output_format in ("json", "stream-json") or print_mode
+    ):
+        from ripperdoc.protocol.stdio import _run_stdio
+
+        effective_prompt = print_prompt or prompt
+        stdio_output_format = (
+            "stream-json" if output_format == "text" else output_format
+        )
+        allowed_tools = parse_csv_option(allowed_tools_csv)
+        disallowed_tools = parse_csv_option(disallowed_tools_csv)
+        tools_list = parse_tools_option(tools)
+
+        default_options: dict[str, Any] = {
+            "cwd": str(project_path),
+            "model": model,
+            "permission_mode": permission_mode,
+            "max_turns": max_turns,
+            "system_prompt": system_prompt,
+            "verbose": verbose,
+        }
+        if allowed_tools is not None:
+            default_options["allowed_tools"] = allowed_tools
+        if disallowed_tools is not None:
+            default_options["disallowed_tools"] = disallowed_tools
+        if tools_list is not None:
+            default_options["tools"] = tools_list
+
+        asyncio.run(
+            _run_stdio(
+                input_format=input_format,
+                output_format=stdio_output_format,
+                model=model,
+                permission_mode=permission_mode,
+                max_turns=max_turns,
+                system_prompt=system_prompt,
+                print_mode=bool(effective_prompt),
+                prompt=effective_prompt,
+                default_options=default_options,
+            )
+        )
+        return
 
     # Handle --continue option: load the most recent session
     resume_messages = None
@@ -642,88 +886,6 @@ def config_cmd() -> None:
         console.print()
 
 
-@cli.command(name="stdio")
-@click.option(
-    "--input-format",
-    type=click.Choice(["stream-json", "auto"]),
-    default="stream-json",
-    help="Input format for messages.",
-)
-@click.option(
-    "--output-format",
-    type=click.Choice(["stream-json", "json"]),
-    default="stream-json",
-    help="Output format for messages.",
-)
-@click.option(
-    "--model",
-    type=str,
-    default=None,
-    help="Model profile for the current session.",
-)
-@click.option(
-    "--permission-mode",
-    type=click.Choice(["default", "acceptEdits", "plan", "bypassPermissions"]),
-    default="default",
-    help="Permission mode for tool usage.",
-)
-@click.option(
-    "--max-turns",
-    type=int,
-    default=None,
-    help="Maximum number of conversation turns.",
-)
-@click.option(
-    "--system-prompt",
-    type=str,
-    default=None,
-    help="System prompt to use for the session.",
-)
-@click.option(
-    "--print",
-    "-p",
-    is_flag=True,
-    help="Print mode (for single prompt queries).",
-)
-@click.option(
-    "--",
-    "prompt",
-    type=str,
-    default=None,
-    help="Direct prompt (for print mode).",
-)
-def stdio_cmd(
-    input_format: str,
-    output_format: str,
-    model: str | None,
-    permission_mode: str,
-    max_turns: int | None,
-    system_prompt: str | None,
-    print: bool,
-    prompt: str | None,
-) -> None:
-    """Stdio mode for SDK subprocess communication.
-
-    This command enables Ripperdoc to communicate with SDKs via JSON Control
-    Protocol over stdin/stdout.
-    """
-    from ripperdoc.protocol.stdio import _run_stdio
-    import asyncio
-
-    asyncio.run(
-        _run_stdio(
-            input_format=input_format,
-            output_format=output_format,
-            model=model,
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            system_prompt=system_prompt,
-            print_mode=print,
-            prompt=prompt,
-        )
-    )
-
-
 @cli.command(name="version")
 def version_cmd() -> None:
     """Show version information"""
@@ -733,7 +895,12 @@ def version_cmd() -> None:
 def main() -> None:
     """Main entry point."""
     try:
-        cli()
+        argv = sys.argv[1:]
+        if "--print" in argv and "--" in argv:
+            sep_index = argv.index("--")
+            prompt = " ".join(argv[sep_index + 1 :]).strip()
+            argv = argv[:sep_index] + ["--prompt", prompt]
+        cli.main(args=argv, prog_name="ripperdoc")
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")
         sys.exit(130)

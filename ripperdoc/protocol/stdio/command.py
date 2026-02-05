@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import click
 
@@ -107,11 +108,13 @@ async def _run_stdio(
     system_prompt: str | None,
     print_mode: bool,
     prompt: str | None,
+    default_options: dict[str, Any] | None = None,
 ) -> None:
     """Async entry point for stdio command."""
     handler = StdioProtocolHandler(
         input_format=input_format,
         output_format=output_format,
+        default_options=default_options,
     )
 
     # If print mode with prompt, handle as single query

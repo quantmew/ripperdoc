@@ -164,6 +164,10 @@ async def cancel_agent_run(agent_id: str) -> bool:
 class TaskToolInput(BaseModel):
     """Input schema for delegating to a subagent."""
 
+    description: Optional[str] = Field(
+        default=None,
+        description="Short summary of the task for display purposes.",
+    )
     prompt: Optional[str] = Field(
         default=None,
         description="Detailed task description for the subagent to perform.",
