@@ -650,10 +650,14 @@ class RichUI:
         if not messages:
             return
         self.console.print("\n[dim]Restored conversation:[/dim]")
+        tool_registry: Dict[str, Dict[str, Any]] = {}
+        last_tool_name: Optional[str] = None
+
         for msg in messages:
             msg_type = getattr(msg, "type", "")
             message_payload = getattr(msg, "message", None) or getattr(msg, "content", None)
             content = getattr(message_payload, "content", None) if message_payload else None
+
             has_tool_result = False
             if isinstance(content, list):
                 for block in content:
@@ -663,17 +667,25 @@ class RichUI:
                     if block_type == "tool_result":
                         has_tool_result = True
                         break
+
+            if msg_type == "assistant":
+                last = handle_assistant_message(self, msg, tool_registry, spinner=None)
+                if last:
+                    last_tool_name = last
+                continue
+
+            if msg_type == "user" and has_tool_result:
+                handle_tool_result_message(
+                    self, msg, tool_registry, last_tool_name, spinner=None
+                )
+                continue
+
             text = self._stringify_message_content(content)
             if not text:
                 continue
-            if msg_type == "user" and not has_tool_result:
+            if msg_type == "user":
                 self._print_replay_user(text)
                 self._append_prompt_history(text)
-            elif msg_type == "user" and has_tool_result:
-                # Tool results are part of the conversation but should not enter prompt history.
-                self.display_message("Tool", text, is_tool=True, tool_type="result")
-            elif msg_type == "assistant":
-                self.display_message("Ripperdoc", text)
 
     def _print_replay_user(self, text: str) -> None:
         """Render restored user messages with a prompt-style prefix."""
