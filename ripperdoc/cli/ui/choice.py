@@ -8,24 +8,52 @@ user interactions.
 from __future__ import annotations
 
 import html
+import re
 import shutil
 from typing import Any, Optional
 
-from prompt_toolkit.filters import is_done
+from prompt_toolkit.application import Application
+from prompt_toolkit.filters import Condition, has_focus, is_done
 from prompt_toolkit.formatted_text import HTML, fragment_list_to_text, to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import HSplit, Layout
+from prompt_toolkit.layout.containers import ConditionalContainer
 from prompt_toolkit.shortcuts import choice
 from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
+from prompt_toolkit.widgets import Box, CheckboxList, Frame, Label, RadioList, TextArea
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 # Shared style system for all choice prompts
-def _choice_style() -> Style:
-    """Create the unified style for choice prompts.
+def neutral_choice_style() -> Style:
+    """Create the default neutral style for choice prompts."""
+    return Style.from_dict(
+        {
+            "frame.border": "#7f8fa6",  # Muted blue-gray border
+            "selected-option": "bold",
+            "option": "#d7e3f4",  # Soft blue for options
+            "title": "#c7d2e6",  # Light blue-gray title
+            "description": "#d9d9d9",
+            "question": "#e8ecf5",  # Neutral light text for questions
+            "label": "#9fb3d1",  # Medium blue-gray labels
+            "number": "#9fb3d1",  # Numbers for indexed options
+            "warning": "#ff6b6b",  # Warning stays distinct
+            "info": "#a7c7e7",  # Calm info blue
+            "dim": "#707070",
+            "yes-option": "#e8ecf5",
+            "no-option": "#e8ecf5",
+            "value": "#e8ecf5",
+            "default": "#88c0d0",
+            "marker": "#9fb3d1",
+        }
+    )
 
-    Uses a golden/amber theme with cyan accents for consistent branding.
-    """
+
+def amber_choice_style() -> Style:
+    """Create the legacy amber style for choice prompts."""
     return Style.from_dict(
         {
             "frame.border": "#d4a017",  # Golden/amber border
@@ -35,6 +63,7 @@ def _choice_style() -> Style:
             "description": "#ffffff",  # White for descriptions
             "question": "#ffd700",  # Gold for questions
             "label": "#87afff",  # Light blue for field labels
+            "number": "#87afff",  # Numbers for indexed options
             "warning": "#ff5555",  # Red for warnings
             "info": "#5fd7ff",  # Cyan for info text
             "dim": "#626262",  # Dimmed text
@@ -45,6 +74,11 @@ def _choice_style() -> Style:
             "marker": "#ffb86c",  # Orange for markers (→, etc.)
         }
     )
+
+
+def _choice_style() -> Style:
+    """Backward-compatible alias for the default choice style."""
+    return neutral_choice_style()
 
 
 def onboarding_style() -> Style:
@@ -61,6 +95,7 @@ def onboarding_style() -> Style:
             "description": "#f0f0f0",  # Off-white for descriptions
             "question": "#ff79c6",  # Pink for questions
             "label": "#8be9fd",  # Cyan for labels
+            "number": "#8be9fd",  # Numbers for indexed options
             "warning": "#ffb86c",  # Orange for warnings
             "info": "#8be9fd",  # Cyan for info text
             "dim": "#626262",  # Dimmed text
@@ -87,6 +122,7 @@ def theme_style() -> Style:
             "description": "#f0f0f0",
             "question": "#f8f8f2",
             "label": "#8be9fd",
+            "number": "#8be9fd",
             "warning": "#ffb86c",
             "info": "#5fd7ff",
             "dim": "#626262",
@@ -97,6 +133,54 @@ def theme_style() -> Style:
             "marker": "#8be9fd",
         }
     )
+
+
+def ask_user_question_style() -> Style:
+    """Create the style for AskUserQuestion prompts.
+
+    Uses a neutral blue/gray palette to avoid warning-like colors.
+    """
+    return Style.from_dict(
+        {
+            "frame.border": "#7f8fa6",  # Muted blue-gray border
+            "selected-option": "bold",
+            "option": "#d7e3f4",  # Soft blue for options
+            "title": "#c7d2e6",  # Light blue-gray title
+            "description": "#d9d9d9",
+            "question": "#e8ecf5",  # Neutral light text for questions
+            "label": "#9fb3d1",  # Medium blue-gray labels
+            "number": "#9fb3d1",  # Numbers for indexed options
+            "warning": "#ff6b6b",  # Keep warning distinct (red)
+            "info": "#a7c7e7",  # Calm info blue
+            "dim": "#707070",
+            "yes-option": "#e8ecf5",
+            "no-option": "#e8ecf5",
+            "value": "#e8ecf5",
+            "default": "#88c0d0",
+            "marker": "#9fb3d1",
+        }
+    )
+
+
+def resolve_choice_style(style_variant: str) -> Style:
+    """Resolve a named style variant for choice prompts.
+
+    Supported variants:
+    - neutral (default)
+    - amber
+    - onboarding
+    - theme
+    - ask_user_question
+    """
+    style_builders = {
+        "neutral": neutral_choice_style,
+        "amber": amber_choice_style,
+        "onboarding": onboarding_style,
+        "theme": theme_style,
+        "ask_user_question": ask_user_question_style,
+    }
+    builder = style_builders.get(style_variant, neutral_choice_style)
+    return builder()
 
 
 class ChoiceOption:
@@ -151,6 +235,7 @@ def _count_display_lines(text: Any, terminal_width: int) -> int:
     plain_text = fragment_list_to_text(fragments)
     if not plain_text:
         return 0
+    plain_text = ANSI_ESCAPE_RE.sub("", plain_text)
 
     # Normalize newlines and keep trailing empty lines.
     plain_text = plain_text.replace("\r\n", "\n").replace("\r", "\n")
@@ -169,6 +254,26 @@ def _count_display_lines(text: Any, terminal_width: int) -> int:
     return total_lines
 
 
+def _selection_label_offset(
+    option_count: int,
+    open_character: str,
+    close_character: str,
+) -> int:
+    """Approximate visible prefix width before option label text."""
+    digits = max(2, len(str(max(1, option_count))))
+    number_width = digits + 2  # "<num>. "
+    marker_width = 1
+    spacing_after_marker = 1
+    return len(open_character) + marker_width + len(close_character) + spacing_after_marker + number_width
+
+
+def _selection_number_offset(open_character: str, close_character: str) -> int:
+    """Visible prefix width before the option number column."""
+    marker_width = 1
+    spacing_after_marker = 1
+    return len(open_character) + marker_width + len(close_character) + spacing_after_marker
+
+
 def prompt_choice(
     message: str,
     options: list[ChoiceOption] | list[tuple[str, str]],
@@ -179,6 +284,8 @@ def prompt_choice(
     allow_esc: bool = True,
     esc_value: Optional[str] = None,
     style: Optional[Style] = None,
+    style_variant: str = "neutral",
+    external_header: Optional[str] = None,
 ) -> str:
     """Prompt the user to make a choice from a list of options.
 
@@ -193,7 +300,8 @@ def prompt_choice(
         warning: Optional warning message to display
         allow_esc: Whether ESC key can be used to cancel (defaults to True)
         esc_value: Value to return when ESC is pressed (defaults to first option's value)
-        style: Optional custom style (defaults to unified choice style)
+        style: Optional custom style object (highest precedence)
+        style_variant: Named style variant when style is not provided
 
     Returns:
         The value of the selected option
@@ -258,11 +366,14 @@ def prompt_choice(
         def _esc_handler(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
             event.app.exit(result=result_on_esc, style="class:aborting")
 
+    if external_header:
+        print(external_header)
+
     # Show the choice dialog
     result = choice(
         message=formatted_prompt,
         options=choice_options_formatted,
-        style=style or _choice_style(),
+        style=style or resolve_choice_style(style_variant),
         show_frame=~is_done,
         key_bindings=key_bindings if allow_esc else None,
     )
@@ -279,6 +390,8 @@ def prompt_choice(
     message_width = max(1, term_width - 2)  # account for label padding
     lines_to_clear = _count_display_lines(formatted_prompt, message_width)
     lines_to_clear += len(choice_options_formatted)
+    if external_header:
+        lines_to_clear += _count_display_lines(external_header, term_width)
 
     for _ in range(lines_to_clear):
         print("\033[F\033[2K", end="", flush=True)
@@ -296,6 +409,11 @@ async def prompt_choice_async(
     allow_esc: bool = True,
     esc_value: Optional[str] = None,
     style: Optional[Style] = None,
+    style_variant: str = "neutral",
+    back_value: Optional[str] = None,
+    next_value: Optional[str] = None,
+    external_header: Optional[str] = None,
+    custom_input_label: Optional[str] = None,
 ) -> str:
     """Async variant of prompt_choice for use inside running event loops."""
     choice_options: list[ChoiceOption] = []
@@ -329,27 +447,374 @@ async def prompt_choice_async(
         default_esc_value = esc_value or (choice_options[0].value if choice_options else "")
         result_on_esc = default_esc_value
 
-        @key_bindings.add("escape", eager=True)
+        @key_bindings.add("escape", eager=False)
         def _esc_handler(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
             event.app.exit(result=result_on_esc, style="class:aborting")
 
-    result = await ChoiceInput(
-        message=formatted_prompt,
-        options=choice_options_formatted,
-        style=style or _choice_style(),
-        show_frame=~is_done,
-        key_bindings=key_bindings if allow_esc else None,
-    ).prompt_async()
+    if custom_input_label:
+        list_padding_left = 3
+        radio_list = RadioList(
+            values=choice_options_formatted,
+            default=choice_options_formatted[0][0] if choice_options_formatted else None,
+            select_on_focus=True,
+            open_character="",
+            select_character=">",
+            close_character="",
+            show_cursor=False,
+            show_numbers=True,
+            container_style="class:input-selection",
+            default_style="class:option",
+            selected_style="",
+            checked_style="class:selected-option",
+            number_style="class:number",
+            show_scrollbar=False,
+        )
+
+        custom_input = TextArea(
+            text="",
+            multiline=False,
+            prompt=f"{custom_input_label}: ",
+            style="class:option",
+            focusable=True,
+        )
+        # Align custom input with the option number column for single-choice prompts.
+        custom_padding_left = list_padding_left + _selection_number_offset("", "")
+
+        def _set_radio_focus_visual(active: bool) -> None:
+            radio_list.select_character = ">" if active else " "
+
+        container: Any = HSplit(
+            [
+                Box(
+                    Label(text=formatted_prompt, dont_extend_height=True),
+                    padding_top=0,
+                    padding_left=1,
+                    padding_right=1,
+                    padding_bottom=0,
+                ),
+                Box(
+                    radio_list,
+                    padding_top=0,
+                    padding_left=list_padding_left,
+                    padding_right=1,
+                    padding_bottom=0,
+                ),
+                Box(
+                    custom_input,
+                    padding_top=0,
+                    padding_left=custom_padding_left,
+                    padding_right=1,
+                    padding_bottom=0,
+                ),
+            ]
+        )
+        container = ConditionalContainer(
+            Frame(container),
+            alternative_content=container,
+            filter=~is_done,
+        )
+        layout = Layout(container, focused_element=radio_list)
+
+        def _collect_choice_result() -> str:
+            custom_text = custom_input.text.strip()
+            if custom_text:
+                return custom_text
+            return str(radio_list.current_value)
+
+        @key_bindings.add("enter", eager=True)
+        def _submit(event: Any) -> None:  # noqa: ANN001
+            event.app.exit(result=_collect_choice_result(), style="class:accepted")
+
+        @key_bindings.add("left", filter=has_focus(radio_list), eager=True)
+        def _left_nav(event: Any) -> None:  # noqa: ANN001
+            if back_value is not None:
+                event.app.exit(result=back_value, style="class:accepted")
+
+        @key_bindings.add("right", filter=has_focus(radio_list), eager=True)
+        def _right_nav(event: Any) -> None:  # noqa: ANN001
+            if next_value is not None:
+                event.app.exit(result=next_value, style="class:accepted")
+
+        @key_bindings.add("tab", eager=True)
+        @key_bindings.add("c-i", eager=True)
+        def _focus_next(event: Any) -> None:  # noqa: ANN001
+            if event.app.layout.has_focus(radio_list):
+                _set_radio_focus_visual(False)
+                event.app.layout.focus(custom_input)
+            else:
+                _set_radio_focus_visual(True)
+                event.app.layout.focus(radio_list)
+
+        @key_bindings.add("s-tab", eager=True)
+        def _focus_prev(event: Any) -> None:  # noqa: ANN001
+            if event.app.layout.has_focus(custom_input):
+                _set_radio_focus_visual(True)
+                event.app.layout.focus(radio_list)
+            else:
+                _set_radio_focus_visual(False)
+                event.app.layout.focus(custom_input)
+
+        @Condition
+        def _is_at_last_option() -> bool:
+            selected_index = getattr(radio_list, "_selected_index", 0)
+            values = getattr(radio_list, "values", [])
+            return bool(values) and selected_index >= len(values) - 1
+
+        @key_bindings.add("down", filter=has_focus(radio_list) & _is_at_last_option, eager=True)
+        def _down_to_custom(event: Any) -> None:  # noqa: ANN001
+            _set_radio_focus_visual(False)
+            event.app.layout.focus(custom_input)
+
+        @key_bindings.add("up", filter=has_focus(custom_input), eager=True)
+        def _up_to_list(event: Any) -> None:  # noqa: ANN001
+            _set_radio_focus_visual(True)
+            event.app.layout.focus(radio_list)
+
+        if external_header:
+            print(external_header)
+
+        result = await Application(
+            layout=layout,
+            full_screen=False,
+            key_bindings=key_bindings,
+            style=style or resolve_choice_style(style_variant),
+        ).run_async()
+    else:
+        @key_bindings.add("left", eager=True)
+        def _left_nav(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
+            if back_value is not None:
+                event.app.exit(result=back_value, style="class:accepted")
+
+        @key_bindings.add("right", eager=True)
+        def _right_nav(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
+            if next_value is not None:
+                event.app.exit(result=next_value, style="class:accepted")
+
+        if external_header:
+            print(external_header)
+
+        result = await ChoiceInput(
+            message=formatted_prompt,
+            options=choice_options_formatted,
+            style=style or resolve_choice_style(style_variant),
+            show_frame=~is_done,
+            key_bindings=key_bindings if allow_esc else None,
+        ).prompt_async()
 
     term_width = _terminal_width()
     message_width = max(1, term_width - 2)
     lines_to_clear = _count_display_lines(formatted_prompt, message_width)
     lines_to_clear += len(choice_options_formatted)
+    if custom_input_label:
+        lines_to_clear += 1
+    if external_header:
+        lines_to_clear += _count_display_lines(external_header, term_width)
 
     for _ in range(lines_to_clear):
         print("\033[F\033[2K", end="", flush=True)
 
     return result
+
+
+async def prompt_checkbox_async(
+    message: str,
+    options: list[ChoiceOption] | list[tuple[str, str]],
+    *,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    warning: Optional[str] = None,
+    ok_text: str = "Confirm",
+    cancel_text: str = "Cancel",
+    style: Optional[Style] = None,
+    style_variant: str = "neutral",
+    custom_input_label: Optional[str] = None,
+    back_value: Optional[str] = None,
+    next_value: Optional[str] = None,
+    submit_on_right: bool = False,
+    external_header: Optional[str] = None,
+) -> Optional[list[str]]:
+    """Prompt the user to select multiple options via a checkbox dialog.
+
+    Returns:
+        List of selected values, or None if the dialog was cancelled.
+    """
+    choice_options: list[ChoiceOption] = []
+    for opt in options:
+        if isinstance(opt, ChoiceOption):
+            choice_options.append(opt)
+        else:
+            value, label = opt
+            choice_options.append(ChoiceOption(value, label))
+
+    prompt_html = ""
+    if description:
+        prompt_html += f"<description>{html.escape(description)}</description>\n"
+    prompt_html += message
+    if warning:
+        prompt_html += f"\n<warning>{html.escape(warning)}</warning>"
+    formatted_prompt = HTML(prompt_html)
+
+    checkbox_values = []
+    for opt in choice_options:
+        label = opt.label
+        if opt.is_default:
+            label = f"{label} <default>*</default>"
+        checkbox_values.append((opt.value, HTML(label) if "<" in label else label))
+
+    checkbox_list = CheckboxList(
+        values=checkbox_values,
+        open_character="[",
+        select_character="x",
+        close_character="]",
+        container_style="class:input-selection",
+        default_style="class:option",
+        selected_style="class:selected-option",
+        checked_style="class:selected-option",
+    )
+    checkbox_list.show_numbers = True
+    checkbox_list.number_style = "class:number"
+    checkbox_list.show_scrollbar = False
+
+    list_padding_left = 3
+    custom_input = TextArea(
+        text="",
+        multiline=False,
+        prompt=(f"{custom_input_label}: " if custom_input_label else ""),
+        style="class:option",
+        focusable=True,
+    )
+    custom_padding_left = list_padding_left + _selection_label_offset(
+        len(checkbox_values), "[", "]"
+    )
+    custom_input_container = Box(
+        custom_input,
+        padding_top=0,
+        padding_left=custom_padding_left,
+        padding_right=1,
+        padding_bottom=0,
+    )
+    body_children: list[Any] = [
+        Box(
+            Label(text=formatted_prompt, dont_extend_height=True),
+            padding_top=0,
+            padding_left=1,
+            padding_right=1,
+            padding_bottom=0,
+        ),
+        Box(
+            checkbox_list,
+            padding_top=0,
+            padding_left=list_padding_left,
+            padding_right=1,
+            padding_bottom=0,
+        ),
+    ]
+    if custom_input_label:
+        body_children.append(custom_input_container)
+
+    container = HSplit(body_children)
+    container = ConditionalContainer(
+        Frame(container),
+        alternative_content=container,
+        filter=~is_done,
+    )
+    layout = Layout(container, focused_element=checkbox_list)
+
+    kb = KeyBindings()
+
+    def _collect_result() -> list[str]:
+        values = [str(item) for item in checkbox_list.current_values]
+        if custom_input_label:
+            custom_text = custom_input.text.strip()
+            if custom_text:
+                values.append(custom_text)
+        return values
+
+    @kb.add("enter", eager=True)
+    def _submit(event: Any) -> None:  # noqa: ANN401
+        event.app.exit(result=_collect_result(), style="class:accepted")
+
+    @kb.add("right", eager=True)
+    def _submit_right(event: Any) -> None:  # noqa: ANN401
+        if event.app.layout.current_window != checkbox_list.window:
+            return
+        if next_value is not None:
+            event.app.exit(result=[next_value], style="class:accepted")
+        elif submit_on_right:
+            event.app.exit(result=_collect_result(), style="class:accepted")
+
+    @kb.add("left", eager=True)
+    def _go_back_left(event: Any) -> None:  # noqa: ANN401
+        if event.app.layout.current_window != checkbox_list.window:
+            return
+        if back_value is not None:
+            event.app.exit(result=[back_value], style="class:accepted")
+
+    if custom_input_label:
+
+        @kb.add("tab", eager=True)
+        @kb.add("c-i", eager=True)
+        def _focus_next(event: Any) -> None:  # noqa: ANN401
+            if event.app.layout.has_focus(checkbox_list):
+                event.app.layout.focus(custom_input)
+            else:
+                event.app.layout.focus(checkbox_list)
+
+        @kb.add("s-tab", eager=True)
+        def _focus_prev(event: Any) -> None:  # noqa: ANN401
+            if event.app.layout.has_focus(custom_input):
+                event.app.layout.focus(checkbox_list)
+            else:
+                event.app.layout.focus(custom_input)
+
+        @Condition
+        def _is_at_last_option() -> bool:
+            selected_index = getattr(checkbox_list, "_selected_index", 0)
+            values = getattr(checkbox_list, "values", [])
+            return bool(values) and selected_index >= len(values) - 1
+
+        @kb.add("down", filter=has_focus(checkbox_list) & _is_at_last_option, eager=True)
+        def _down_to_custom(event: Any) -> None:  # noqa: ANN401
+            event.app.layout.focus(custom_input)
+
+        @kb.add("up", filter=has_focus(custom_input), eager=True)
+        def _up_to_list(event: Any) -> None:  # noqa: ANN401
+            event.app.layout.focus(checkbox_list)
+
+    if external_header:
+        print(external_header)
+
+    @kb.add("escape", eager=False)
+    def _cancel(event: Any) -> None:  # noqa: ANN401
+        event.app.exit(result=None, style="class:aborting")
+
+    @kb.add("c-c", eager=True)
+    @kb.add("<sigint>", eager=True)
+    def _interrupt(event: Any) -> None:  # noqa: ANN401
+        event.app.exit(result=None, style="class:aborting")
+
+    result = await Application(
+        layout=layout,
+        full_screen=False,
+        key_bindings=kb,
+        style=style or resolve_choice_style(style_variant),
+    ).run_async()
+
+    # Clear prompt area, matching the behavior of prompt_choice_async.
+    term_width = _terminal_width()
+    message_width = max(1, term_width - 2)
+    lines_to_clear = _count_display_lines(formatted_prompt, message_width)
+    lines_to_clear += len(checkbox_values)
+    if custom_input_label:
+        lines_to_clear += 1
+    if external_header:
+        lines_to_clear += _count_display_lines(external_header, term_width)
+    for _ in range(lines_to_clear):
+        print("\033[F\033[2K", end="", flush=True)
+
+    if result is None:
+        return None
+    return [str(item) for item in result]
 
 
 def prompt_yes_no(

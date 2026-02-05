@@ -8,11 +8,19 @@ and making decisions on implementation choices.
 from __future__ import annotations
 
 import asyncio
+import html
+import os
+import sys
 from textwrap import dedent
 from typing import AsyncGenerator, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from ripperdoc.cli.ui.choice import (
+    ChoiceOption,
+    prompt_checkbox_async,
+    prompt_choice_async,
+)
 from ripperdoc.core.tool import (
     Tool,
     ToolOutput,
@@ -25,8 +33,15 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 TOOL_NAME = "AskUserQuestion"
-OTHER_VALUE = "__other__"
+CHOICE_UI_FALLBACK = "__choice_ui_fallback__"
+BACK_VALUE = "__back__"
+NEXT_VALUE = "__next__"
 HEADER_MAX_CHARS = 12
+
+ANSI_RESET = "\033[0m"
+ANSI_TAB_ACTIVE_BG = "\033[48;5;24m"
+ANSI_TAB_ACTIVE_FG = "\033[38;5;255m"
+ANSI_TAB_INACTIVE_FG = "\033[38;5;244m"
 
 ASK_USER_QUESTION_PROMPT = dedent(
     """\
@@ -117,13 +132,19 @@ def format_option_display(option: OptionInput, index: int) -> str:
     return f"  {index}. {option.label}{desc}"
 
 
-def format_question_prompt(question: QuestionInput, question_num: int, total: int) -> str:
+def format_question_prompt(
+    question: QuestionInput,
+    question_num: int,
+    total: int,
+    allow_back: bool = False,
+    allow_next: bool = False,
+) -> str:
     """Format a question for terminal display."""
     header = truncate_header(question.header)
     lines = [
         "",
-        f"[{header}] Question {question_num}/{total}",
-        f"  {question.question}",
+        f"[{header}] {question_num}/{total}",
+        question.question,
         "",
     ]
 
@@ -131,20 +152,261 @@ def format_question_prompt(question: QuestionInput, question_num: int, total: in
         lines.append(format_option_display(opt, idx))
 
     # Add "Other" option
-    lines.append(f"  {len(question.options) + 1}. Other (type your own answer)")
+    other_index = len(question.options) + 1
+    lines.append(f"  {other_index}. Other (type your own answer)")
+    if allow_back:
+        lines.append(f"  {other_index + 1}. Back to previous question")
 
     if question.multiSelect:
         lines.append("")
-        lines.append("  Enter numbers separated by commas (e.g., 1,3), or 'o' for other: ")
+        if allow_back:
+            if allow_next:
+                lines.append(
+                    "  Select options (e.g., 1,3), 'o' for other, "
+                    "'b' to go back, 'n' to next, or 'q' to cancel: "
+                )
+            else:
+                lines.append(
+                    f"  Select options (e.g., 1,3), 'o' for other, 'b' to go back, or 'q' to cancel: "
+                )
+        else:
+            if allow_next:
+                lines.append(
+                    "  Select options (e.g., 1,3), 'o' for other, 'n' to next, or 'q' to cancel: "
+                )
+            else:
+                lines.append(
+                    "  Select options (e.g., 1,3), 'o' for other, or 'q' to cancel: "
+                )
     else:
         lines.append("")
-        lines.append("  Enter choice (1-{}) or 'o' for other: ".format(len(question.options) + 1))
+        if allow_back:
+            if allow_next:
+                lines.append(
+                    "  Select 1-{}, 'o' for other, 'b' to go back, 'n' to next, or 'q' to cancel: ".format(
+                        len(question.options) + 2
+                    )
+                )
+            else:
+                lines.append(
+                    "  Select 1-{}, 'o' for other, 'b' to go back, or 'q' to cancel: ".format(
+                        len(question.options) + 2
+                    )
+                )
+        else:
+            if allow_next:
+                lines.append(
+                    "  Select 1-{}, 'o' for other, 'n' to next, or 'q' to cancel: ".format(
+                        len(question.options) + 1
+                    )
+                )
+            else:
+                lines.append(
+                    "  Select 1-{}, 'o' for other, or 'q' to cancel: ".format(len(question.options) + 1)
+                )
 
     return "\n".join(lines)
 
 
+def build_question_tabs(questions: List[QuestionInput], current_index: int) -> str:
+    """Build a plain tab-like step header for multi-question flows."""
+    use_ansi = _supports_ansi_tabs()
+    tabs: list[str] = []
+    for idx, item in enumerate(questions):
+        header = truncate_header(item.header)
+        if idx == current_index:
+            if use_ansi:
+                tabs.append(
+                    f"{ANSI_TAB_ACTIVE_BG}{ANSI_TAB_ACTIVE_FG}[{idx + 1}. {header}]{ANSI_RESET}"
+                )
+            else:
+                tabs.append(f">[{idx + 1}. {header}]<")
+        else:
+            if use_ansi:
+                tabs.append(f"{ANSI_TAB_INACTIVE_FG}[{idx + 1}. {header}]{ANSI_RESET}")
+            else:
+                tabs.append(f"[{idx + 1}. {header}]")
+    return "  ".join(tabs)
+
+
+def _supports_ansi_tabs() -> bool:
+    """Return True when ANSI colors are likely supported for tab rendering."""
+    term = os.environ.get("TERM", "")
+    return bool(sys.stdout.isatty() and term and term.lower() != "dumb")
+
+
+async def prompt_custom_answer() -> Optional[str]:
+    """Prompt for a custom free-text answer."""
+    loop = asyncio.get_running_loop()
+
+    def _prompt_custom() -> Optional[str]:
+        from prompt_toolkit import prompt as pt_prompt
+
+        print("  Enter your custom answer: ", end="")
+        custom = pt_prompt("")
+        if custom.strip():
+            return custom.strip()
+        print("  Custom answer cannot be empty.")
+        return None
+
+    while True:
+        try:
+            custom = await loop.run_in_executor(None, _prompt_custom)
+            if custom:
+                return custom
+        except KeyboardInterrupt:
+            return None
+        except EOFError:
+            return None
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.warning(
+                "[ask_user_question_tool] Error collecting custom answer: %s: %s",
+                type(e).__name__,
+                e,
+            )
+            return None
+
+
+async def prompt_single_choice_with_ui(
+    question: QuestionInput,
+    question_num: int,
+    total: int,
+    all_questions: Optional[List[QuestionInput]] = None,
+    allow_back: bool = False,
+    allow_next: bool = False,
+) -> Optional[str]:
+    """Prompt single-select questions using the shared choice component."""
+    header = truncate_header(question.header)
+    title = f"[{header}] {question_num}/{total}"
+    message_parts: list[str] = [f"<question>{html.escape(question.question)}</question>"]
+    nav_hints = ["Enter submit", "ESC cancel"]
+    if allow_back:
+        nav_hints.insert(0, "← previous step")
+    if allow_next:
+        nav_hints.insert(1 if allow_back else 0, "→ next step")
+    message_parts.append(f"<dim>{', '.join(nav_hints)}.</dim>")
+    message = "\n".join(message_parts)
+    external_header = None
+    if all_questions and len(all_questions) > 1:
+        external_header = build_question_tabs(all_questions, question_num - 1)
+    options: list[ChoiceOption] = []
+    for option in question.options:
+        label = html.escape(option.label)
+        if option.description.strip():
+            label = f"{label} <dim>- {html.escape(option.description)}</dim>"
+        options.append(ChoiceOption(value=option.label, label=label))
+    try:
+        selection = await prompt_choice_async(
+            message=message,
+            options=options,
+            title=title,
+            allow_esc=True,
+            esc_value="__cancel__",
+            style_variant="ask_user_question",
+            back_value=BACK_VALUE if allow_back else None,
+            next_value=NEXT_VALUE if allow_next else None,
+            external_header=external_header,
+            custom_input_label="Other",
+        )
+    except (OSError, RuntimeError, ValueError) as e:
+        logger.warning(
+            "[ask_user_question_tool] Choice UI failed, falling back to text prompt: %s: %s",
+            type(e).__name__,
+            e,
+        )
+        print(
+            f"[ask_user_question_tool] Choice UI unavailable ({type(e).__name__}), using text mode."
+        )
+        return CHOICE_UI_FALLBACK
+
+    if selection == "__cancel__":
+        return None
+
+    if selection == BACK_VALUE:
+        return BACK_VALUE
+
+    return selection
+
+
+async def prompt_multi_choice_with_ui(
+    question: QuestionInput,
+    question_num: int,
+    total: int,
+    all_questions: Optional[List[QuestionInput]] = None,
+    allow_back: bool = False,
+    allow_next: bool = False,
+) -> Optional[str]:
+    """Prompt multi-select questions using the shared checkbox component."""
+    header = truncate_header(question.header)
+    title = f"[{header}] {question_num}/{total}"
+    message_parts: list[str] = [f"<question>{html.escape(question.question)}</question>"]
+    message_parts.append("<dim>Use arrow keys to move, Space to toggle.</dim>")
+    nav_hints = ["Enter submit", "ESC cancel", "Tab Other input"]
+    if allow_back:
+        nav_hints.insert(0, "← previous step")
+    if allow_next:
+        nav_hints.insert(1 if allow_back else 0, "→ next step")
+    message_parts.append(f"<dim>{', '.join(nav_hints)}.</dim>")
+    message_parts.append("<dim>Type in 'Other' field for custom input.</dim>")
+    message = "\n".join(message_parts)
+    external_header = None
+    if all_questions and len(all_questions) > 1:
+        external_header = build_question_tabs(all_questions, question_num - 1)
+    options: list[ChoiceOption] = []
+    for option in question.options:
+        label = html.escape(option.label)
+        if option.description.strip():
+            label = f"{label} <dim>- {html.escape(option.description)}</dim>"
+        options.append(ChoiceOption(value=option.label, label=label))
+
+    while True:
+        try:
+            selected = await prompt_checkbox_async(
+                message=message,
+                options=options,
+                title=title,
+                ok_text="Submit",
+                cancel_text="Cancel",
+                style_variant="ask_user_question",
+                custom_input_label="Other",
+                back_value=BACK_VALUE if allow_back else None,
+                next_value=NEXT_VALUE if allow_next else None,
+                external_header=external_header,
+            )
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.warning(
+                "[ask_user_question_tool] Checkbox UI failed, falling back to text prompt: %s: %s",
+                type(e).__name__,
+                e,
+            )
+            print(
+                f"[ask_user_question_tool] Checkbox UI unavailable ({type(e).__name__}), using text mode."
+            )
+            return CHOICE_UI_FALLBACK
+
+        if selected is None:
+            return None
+
+        if not selected:
+            print("  Please select at least one option.")
+            continue
+
+        if BACK_VALUE in selected:
+            if len(selected) == 1:
+                return BACK_VALUE
+            print("  'Back to previous question' cannot be combined with other selections.")
+            continue
+
+        return ", ".join(selected)
+
+
 async def prompt_user_for_answer(
-    question: QuestionInput, question_num: int, total: int
+    question: QuestionInput,
+    question_num: int,
+    total: int,
+    all_questions: Optional[List[QuestionInput]] = None,
+    allow_back: bool = False,
+    allow_next: bool = False,
 ) -> Optional[str]:
     """Prompt user for an answer to a single question.
 
@@ -156,7 +418,9 @@ async def prompt_user_for_answer(
         try:
             from prompt_toolkit import prompt as pt_prompt
 
-            prompt_text = format_question_prompt(question, question_num, total)
+            prompt_text = format_question_prompt(
+                question, question_num, total, allow_back=allow_back, allow_next=allow_next
+            )
             print(prompt_text, end="")
 
             while True:
@@ -168,6 +432,11 @@ async def prompt_user_for_answer(
 
                 if response.lower() in ("q", "quit", "cancel", "exit"):
                     return None
+
+                if allow_back and response.lower() in ("b", "back", "prev", "previous"):
+                    return BACK_VALUE
+                if allow_next and response.lower() in ("n", "next", "forward"):
+                    return NEXT_VALUE
 
                 if response.lower() == "o" or response == str(len(question.options) + 1):
                     # Other option selected
@@ -182,8 +451,17 @@ async def prompt_user_for_answer(
                     # Parse comma-separated numbers
                     try:
                         indices = [int(x.strip()) for x in response.split(",")]
-                        valid_range = range(1, len(question.options) + 2)
+                        max_index = len(question.options) + (3 if allow_back else 2)
+                        back_index = len(question.options) + 2 if allow_back else None
+                        valid_range = range(1, max_index)
                         if all(i in valid_range for i in indices):
+                            if back_index is not None and back_index in indices:
+                                if len(indices) == 1:
+                                    return BACK_VALUE
+                                print(
+                                    "  'Back to previous question' cannot be combined with other selections."
+                                )
+                                continue
                             selected = []
                             for i in indices:
                                 if i == len(question.options) + 1:
@@ -196,9 +474,7 @@ async def prompt_user_for_answer(
                                     selected.append(question.options[i - 1].label)
                             if selected:
                                 return ", ".join(selected)
-                        print(
-                            f"  Invalid selection. Enter numbers from 1 to {len(question.options) + 1}."
-                        )
+                        print(f"  Invalid selection. Enter numbers from 1 to {max_index - 1}.")
                     except ValueError:
                         print("  Invalid input. Enter numbers separated by commas.")
                 else:
@@ -207,6 +483,8 @@ async def prompt_user_for_answer(
                         choice = int(response)
                         if 1 <= choice <= len(question.options):
                             return question.options[choice - 1].label
+                        elif allow_back and choice == len(question.options) + 2:
+                            return BACK_VALUE
                         elif choice == len(question.options) + 1:
                             # Other option
                             print("  Enter your custom answer: ", end="")
@@ -215,9 +493,8 @@ async def prompt_user_for_answer(
                                 return custom.strip()
                             print("  Custom answer cannot be empty.")
                         else:
-                            print(
-                                f"  Invalid choice. Enter a number from 1 to {len(question.options) + 1}."
-                            )
+                            max_choice = len(question.options) + (2 if allow_back else 1)
+                            print(f"  Invalid choice. Enter a number from 1 to {max_choice}.")
                     except ValueError:
                         print("  Invalid input. Enter a number.")
 
@@ -233,7 +510,62 @@ async def prompt_user_for_answer(
             )
             return None
 
+    if not question.multiSelect:
+        # Use shared choice box for single-select questions.
+        single_choice = await prompt_single_choice_with_ui(
+            question,
+            question_num,
+            total,
+            all_questions=all_questions,
+            allow_back=allow_back,
+            allow_next=allow_next,
+        )
+        if single_choice != CHOICE_UI_FALLBACK:
+            return single_choice
+    else:
+        # Use shared checkbox box for multi-select questions.
+        multi_choice = await prompt_multi_choice_with_ui(
+            question,
+            question_num,
+            total,
+            all_questions=all_questions,
+            allow_back=allow_back,
+            allow_next=allow_next,
+        )
+        if multi_choice != CHOICE_UI_FALLBACK:
+            return multi_choice
+
     return await loop.run_in_executor(None, _prompt)
+
+
+def _build_confirmation_message(questions: List[QuestionInput], answers: Dict[str, str]) -> str:
+    """Build confirmation content listing each question and answer."""
+    lines = ["<question>Please confirm your answers before submit:</question>", ""]
+    for idx, q in enumerate(questions, start=1):
+        question_text = html.escape(q.question)
+        answer = answers.get(q.question, "").strip()
+        answer_text = html.escape(answer) if answer else "<dim>(未回答)</dim>"
+        lines.append(f"{idx}. {question_text}")
+        lines.append(f"   -> {answer_text}")
+    lines.append("")
+    lines.append("<dim>Use Left/Right to review steps before submit if needed.</dim>")
+    return "\n".join(lines)
+
+
+async def _confirm_answers(questions: List[QuestionInput], answers: Dict[str, str]) -> bool:
+    """Show final confirmation and return True when user confirms submit."""
+    selection = await prompt_choice_async(
+        message=_build_confirmation_message(questions, answers),
+        options=[
+            ChoiceOption(value="submit", label="<default>Submit</default>"),
+            ChoiceOption(value="cancel", label="<dim>Cancel</dim>"),
+        ],
+        title="Confirm Answers",
+        allow_esc=True,
+        esc_value="cancel",
+        style_variant="ask_user_question",
+    )
+    return selection == "submit"
 
 
 async def collect_answers(
@@ -245,18 +577,33 @@ async def collect_answers(
     """
     answers = dict(initial_answers)
     total = len(questions)
+    idx = 0
 
-    for idx, question in enumerate(questions, start=1):
-        # Skip if already answered
-        if question.question in answers and answers[question.question]:
-            continue
-
-        answer = await prompt_user_for_answer(question, idx, total)
+    while idx < total:
+        question = questions[idx]
+        answer = await prompt_user_for_answer(
+            question,
+            idx + 1,
+            total,
+            all_questions=questions,
+            allow_back=idx > 0,
+            allow_next=True,
+        )
         if answer is None:
             return answers, True  # Cancelled
-        answers[question.question] = answer
 
-    return answers, False
+        if answer == BACK_VALUE:
+            idx = max(0, idx - 1)
+            continue
+
+        if answer == NEXT_VALUE:
+            idx += 1
+            continue
+
+        answers[question.question] = answer
+        idx += 1
+    confirmed = await _confirm_answers(questions, answers)
+    return answers, not confirmed
 
 
 class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutput]):
@@ -362,16 +709,6 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
                 logger.debug("[ask_user_question_tool] Failed to pause UI")
 
         try:
-            # Display introduction
-            loop = asyncio.get_running_loop()
-
-            def _print_intro() -> None:
-                print("\n" + "=" * 60)
-                print("I need a few answers to proceed:")
-                print("=" * 60)
-
-            await loop.run_in_executor(None, _print_intro)
-
             # Collect answers
             answers, cancelled = await collect_answers(questions, initial_answers)
 
@@ -389,13 +726,13 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
 
             # Display summary
             def _print_summary() -> None:
-                print("\n" + "-" * 40)
-                print("Your answers:")
+                print("\nAnswers received:")
                 for q, a in answers.items():
                     print(f"  - {q}")
                     print(f"    -> {a}")
-                print("-" * 40 + "\n")
+                print("")
 
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, _print_summary)
 
             output = AskUserQuestionToolOutput(
