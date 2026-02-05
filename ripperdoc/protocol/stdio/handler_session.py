@@ -1,0 +1,273 @@
+"""Session initialization for stdio protocol handler."""
+
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+from ripperdoc import __version__
+from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
+from ripperdoc.core.agents import load_agent_definitions
+from ripperdoc.core.config import get_effective_model_profile, get_project_config
+from ripperdoc.core.default_tools import get_default_tools
+from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
+from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
+from ripperdoc.core.query import QueryContext
+from ripperdoc.core.query_utils import resolve_model_profile
+from ripperdoc.protocol.models import (
+    InitializeResponseData,
+    MCPServerInfo,
+    MCPServerStatusInfo,
+    SystemStreamMessage,
+    model_to_dict,
+)
+from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
+from ripperdoc.utils.asyncio_compat import asyncio_timeout
+from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
+from ripperdoc.utils.session_history import SessionHistory
+
+from .timeouts import STDIO_HOOK_TIMEOUT_SEC
+
+logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
+
+
+class StdioSessionMixin:
+    async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
+        """Handle initialize request from SDK.
+
+        Args:
+            request: The initialize request data.
+            request_id: The request ID.
+        """
+        if self._initialized:
+            await self._write_control_response(request_id, error="Already initialized")
+            return
+
+        try:
+            # Extract options from request
+            request_options = request.get("options", {}) or {}
+            options = {**self._default_options, **request_options}
+            self._session_id = options.get("session_id") or str(uuid.uuid4())
+            self._custom_system_prompt = options.get("system_prompt")
+            raw_max_turns = options.get("max_turns")
+            max_turns: int | None = None
+            if raw_max_turns is not None:
+                try:
+                    max_turns = int(raw_max_turns)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "[stdio] Invalid max_turns %r; ignoring",
+                        raw_max_turns,
+                    )
+
+            # Setup working directory
+            cwd = options.get("cwd")
+            if cwd:
+                self._project_path = Path(cwd)
+            else:
+                self._project_path = Path.cwd()
+
+            # Initialize project config
+            get_project_config(self._project_path)
+
+            # Parse tool options
+            self._allowed_tools = self._normalize_tool_list(options.get("allowed_tools"))
+            self._disallowed_tools = self._normalize_tool_list(options.get("disallowed_tools"))
+            self._tools_list = self._normalize_tool_list(options.get("tools"))
+
+            # Get the tool list (apply SDK filters)
+            tools = get_default_tools()
+            tools = self._apply_tool_filters(
+                tools,
+                allowed_tools=self._allowed_tools,
+                disallowed_tools=self._disallowed_tools,
+                tools_list=self._tools_list,
+            )
+
+            # Parse permission mode
+            permission_mode = self._normalize_permission_mode(
+                options.get("permission_mode", "default")
+            )
+            yolo_mode = permission_mode == "bypassPermissions"
+
+            # Setup model
+            model = options.get("model") or "main"
+
+            # 验证模型配置是否有效
+            model_profile = get_effective_model_profile(model)
+            if model_profile is None:
+                error_msg = (
+                    f"No valid model configuration found for '{model}'. "
+                    "Please set RIPPERDOC_MODEL/RIPPERDOC_BASE_URL/RIPPERDOC_PROTOCOL "
+                    "environment variables or complete onboarding."
+                )
+                logger.error(f"[stdio] {error_msg}")
+                await self._write_control_response(request_id, error=error_msg)
+                return
+
+            # Create query context
+            self._query_context = QueryContext(
+                tools=tools,
+                yolo_mode=yolo_mode,
+                verbose=options.get("verbose", False),
+                model=model,
+                max_turns=max_turns,
+                permission_mode=permission_mode,
+            )
+
+            # Initialize hook manager
+            hook_manager.set_project_dir(self._project_path)
+            hook_manager.set_session_id(self._session_id)
+            hook_manager.set_llm_callback(build_hook_llm_callback())
+            self._session_history = SessionHistory(
+                self._project_path, self._session_id or str(uuid.uuid4())
+            )
+            hook_manager.set_transcript_path(str(self._session_history.path))
+
+            # Configure SDK-provided hooks (if any)
+            hooks = request.get("hooks", None)
+            if hooks is None:
+                hooks = options.get("hooks", {})
+            self._configure_sdk_hooks(hooks)
+
+            session_start_notices: list[str] = []
+            # Run SessionStart hooks during initialize (once per session)
+            queue = self._query_context.pending_message_queue if self._query_context else None
+            hook_scopes = self._query_context.hook_scopes if self._query_context else []
+            with bind_pending_message_queue(queue), bind_hook_scopes(hook_scopes):
+                try:
+                    async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
+                        session_start_result = await hook_manager.run_session_start_async("startup")
+                    if getattr(session_start_result, "system_message", None):
+                        session_start_notices.append(str(session_start_result.system_message))
+                    self._session_hook_contexts = self._collect_hook_contexts(
+                        session_start_result
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"[stdio] Session start hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s"
+                    )
+                except Exception as e:
+                    logger.warning(f"[stdio] Session start hook failed: {e}")
+                finally:
+                    self._session_started = True
+                    if self._session_start_time is None:
+                        self._session_start_time = time.time()
+                    self._session_end_sent = False
+
+            # Load MCP servers and dynamic tools
+            servers = await load_mcp_servers_async(self._project_path)
+            dynamic_tools = await load_dynamic_mcp_tools_async(self._project_path)
+            if dynamic_tools:
+                tools = merge_tools_with_dynamic(tools, dynamic_tools)
+                tools = self._apply_tool_filters(
+                    tools,
+                    allowed_tools=self._allowed_tools,
+                    disallowed_tools=self._disallowed_tools,
+                    tools_list=self._tools_list,
+                )
+                self._query_context.tools = tools
+
+            mcp_instructions = format_mcp_instructions(servers)
+
+            # Build system prompt components
+            from ripperdoc.core.skills import load_all_skills, build_skill_summary
+
+            skill_result = load_all_skills(self._project_path)
+            self._skill_instructions = build_skill_summary(skill_result.skills)
+
+            agent_result = load_agent_definitions()
+
+            system_prompt = self._resolve_system_prompt(
+                tools,
+                "",  # Will be set per query
+                mcp_instructions,
+                self._session_hook_contexts,
+            )
+
+            # Apply permission mode to runtime state (checker + query context)
+            self._apply_permission_mode(permission_mode)
+
+            # Mark as initialized
+            self._initialized = True
+
+            # Send success response with available tools
+            # Use simple list format for Claude SDK compatibility
+            def _display_agent_name(agent_type: str) -> str:
+                if agent_type in ("explore", "plan"):
+                    return agent_type.title()
+                return agent_type
+
+            agent_names = [
+                _display_agent_name(agent.agent_type) for agent in agent_result.active_agents
+            ]
+            skill_names = [skill.name for skill in skill_result.skills] if skill_result.skills else []
+
+            slash_commands = [cmd.name for cmd in list_slash_commands()]
+            for custom_cmd in list_custom_commands(self._project_path):
+                if custom_cmd.name not in slash_commands:
+                    slash_commands.append(custom_cmd.name)
+
+            resolved_model_profile = resolve_model_profile(model or "main")
+            resolved_model = resolved_model_profile.model if resolved_model_profile else (model or "main")
+
+            init_response = InitializeResponseData(
+                session_id=self._session_id or "",
+                system_prompt=system_prompt,
+                tools=[t.name for t in tools],
+                mcp_servers=[MCPServerInfo(name=s.name) for s in servers] if servers else [],
+                slash_commands=slash_commands,
+                claude_code_version=__version__,
+                agents=agent_names,
+                skills=skill_names,
+                plugins=[],
+            )
+
+            # Emit a system/init stream message first (Claude CLI compatibility)
+            try:
+                system_message = SystemStreamMessage(
+                    uuid=str(uuid.uuid4()),
+                    session_id=self._session_id or "",
+                    api_key_source=init_response.apiKeySource,
+                    cwd=str(self._project_path),
+                    tools=[t.name for t in tools],
+                    mcp_servers=[
+                        MCPServerStatusInfo(name=s.name, status=getattr(s, "status", "unknown"))
+                        for s in servers
+                    ]
+                    if servers
+                    else [],
+                    model=resolved_model,
+                    permission_mode=permission_mode,
+                    slash_commands=slash_commands,
+                    claude_code_version=init_response.claude_code_version,
+                    output_style=init_response.output_style,
+                    agents=agent_names,
+                    skills=skill_names,
+                    plugins=[],
+                )
+                await self._write_message_stream(model_to_dict(system_message))
+            except Exception as e:
+                logger.warning(f"[stdio] Failed to emit system init message: {e}")
+
+            for notice_text in session_start_notices:
+                stream_message = self._build_hook_notice_stream_message(
+                    notice_text,
+                    "SessionStart",
+                    tool_name=None,
+                    level="info",
+                )
+                await self._write_message_stream(model_to_dict(stream_message))
+
+            await self._write_control_response(
+                request_id,
+                response=model_to_dict(init_response),
+            )
+
+        except Exception as e:
+            logger.error(f"Initialize failed: {e}", exc_info=True)
+            await self._write_control_response(request_id, error=str(e))

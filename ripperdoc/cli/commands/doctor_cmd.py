@@ -12,7 +12,6 @@ from rich.table import Table
 
 from ripperdoc.core.config import (
     ProviderType,
-    api_key_env_candidates,
     get_global_config,
     get_project_config,
     get_ripperdoc_env_status,
@@ -48,17 +47,10 @@ def _api_key_status(provider: ProviderType, profile_key: Optional[str]) -> Tuple
         masked = ripperdoc_api_key[:4] + "…" if len(ripperdoc_api_key) > 4 else "set"
         return ("ok", f"Found in $RIPPERDOC_API_KEY ({masked})")
 
-    # 然后检查 provider 特定的环境变量
-    for env_var in api_key_env_candidates(provider):
-        if os.environ.get(env_var):
-            masked = os.environ[env_var]
-            masked = masked[:4] + "…" if len(masked) > 4 else "set"
-            return ("ok", f"Found in ${env_var} ({masked})")
-
     if profile_key:
         return ("ok", "Stored in config profile")
 
-    return ("error", "Missing API key for active provider; set $ENV or edit config")
+    return ("error", "Missing API key for active provider; set $RIPPERDOC_API_KEY or edit config")
 
 
 def _model_status(project_path: Path) -> List[Tuple[str, str, str]]:

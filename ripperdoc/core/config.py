@@ -62,36 +62,14 @@ def provider_protocol(provider: ProviderType) -> str:
     return "openai"
 
 
-def api_key_env_candidates(provider: ProviderType) -> list[str]:
-    """Environment variables to check for an API key based on protocol."""
-    if provider == ProviderType.ANTHROPIC:
-        return ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
-    if provider == ProviderType.GEMINI:
-        return ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
-    return [
-        "OPENAI_COMPATIBLE_API_KEY",
-        "OPENAI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "MISTRAL_API_KEY",
-        "KIMI_API_KEY",
-        "QWEN_API_KEY",
-        "GLM_API_KEY",
-    ]
-
-
-def api_base_env_candidates(provider: ProviderType) -> list[str]:
-    """Environment variables to check for API base overrides."""
-    if provider == ProviderType.ANTHROPIC:
-        return ["ANTHROPIC_API_URL", "ANTHROPIC_BASE_URL"]
-    if provider == ProviderType.GEMINI:
-        return ["GEMINI_API_BASE", "GEMINI_BASE_URL", "GOOGLE_API_BASE_URL"]
-    return [
-        "OPENAI_COMPATIBLE_API_BASE",
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "DEEPSEEK_API_BASE",
-        "DEEPSEEK_BASE_URL",
-    ]
+def _default_model_for_protocol(protocol: ProviderType) -> str:
+    """Reasonable default model per protocol family."""
+    if protocol == ProviderType.ANTHROPIC:
+        # Keep existing Anthropic default for RIPPERDOC_BASE_URL-only setups.
+        return "claude-sonnet-4-5-20250929"
+    if protocol == ProviderType.GEMINI:
+        return "gemini-1.5-pro"
+    return "gpt-4o-mini"
 
 
 # Known vision-enabled model patterns for auto-detection
@@ -529,14 +507,9 @@ class ConfigManager:
 
     def get_api_key(self, provider: ProviderType) -> Optional[str]:
         """Get API key for a provider."""
-        # First check environment variables
-        env_candidates = api_key_env_candidates(provider)
-        provider_env = f"{provider.value.upper()}_API_KEY"
-        if provider_env not in env_candidates:
-            env_candidates.insert(0, provider_env)
-        for env_var in env_candidates:
-            if env_var in os.environ:
-                return os.environ[env_var]
+        # Only honor RIPPERDOC_* environment overrides
+        if ripperdoc_api_key := os.getenv(RIPPERDOC_API_KEY):
+            return ripperdoc_api_key
 
         # Then check user config
         global_config = self.get_global_config()
@@ -766,8 +739,8 @@ def has_ripperdoc_env_overrides() -> bool:
 def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]:
     """获取模型配置，应用 RIPPERDOC_* 环境变量覆盖.
 
-    当设置了 RIPPERDOC_BASE_URL 环境变量时，完全在内存中创建 ModelProfile，
-    不依赖也不写入配置文件。这是获取模型配置的新入口点，替代 get_current_model_profile()。
+    仅使用 RIPPERDOC_* 环境变量做覆盖，不再读取 provider 特定的环境变量。
+    任何 RIPPERDOC_* 被设置时，会覆盖配置文件中的对应字段（若存在）。
 
     Args:
         pointer: 模型指针名称 ("main" 或 "quick")
@@ -776,35 +749,55 @@ def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]
         应用环境变量覆盖后的 ModelProfile，如果没有则返回 None
     """
     env_overrides = _get_ripperdoc_env_overrides()
-    base_url = env_overrides.get("base_url")
+    profile = get_current_model_profile(pointer)
 
-    # 如果设置了 RIPPERDOC_BASE_URL，完全在内存中创建 profile
-    if base_url:
-        # 确定模型名称
-        if pointer == "quick":
-            model_name = env_overrides.get("small_fast_model") or env_overrides.get("model")
-        else:
-            model_name = env_overrides.get("model")
+    if not env_overrides:
+        return profile
 
-        if not model_name:
-            model_name = "claude-sonnet-4-5-20250929"
+    base_override = env_overrides.get("base_url")
+    api_key_override = env_overrides.get("api_key")
+    auth_token_override = env_overrides.get("auth_token")
+    protocol_override = env_overrides.get("protocol")
+    if pointer == "quick":
+        model_override = env_overrides.get("small_fast_model") or env_overrides.get("model")
+    else:
+        model_override = env_overrides.get("model")
 
-        # 确定协议类型
-        protocol = env_overrides.get("protocol")
-        if not protocol:
-            protocol = _infer_protocol_from_url_and_model(base_url, model_name)
+    if profile:
+        updates: Dict[str, Any] = {}
+        if base_override:
+            updates["api_base"] = base_override
+        if api_key_override:
+            updates["api_key"] = api_key_override
+        if auth_token_override:
+            updates["auth_token"] = auth_token_override
+        if model_override:
+            updates["model"] = model_override
+        if protocol_override:
+            updates["provider"] = protocol_override
+        elif base_override or model_override:
+            inferred = _infer_protocol_from_url_and_model(
+                base_override or profile.api_base or "", model_override or profile.model
+            )
+            updates["provider"] = inferred
+        return profile.model_copy(update=updates)
 
-        # 在内存中创建新的 profile，不写入配置文件
-        return ModelProfile(
-            provider=protocol,
-            model=model_name,
-            api_base=base_url,
-            api_key=env_overrides.get("api_key"),
-            auth_token=env_overrides.get("auth_token"),
-        )
+    # No profile exists; only synthesize a profile if env provides enough context.
+    if not (base_override or model_override or protocol_override):
+        return None
 
-    # 没有设置 RIPPERDOC_BASE_URL，返回配置文件中的 profile
-    return get_current_model_profile(pointer)
+    protocol = protocol_override or _infer_protocol_from_url_and_model(
+        base_override or "", model_override or ""
+    )
+    model_name = model_override or _default_model_for_protocol(protocol)
+
+    return ModelProfile(
+        provider=protocol,
+        model=model_name,
+        api_base=base_override,
+        api_key=api_key_override,
+        auth_token=auth_token_override,
+    )
 
 
 def get_ripperdoc_env_status() -> Dict[str, str]:

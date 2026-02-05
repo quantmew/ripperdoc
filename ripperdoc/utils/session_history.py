@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -42,7 +42,7 @@ def _session_file(project_path: Path, session_id: str) -> Path:
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _extract_prompt(payload: dict) -> str:

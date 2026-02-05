@@ -6,6 +6,7 @@ import pytest
 
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.protocol.stdio import handler as handler_module
+from ripperdoc.protocol.stdio import handler_config, handler_session
 
 
 @pytest.mark.asyncio
@@ -14,12 +15,14 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
     handler._project_path = tmp_path
 
     # Avoid touching real config or external dependencies during init.
-    monkeypatch.setattr(handler_module, "get_project_config", lambda _path: None)
-    monkeypatch.setattr(handler_module, "get_effective_model_profile", lambda _model: object())
-    monkeypatch.setattr(handler_module, "get_default_tools", lambda **_: [])
-    monkeypatch.setattr(handler_module, "format_mcp_instructions", lambda _servers: "")
-    monkeypatch.setattr(handler_module, "build_system_prompt", lambda *_args, **_kwargs: "system")
-    monkeypatch.setattr(handler_module, "build_memory_instructions", lambda: "")
+    monkeypatch.setattr(handler_session, "get_project_config", lambda _path: None)
+    monkeypatch.setattr(handler_session, "get_effective_model_profile", lambda _model: object())
+    monkeypatch.setattr(handler_session, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr(handler_session, "format_mcp_instructions", lambda _servers: "")
+    monkeypatch.setattr(handler_config, "build_system_prompt", lambda *_args, **_kwargs: "system")
+    monkeypatch.setattr(handler_config, "build_memory_instructions", lambda: "")
+    monkeypatch.setattr(handler_session, "list_custom_commands", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(handler_session, "list_slash_commands", lambda: [])
 
     async def fake_load_mcp_servers_async(_path):
         return []
@@ -27,8 +30,8 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
     async def fake_load_dynamic_mcp_tools_async(_path):
         return []
 
-    monkeypatch.setattr(handler_module, "load_mcp_servers_async", fake_load_mcp_servers_async)
-    monkeypatch.setattr(handler_module, "load_dynamic_mcp_tools_async", fake_load_dynamic_mcp_tools_async)
+    monkeypatch.setattr(handler_session, "load_mcp_servers_async", fake_load_mcp_servers_async)
+    monkeypatch.setattr(handler_session, "load_dynamic_mcp_tools_async", fake_load_dynamic_mcp_tools_async)
 
     # Patch skill helpers to avoid filesystem access.
     from ripperdoc.core import skills as skills_module
@@ -47,7 +50,7 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
         checker_calls.append((project_path, yolo_mode, checker))
         return checker
 
-    monkeypatch.setattr(handler_module, "make_permission_checker", fake_make_permission_checker)
+    monkeypatch.setattr(handler_config, "make_permission_checker", fake_make_permission_checker)
 
     # Silence stdout writes from control responses.
     async def noop_write_control_response(*_args, **_kwargs):

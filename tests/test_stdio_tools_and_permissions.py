@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.protocol.stdio import handler as handler_module
+from ripperdoc.protocol.stdio import handler_config, handler_session
 from ripperdoc.tools.task_tool import TaskTool
 
 
@@ -47,14 +48,14 @@ class DummyTool(Tool[DummyInput, str]):
 
 
 def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
-    monkeypatch.setattr(handler_module, "get_project_config", lambda _path: None)
-    monkeypatch.setattr(handler_module, "get_effective_model_profile", lambda _model: object())
-    monkeypatch.setattr(handler_module, "get_default_tools", lambda **_: tools)
-    monkeypatch.setattr(handler_module, "format_mcp_instructions", lambda _servers: "")
-    monkeypatch.setattr(handler_module, "build_system_prompt", lambda *_args, **_kwargs: "system")
-    monkeypatch.setattr(handler_module, "build_memory_instructions", lambda: "")
-    monkeypatch.setattr(handler_module, "list_custom_commands", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(handler_module, "list_slash_commands", lambda: [])
+    monkeypatch.setattr(handler_session, "get_project_config", lambda _path: None)
+    monkeypatch.setattr(handler_session, "get_effective_model_profile", lambda _model: object())
+    monkeypatch.setattr(handler_session, "get_default_tools", lambda **_: tools)
+    monkeypatch.setattr(handler_session, "format_mcp_instructions", lambda _servers: "")
+    monkeypatch.setattr(handler_config, "build_system_prompt", lambda *_args, **_kwargs: "system")
+    monkeypatch.setattr(handler_config, "build_memory_instructions", lambda: "")
+    monkeypatch.setattr(handler_session, "list_custom_commands", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(handler_session, "list_slash_commands", lambda: [])
 
     async def fake_load_mcp_servers_async(_path):
         return []
@@ -62,8 +63,8 @@ def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
     async def fake_load_dynamic_mcp_tools_async(_path):
         return []
 
-    monkeypatch.setattr(handler_module, "load_mcp_servers_async", fake_load_mcp_servers_async)
-    monkeypatch.setattr(handler_module, "load_dynamic_mcp_tools_async", fake_load_dynamic_mcp_tools_async)
+    monkeypatch.setattr(handler_session, "load_mcp_servers_async", fake_load_mcp_servers_async)
+    monkeypatch.setattr(handler_session, "load_dynamic_mcp_tools_async", fake_load_dynamic_mcp_tools_async)
 
     from ripperdoc.core import skills as skills_module
 
@@ -134,7 +135,7 @@ async def test_stdio_can_use_tool_permission_result(monkeypatch, tmp_path):
         assert parsed_input.value == "hello"
         return PermissionResult(result=True, updated_input={"value": "updated"})
 
-    monkeypatch.setattr(handler_module, "make_permission_checker", lambda *_args, **_kwargs: allow_checker)
+    monkeypatch.setattr(handler_config, "make_permission_checker", lambda *_args, **_kwargs: allow_checker)
 
     handler = handler_module.StdioProtocolHandler()
     handler._project_path = tmp_path

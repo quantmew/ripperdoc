@@ -8,8 +8,6 @@ from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.config import (
     ModelProfile,
     ProviderType,
-    api_base_env_candidates,
-    api_key_env_candidates,
     get_global_config,
 )
 from ripperdoc.utils.memory import MAX_CONTENT_LENGTH, MemoryFile, collect_all_memory_files
@@ -28,18 +26,6 @@ def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[
     if os.getenv("RIPPERDOC_API_KEY"):
         return ("RIPPERDOC_API_KEY (env)", "RIPPERDOC_API_KEY")
 
-    provider_value = (
-        profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
-    )
-
-    env_candidates = api_key_env_candidates(profile.provider)
-    provider_env = f"{provider_value.upper()}_API_KEY" if provider_value else None
-    if provider_env and provider_env not in env_candidates:
-        env_candidates = [provider_env, *env_candidates]
-
-    env_var = next((name for name in env_candidates if os.environ.get(name)), None)
-    if env_var:
-        return (f"{env_var} (env)", env_var)
     if profile.api_key or getattr(profile, "auth_token", None):
         return ("Configured in profile", None)
     return ("Missing", None)
@@ -60,20 +46,7 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
         ProviderType.GEMINI: "Gemini base URL",
     }
     label = label_map.get(profile.provider, "API base URL")
-    provider_value = (
-        profile.provider.value if hasattr(profile.provider, "value") else str(profile.provider)
-    )
-
-    env_candidates = api_base_env_candidates(profile.provider)
-    provider_env = f"{provider_value.upper()}_BASE_URL" if provider_value else None
-    if provider_env and provider_env not in env_candidates:
-        env_candidates = [provider_env, *env_candidates]
-
     base_url = profile.api_base
-    if not base_url:
-        base_url = next(
-            (os.environ.get(name) for name in env_candidates if os.environ.get(name)), None
-        )
 
     return f"{label}: {base_url or 'default'}"
 

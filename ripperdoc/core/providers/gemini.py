@@ -6,7 +6,6 @@ import asyncio
 import copy
 import inspect
 import json
-import os
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, cast
 from uuid import uuid4
@@ -357,9 +356,7 @@ class GeminiClient(ProviderClient):
             raise RuntimeError(GEMINI_SDK_IMPORT_ERROR) from exc
 
         client_kwargs: Dict[str, Any] = {}
-        api_key = (
-            model_profile.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        )
+        api_key = model_profile.api_key
         if api_key:
             client_kwargs["api_key"] = api_key
         if model_profile.api_base:

@@ -2,7 +2,6 @@
 Interactive onboarding wizard for Ripperdoc.
 """
 
-import os
 from typing import List, Optional, Tuple
 
 import click
@@ -19,6 +18,7 @@ from ripperdoc.core.config import (
     ModelProfile,
     ProviderType,
     get_global_config,
+    has_ripperdoc_env_overrides,
     save_global_config,
 )
 from ripperdoc.utils.prompt import prompt_secret
@@ -49,9 +49,9 @@ def check_onboarding() -> bool:
         return True
 
     # 检查是否有有效的 RIPPERDOC_* 环境变量配置
-    # 如果设置了 RIPPERDOC_BASE_URL，可以跳过 onboarding
+    # 如果设置了任意 RIPPERDOC_*，可以跳过 onboarding
     # 不写入配置文件，只在内存中处理
-    if os.getenv("RIPPERDOC_BASE_URL"):
+    if has_ripperdoc_env_overrides():
         # 在内存中标记已完成 onboarding，但不保存到配置文件
         # 这样下次启动时如果环境变量存在仍然可以工作
         config.has_completed_onboarding = True

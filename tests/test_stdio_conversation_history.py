@@ -6,20 +6,23 @@ from typing import Any, List
 
 import pytest
 
+from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.protocol.stdio import handler as handler_module
+from ripperdoc.protocol.stdio import handler_config, handler_query, handler_session
 from ripperdoc.utils.messages import create_assistant_message
 from ripperdoc.core.query_utils import tool_result_message
 
 
 def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
-    monkeypatch.setattr(handler_module, "get_project_config", lambda _path: None)
-    monkeypatch.setattr(handler_module, "get_effective_model_profile", lambda _model: object())
-    monkeypatch.setattr(handler_module, "get_default_tools", lambda **_: tools)
-    monkeypatch.setattr(handler_module, "format_mcp_instructions", lambda _servers: "")
-    monkeypatch.setattr(handler_module, "build_system_prompt", lambda *_args, **_kwargs: "system")
-    monkeypatch.setattr(handler_module, "build_memory_instructions", lambda: "")
-    monkeypatch.setattr(handler_module, "list_custom_commands", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(handler_module, "list_slash_commands", lambda: [])
+    monkeypatch.setattr(handler_session, "get_project_config", lambda _path: None)
+    monkeypatch.setattr(handler_session, "get_effective_model_profile", lambda _model: object())
+    monkeypatch.setattr(handler_session, "get_default_tools", lambda **_: tools)
+    monkeypatch.setattr(handler_session, "format_mcp_instructions", lambda _servers: "")
+    monkeypatch.setattr(handler_query, "format_mcp_instructions", lambda _servers: "")
+    monkeypatch.setattr(handler_config, "build_system_prompt", lambda *_args, **_kwargs: "system")
+    monkeypatch.setattr(handler_config, "build_memory_instructions", lambda: "")
+    monkeypatch.setattr(handler_session, "list_custom_commands", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(handler_session, "list_slash_commands", lambda: [])
 
     async def fake_load_mcp_servers_async(_path):
         return []
@@ -27,8 +30,9 @@ def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
     async def fake_load_dynamic_mcp_tools_async(_path):
         return []
 
-    monkeypatch.setattr(handler_module, "load_mcp_servers_async", fake_load_mcp_servers_async)
-    monkeypatch.setattr(handler_module, "load_dynamic_mcp_tools_async", fake_load_dynamic_mcp_tools_async)
+    monkeypatch.setattr(handler_session, "load_mcp_servers_async", fake_load_mcp_servers_async)
+    monkeypatch.setattr(handler_session, "load_dynamic_mcp_tools_async", fake_load_dynamic_mcp_tools_async)
+    monkeypatch.setattr(handler_query, "load_mcp_servers_async", fake_load_mcp_servers_async)
 
     from ripperdoc.core import skills as skills_module
 
@@ -55,8 +59,8 @@ def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
 
         return Dummy()
 
-    monkeypatch.setattr(handler_module.hook_manager, "run_session_start_async", fake_session_start_async)
-    monkeypatch.setattr(handler_module.hook_manager, "run_user_prompt_submit_async", fake_prompt_submit_async)
+    monkeypatch.setattr(hook_manager, "run_session_start_async", fake_session_start_async)
+    monkeypatch.setattr(hook_manager, "run_user_prompt_submit_async", fake_prompt_submit_async)
 
 
 def _messages_have_tool_result(messages: List[Any]) -> bool:
@@ -88,7 +92,7 @@ async def test_stdio_history_includes_tool_results(monkeypatch, tmp_path):
         else:
             yield create_assistant_message("ok2")
 
-    monkeypatch.setattr(handler_module, "query", fake_query)
+    monkeypatch.setattr(handler_query, "query", fake_query)
 
     handler = handler_module.StdioProtocolHandler()
     handler._project_path = tmp_path
