@@ -1,5 +1,6 @@
 """Tests for path ignore utilities."""
 
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -492,3 +493,23 @@ class TestGitignoreCompatibility:
         assert f.ignores("npm-debug.log.12345") is True
         assert f.ignores("dist/bundle.js") is True
         assert f.ignores("tsconfig.tsbuildinfo") is True
+
+
+class TestCheckPathForTool:
+    """Tests for check_path_for_tool behavior."""
+
+    def test_suppresses_gitignore_warning_when_disabled(self, tmp_path):
+        """Gitignored paths should not warn when warn_on_gitignore is False."""
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+        (tmp_path / ".gitignore").write_text("ignored_dir/\n")
+        ignored_dir = tmp_path / "ignored_dir"
+        ignored_dir.mkdir()
+        target = ignored_dir / "file.txt"
+        target.write_text("hello")
+
+        should_proceed, warning = check_path_for_tool(
+            target, tool_name="Edit", warn_only=True, warn_on_gitignore=False
+        )
+
+        assert should_proceed is True
+        assert warning is None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, List
 
 import pytest
@@ -113,3 +114,43 @@ async def test_stdio_history_includes_tool_results(monkeypatch, tmp_path):
 
     assert call_state["count"] == 2
     assert call_state["tool_result_seen"] is True
+
+
+@pytest.mark.asyncio
+async def test_stdio_query_timeout_reports_timeout_not_name_error(monkeypatch, tmp_path):
+    _patch_stdio_dependencies(monkeypatch, tools=[])
+
+    async def fake_query(messages, system_prompt, context, query_context, can_use_tool):  # noqa: ARG001
+        await asyncio.sleep(0.05)
+        if False:
+            yield create_assistant_message("never")
+
+    monkeypatch.setattr(handler_query, "query", fake_query)
+    monkeypatch.setattr(handler_query, "STDIO_QUERY_TIMEOUT_SEC", 0.01)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    control_responses: list[dict[str, Any]] = []
+    stream_messages: list[dict[str, Any]] = []
+
+    async def capture_control(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        control_responses.append({"request_id": request_id, "response": response, "error": error})
+
+    async def capture_stream(payload: dict[str, Any]):
+        stream_messages.append(payload)
+
+    monkeypatch.setattr(handler, "_write_control_response", capture_control)
+    monkeypatch.setattr(handler, "_write_message_stream", capture_stream)
+
+    await handler._handle_initialize({"options": {"permission_mode": "bypassPermissions"}}, "init")
+    await handler._handle_query({"prompt": "timeout test"}, "q_timeout")
+
+    assert not any(
+        response.get("error") and "name 'asyncio' is not defined" in response.get("error", "")
+        for response in control_responses
+    )
+
+    result_messages = [msg for msg in stream_messages if msg.get("type") == "result"]
+    assert result_messages
+    assert "Query timed out" in (result_messages[-1].get("result") or "")

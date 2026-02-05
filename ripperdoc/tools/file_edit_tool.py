@@ -204,7 +204,7 @@ match exactly (including whitespace and indentation)."""
         # Check if path is ignored (warning for edit operations)
         file_path_obj = Path(file_path)
         should_proceed, warning_msg = check_path_for_tool(
-            file_path_obj, tool_name="Edit", warn_only=True
+            file_path_obj, tool_name="Edit", warn_only=True, warn_on_gitignore=False
         )
         if warning_msg:
             logger.warning("[file_edit_tool] %s", warning_msg)

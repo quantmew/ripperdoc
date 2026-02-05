@@ -628,10 +628,81 @@ def should_skip_path(
 # =============================================================================
 
 
+def _get_ignore_details(file_path: Path, root_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Return ignore evaluation details for a path.
+
+    The result includes whether the path is ignored, and if that ignore comes
+    from gitignore rules and/or default/project ignore patterns.
+    """
+    # Resolve paths
+    file_path = Path(file_path)
+    if not file_path.is_absolute():
+        from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+
+        file_path = Path(safe_get_cwd()) / file_path
+
+    file_path = file_path.resolve()
+
+    # Determine root path
+    if root_path is None:
+        root_path = get_git_root(file_path.parent)
+        if root_path is None:
+            from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+
+            root_path = Path(safe_get_cwd())
+
+    root_path = root_path.resolve()
+
+    # Get relative path (if outside root, treat as not ignored)
+    try:
+        rel_path = file_path.relative_to(root_path).as_posix()
+    except ValueError:
+        return {
+            "ignored": False,
+            "ignored_by_gitignore": False,
+            "ignored_by_default": False,
+            "root_path": root_path,
+            "rel_path": None,
+            "gitignore_rule": None,
+            "default_rule": None,
+        }
+
+    project_patterns = get_project_ignore_patterns()
+    ignore_filter = build_ignore_filter(
+        root_path,
+        project_patterns=project_patterns,
+        include_defaults=True,
+        include_gitignore=True,
+    )
+
+    ignored_by_gitignore = False
+    gitignore_rule = None
+    gitignore_matcher = getattr(ignore_filter, "_gitignore_matcher", None)
+    if gitignore_matcher is not None:
+        gitignore_rule = gitignore_matcher.match_details(file_path, is_dir=file_path.is_dir())
+        if gitignore_rule is not None and not gitignore_rule.negation:
+            ignored_by_gitignore = True
+
+    test_result = ignore_filter.test(rel_path)
+    ignored_by_default = bool(test_result.get("ignored"))
+    default_rule = test_result.get("rule")
+
+    return {
+        "ignored": ignored_by_gitignore or ignored_by_default,
+        "ignored_by_gitignore": ignored_by_gitignore,
+        "ignored_by_default": ignored_by_default,
+        "root_path": root_path,
+        "rel_path": rel_path,
+        "gitignore_rule": gitignore_rule,
+        "default_rule": default_rule,
+    }
+
+
 def check_path_for_tool(
     file_path: Path,
     tool_name: str = "unknown",
     warn_only: bool = True,
+    warn_on_gitignore: bool = True,
 ) -> Tuple[bool, Optional[str]]:
     """Check if a path should be accessible for a tool.
 
@@ -642,13 +713,15 @@ def check_path_for_tool(
         file_path: The file path to check
         tool_name: Name of the calling tool (for messages)
         warn_only: If True, return warning message; if False, block access
+        warn_on_gitignore: If False, suppress warnings for gitignored paths
 
     Returns:
         Tuple of (should_proceed, warning_message)
         - should_proceed: True if the operation should continue
         - warning_message: Warning or error message if path is ignored
     """
-    if is_path_ignored(file_path):
+    details = _get_ignore_details(file_path)
+    if details["ignored"]:
         file_name = file_path.name
 
         # Check why it's ignored
@@ -697,6 +770,15 @@ def check_path_for_tool(
                 break
 
         reason_str = ", ".join(reasons) if reasons else "matches ignore pattern"
+
+        if (
+            warn_only
+            and not warn_on_gitignore
+            and reasons == []
+            and details["ignored_by_gitignore"]
+            and not details["ignored_by_default"]
+        ):
+            return True, None
 
         if warn_only:
             message = (

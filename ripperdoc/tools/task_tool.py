@@ -17,7 +17,7 @@ from ripperdoc.core.agents import (
     AgentLoadResult,
     FILE_EDIT_TOOL_NAME,
     GREP_TOOL_NAME,
-    VIEW_TOOL_NAME,
+    READ_TOOL_NAME,
     clear_agent_cache,
     load_agent_definitions,
     resolve_agent_tools,
@@ -252,7 +252,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         agent_block = "\n".join(agent_lines) or "- general-purpose (built-in)"
 
         task_tool_name = self.name
-        file_read_tool_name = VIEW_TOOL_NAME
+        file_read_tool_name = READ_TOOL_NAME
         search_tool_name = GREP_TOOL_NAME
         code_tool_name = FILE_EDIT_TOOL_NAME
         background_fetch_tool_name = task_tool_name
