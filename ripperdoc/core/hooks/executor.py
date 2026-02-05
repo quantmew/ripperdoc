@@ -23,7 +23,6 @@ from ripperdoc.core.hooks.events import (
     AnyHookInput,
     HookOutput,
     SessionStartInput,
-    UserPromptSubmitInput,
 )
 from ripperdoc.core.hooks.state import suspend_hooks
 from ripperdoc.core.system_prompt import build_environment_prompt
@@ -220,8 +219,7 @@ class HookExecutor:
             "systemMessage": "warning"    // optional
         }
 
-        Or plain text (treated as raw output; for SessionStart/UserPromptSubmit it is
-        also added as additional context).
+        Or plain text (treated as raw output and added as additional context).
         """
         response = response.strip()
         if not response:
@@ -243,7 +241,9 @@ class HookExecutor:
 
     def _allow_raw_output_context(self, input_data: AnyHookInput) -> bool:
         """Return True if non-JSON stdout should be injected as context."""
-        return isinstance(input_data, (SessionStartInput, UserPromptSubmitInput))
+        # Plain-text hook output should be treated as additional context
+        # for all hook events (matches docs/examples).
+        return True
 
     def _build_agent_system_prompt(self, tool_names: str) -> str:
         """Build the system prompt for agent-based hooks."""

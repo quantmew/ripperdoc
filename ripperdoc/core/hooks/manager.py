@@ -422,11 +422,13 @@ class HookManager:
         self,
         hooks: List[HookDefinition],
         input_data: Any,
+        *,
+        allow_async_commands: bool = True,
     ) -> List[HookOutput]:
         results: List[HookOutput] = []
         for hook in hooks:
             self._emit_status(hook, input_data)
-            if hook.is_command_hook() and hook.run_async:
+            if hook.is_command_hook() and hook.run_async and allow_async_commands:
                 self._start_async_command_hook(hook, input_data)
                 results.append(HookOutput())
                 continue
@@ -1114,7 +1116,12 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self._execute_hooks_async(hooks, input_data)
+        # SessionStart should wait for command hooks so env updates are deterministic.
+        outputs = await self._execute_hooks_async(
+            hooks,
+            input_data,
+            allow_async_commands=False,
+        )
         self._apply_session_env()
         return HookResult(outputs)
 
@@ -1135,6 +1142,7 @@ class HookManager:
         """
         hooks = self._get_hooks(HookEvent.SESSION_END, reason)
         if not hooks:
+            self.cleanup()
             return HookResult([])
 
         input_data = SessionEndInput(
@@ -1147,8 +1155,11 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = self._execute_hooks_sync(hooks, input_data)
-        return HookResult(outputs)
+        try:
+            outputs = self._execute_hooks_sync(hooks, input_data)
+            return HookResult(outputs)
+        finally:
+            self.cleanup()
 
     async def run_session_end_async(
         self,
@@ -1159,6 +1170,7 @@ class HookManager:
         """Run SessionEnd hooks asynchronously."""
         hooks = self._get_hooks(HookEvent.SESSION_END, reason)
         if not hooks:
+            self.cleanup()
             return HookResult([])
 
         input_data = SessionEndInput(
@@ -1171,8 +1183,11 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
-        outputs = await self._execute_hooks_async(hooks, input_data)
-        return HookResult(outputs)
+        try:
+            outputs = await self._execute_hooks_async(hooks, input_data)
+            return HookResult(outputs)
+        finally:
+            self.cleanup()
 
 
 # Global instance for convenience

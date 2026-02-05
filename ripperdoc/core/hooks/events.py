@@ -503,7 +503,9 @@ class HookOutput(BaseModel):
                             output.decision = HookDecision(perm_decision)
                         except ValueError:
                             pass
-                        output.reason = hso.get("permissionDecisionReason")
+                        perm_reason = hso.get("permissionDecisionReason")
+                        if perm_reason is not None:
+                            output.reason = perm_reason
 
                 # Handle PermissionRequest specific fields
                 elif event_name == "PermissionRequest":

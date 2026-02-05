@@ -125,6 +125,11 @@ class StdioProtocolHandler:
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []
+        self._session_started = False
+        self._session_start_time: float | None = None
+        self._session_end_sent = False
+        self._session_hook_contexts: list[str] = []
+        self._session_history: SessionHistory | None = None
 
     def _normalize_permission_mode(self, mode: Any) -> str:
         """Normalize permission mode to a supported value."""
@@ -145,6 +150,34 @@ class StdioProtocolHandler:
             self._can_use_tool = None
         else:
             self._can_use_tool = make_permission_checker(self._project_path, yolo_mode=False)
+
+    def _collect_hook_contexts(self, hook_result: Any) -> list[str]:
+        contexts: list[str] = []
+        additional_context = getattr(hook_result, "additional_context", None)
+        if additional_context:
+            contexts.append(str(additional_context))
+        return contexts
+
+    def _build_hook_notice_stream_message(
+        self,
+        text: str,
+        hook_event: str,
+        *,
+        tool_name: str | None = None,
+        level: str = "info",
+    ) -> UserStreamMessage:
+        return UserStreamMessage(
+            session_id=self._session_id,
+            message=UserMessageData(
+                content=text,
+                metadata={
+                    "hook_notice": True,
+                    "hook_event": hook_event,
+                    "tool_name": tool_name,
+                    "level": level,
+                },
+            ),
+        )
 
     def _resolve_system_prompt(
         self,
@@ -647,12 +680,41 @@ class StdioProtocolHandler:
             hook_manager.set_project_dir(self._project_path)
             hook_manager.set_session_id(self._session_id)
             hook_manager.set_llm_callback(build_hook_llm_callback())
+            self._session_history = SessionHistory(
+                self._project_path, self._session_id or str(uuid.uuid4())
+            )
+            hook_manager.set_transcript_path(str(self._session_history.path))
 
             # Configure SDK-provided hooks (if any)
             hooks = request.get("hooks", None)
             if hooks is None:
                 hooks = options.get("hooks", {})
             self._configure_sdk_hooks(hooks)
+
+            session_start_notices: list[str] = []
+            # Run SessionStart hooks during initialize (once per session)
+            queue = self._query_context.pending_message_queue if self._query_context else None
+            hook_scopes = self._query_context.hook_scopes if self._query_context else []
+            with bind_pending_message_queue(queue), bind_hook_scopes(hook_scopes):
+                try:
+                    async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
+                        session_start_result = await hook_manager.run_session_start_async("startup")
+                    if getattr(session_start_result, "system_message", None):
+                        session_start_notices.append(str(session_start_result.system_message))
+                    self._session_hook_contexts = self._collect_hook_contexts(
+                        session_start_result
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"[stdio] Session start hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s"
+                    )
+                except Exception as e:
+                    logger.warning(f"[stdio] Session start hook failed: {e}")
+                finally:
+                    self._session_started = True
+                    if self._session_start_time is None:
+                        self._session_start_time = time.time()
+                    self._session_end_sent = False
 
             # Load MCP servers and dynamic tools
             servers = await load_mcp_servers_async(self._project_path)
@@ -677,6 +739,7 @@ class StdioProtocolHandler:
                 tools,
                 "",  # Will be set per query
                 mcp_instructions,
+                self._session_hook_contexts,
             )
 
             # Apply permission mode to runtime state (checker + query context)
@@ -743,6 +806,15 @@ class StdioProtocolHandler:
                 await self._write_message_stream(model_to_dict(system_message))
             except Exception as e:
                 logger.warning(f"[stdio] Failed to emit system init message: {e}")
+
+            for notice_text in session_start_notices:
+                stream_message = self._build_hook_notice_stream_message(
+                    notice_text,
+                    "SessionStart",
+                    tool_name=None,
+                    level="info",
+                )
+                await self._write_message_stream(model_to_dict(stream_message))
 
             await self._write_control_response(
                 request_id,
@@ -844,10 +916,12 @@ class StdioProtocolHandler:
                 },
             )
 
-            # Create session history
-            session_history = SessionHistory(
-                self._project_path, self._session_id or str(uuid.uuid4())
-            )
+            # Create session history (one per session)
+            if self._session_history is None:
+                self._session_history = SessionHistory(
+                    self._project_path, self._session_id or str(uuid.uuid4())
+                )
+            session_history = self._session_history
             hook_manager.set_transcript_path(str(session_history.path))
 
             # Create initial user message
@@ -865,25 +939,8 @@ class StdioProtocolHandler:
             queue = self._query_context.pending_message_queue if self._query_context else None
             hook_scopes = self._query_context.hook_scopes if self._query_context else []
             with bind_pending_message_queue(queue), bind_hook_scopes(hook_scopes):
-                # Run session start hooks with timeout
-                try:
-                    async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
-                        session_start_result = await hook_manager.run_session_start_async("startup")
-                        if hasattr(session_start_result, "system_message"):
-                            if session_start_result.system_message:
-                                hook_notices.append(
-                                    create_hook_notice_payload(
-                                        text=str(session_start_result.system_message),
-                                        hook_event="SessionStart",
-                                    )
-                                )
-                        if hasattr(session_start_result, "additional_context"):
-                            if session_start_result.additional_context:
-                                additional_instructions.append(str(session_start_result.additional_context))
-                except asyncio.TimeoutError:
-                    logger.warning(f"[stdio] Session start hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
-                except Exception as e:
-                    logger.warning(f"[stdio] Session start hook failed: {e}")
+                if self._session_hook_contexts:
+                    additional_instructions.extend(self._session_hook_contexts)
 
                 # Run prompt submit hooks with timeout
                 try:
@@ -933,22 +990,13 @@ class StdioProtocolHandler:
                 request_id, response={"status": "querying", "session_id": self._session_id}
             )
             for notice in hook_notices:
-                await self._write_message_stream(
-                    {
-                        "type": "user",
-                        "session_id": self._session_id,
-                        "message": {
-                            "role": "user",
-                            "content": notice.get("text", ""),
-                            "metadata": {
-                                "hook_notice": True,
-                                "hook_event": notice.get("hook_event"),
-                                "tool_name": notice.get("tool_name"),
-                                "level": notice.get("level"),
-                            },
-                        },
-                    }
+                stream_message = self._build_hook_notice_stream_message(
+                    str(notice.get("text", "")),
+                    str(notice.get("hook_event", "")),
+                    tool_name=notice.get("tool_name"),
+                    level=notice.get("level") or "info",
                 )
+                await self._write_message_stream(model_to_dict(stream_message))
 
             # Execute query with comprehensive timeout and error handling
             try:
@@ -989,22 +1037,13 @@ class StdioProtocolHandler:
                             if msg_type == "progress":
                                 notice_content = getattr(message, "content", None)
                                 if is_hook_notice_payload(notice_content):
-                                    await self._write_message_stream(
-                                        {
-                                            "type": "user",
-                                            "session_id": self._session_id,
-                                            "message": {
-                                                "role": "user",
-                                                "content": notice_content.get("text", ""),
-                                                "metadata": {
-                                                    "hook_notice": True,
-                                                    "hook_event": notice_content.get("hook_event"),
-                                                    "tool_name": notice_content.get("tool_name"),
-                                                    "level": notice_content.get("level"),
-                                                },
-                                            },
-                                        }
+                                    stream_message = self._build_hook_notice_stream_message(
+                                        str(notice_content.get("text", "")),
+                                        str(notice_content.get("hook_event", "")),
+                                        tool_name=notice_content.get("tool_name"),
+                                        level=notice_content.get("level") or "info",
                                     )
+                                    await self._write_message_stream(model_to_dict(stream_message))
                                     continue
                                 # Check if this is a subagent message that should be forwarded to SDK
                                 is_subagent_msg = getattr(message, "is_subagent_message", False)
@@ -1129,23 +1168,6 @@ class StdioProtocolHandler:
                     structured_output=None,
                 )
                 await send_final_result(result_message)
-
-            # Run session end hooks with timeout
-            logger.debug("[stdio] Running session end hooks")
-            try:
-                duration = time.time() - start_time
-                with bind_hook_scopes(hook_scopes):
-                    async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
-                        await hook_manager.run_session_end_async(
-                            "other",
-                            duration_seconds=duration,
-                            message_count=len(messages),
-                        )
-                logger.debug("[stdio] Session end hooks completed")
-            except asyncio.TimeoutError:
-                logger.warning(f"[stdio] Session end hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
-            except Exception as e:
-                logger.warning(f"[stdio] Session end hook failed: {e}")
 
             logger.info(
                 "[stdio] Query completed",
@@ -1663,6 +1685,33 @@ class StdioProtocolHandler:
                 response=model_to_dict(perm_response),
             )
 
+    async def _run_session_end(self, reason: str) -> None:
+        if self._session_end_sent or not self._session_started:
+            return
+        duration = 0.0
+        if self._session_start_time is not None:
+            duration = max(time.time() - self._session_start_time, 0.0)
+        message_count = len(self._conversation_messages)
+        hook_scopes = self._query_context.hook_scopes if self._query_context else []
+        logger.debug("[stdio] Running session end hooks")
+        try:
+            with bind_hook_scopes(hook_scopes):
+                async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
+                    await hook_manager.run_session_end_async(
+                        reason,
+                        duration_seconds=duration,
+                        message_count=message_count,
+                    )
+            logger.debug("[stdio] Session end hooks completed")
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[stdio] Session end hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s"
+            )
+        except Exception as e:
+            logger.warning(f"[stdio] Session end hook failed: {e}")
+        finally:
+            self._session_end_sent = True
+
     async def run(self) -> None:
         """Main run loop for the stdio protocol handler with graceful shutdown.
 
@@ -1722,6 +1771,11 @@ class StdioProtocolHandler:
                     await asyncio.gather(*self._inflight_tasks, return_exceptions=True)
                 except Exception:
                     pass
+
+            try:
+                await self._run_session_end("other")
+            except Exception as e:
+                logger.warning(f"[cleanup] Session end hook failed: {e}")
 
             cleanup_tasks = []
 
