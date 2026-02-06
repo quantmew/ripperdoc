@@ -60,6 +60,7 @@ MAX_BASH_TIMEOUT_MS = get_bash_max_timeout_ms()
 MAX_OUTPUT_CHARS = get_bash_max_output_length()
 KILL_GRACE_SECONDS = 5.0
 PROGRESS_INTERVAL_SECONDS = 0.5
+STREAM_READ_CHUNK_SIZE = 8192
 ORIGINAL_CWD = Path(get_original_cwd())
 
 
@@ -113,6 +114,7 @@ class BashToolOutput(BaseModel):
     is_image: bool = False
     sandbox: Optional[bool] = None
     is_error: bool = False  # Whether this is considered an error
+    truncation_details: list[str] = Field(default_factory=list)
 
 
 class BashTool(Tool[BashToolInput, BashToolOutput]):
@@ -472,6 +474,10 @@ build projects, run tests, and interact with the file system."""
             result_parts.append(
                 f"Note: Output was truncated (original length: {output.original_length} chars)"
             )
+            if output.truncation_details:
+                result_parts.append(
+                    "Truncation details:\n" + "\n".join(output.truncation_details)
+                )
 
         if output.interrupted:
             result_parts.append("Command was interrupted (timeout or termination).")
@@ -715,7 +721,10 @@ build projects, run tests, and interact with the file system."""
         ) -> None:
             if not stream:
                 return
-            async for raw in stream:
+            while True:
+                raw = await stream.read(STREAM_READ_CHUNK_SIZE)
+                if not raw:
+                    break
                 text = raw.decode("utf-8", errors="replace")
                 sanitized_text = sanitize_output(text)
                 sink.append(sanitized_text)
@@ -793,6 +802,40 @@ build projects, run tests, and interact with the file system."""
         if remaining:
             sink.append(remaining.decode("utf-8", errors="replace"))
 
+    def _build_truncation_notice(self, stream_name: str, truncation: dict[str, Any]) -> Optional[str]:
+        """Build a machine-readable truncation message for assistant context."""
+        if not truncation.get("is_truncated"):
+            return None
+
+        omitted_chars = int(truncation.get("omitted_chars") or 0)
+        kept_start = int(truncation.get("kept_start_chars") or 0)
+        kept_end = int(truncation.get("kept_end_chars") or 0)
+        start_line = truncation.get("omitted_start_line")
+        end_line = truncation.get("omitted_end_line")
+        start_char = truncation.get("omitted_start_char")
+        end_char = truncation.get("omitted_end_char")
+
+        location_parts: list[str] = []
+        if isinstance(start_line, int) and start_line > 0:
+            if isinstance(end_line, int) and end_line >= start_line:
+                if start_line == end_line:
+                    location_parts.append(f"line {start_line}")
+                else:
+                    location_parts.append(f"lines {start_line}-{end_line}")
+        if (
+            isinstance(start_char, int)
+            and isinstance(end_char, int)
+            and start_char > 0
+            and end_char >= start_char
+        ):
+            location_parts.append(f"chars {start_char}-{end_char}")
+
+        location_text = ", ".join(location_parts) if location_parts else "middle segment"
+        return (
+            f"{stream_name}: omitted {omitted_chars} chars at {location_text}; "
+            f"kept head {kept_start} chars and tail {kept_end} chars."
+        )
+
     def _build_final_output(
         self,
         command: str,
@@ -837,6 +880,13 @@ build projects, run tests, and interact with the file system."""
         stdout_result = truncate_output(trimmed_stdout, max_chars=MAX_OUTPUT_CHARS)
         stderr_result = truncate_output(trimmed_stderr, max_chars=MAX_OUTPUT_CHARS)
         is_image = stdout_result.get("is_image", False) or stderr_result.get("is_image", False)
+        truncation_details: list[str] = []
+        stdout_notice = self._build_truncation_notice("stdout", stdout_result)
+        if stdout_notice:
+            truncation_details.append(stdout_notice)
+        stderr_notice = self._build_truncation_notice("stderr", stderr_result)
+        if stderr_notice:
+            truncation_details.append(stderr_notice)
 
         # Determine if truncated
         is_truncated = stdout_result["is_truncated"] or stderr_result["is_truncated"]
@@ -862,6 +912,7 @@ build projects, run tests, and interact with the file system."""
             is_image=is_image,
             sandbox=sandbox_requested,
             is_error=exit_result.is_error or timed_out,
+            truncation_details=truncation_details,
         )
 
     async def call(
@@ -970,7 +1021,10 @@ build projects, run tests, and interact with the file system."""
             ) -> None:
                 if not stream:
                     return
-                async for raw in stream:
+                while True:
+                    raw = await stream.read(STREAM_READ_CHUNK_SIZE)
+                    if not raw:
+                        break
                     text = raw.decode("utf-8", errors="replace")
                     sanitized_text = sanitize_output(text)
                     sink.append(sanitized_text)

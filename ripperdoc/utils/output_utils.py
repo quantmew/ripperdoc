@@ -110,6 +110,13 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, A
             "is_truncated": False,
             "original_length": 0,
             "is_image": False,
+            "omitted_chars": 0,
+            "kept_start_chars": 0,
+            "kept_end_chars": 0,
+            "omitted_start_char": None,
+            "omitted_end_char": None,
+            "omitted_start_line": None,
+            "omitted_end_line": None,
         }
 
     # Check if it's image data
@@ -119,6 +126,13 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, A
             "is_truncated": False,
             "original_length": len(text),
             "is_image": True,
+            "omitted_chars": 0,
+            "kept_start_chars": len(text),
+            "kept_end_chars": 0,
+            "omitted_start_char": None,
+            "omitted_end_char": None,
+            "omitted_start_line": None,
+            "omitted_end_line": None,
         }
 
     original_length = len(text)
@@ -129,6 +143,13 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, A
             "is_truncated": False,
             "original_length": original_length,
             "is_image": False,
+            "omitted_chars": 0,
+            "kept_start_chars": original_length,
+            "kept_end_chars": 0,
+            "omitted_start_char": None,
+            "omitted_end_char": None,
+            "omitted_start_line": None,
+            "omitted_end_line": None,
         }
 
     marker_template = "\n\n... [Output truncated: {omitted} characters omitted] ...\n\n"
@@ -166,11 +187,28 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, A
     if len(truncated) > max_chars:
         truncated = truncated[:max_chars]
 
+    omitted_start = keep_start
+    omitted_end = original_length - keep_end
+    omitted_chars = max(0, omitted_end - omitted_start)
+    omitted_start_char = omitted_start + 1 if omitted_chars > 0 else None
+    omitted_end_char = omitted_end if omitted_chars > 0 else None
+    omitted_start_line = text.count("\n", 0, omitted_start) + 1 if omitted_chars > 0 else None
+    omitted_end_line = (
+        text.count("\n", 0, max(omitted_end - 1, 0)) + 1 if omitted_chars > 0 else None
+    )
+
     return {
         "truncated_content": truncated,
         "is_truncated": True,
         "original_length": original_length,
         "is_image": False,
+        "omitted_chars": omitted_chars,
+        "kept_start_chars": keep_start,
+        "kept_end_chars": keep_end,
+        "omitted_start_char": omitted_start_char,
+        "omitted_end_char": omitted_end_char,
+        "omitted_start_line": omitted_start_line,
+        "omitted_end_line": omitted_end_line,
     }
 
 

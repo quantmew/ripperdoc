@@ -430,6 +430,34 @@ async def test_bash_tool_streaming_output():
 
 
 @pytest.mark.asyncio
+async def test_bash_tool_handles_very_long_single_line_output():
+    """Foreground BashTool should handle long single lines without separator errors."""
+    bash_tool = BashTool()
+    context = ToolUseContext()
+
+    input_data = BashToolInput(
+        command='python -c "import sys; sys.stdout.write(\'a\' * 200000)"',
+        timeout=5000,
+    )
+
+    result = None
+    async for output in bash_tool.call(input_data, context):
+        if isinstance(output, ToolResult):
+            result = output
+
+    assert result is not None
+    assert result.data.exit_code == 0
+    assert result.data.stderr == ""
+    assert result.data.is_truncated is True
+    assert result.data.truncation_details
+    assert any("stdout:" in item and "omitted" in item for item in result.data.truncation_details)
+    assert any("line 1" in item for item in result.data.truncation_details)
+
+    rendered = bash_tool.render_result_for_assistant(result.data)
+    assert "Truncation details:" in rendered
+
+
+@pytest.mark.asyncio
 async def test_kill_bash_running_task():
     """KillBash should terminate a running background command."""
     bash_tool = BashTool()
