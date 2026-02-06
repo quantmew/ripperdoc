@@ -30,6 +30,7 @@ from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
 from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.working_directories import coerce_directory_list, normalize_directory_inputs
 
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC
 
@@ -43,6 +44,7 @@ class StdioSessionMixin:
     _skill_instructions: str | None
     _session_start_time: float | None
     _session_history: SessionHistory | None
+    _session_additional_working_dirs: set[str]
 
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
@@ -78,6 +80,24 @@ class StdioSessionMixin:
                 self._project_path = Path(cwd)
             else:
                 self._project_path = Path.cwd()
+
+            raw_additional_dirs = options.get("additional_directories")
+            if raw_additional_dirs is None:
+                raw_additional_dirs = options.get("additionalDirectories")
+            if raw_additional_dirs is None:
+                raw_additional_dirs = options.get("add_dirs")
+            additional_dirs = coerce_directory_list(raw_additional_dirs)
+            normalized_dirs, dir_errors = normalize_directory_inputs(
+                additional_dirs,
+                base_dir=self._project_path,
+                require_exists=True,
+            )
+            if dir_errors:
+                logger.warning(
+                    "[stdio] Ignoring invalid additional directories",
+                    extra={"errors": dir_errors},
+                )
+            self._session_additional_working_dirs = set(normalized_dirs)
 
             # Initialize project config
             get_project_config(self._project_path)

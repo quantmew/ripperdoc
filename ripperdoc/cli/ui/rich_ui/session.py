@@ -69,6 +69,7 @@ from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.tips import get_random_tip
 from ripperdoc.utils.message_formatting import stringify_message_content
+from ripperdoc.utils.working_directories import normalize_directory_inputs
 
 from ripperdoc.cli.ui.rich_ui.commands import handle_slash_command as _handle_slash_command
 from ripperdoc.cli.ui.rich_ui.images import process_images_in_input
@@ -103,6 +104,7 @@ class RichUI:
         model: Optional[str] = None,
         resume_messages: Optional[List[Any]] = None,
         initial_query: Optional[str] = None,
+        additional_working_dirs: Optional[List[str]] = None,
     ):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -153,6 +155,17 @@ class RichUI:
         self._query_in_progress = False
         self._active_spinner: Optional[ThinkingSpinner] = None
         self._permission_checker: Any = None
+        normalized_working_dirs, working_dir_errors = normalize_directory_inputs(
+            additional_working_dirs or [],
+            base_dir=self.project_path,
+            require_exists=True,
+        )
+        if working_dir_errors:
+            logger.warning(
+                "[ui] Ignoring invalid additional directories",
+                extra={"errors": working_dir_errors, "session_id": self.session_id},
+            )
+        self._session_additional_working_dirs: set[str] = set(normalized_working_dirs)
         hook_manager.set_transcript_path(str(self._session_history.path))
 
         # Create permission checker with Rich console and PromptSession support
@@ -171,6 +184,7 @@ class RichUI:
                 yolo_mode=False,
                 console=console,  # Pass console for Rich Panel rendering
                 prompt_session=permission_session,  # Use PromptSession for input
+                session_additional_working_dirs=self._session_additional_working_dirs,
             )
         else:
             self._permission_checker = None
@@ -312,6 +326,36 @@ class RichUI:
         self._session_history = SessionHistory(self.project_path, session_id)
         hook_manager.set_session_id(self.session_id)
         hook_manager.set_transcript_path(str(self._session_history.path))
+
+    def list_additional_working_directories(self) -> list[str]:
+        """Return current session-scoped additional working directories."""
+        return sorted(self._session_additional_working_dirs)
+
+    def add_additional_working_directory(self, raw_path: str) -> tuple[bool, str]:
+        """Add a working directory for this session.
+
+        Returns:
+            tuple[bool, str]: (added, message)
+        """
+        normalized, errors = normalize_directory_inputs(
+            [raw_path],
+            base_dir=self.project_path,
+            require_exists=True,
+        )
+        if errors:
+            return False, errors[0]
+        if not normalized:
+            return False, "No directory path provided."
+
+        resolved = normalized[0]
+        if resolved in self._session_additional_working_dirs:
+            return False, f"Already added: {resolved}"
+
+        self._session_additional_working_dirs.add(resolved)
+        adder = getattr(self._permission_checker, "add_working_directory", None)
+        if callable(adder):
+            adder(resolved)
+        return True, f"Added: {resolved}"
 
     def _collect_hook_contexts(self, hook_result: Any) -> List[str]:
         contexts: List[str] = []
@@ -1597,6 +1641,7 @@ def main_rich(
     model: Optional[str] = None,
     resume_messages: Optional[List[Any]] = None,
     initial_query: Optional[str] = None,
+    additional_working_dirs: Optional[List[str]] = None,
 ) -> None:
     """Main entry point for Rich interface.
 
@@ -1622,6 +1667,7 @@ def main_rich(
         model=model,
         resume_messages=resume_messages,
         initial_query=initial_query,
+        additional_working_dirs=additional_working_dirs,
     )
     ui.run()
 

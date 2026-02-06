@@ -7,7 +7,7 @@ import html
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, Set
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Optional, Set
 
 from ripperdoc.cli.ui.choice import prompt_choice
 from ripperdoc.core.config import config_manager
@@ -233,6 +233,7 @@ def _build_permission_policy(
     global_config: Any,
     local_config: Any,
     session_tool_rules: dict[str, Set[str]],
+    session_working_dirs: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Build merged permission policy inputs for tool-level evaluation."""
     allow_rules = {
@@ -257,10 +258,23 @@ def _build_permission_policy(
             | set(local_config.local_ask_rules or [])
         )
     }
-    allowed_working_dirs = {
-        str(project_path.resolve()),
-        *[str(Path(p).resolve()) for p in config.working_directories or []],
-    }
+    allowed_working_dirs = {str(project_path.resolve())}
+    for raw_path in config.working_directories or []:
+        try:
+            path = Path(raw_path).expanduser()
+            if not path.is_absolute():
+                path = project_path / path
+            allowed_working_dirs.add(str(path.resolve()))
+        except (OSError, RuntimeError, ValueError):
+            continue
+    for raw_path in session_working_dirs or []:
+        try:
+            path = Path(raw_path).expanduser()
+            if not path.is_absolute():
+                path = project_path / path
+            allowed_working_dirs.add(str(path.resolve()))
+        except (OSError, RuntimeError, ValueError):
+            continue
 
     return {
         "allow_rules": allow_rules,
@@ -405,6 +419,7 @@ def make_permission_checker(
     prompt_fn: Optional[Callable[[str], str]] = None,
     console: Optional["Console"] = None,  # noqa: ARG001 (kept for backward compatibility)
     prompt_session: Optional["PromptSession"] = None,  # noqa: ARG001 (kept for backward compatibility)
+    session_additional_working_dirs: Optional[Iterable[str]] = None,
 ) -> Callable[[Tool[Any, Any], Any], Awaitable[PermissionResult]]:
     """Create a permission checking function for the current project.
 
@@ -424,6 +439,15 @@ def make_permission_checker(
 
     session_allowed_tools: Set[str] = set()
     session_tool_rules: dict[str, Set[str]] = defaultdict(set)
+    session_working_dirs: Set[str] = set()
+    for raw_path in session_additional_working_dirs or []:
+        try:
+            path = Path(str(raw_path)).expanduser()
+            if not path.is_absolute():
+                path = project_path / path
+            session_working_dirs.add(str(path.resolve()))
+        except (OSError, RuntimeError, ValueError):
+            continue
 
     async def _prompt_user(prompt: str, options: list[tuple[str, str]]) -> str:
         """Prompt the user with proper interrupt handling using unified choice component.
@@ -502,6 +526,7 @@ def make_permission_checker(
             global_config=config_manager.get_global_config(),
             local_config=config_manager.get_project_local_config(project_path),
             session_tool_rules=session_tool_rules,
+            session_working_dirs=session_working_dirs,
         )
         is_preapproved = tool.name in allowed_tools or tool.name in session_allowed_tools
         decision = None if is_preapproved else await _resolve_permission_decision(
@@ -662,5 +687,27 @@ def make_permission_checker(
     setattr(can_use_tool, "force_prompt", _force_prompt)
     setattr(can_use_tool, "preview", _preview)
     setattr(can_use_tool, "preview_force_prompt", _preview_force_prompt)
+
+    def _add_working_directory(path: str) -> str | None:
+        """Add a session-scoped allowed working directory."""
+        text = str(path).strip()
+        if not text:
+            return None
+        try:
+            resolved = Path(text).expanduser()
+            if not resolved.is_absolute():
+                resolved = project_path / resolved
+            resolved_str = str(resolved.resolve())
+        except (OSError, RuntimeError, ValueError):
+            return None
+        session_working_dirs.add(resolved_str)
+        return resolved_str
+
+    def _list_working_directories() -> set[str]:
+        """Return session-scoped additional working directories."""
+        return set(session_working_dirs)
+
+    setattr(can_use_tool, "add_working_directory", _add_working_directory)
+    setattr(can_use_tool, "list_working_directories", _list_working_directories)
 
     return can_use_tool

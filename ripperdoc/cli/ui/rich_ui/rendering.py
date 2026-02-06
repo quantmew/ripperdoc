@@ -22,6 +22,12 @@ def simplify_progress_suffix(content: Any) -> str:
     if not isinstance(content, str):
         return f"Working... {content}"
 
+    # Hide stream labels from the spinner line; keep only useful payload text.
+    for stream_label in ("stdout:", "stderr:"):
+        if content.startswith(stream_label):
+            stream_text = content[len(stream_label) :].strip()
+            return f"Working... {stream_text}" if stream_text else "Working..."
+
     # Handle bash command progress: "Running... (10s)\nstdout..."
     if content.startswith("Running..."):
         # Extract just the "Running... (time)" part before any newline
@@ -179,7 +185,7 @@ def handle_progress_message(
         output_token_est += delta_tokens
         spinner.update_tokens(output_token_est)
     else:
-        suffix = simplify_progress_suffix(message.content)
-        spinner.update_tokens(output_token_est, suffix=suffix)
+        # Keep spinner minimal: do not surface tool progress text as spinner suffix.
+        spinner.update_tokens(output_token_est)
 
     return output_token_est

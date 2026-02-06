@@ -2,6 +2,7 @@ from typing import Any
 import os
 from pathlib import Path
 from typing import List, Optional, Tuple
+from rich.markup import escape
 
 from ripperdoc import __version__
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
@@ -129,6 +130,13 @@ def _handle(ui: Any, _: str) -> bool:
     ui.console.print(f" Version: {__version__}")
     ui.console.print(f" Session ID: {ui.session_id}")
     ui.console.print(f" cwd: {Path.cwd()}")
+    list_dirs = getattr(ui, "list_additional_working_directories", None)
+    if callable(list_dirs):
+        extra_dirs = list(list_dirs())
+        if extra_dirs:
+            ui.console.print(" additional dirs:")
+            for directory in extra_dirs:
+                ui.console.print(f"  - {escape(str(directory))}")
     ui.console.print(f" Auth token: {auth_summary}")
     ui.console.print(f" {api_base_summary}")
     ui.console.print()

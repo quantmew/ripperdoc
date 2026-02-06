@@ -2,10 +2,12 @@
 
 from rich.console import Console
 
+from ripperdoc.cli.commands.add_dir_cmd import command as add_dir_command
 from ripperdoc.cli.commands.memory_cmd import command as memory_command
 from ripperdoc.cli.commands.tasks_cmd import command as tasks_command
 from ripperdoc.cli.commands.todos_cmd import command as todos_command
 from ripperdoc.tools import background_shell
+from ripperdoc.utils.working_directories import normalize_directory_inputs
 from ripperdoc.utils.todo import TodoItem, set_todos
 
 
@@ -15,6 +17,29 @@ class _DummyUI:
     def __init__(self, console: Console, project_path):
         self.console = console
         self.project_path = project_path
+
+
+class _AddDirUI(_DummyUI):
+    def __init__(self, console: Console, project_path):
+        super().__init__(console, project_path)
+        self._dirs = set()
+
+    def list_additional_working_directories(self):
+        return sorted(self._dirs)
+
+    def add_additional_working_directory(self, raw_path: str):
+        normalized, errors = normalize_directory_inputs(
+            [raw_path],
+            base_dir=self.project_path,
+            require_exists=True,
+        )
+        if errors:
+            return False, errors[0]
+        resolved = normalized[0]
+        if resolved in self._dirs:
+            return False, f"Already added: {resolved}"
+        self._dirs.add(resolved)
+        return True, f"Added: {resolved}"
 
 
 def test_todos_command_empty(tmp_path, monkeypatch):
@@ -126,3 +151,24 @@ def test_memory_command_created_file_editor_opened(tmp_path, monkeypatch):
 
     output = ui.console.export_text()
     assert "Created and opened new memory file." in output
+
+
+def test_add_dir_command_adds_directory_and_lists_current_dirs(tmp_path):
+    extra_dir = tmp_path / "extra"
+    extra_dir.mkdir()
+
+    ui = _AddDirUI(Console(record=True, width=120), tmp_path)
+    add_dir_command.handler(ui, "extra")
+    add_dir_command.handler(ui, "")
+
+    output = ui.console.export_text()
+    assert f"Added: {extra_dir.resolve()}" in output
+    assert "Session Additional Directories" in output
+
+
+def test_add_dir_command_reports_missing_directory(tmp_path):
+    ui = _AddDirUI(Console(record=True, width=120), tmp_path)
+    add_dir_command.handler(ui, "missing")
+
+    output = ui.console.export_text()
+    assert "does not exist" in output

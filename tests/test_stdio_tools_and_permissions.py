@@ -362,3 +362,38 @@ async def test_stdio_sdk_can_use_tool_falls_back_to_local_checker(monkeypatch, t
     # First call probes SDK and then degrades; second call should remain local-only.
     assert sdk_calls["count"] == 1
     assert local_calls["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_stdio_initialize_passes_additional_dirs_to_permission_checker(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    captured: dict[str, Any] = {}
+
+    async def allow_checker(_tool, _parsed_input):
+        return PermissionResult(result=True)
+
+    def fake_make_permission_checker(project_path, yolo_mode=False, **kwargs):  # noqa: ARG001
+        captured["dirs"] = kwargs.get("session_additional_working_dirs")
+        return allow_checker
+
+    monkeypatch.setattr(handler_config, "make_permission_checker", fake_make_permission_checker)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    async def capture_control_response(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
+
+    await handler._handle_initialize(
+        {"options": {"additional_directories": [str(outside)]}},
+        "init",
+    )
+
+    assert "dirs" in captured
+    assert str(outside.resolve()) in set(captured["dirs"] or [])

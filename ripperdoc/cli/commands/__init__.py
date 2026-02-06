@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from .base import SlashCommand
 from .agents_cmd import command as agents_command
+from .add_dir_cmd import command as add_dir_command
 from .clear_cmd import command as clear_command
 from .compact_cmd import command as compact_command
 from .commands_cmd import command as commands_command
@@ -51,6 +52,7 @@ def _build_registry(commands: List[SlashCommand]) -> Dict[str, SlashCommand]:
 
 ALL_COMMANDS: List[SlashCommand] = [
     help_command,
+    add_dir_command,
     clear_command,
     commands_command,
     config_command,

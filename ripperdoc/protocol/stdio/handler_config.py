@@ -32,6 +32,7 @@ class StdioConfigMixin:
     _skill_instructions: str | None
     _session_id: str | None
     _sdk_hook_scope: HooksConfig | None
+    _session_additional_working_dirs: set[str]
 
     def _normalize_permission_mode(self, mode: Any) -> str:
         """Normalize permission mode to a supported value."""
@@ -103,7 +104,11 @@ class StdioConfigMixin:
             self._can_use_tool = None
             self._sdk_can_use_tool_supported = True
         else:
-            self._local_can_use_tool = make_permission_checker(self._project_path, yolo_mode=False)
+            self._local_can_use_tool = make_permission_checker(
+                self._project_path,
+                yolo_mode=False,
+                session_additional_working_dirs=self._session_additional_working_dirs,
+            )
             self._sdk_can_use_tool_supported = True
 
             if self._sdk_can_use_tool_enabled:

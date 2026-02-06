@@ -260,6 +260,60 @@ def test_permission_checker_preview_skips_user_input_when_not_required(tmp_path:
     assert preview.result.result is True
 
 
+def test_permission_checker_respects_session_additional_working_dirs(tmp_path: Path):
+    """Session-scoped additional working dirs should bypass path prompts for find/cd."""
+    outside_dir = tmp_path.parent / f"{tmp_path.name}_outside"
+    outside_dir.mkdir(exist_ok=True)
+
+    checker_without_extra = make_permission_checker(
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
+    preview_without = asyncio.run(
+        checker_without_extra.preview(BashTool(), BashToolInput(command=f"find {outside_dir} -maxdepth 1"))
+    )
+    assert isinstance(preview_without, PermissionPreview)
+    assert preview_without.requires_user_input is True
+
+    checker_with_extra = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+        session_additional_working_dirs=[str(outside_dir)],
+    )
+    preview_with = asyncio.run(
+        checker_with_extra.preview(BashTool(), BashToolInput(command=f"find {outside_dir} -maxdepth 1"))
+    )
+    assert isinstance(preview_with, PermissionPreview)
+    assert preview_with.requires_user_input is False
+    assert isinstance(preview_with.result, PermissionResult)
+    assert preview_with.result.result is True
+
+
+def test_permission_checker_can_add_session_working_dir_dynamically(tmp_path: Path):
+    """Permission checker should support runtime add directory updates."""
+    outside_dir = tmp_path.parent / f"{tmp_path.name}_dynamic_outside"
+    outside_dir.mkdir(exist_ok=True)
+
+    checker = make_permission_checker(
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
+    first_preview = asyncio.run(
+        checker.preview(BashTool(), BashToolInput(command=f"find {outside_dir} -maxdepth 1"))
+    )
+    assert isinstance(first_preview, PermissionPreview)
+    assert first_preview.requires_user_input is True
+
+    adder = getattr(checker, "add_working_directory")
+    added_path = adder(str(outside_dir))
+    assert added_path == str(outside_dir.resolve())
+
+    second_preview = asyncio.run(
+        checker.preview(BashTool(), BashToolInput(command=f"find {outside_dir} -maxdepth 1"))
+    )
+    assert isinstance(second_preview, PermissionPreview)
+    assert second_preview.requires_user_input is False
+
+
 @pytest.mark.asyncio
 async def test_mixed_format_rules_in_permission_checker(tmp_path: Path):
     """Test that permission checker handles both legacy and glob format rules."""

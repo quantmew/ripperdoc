@@ -45,7 +45,7 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
     # Capture permission checker instantiation.
     checker_calls = []
 
-    def fake_make_permission_checker(project_path, yolo_mode=False):
+    def fake_make_permission_checker(project_path, yolo_mode=False, **_kwargs):
         checker = object()
         checker_calls.append((project_path, yolo_mode, checker))
         return checker

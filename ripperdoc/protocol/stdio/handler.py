@@ -89,6 +89,7 @@ class StdioProtocolHandler(
         self._allowed_tools: list[str] | None = None
         self._disallowed_tools: list[str] | None = None
         self._tools_list: list[str] | None = None
+        self._session_additional_working_dirs: set[str] = set()
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []

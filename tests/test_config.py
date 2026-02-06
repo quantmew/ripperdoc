@@ -85,3 +85,9 @@ def test_project_config():
     assert isinstance(config.bash_deny_rules, list)
     assert isinstance(config.bash_ask_rules, list)
     assert isinstance(config.working_directories, list)
+
+
+def test_project_config_accepts_additional_directories_alias():
+    """ProjectConfig should accept Claude-style additionalDirectories."""
+    config = ProjectConfig(**{"additionalDirectories": ["./foo", "/tmp/bar"]})
+    assert config.working_directories == ["./foo", "/tmp/bar"]

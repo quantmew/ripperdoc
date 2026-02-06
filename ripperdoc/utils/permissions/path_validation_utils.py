@@ -156,8 +156,11 @@ def _check_command_paths(
     elif command == "find":
         paths: list[str] = []
         for arg in args:
-            if arg.startswith("-"):
-                continue
+            # find syntax is: find [path ...] [expression]
+            # Collect only the leading path operands. Once expression tokens
+            # begin (typically flags/predicates), remaining args are not paths.
+            if arg in {"(", ")", "!", ","} or arg.startswith("-"):
+                break
             paths.append(arg)
         if not paths:
             paths = ["."]

@@ -21,6 +21,7 @@ def test_cli_consumes_piped_stdin_as_initial_query(monkeypatch, tmp_path):
         model=None,
         resume_messages=None,
         initial_query=None,
+        additional_working_dirs=None,
     ):
         """Mock main_rich to record the initial_query parameter."""
         recorded["initial_query"] = initial_query

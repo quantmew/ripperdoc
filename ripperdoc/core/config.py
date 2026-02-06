@@ -264,6 +264,22 @@ class ProjectConfig(BaseModel):
     last_duration: Optional[float] = None
     last_session_id: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_additional_directories(cls, data: Any) -> Any:
+        """Allow Claude-style additionalDirectories as an alias."""
+        if not isinstance(data, dict):
+            return data
+        if "working_directories" in data:
+            return data
+
+        migrated = dict(data)
+        if "additionalDirectories" in migrated:
+            migrated["working_directories"] = migrated.get("additionalDirectories")
+        elif "additional_directories" in migrated:
+            migrated["working_directories"] = migrated.get("additional_directories")
+        return migrated
+
 
 class ProjectLocalConfig(BaseModel):
     """Project-local configuration stored in .ripperdoc/config.local.json (not checked into git)"""

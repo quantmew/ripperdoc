@@ -4,6 +4,7 @@ This module provides the command-line interface for the Ripperdoc agent.
 """
 
 import asyncio
+import json
 import click
 import sys
 import time
@@ -45,6 +46,10 @@ from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
+from ripperdoc.utils.working_directories import (
+    extract_additional_directories,
+    normalize_directory_inputs,
+)
 
 
 from rich.console import Console
@@ -101,6 +106,35 @@ def parse_csv_option(raw_value: Optional[str]) -> Optional[List[str]]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _load_settings_payload(settings_value: Optional[str]) -> tuple[dict[str, Any], Path]:
+    """Load settings JSON from an inline payload or a file path."""
+    if not settings_value:
+        return {}, Path.cwd()
+
+    settings_text = settings_value
+    settings_base_dir = Path.cwd()
+    candidate = Path(settings_value).expanduser()
+    if candidate.exists():
+        try:
+            settings_text = candidate.read_text(encoding="utf-8")
+        except (OSError, IOError, UnicodeDecodeError) as exc:
+            raise click.ClickException(
+                f"Failed to read settings file '{candidate}': {type(exc).__name__}: {exc}"
+            ) from exc
+        settings_base_dir = candidate.resolve().parent
+
+    try:
+        parsed = json.loads(settings_text)
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(
+            f"--settings must be valid JSON or a valid JSON file path: {exc.msg}"
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise click.ClickException("--settings JSON must be an object.")
+    return parsed, settings_base_dir
+
+
 async def run_query(
     prompt: str,
     tools: list,
@@ -111,6 +145,7 @@ async def run_query(
     append_system_prompt: Optional[str] = None,
     model: Optional[str] = None,
     allowed_tools: Optional[List[str]] = None,
+    additional_working_dirs: Optional[List[str]] = None,
 ) -> None:
     """Run a single query and print the response."""
     logger.info(
@@ -132,7 +167,15 @@ async def run_query(
         )
 
     project_path = Path.cwd()
-    can_use_tool = None if yolo_mode else make_permission_checker(project_path, yolo_mode=False)
+    can_use_tool = (
+        None
+        if yolo_mode
+        else make_permission_checker(
+            project_path,
+            yolo_mode=False,
+            session_additional_working_dirs=additional_working_dirs or [],
+        )
+    )
 
     # Initialize hook manager
     hook_manager.set_project_dir(project_path)
@@ -419,8 +462,7 @@ async def run_query(
     "add_dirs",
     multiple=True,
     type=click.Path(),
-    help="Additional directories (SDK only).",
-    hidden=True,
+    help="Additional working directory (repeatable).",
 )
 @click.option(
     "--mcp-config",
@@ -622,6 +664,24 @@ def cli(
         cwd_changed = cwd
 
     project_path = Path.cwd()
+    settings_payload, settings_base_dir = _load_settings_payload(settings)
+    settings_dirs_raw = extract_additional_directories(settings_payload)
+    settings_dirs, settings_dir_errors = normalize_directory_inputs(
+        settings_dirs_raw,
+        base_dir=settings_base_dir,
+        require_exists=True,
+    )
+    cli_dirs, cli_dir_errors = normalize_directory_inputs(
+        add_dirs,
+        base_dir=project_path,
+        require_exists=True,
+    )
+    directory_errors = [*settings_dir_errors, *cli_dir_errors]
+    if directory_errors:
+        raise click.ClickException(
+            "Invalid additional directory configuration:\n- " + "\n- ".join(directory_errors)
+        )
+    additional_working_dirs = list(dict.fromkeys([*settings_dirs, *cli_dirs]))
 
     if ctx.invoked_subcommand is None and (
         output_format in ("json", "stream-json") or print_mode
@@ -650,6 +710,8 @@ def cli(
             default_options["disallowed_tools"] = disallowed_tools
         if tools_list is not None:
             default_options["tools"] = tools_list
+        if additional_working_dirs:
+            default_options["additional_directories"] = additional_working_dirs
 
         asyncio.run(
             run_stdio(
@@ -839,6 +901,7 @@ def cli(
                 append_system_prompt=append_system_prompt,
                 model=model,
                 allowed_tools=allowed_tools,
+                additional_working_dirs=additional_working_dirs,
             )
         )
         return
@@ -860,6 +923,7 @@ def cli(
             model=model,
             resume_messages=resume_messages,
             initial_query=initial_query,
+            additional_working_dirs=additional_working_dirs,
         )
         return
 
