@@ -22,6 +22,7 @@ from ripperdoc.core.agents import (
     summarize_agent,
 )
 from ripperdoc.core.tool import Tool
+from ripperdoc.core.output_styles import resolve_output_style, style_adherence_reminder
 from ripperdoc.utils.log import get_logger
 
 
@@ -191,12 +192,37 @@ def _resolve_shell_tool_name(tools: List[Tool[Any, Any]]) -> str | None:
     return None
 
 
-def _build_main_prompt(shell_tool_name: str | None, mcp_instructions: str | None) -> str:
+def _build_main_prompt(
+    shell_tool_name: str | None,
+    mcp_instructions: str | None,
+    *,
+    include_efficiency_instructions: bool,
+    keep_coding_instructions: bool,
+) -> str:
     communication_line = (
         f"- Output text to communicate with the user; all text you output outside of tool use is displayed to the user. Only use tools to complete tasks. Never use tools like {shell_tool_name} or code comments as means to communicate with the user during the session."
         if shell_tool_name
         else "- Output text to communicate with the user; all text you output outside of tool use is displayed to the user. Only use tools to complete tasks. Never use tool calls or code comments as means to communicate with the user during the session."
     )
+    concise_line = (
+        "- Your output will be displayed on a command line interface. Your responses should be short and concise. You can use Github-flavored markdown for formatting, and will be rendered in a monospace font using the CommonMark specification."
+        if include_efficiency_instructions
+        else "- Your output will be displayed on a command line interface. Use Github-flavored markdown when helpful, and adapt detail level to the active output style."
+    )
+    coding_sections = ""
+    if keep_coding_instructions:
+        coding_sections = dedent(
+            """\
+            # Following conventions
+            When making changes to files, first understand the file's code conventions. Mimic code style, use existing libraries and utilities, and follow existing patterns.
+            - NEVER assume that a given library is available, even if it is well known. Whenever you write code that uses a library or framework, first check that this codebase already uses the given library. For example, you might look at neighboring files, or check the package.json (or cargo.toml, and so on depending on the language).
+            - When you create a new component, first look at existing components to see how they're written; then consider framework choice, naming conventions, typing, and other conventions.
+            - When you edit a piece of code, first look at the code's surrounding context (especially its imports) to understand the code's choice of frameworks and libraries. Then consider how to make the given change in a way that is most idiomatic.
+            - Always follow security best practices. Never introduce code that exposes or logs secrets and keys. Never commit secrets or keys to the repository.
+
+            # Code style
+            - Only add comments when the logic is not self-evident and within code you changed. Do not add docstrings, comments, or type annotations to code you did not modify."""
+        ).strip()
 
     sections = [
         dedent(
@@ -215,7 +241,7 @@ def _build_main_prompt(shell_tool_name: str | None, mcp_instructions: str | None
 
             # Tone and style
             - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
-            - Your output will be displayed on a command line interface. Your responses should be short and concise. You can use Github-flavored markdown for formatting, and will be rendered in a monospace font using the CommonMark specification.
+            {concise_line}
             {communication_line}
             - NEVER create files unless they're absolutely necessary for achieving your goal. ALWAYS prefer editing an existing file to creating a new one. This includes markdown files.
 
@@ -230,18 +256,11 @@ def _build_main_prompt(shell_tool_name: str | None, mcp_instructions: str | None
             - Doing the right thing when asked, including taking actions and follow-up actions
             - Not surprising the user with actions you take without asking
             For example, if the user asks you how to approach something, you should do your best to answer their question first, and not immediately jump into taking actions.
-
-            # Following conventions
-            When making changes to files, first understand the file's code conventions. Mimic code style, use existing libraries and utilities, and follow existing patterns.
-            - NEVER assume that a given library is available, even if it is well known. Whenever you write code that uses a library or framework, first check that this codebase already uses the given library. For example, you might look at neighboring files, or check the package.json (or cargo.toml, and so on depending on the language).
-            - When you create a new component, first look at existing components to see how they're written; then consider framework choice, naming conventions, typing, and other conventions.
-            - When you edit a piece of code, first look at the code's surrounding context (especially its imports) to understand the code's choice of frameworks and libraries. Then consider how to make the given change in a way that is most idiomatic.
-            - Always follow security best practices. Never introduce code that exposes or logs secrets and keys. Never commit secrets or keys to the repository.
-
-            # Code style
-            - Only add comments when the logic is not self-evident and within code you changed. Do not add docstrings, comments, or type annotations to code you did not modify."""
+            """
         ).strip()
     ]
+    if coding_sections:
+        sections.append(coding_sections)
 
     if shell_tool_name:
         sections.append(
@@ -333,6 +352,8 @@ def _build_doing_tasks_section(
     todo_tool_name: str,
     ask_tool_name: str,
     shell_tool_name: str | None,
+    *,
+    keep_coding_instructions: bool,
 ) -> str:
     doing_tasks_lines = [
         "# Doing tasks",
@@ -344,27 +365,37 @@ def _build_doing_tasks_section(
         doing_tasks_lines.append(
             f"- Use the {ask_tool_name} tool to ask questions, clarify, and gather information as needed."
         )
-    doing_tasks_lines.extend(
-        [
-            "- NEVER propose changes to code you haven't read. If a user asks about or wants you to modify a file, read it first.",
-            "- Use the available search tools to understand the codebase and the user's query. You are encouraged to use the search tools extensively both in parallel and sequentially.",
-            "- When exploring the codebase beyond a needle query, prefer using the Task tool with an exploration subagent if available instead of running raw search commands directly.",
-            "- Implement the solution using all tools available to you.",
-            "- Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection, and other OWASP top 10 vulnerabilities. If you notice that you wrote insecure code, immediately fix it.",
-            "- Avoid over-engineering. Only make changes that are directly requested or clearly necessary. Keep solutions simple and focused.",
-            "  - Don't add features, refactor code, or make improvements beyond what was asked. Don't add docstrings, comments, or type annotations to code you didn't change. Only add comments where the logic isn't self-evident.",
-            "  - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Validate only at system boundaries (user input, external APIs).",
-            "  - Don't create helpers, utilities, or abstractions for one-time operations. Avoid feature flags or backwards-compatibility shims when a direct change is sufficient. If something is unused, delete it completely.",
-            "- Verify the solution if possible with tests. NEVER assume specific test framework or test script. Check the README or search codebase to determine the testing approach.",
-        ]
-    )
-    if shell_tool_name:
-        doing_tasks_lines.append(
-            f"- VERY IMPORTANT: When you have completed a task, you MUST run the lint and typecheck commands (eg. npm run lint, npm run typecheck, ruff, etc.) with {shell_tool_name} if they were provided to you to ensure your code is correct. If you are unable to find the correct command, ask the user for the command to run and if they supply it, proactively suggest writing it to AGENTS.md so that you will know to run it next time."
+    if keep_coding_instructions:
+        doing_tasks_lines.extend(
+            [
+                "- NEVER propose changes to code you haven't read. If a user asks about or wants you to modify a file, read it first.",
+                "- Use the available search tools to understand the codebase and the user's query. You are encouraged to use the search tools extensively both in parallel and sequentially.",
+                "- When exploring the codebase beyond a needle query, prefer using the Task tool with an exploration subagent if available instead of running raw search commands directly.",
+                "- Implement the solution using all tools available to you.",
+                "- Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection, and other OWASP top 10 vulnerabilities. If you notice that you wrote insecure code, immediately fix it.",
+                "- Avoid over-engineering. Only make changes that are directly requested or clearly necessary. Keep solutions simple and focused.",
+                "  - Don't add features, refactor code, or make improvements beyond what was asked. Don't add docstrings, comments, or type annotations to code you didn't change. Only add comments where the logic isn't self-evident.",
+                "  - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Validate only at system boundaries (user input, external APIs).",
+                "  - Don't create helpers, utilities, or abstractions for one-time operations. Avoid feature flags or backwards-compatibility shims when a direct change is sufficient. If something is unused, delete it completely.",
+                "- Verify the solution if possible with tests. NEVER assume specific test framework or test script. Check the README or search codebase to determine the testing approach.",
+            ]
         )
+        if shell_tool_name:
+            doing_tasks_lines.append(
+                f"- VERY IMPORTANT: When you have completed a task, you MUST run the lint and typecheck commands (eg. npm run lint, npm run typecheck, ruff, etc.) with {shell_tool_name} if they were provided to you to ensure your code is correct. If you are unable to find the correct command, ask the user for the command to run and if they supply it, proactively suggest writing it to AGENTS.md so that you will know to run it next time."
+            )
+        else:
+            doing_tasks_lines.append(
+                "- If lint/typecheck/build commands are required and no shell tool is available, ask the user to run the commands and share outputs before you conclude the task."
+            )
     else:
-        doing_tasks_lines.append(
-            "- If lint/typecheck/build commands are required and no shell tool is available, ask the user to run the commands and share outputs before you conclude the task."
+        doing_tasks_lines.extend(
+            [
+                "- Read relevant project files before proposing concrete implementation details.",
+                "- Ask clarifying questions when requirements are ambiguous.",
+                "- Use available tools deliberately and avoid unnecessary scope expansion.",
+                "- Maintain security best practices and never expose secrets.",
+            ]
         )
     doing_tasks_lines.extend(
         [
@@ -383,6 +414,8 @@ def _build_tool_usage_section(
     file_edit_tool_name: str,
     file_write_tool_name: str,
     shell_tool_name: str | None,
+    *,
+    include_efficiency_instructions: bool,
 ) -> str:
     tool_usage_lines = ["# Tool usage policy"]
     if task_available:
@@ -410,9 +443,10 @@ def _build_tool_usage_section(
                 f"- Use specialized tools directly: use {read_tool_name} for reading files, {file_edit_tool_name} for editing, and {file_write_tool_name} for creating files.",
             ]
         )
-    tool_usage_lines.append(
-        "You MUST answer concisely with fewer than 4 lines of text (not including tool use or code generation), unless user asks for detail."
-    )
+    if include_efficiency_instructions:
+        tool_usage_lines.append(
+            "You MUST answer concisely with fewer than 4 lines of text (not including tool use or code generation), unless user asks for detail."
+        )
     return "\n".join(tool_usage_lines)
 
 
@@ -435,8 +469,14 @@ def build_system_prompt(
     context: Optional[Dict[str, str]] = None,
     additional_instructions: Optional[Iterable[str]] = None,
     mcp_instructions: Optional[str] = None,
+    output_style: str = "default",
+    project_path: Optional[Path] = None,
 ) -> str:
     _ = user_prompt, context
+    resolved_style, _ = resolve_output_style(output_style, project_path=project_path)
+    include_efficiency_instructions = resolved_style.include_efficiency_instructions
+    keep_coding_instructions = resolved_style.keep_coding_instructions
+
     tool_names = {tool.name for tool in tools}
     todo_tool_name = TODO_WRITE_TOOL_NAME
     todo_available = todo_tool_name in tool_names
@@ -448,10 +488,15 @@ def build_system_prompt(
     file_write_tool_name = FILE_WRITE_TOOL_NAME
     shell_tool_name = _resolve_shell_tool_name(tools)
 
-    main_prompt = _build_main_prompt(shell_tool_name, mcp_instructions)
+    main_prompt = _build_main_prompt(
+        shell_tool_name,
+        mcp_instructions,
+        include_efficiency_instructions=include_efficiency_instructions,
+        keep_coding_instructions=keep_coding_instructions,
+    )
 
     task_management_section = ""
-    if todo_available:
+    if todo_available and keep_coding_instructions:
         task_management_section = _build_task_management_section(todo_tool_name, shell_tool_name)
 
     ask_questions_section = ""
@@ -474,6 +519,7 @@ def build_system_prompt(
         todo_tool_name,
         ask_tool_name,
         shell_tool_name,
+        keep_coding_instructions=keep_coding_instructions,
     )
 
     tool_usage_section = _build_tool_usage_section(
@@ -483,18 +529,21 @@ def build_system_prompt(
         file_edit_tool_name,
         file_write_tool_name,
         shell_tool_name,
+        include_efficiency_instructions=include_efficiency_instructions,
     )
 
     always_use_todo = ""
-    if todo_available:
+    if todo_available and keep_coding_instructions:
         always_use_todo = f"IMPORTANT: Always use the {todo_tool_name} tool to plan and track tasks throughout the conversation."
 
-    git_workflow_section = _build_git_workflow_section(
-        shell_tool_name, todo_tool_name, TASK_TOOL_NAME
+    git_workflow_section = (
+        _build_git_workflow_section(shell_tool_name, todo_tool_name, TASK_TOOL_NAME)
+        if keep_coding_instructions
+        else ""
     )
 
     agent_section = ""
-    if task_available:
+    if task_available and keep_coding_instructions:
         clear_agent_cache()
         try:
             agent_definitions = load_agent_definitions()
@@ -520,17 +569,24 @@ def build_system_prompt(
                 "# Subagents\nTask tool available, but agent definitions could not be loaded."
             )
 
-    code_references = dedent(
-        """\
-        # Code References
+    code_references = ""
+    if keep_coding_instructions:
+        code_references = dedent(
+            """\
+            # Code References
 
-        When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
+            When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
 
-        <example>
-        user: Where are errors from the client handled?
-        assistant: Clients are marked as failed in the `connectToServer` function in src/services/process.ts:712.
-        </example>"""
-    ).strip()
+            <example>
+            user: Where are errors from the client handled?
+            assistant: Clients are marked as failed in the `connectToServer` function in src/services/process.ts:712.
+            </example>"""
+        ).strip()
+
+    style_sections = [
+        resolved_style.instructions.strip(),
+        style_adherence_reminder(resolved_style),
+    ]
 
     sections: List[str] = [
         main_prompt,
@@ -544,6 +600,7 @@ def build_system_prompt(
         always_use_todo,
         git_workflow_section,
         code_references,
+        *style_sections,
     ]
 
     if additional_instructions:

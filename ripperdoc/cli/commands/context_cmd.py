@@ -79,6 +79,8 @@ def _handle(ui: Any, _: str) -> bool:
         {},
         additional_instructions=additional_instructions or None,
         mcp_instructions=mcp_instructions,
+        output_style=getattr(ui, "output_style", "default"),
+        project_path=ui.project_path,
     )
     memory_tokens = 0
     mcp_tokens = estimate_mcp_tokens(servers) if mcp_instructions else 0

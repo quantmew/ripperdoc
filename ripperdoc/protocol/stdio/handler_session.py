@@ -12,7 +12,12 @@ from typing import Any
 from ripperdoc import __version__
 from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.core.agents import load_agent_definitions
-from ripperdoc.core.config import get_effective_model_profile, get_project_config
+from ripperdoc.core.config import (
+    get_effective_model_profile,
+    get_project_config,
+    get_project_local_config,
+)
+from ripperdoc.core.output_styles import resolve_output_style
 from ripperdoc.core.default_tools import get_default_tools
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
@@ -42,6 +47,7 @@ class StdioSessionMixin:
     _session_id: str | None
     _custom_system_prompt: str | None
     _skill_instructions: str | None
+    _output_style: str
     _session_start_time: float | None
     _session_history: SessionHistory | None
     _session_additional_working_dirs: set[str]
@@ -101,6 +107,20 @@ class StdioSessionMixin:
 
             # Initialize project config
             get_project_config(self._project_path)
+            project_local_config = get_project_local_config(self._project_path)
+            configured_output_style = (
+                getattr(project_local_config, "output_style", "default") or "default"
+            )
+            requested_output_style = (
+                options.get("output_style")
+                or options.get("outputStyle")
+                or configured_output_style
+            )
+            resolved_output_style, _ = resolve_output_style(
+                str(requested_output_style),
+                project_path=self._project_path,
+            )
+            self._output_style = resolved_output_style.key
 
             # Parse tool options
             self._allowed_tools = self._normalize_tool_list(options.get("allowed_tools"))
@@ -261,6 +281,7 @@ class StdioSessionMixin:
                 mcp_servers=[MCPServerInfo(name=s.name) for s in servers] if servers else [],
                 slash_commands=slash_commands,
                 ripperdoc_version=__version__,
+                output_style=self._output_style,
                 agents=agent_names,
                 skills=skill_names,
                 plugins=[],

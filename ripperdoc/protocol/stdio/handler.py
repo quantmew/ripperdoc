@@ -85,6 +85,7 @@ class StdioProtocolHandler(
         self._inflight_tasks: set[asyncio.Task[None]] = set()
         self._custom_system_prompt: str | None = None
         self._skill_instructions: str | None = None
+        self._output_style: str = "default"
         self._output_buffer: list[dict[str, Any]] = []
         self._allowed_tools: list[str] | None = None
         self._disallowed_tools: list[str] | None = None

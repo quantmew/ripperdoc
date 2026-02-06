@@ -284,10 +284,15 @@ class ProjectConfig(BaseModel):
 class ProjectLocalConfig(BaseModel):
     """Project-local configuration stored in .ripperdoc/config.local.json (not checked into git)"""
 
+    model_config = {"populate_by_name": True}
+
     # Local permission rules (project-specific but not shared)
     local_allow_rules: list[str] = Field(default_factory=list)
     local_deny_rules: list[str] = Field(default_factory=list)
     local_ask_rules: list[str] = Field(default_factory=list)
+
+    # Output style for this project/session context
+    output_style: str = Field(default="default", alias="outputStyle")
 
 
 class ConfigManager:

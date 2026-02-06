@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from ripperdoc.core.output_styles import resolve_output_style
 from ripperdoc.core.permissions import PermissionResult
 from ripperdoc.core.query_utils import format_pydantic_errors
 from ripperdoc.protocol.models import PermissionResponseAllow, PermissionResponseDeny, model_to_dict
@@ -41,6 +42,9 @@ class StdioControlMixin:
 
                 elif request_subtype == "set_model":
                     await self._handle_set_model(request, request_id)
+
+                elif request_subtype == "set_output_style":
+                    await self._handle_set_output_style(request, request_id)
 
                 elif request_subtype == "rewind_files":
                     await self._handle_rewind_files(request, request_id)
@@ -88,6 +92,24 @@ class StdioControlMixin:
 
         await self._write_control_response(
             request_id, response={"status": "model_set", "model": model}
+        )
+
+    async def _handle_set_output_style(self, request: dict[str, Any], request_id: str) -> None:
+        """Handle set_output_style request from SDK."""
+        requested_style = (
+            request.get("style")
+            or request.get("output_style")
+            or request.get("outputStyle")
+            or "default"
+        )
+        resolved_style, _ = resolve_output_style(
+            str(requested_style),
+            project_path=getattr(self, "_project_path", None),
+        )
+        self._output_style = resolved_style.key
+        await self._write_control_response(
+            request_id,
+            response={"status": "output_style_set", "output_style": self._output_style},
         )
 
     async def _handle_rewind_files(self, _request: dict[str, Any], request_id: str) -> None:

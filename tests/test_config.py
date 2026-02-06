@@ -6,6 +6,7 @@ import tempfile
 from ripperdoc.core.config import (
     UserConfig,
     ProjectConfig,
+    ProjectLocalConfig,
     ModelProfile,
     ProviderType,
     ConfigManager,
@@ -91,3 +92,9 @@ def test_project_config_accepts_additional_directories_alias():
     """ProjectConfig should accept Claude-style additionalDirectories."""
     config = ProjectConfig(**{"additionalDirectories": ["./foo", "/tmp/bar"]})
     assert config.working_directories == ["./foo", "/tmp/bar"]
+
+
+def test_project_local_config_accepts_output_style_alias():
+    """ProjectLocalConfig should accept outputStyle alias."""
+    config = ProjectLocalConfig(**{"outputStyle": "learning"})
+    assert config.output_style == "learning"

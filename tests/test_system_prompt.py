@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import AsyncGenerator
 
 from pydantic import BaseModel
@@ -63,3 +64,62 @@ def test_system_prompt_with_shell_includes_shell_instructions() -> None:
     assert "# Committing changes with git" in prompt
     assert "via the Bash tool" in prompt
     assert "No shell command tool is available in this session." not in prompt
+
+
+def test_explanatory_style_removes_concise_constraints() -> None:
+    prompt = build_system_prompt([DummyTool("Read"), DummyTool("Bash")], output_style="explanatory")
+
+    assert "Output Style: Explanatory" in prompt
+    assert "fewer than 4 lines" not in prompt
+    assert "responses should be short and concise" not in prompt
+    assert "Verify the solution if possible with tests." in prompt
+
+
+def test_custom_style_excludes_coding_instructions_by_default(tmp_path: Path) -> None:
+    styles_dir = tmp_path / ".ripperdoc" / "output-styles"
+    styles_dir.mkdir(parents=True)
+    (styles_dir / "product.md").write_text(
+        """---
+name: Product
+description: product planner
+---
+Focus on product planning and tradeoffs.
+""",
+        encoding="utf-8",
+    )
+
+    prompt = build_system_prompt(
+        [DummyTool("Read"), DummyTool("Bash")],
+        output_style="product",
+        project_path=tmp_path,
+    )
+
+    assert "Focus on product planning and tradeoffs." in prompt
+    assert "Verify the solution if possible with tests." not in prompt
+    assert "responses should be short and concise" not in prompt
+    assert "# Committing changes with git" not in prompt
+
+
+def test_custom_style_keep_coding_instructions_true(tmp_path: Path) -> None:
+    styles_dir = tmp_path / ".ripperdoc" / "output-styles"
+    styles_dir.mkdir(parents=True)
+    (styles_dir / "mentor.md").write_text(
+        """---
+name: Mentor
+description: coding mentor
+keep-coding-instructions: true
+---
+Teach with coding examples.
+""",
+        encoding="utf-8",
+    )
+
+    prompt = build_system_prompt(
+        [DummyTool("Read"), DummyTool("Bash")],
+        output_style="mentor",
+        project_path=tmp_path,
+    )
+
+    assert "Teach with coding examples." in prompt
+    assert "Verify the solution if possible with tests." in prompt
+    assert "# Committing changes with git" in prompt

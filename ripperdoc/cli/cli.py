@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from ripperdoc import __version__
 from ripperdoc.core.config import (
     get_global_config,
+    get_project_local_config,
     get_project_config,
 )
 from ripperdoc.cli.ui.wizard import check_onboarding
@@ -167,6 +168,8 @@ async def run_query(
         )
 
     project_path = Path.cwd()
+    project_local_config = get_project_local_config(project_path)
+    output_style = getattr(project_local_config, "output_style", "default") or "default"
     can_use_tool = (
         None
         if yolo_mode
@@ -276,6 +279,8 @@ async def run_query(
                 context,
                 additional_instructions=all_instructions or None,
                 mcp_instructions=mcp_instructions,
+                output_style=output_style,
+                project_path=project_path,
             )
 
         # Run the query - collect final response text

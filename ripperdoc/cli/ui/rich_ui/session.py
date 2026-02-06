@@ -17,7 +17,7 @@ from prompt_toolkit.formatted_text import FormattedText
 from rich.console import Console
 from rich.markup import escape
 
-from ripperdoc.core.config import get_global_config, provider_protocol
+from ripperdoc.core.config import get_global_config, get_project_local_config, provider_protocol
 from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
 from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
@@ -126,6 +126,8 @@ class RichUI:
         self._custom_command_list = list_custom_commands()
         self._prompt_session: Optional[PromptSession] = None
         self.project_path = Path.cwd()
+        project_local_config = get_project_local_config(self.project_path)
+        self.output_style = getattr(project_local_config, "output_style", "default") or "default"
         # Track a stable session identifier for the current UI run.
         self.session_id = session_id or str(uuid.uuid4())
         if log_file_path:
@@ -330,6 +332,14 @@ class RichUI:
     def list_additional_working_directories(self) -> list[str]:
         """Return current session-scoped additional working directories."""
         return sorted(self._session_additional_working_dirs)
+
+    def get_output_style(self) -> str:
+        """Return the active output style key for this session."""
+        return self.output_style
+
+    def set_output_style(self, style_key: str) -> None:
+        """Update active output style for subsequent turns."""
+        self.output_style = style_key or "default"
 
     def add_additional_working_directory(self, raw_path: str) -> tuple[bool, str]:
         """Add a working directory for this session.
@@ -871,6 +881,8 @@ class RichUI:
                 context,
                 additional_instructions=all_instructions or None,
                 mcp_instructions=mcp_instructions,
+                output_style=self.output_style,
+                project_path=self.project_path,
             )
 
         return system_prompt, context
