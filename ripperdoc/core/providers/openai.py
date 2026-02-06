@@ -24,7 +24,7 @@ from ripperdoc.core.query_utils import (
     build_openai_tool_schemas,
     content_blocks_from_openai_choice,
     estimate_cost_usd,
-    _normalize_tool_args,
+    normalize_tool_args,
     openai_usage_tokens,
 )
 from ripperdoc.core.tool import Tool
@@ -528,7 +528,7 @@ class OpenAIClient(ProviderClient):
                         "type": "tool_use",
                         "tool_use_id": tool_use_id,
                         "name": name,
-                        "input": _normalize_tool_args(call.get("arguments")),
+                        "input": normalize_tool_args(call.get("arguments")),
                     }
                 )
             finish_reason = "stream"

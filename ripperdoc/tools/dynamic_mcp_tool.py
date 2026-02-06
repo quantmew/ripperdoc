@@ -244,7 +244,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
         input_data: BaseModel,
         _context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
-        from ripperdoc.tools.mcp_tools import _evaluate_mcp_output_size
+        from ripperdoc.tools.mcp_tools import evaluate_mcp_output_size
 
         runtime = await ensure_mcp_runtime(self.project_path)
         session = runtime.sessions.get(self.server_name) if runtime else None
@@ -291,7 +291,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                 is_error=getattr(call_result, "isError", False),
             )
             base_result_text = self.render_result_for_assistant(output)
-            warning_text, error_text, token_estimate = _evaluate_mcp_output_size(
+            warning_text, error_text, token_estimate = evaluate_mcp_output_size(
                 base_result_text, self.server_name, self.tool_info.name
             )
 

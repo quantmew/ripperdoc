@@ -625,7 +625,7 @@ def cli(
     if ctx.invoked_subcommand is None and (
         output_format in ("json", "stream-json") or print_mode
     ):
-        from ripperdoc.protocol.stdio import _run_stdio
+        from ripperdoc.protocol.stdio import run_stdio
 
         effective_prompt = print_prompt or prompt
         stdio_output_format = (
@@ -651,7 +651,7 @@ def cli(
             default_options["tools"] = tools_list
 
         asyncio.run(
-            _run_stdio(
+            run_stdio(
                 input_format=input_format,
                 output_format=stdio_output_format,
                 model=model,

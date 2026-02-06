@@ -15,6 +15,6 @@ def test_suggest_slash_commands_returns_close_matches(monkeypatch):
 
     monkeypatch.setattr(rich_ui, "slash_command_completions", _fake_completions)
 
-    suggestions = rich_ui._suggest_slash_commands("tsaks", None)
+    suggestions = rich_ui.suggest_slash_command_matches("tsaks", None)
 
     assert suggestions and suggestions[0] == "tasks"

@@ -1269,9 +1269,9 @@ class RichUI:
         Returns True if handled as built-in, False if not a command,
         or a string if it's a custom command that should be sent to the AI.
         """
-        from ripperdoc.cli.ui.rich_ui import _suggest_slash_commands
+        from ripperdoc.cli.ui.rich_ui import suggest_slash_command_matches
 
-        return _handle_slash_command(self, user_input, _suggest_slash_commands)
+        return _handle_slash_command(self, user_input, suggest_slash_command_matches)
 
     def get_prompt_session(self) -> PromptSession:
         """Create (or return) the prompt session with command completion."""

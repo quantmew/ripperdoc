@@ -18,7 +18,7 @@ from ripperdoc.core.providers.base import (
     call_with_timeout_and_retries,
     iter_with_timeout,
 )
-from ripperdoc.core.query_utils import _normalize_tool_args, build_tool_description
+from ripperdoc.core.query_utils import normalize_tool_args, build_tool_description
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.session_usage import record_usage
@@ -138,7 +138,7 @@ def _extract_function_calls(parts: List[Any]) -> List[Dict[str, Any]]:
         name = getattr(fn_call, "name", None) or getattr(fn_call, "function_name", None)
         args = getattr(fn_call, "args", None) or getattr(fn_call, "arguments", None) or {}
         call_id = getattr(fn_call, "id", None) or getattr(fn_call, "call_id", None)
-        calls.append({"name": name, "args": _normalize_tool_args(args), "id": call_id})
+        calls.append({"name": name, "args": normalize_tool_args(args), "id": call_id})
     return calls
 
 
@@ -308,7 +308,7 @@ def _convert_messages_to_genai_contents(
         for tool_call in message.get("tool_calls") or []:
             func = tool_call.get("function") or {}
             name = func.get("name") or ""
-            args = _normalize_tool_args(func.get("arguments") or {})
+            args = normalize_tool_args(func.get("arguments") or {})
             call_id = tool_call.get("id")
             msg_parts.append(_mk_part_from_function_call(name, args, call_id))
 

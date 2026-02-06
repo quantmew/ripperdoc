@@ -11,7 +11,7 @@ from ripperdoc.cli.ui.rich_ui.commands import suggest_slash_commands
 from ripperdoc.cli.ui.rich_ui.session import RichUI, check_onboarding_rich, main_rich
 
 
-def _suggest_slash_commands(name: str, project_path: Optional[Path]) -> List[str]:
+def suggest_slash_command_matches(name: str, project_path: Optional[Path]) -> List[str]:
     """Return close matching slash commands for a mistyped name."""
     def _completion_provider(path: Optional[Path]) -> List[tuple[str, object]]:
         return [(command_name, command_def) for command_name, command_def in slash_command_completions(path)]
@@ -23,6 +23,6 @@ __all__ = [
     "RichUI",
     "check_onboarding_rich",
     "main_rich",
-    "_suggest_slash_commands",
+    "suggest_slash_command_matches",
     "slash_command_completions",
 ]

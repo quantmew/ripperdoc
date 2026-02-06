@@ -86,7 +86,7 @@ def stdio_cmd(
     """
     # Set up async event loop
     asyncio.run(
-        _run_stdio(
+        run_stdio(
             input_format=input_format,
             output_format=output_format,
             model=model,
@@ -99,7 +99,7 @@ def stdio_cmd(
     )
 
 
-async def _run_stdio(
+async def run_stdio(
     input_format: str,
     output_format: str,
     model: str | None,
@@ -151,4 +151,4 @@ async def _run_stdio(
     await handler.run()
 
 
-__all__ = ["stdio_cmd", "_run_stdio"]
+__all__ = ["stdio_cmd", "run_stdio"]

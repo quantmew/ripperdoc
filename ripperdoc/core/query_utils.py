@@ -182,7 +182,7 @@ def _parse_text_mode_json_blocks(text: str) -> Optional[List[Dict[str, Any]]]:
                 tool_use_id = raw.get("tool_use_id") or raw.get("id") or str(uuid4())
                 input_value = raw.get("input") or {}
                 if not isinstance(input_value, dict):
-                    input_value = _normalize_tool_args(input_value)
+                    input_value = normalize_tool_args(input_value)
                 normalized.append(
                     {
                         "type": "tool_use",
@@ -419,7 +419,7 @@ def _maybe_convert_json_block_to_tool_use(
     return new_blocks
 
 
-def _normalize_tool_args(raw_args: Any) -> Dict[str, Any]:
+def normalize_tool_args(raw_args: Any) -> Dict[str, Any]:
     """Ensure tool arguments are returned as a dict, handling double-encoded strings."""
     candidate = raw_args
 
@@ -543,7 +543,7 @@ def content_blocks_from_anthropic_response(response: Any, tool_mode: str) -> Lis
                     "type": "tool_use",
                     "tool_use_id": getattr(block, "id", None) or str(uuid4()),
                     "name": getattr(block, "name", None),
-                    "input": _normalize_tool_args(raw_input),
+                    "input": normalize_tool_args(raw_input),
                 }
             )
 
@@ -573,7 +573,7 @@ def content_blocks_from_openai_choice(choice: Any, tool_mode: str) -> List[Dict[
                         "arguments_preview": arg_preview,
                     },
                 )
-            parsed_args = _normalize_tool_args(parsed_args if parsed_args is not None else raw_args)
+            parsed_args = normalize_tool_args(parsed_args if parsed_args is not None else raw_args)
             content_blocks.append(
                 {
                     "type": "tool_use",

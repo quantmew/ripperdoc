@@ -106,7 +106,7 @@ def _get_mcp_token_limits() -> tuple[int, int]:
     return warn_tokens_int, max_tokens_int
 
 
-def _evaluate_mcp_output_size(
+def evaluate_mcp_output_size(
     result_text: Optional[str],
     server_name: str,
     tool_name: str,
@@ -540,7 +540,7 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
             server=input_data.server, uri=input_data.uri, content=content_text, contents=parts
         )
         assistant_text = self.render_result_for_assistant(read_result)  # type: ignore[arg-type]
-        warning_text, error_text, token_estimate = _evaluate_mcp_output_size(
+        warning_text, error_text, token_estimate = evaluate_mcp_output_size(
             assistant_text, input_data.server, f"resource:{input_data.uri}"
         )
 
@@ -573,7 +573,7 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
 
 # Re-export DynamicMcpTool and related functions from the dedicated module
 # for backward compatibility. The imports are placed at the end to avoid
-# circular import issues since dynamic_mcp_tool.py imports _evaluate_mcp_output_size.
+# circular import issues since dynamic_mcp_tool.py imports evaluate_mcp_output_size.
 from ripperdoc.tools.dynamic_mcp_tool import (  # noqa: E402
     DynamicMcpTool,
     McpToolCallOutput,
