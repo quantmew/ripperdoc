@@ -71,6 +71,9 @@ class StdioProtocolHandler(
         self._project_path: Path = Path.cwd()
         self._query_context = None
         self._can_use_tool: Any | None = None
+        self._local_can_use_tool: Any | None = None
+        self._sdk_can_use_tool_enabled: bool = False
+        self._sdk_can_use_tool_supported: bool = True
         self._hooks: dict[str, list[dict[str, Any]]] = {}
         self._sdk_hook_scope = None
         self._pending_requests: dict[str, Any] = {}

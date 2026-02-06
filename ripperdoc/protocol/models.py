@@ -133,6 +133,34 @@ class UserStreamMessage(BaseModel):
     tool_use_result: Any = None
 
 
+class IncomingUserMessageData(BaseModel):
+    """Validated incoming user message data from SDK stream input."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+    role: Literal["user"]
+    content: list[dict[str, Any]] | str = ""
+
+
+class IncomingUserStreamMessage(BaseModel):
+    """Validated incoming `type=user` message from SDK stream input."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+    type: Literal["user"]
+    message: IncomingUserMessageData
+    uuid: str | None = None
+    session_id: str | None = None
+    parent_tool_use_id: str | None = None
+    tool_use_result: Any = None
+
+
 class SystemStreamMessage(BaseModel):
     """A system init message sent to the SDK."""
 

@@ -7,7 +7,7 @@ from typing import Any, List
 import pytest
 from pydantic import BaseModel
 
-from ripperdoc.core.permissions import PermissionResult
+from ripperdoc.core.permissions import PermissionPreview, PermissionResult
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_config, handler_session
@@ -45,6 +45,20 @@ class DummyTool(Tool[DummyInput, str]):
 
     async def call(self, input_data: DummyInput, context: ToolUseContext):
         yield ToolResult(data="ok")
+
+
+class DummyReadOnlyTool(DummyTool):
+    def is_read_only(self) -> bool:
+        return True
+
+
+class DummyAskTool(DummyTool):
+    @property
+    def name(self) -> str:
+        return "AskUserQuestion"
+
+    def needs_permissions(self, input_data: DummyInput | None = None) -> bool:  # noqa: ARG002
+        return False
 
 
 def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
@@ -162,7 +176,7 @@ async def test_stdio_can_use_tool_permission_result(monkeypatch, tmp_path):
         assert parsed_input.value == "hello"
         return PermissionResult(result=False, message="nope")
 
-    handler._can_use_tool = deny_checker
+    handler._local_can_use_tool = deny_checker
 
     await handler._handle_can_use_tool(
         {"tool_name": "Read", "input": {"value": "hello"}},
@@ -171,3 +185,180 @@ async def test_stdio_can_use_tool_permission_result(monkeypatch, tmp_path):
     deny_response = responses["req_deny"]["response"]
     assert deny_response["decision"] == "deny"
     assert deny_response["message"] == "nope"
+
+
+@pytest.mark.asyncio
+async def test_stdio_sdk_can_use_tool_bridges_ask_user_question(monkeypatch, tmp_path):
+    tools = [DummyAskTool("ignored")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    # Local checker should not be used when SDK bridge is active and responds.
+    async def local_checker(_tool, _parsed_input):
+        return PermissionResult(result=False, message="local checker should not run")
+
+    monkeypatch.setattr(handler_config, "make_permission_checker", lambda *_args, **_kwargs: local_checker)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    async def capture_control_response(*_args, **_kwargs):
+        return None
+
+    requests: list[dict[str, Any]] = []
+
+    async def fake_send_control_request(request: dict[str, Any], *, timeout: float | None = None):
+        requests.append({"request": request, "timeout": timeout})
+        assert request["subtype"] == "can_use_tool"
+        assert request["tool_name"] == "AskUserQuestion"
+        return {
+            "decision": "allow",
+            "updatedInput": {
+                "value": "sdk-answer",
+            },
+        }
+
+    monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
+    monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
+
+    await handler._handle_initialize({"options": {}}, "init")
+
+    tool = handler._query_context.tool_registry.get("AskUserQuestion")
+    assert tool is not None
+    result = await handler._can_use_tool(tool, tool.input_schema(value="question"))  # type: ignore[misc]
+
+    assert isinstance(result, PermissionResult)
+    assert result.result is True
+    assert result.updated_input == {"value": "sdk-answer"}
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_stdio_sdk_can_use_tool_skips_read_only_tools(monkeypatch, tmp_path):
+    tools = [DummyReadOnlyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    monkeypatch.setattr(
+        handler_config,
+        "make_permission_checker",
+        lambda *_args, **_kwargs: (lambda *_a, **_k: PermissionResult(result=True)),
+    )
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    async def capture_control_response(*_args, **_kwargs):
+        return None
+
+    called = {"sdk": 0}
+
+    async def fake_send_control_request(*_args, **_kwargs):
+        called["sdk"] += 1
+        raise AssertionError("SDK can_use_tool should not run for read-only tool")
+
+    monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
+    monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
+
+    await handler._handle_initialize({"options": {}}, "init")
+
+    tool = handler._query_context.tool_registry.get("Read")
+    assert tool is not None
+    result = await handler._can_use_tool(tool, tool.input_schema(value="ok"))  # type: ignore[misc]
+
+    assert isinstance(result, PermissionResult)
+    assert result.result is True
+    assert called["sdk"] == 0
+
+
+@pytest.mark.asyncio
+async def test_stdio_sdk_can_use_tool_uses_preview_for_rule_level_ask(monkeypatch, tmp_path):
+    tools = [DummyReadOnlyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    async def local_checker(_tool, _parsed_input):
+        return PermissionResult(result=True)
+
+    async def local_preview(_tool, _parsed_input):
+        return PermissionPreview(requires_user_input=True)
+
+    async def local_preview_force(_tool, _parsed_input):
+        return PermissionPreview(requires_user_input=True)
+
+    setattr(local_checker, "preview", local_preview)
+    setattr(local_checker, "preview_force_prompt", local_preview_force)
+
+    monkeypatch.setattr(handler_config, "make_permission_checker", lambda *_args, **_kwargs: local_checker)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    async def capture_control_response(*_args, **_kwargs):
+        return None
+
+    calls = {"sdk": 0}
+
+    async def fake_send_control_request(request: dict[str, Any], *, timeout: float | None = None):
+        calls["sdk"] += 1
+        assert request["subtype"] == "can_use_tool"
+        assert request["tool_name"] == "Read"
+        return {"decision": "allow", "updatedInput": {"value": "approved"}}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
+    monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
+
+    await handler._handle_initialize({"options": {}}, "init")
+
+    tool = handler._query_context.tool_registry.get("Read")
+    assert tool is not None
+    result = await handler._can_use_tool(tool, tool.input_schema(value="ok"))  # type: ignore[misc]
+
+    assert isinstance(result, PermissionResult)
+    assert result.result is True
+    assert result.updated_input == {"value": "approved"}
+    assert calls["sdk"] == 1
+
+
+@pytest.mark.asyncio
+async def test_stdio_sdk_can_use_tool_falls_back_to_local_checker(monkeypatch, tmp_path):
+    tools = [DummyTool("Write")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    local_calls = {"count": 0}
+
+    async def local_checker(_tool, parsed_input):
+        local_calls["count"] += 1
+        return PermissionResult(result=True, updated_input={"value": parsed_input.value + "-local"})
+
+    monkeypatch.setattr(handler_config, "make_permission_checker", lambda *_args, **_kwargs: local_checker)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    async def capture_control_response(*_args, **_kwargs):
+        return None
+
+    sdk_calls = {"count": 0}
+
+    async def fake_send_control_request(*_args, **_kwargs):
+        sdk_calls["count"] += 1
+        raise RuntimeError("Unknown request subtype: can_use_tool")
+
+    monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
+    monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
+
+    await handler._handle_initialize({"options": {}}, "init")
+
+    tool = handler._query_context.tool_registry.get("Write")
+    assert tool is not None
+
+    first = await handler._can_use_tool(tool, tool.input_schema(value="a"))  # type: ignore[misc]
+    second = await handler._can_use_tool(tool, tool.input_schema(value="b"))  # type: ignore[misc]
+
+    assert isinstance(first, PermissionResult)
+    assert isinstance(second, PermissionResult)
+    assert first.result is True
+    assert second.result is True
+    assert first.updated_input == {"value": "a-local"}
+    assert second.updated_input == {"value": "b-local"}
+    # First call probes SDK and then degrades; second call should remain local-only.
+    assert sdk_calls["count"] == 1
+    assert local_calls["count"] == 2

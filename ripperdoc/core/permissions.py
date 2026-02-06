@@ -33,6 +33,15 @@ class PermissionResult:
     decision: Optional[PermissionDecision] = None
 
 
+@dataclass
+class PermissionPreview:
+    """Non-interactive preview of permission evaluation."""
+
+    requires_user_input: bool
+    result: Optional[PermissionResult] = None
+    decision: Optional[PermissionDecision] = None
+
+
 def _format_input_preview(parsed_input: Any, tool_name: Optional[str] = None) -> str:
     """Create a human-friendly preview for prompts.
 
@@ -501,12 +510,172 @@ def make_permission_checker(
             decision=decision,
         )
 
+    async def _preview_permission(
+        tool: Tool[Any, Any], parsed_input: Any, *, force_prompt: bool = False
+    ) -> PermissionPreview:
+        """Preview permission outcome without hooks or interactive prompt.
+
+        This mirrors rule evaluation logic used by _evaluate_permission and is
+        intended for SDK bridges that must decide whether user input is needed.
+        """
+        config = config_manager.get_project_config(project_path)
+
+        if yolo_mode and not force_prompt:
+            return PermissionPreview(
+                requires_user_input=False,
+                result=PermissionResult(result=True),
+            )
+
+        try:
+            needs_permission = True
+            if hasattr(tool, "needs_permissions"):
+                needs_permission = tool.needs_permissions(parsed_input)
+            if force_prompt:
+                needs_permission = True
+        except (TypeError, AttributeError, ValueError) as exc:
+            return PermissionPreview(
+                requires_user_input=False,
+                result=PermissionResult(
+                    result=False,
+                    message=f"Permission check failed: {type(exc).__name__}: {exc}",
+                ),
+            )
+
+        allowed_tools = set(config.allowed_tools or [])
+
+        global_config = config_manager.get_global_config()
+        local_config = config_manager.get_project_local_config(project_path)
+
+        allow_rules = {
+            "Bash": (
+                set(config.bash_allow_rules or [])
+                | set(global_config.user_allow_rules or [])
+                | set(local_config.local_allow_rules or [])
+                | session_tool_rules.get("Bash", set())
+            )
+        }
+        deny_rules = {
+            "Bash": (
+                set(config.bash_deny_rules or [])
+                | set(global_config.user_deny_rules or [])
+                | set(local_config.local_deny_rules or [])
+            )
+        }
+        ask_rules = {
+            "Bash": (
+                set(config.bash_ask_rules or [])
+                | set(global_config.user_ask_rules or [])
+                | set(local_config.local_ask_rules or [])
+            )
+        }
+        allowed_working_dirs = {
+            str(project_path.resolve()),
+            *[str(Path(p).resolve()) for p in config.working_directories or []],
+        }
+
+        if tool.name in allowed_tools or tool.name in session_allowed_tools:
+            return PermissionPreview(
+                requires_user_input=False,
+                result=PermissionResult(result=True),
+            )
+
+        decision: Optional[PermissionDecision] = None
+        if hasattr(tool, "check_permissions"):
+            try:
+                maybe_decision = tool.check_permissions(
+                    parsed_input,
+                    {
+                        "allowed_rules": allow_rules.get(tool.name, set()),
+                        "denied_rules": deny_rules.get(tool.name, set()),
+                        "ask_rules": ask_rules.get(tool.name, set()),
+                        "allowed_working_directories": allowed_working_dirs,
+                    },
+                )
+                decision = (
+                    await maybe_decision if asyncio.iscoroutine(maybe_decision) else maybe_decision
+                )
+                if isinstance(decision, dict) and "behavior" in decision:
+                    decision = PermissionDecision(**decision)
+            except (TypeError, AttributeError, ValueError, KeyError) as exc:
+                decision = PermissionDecision(
+                    behavior="ask",
+                    message=f"Error checking permissions: {type(exc).__name__}",
+                    rule_suggestions=None,
+                )
+
+        if decision is None:
+            decision = PermissionDecision(
+                behavior="passthrough",
+                message=f"Allow tool '{tool.name}'?",
+                rule_suggestions=[ToolRule(tool_name=tool.name, rule_content=tool.name)],
+            )
+
+        if not needs_permission and decision.behavior != "ask" and not force_prompt:
+            if decision.behavior == "deny":
+                return PermissionPreview(
+                    requires_user_input=False,
+                    result=PermissionResult(
+                        result=False,
+                        message=decision.message or f"Permission denied for tool '{tool.name}'.",
+                        decision=decision,
+                    ),
+                    decision=decision,
+                )
+            return PermissionPreview(
+                requires_user_input=False,
+                result=PermissionResult(
+                    result=True,
+                    message=decision.message,
+                    updated_input=decision.updated_input,
+                    decision=decision,
+                ),
+                decision=decision,
+            )
+
+        if decision.behavior == "allow" and not force_prompt:
+            return PermissionPreview(
+                requires_user_input=False,
+                result=PermissionResult(
+                    result=True,
+                    message=decision.message,
+                    updated_input=decision.updated_input,
+                    decision=decision,
+                ),
+                decision=decision,
+            )
+
+        if decision.behavior == "deny":
+            return PermissionPreview(
+                requires_user_input=False,
+                result=PermissionResult(
+                    result=False,
+                    message=decision.message or f"Permission denied for tool '{tool.name}'.",
+                    decision=decision,
+                ),
+                decision=decision,
+            )
+
+        # ask/passthrough with permission requirement: caller must ask user
+        return PermissionPreview(
+            requires_user_input=True,
+            result=None,
+            decision=decision,
+        )
+
     async def can_use_tool(tool: Tool[Any, Any], parsed_input: Any) -> PermissionResult:
         return await _evaluate_permission(tool, parsed_input, force_prompt=False)
 
     async def _force_prompt(tool: Tool[Any, Any], parsed_input: Any) -> PermissionResult:
         return await _evaluate_permission(tool, parsed_input, force_prompt=True)
 
+    async def _preview(tool: Tool[Any, Any], parsed_input: Any) -> PermissionPreview:
+        return await _preview_permission(tool, parsed_input, force_prompt=False)
+
+    async def _preview_force_prompt(tool: Tool[Any, Any], parsed_input: Any) -> PermissionPreview:
+        return await _preview_permission(tool, parsed_input, force_prompt=True)
+
     setattr(can_use_tool, "force_prompt", _force_prompt)
+    setattr(can_use_tool, "preview", _preview)
+    setattr(can_use_tool, "preview_force_prompt", _preview_force_prompt)
 
     return can_use_tool

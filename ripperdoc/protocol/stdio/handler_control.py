@@ -170,10 +170,11 @@ class StdioControlMixin:
             await self._write_control_response(request_id, response=model_to_dict(perm_response))
             return
 
-        # Use the permission checker if available
-        if self._can_use_tool:
+        # Use local permission checker for inbound SDK compatibility requests.
+        permission_checker = self._local_can_use_tool or self._can_use_tool
+        if permission_checker:
             try:
-                result = self._can_use_tool(tool, parsed_input)
+                result = permission_checker(tool, parsed_input)
                 if inspect.isawaitable(result):
                     result = await result
 

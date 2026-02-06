@@ -60,7 +60,10 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
 
     previous_mode = hook_manager.permission_mode
     try:
-        await handler._handle_initialize({"options": {"permission_mode": "plan"}}, "init")
+        await handler._handle_initialize(
+            {"options": {"permission_mode": "plan", "sdk_can_use_tool": False}},
+            "init",
+        )
 
         assert handler._query_context is not None
         assert handler._query_context.permission_mode == "plan"

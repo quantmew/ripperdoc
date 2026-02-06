@@ -279,7 +279,7 @@ and limit to read only a portion of the file."""
         # Check if path is ignored (warning only for read operations)
         file_path = Path(input_data.file_path)
         should_proceed, warning_msg = check_path_for_tool(
-            file_path, tool_name="Read", warn_only=True
+            file_path, tool_name="Read", warn_only=True, warn_on_gitignore=False
         )
         if warning_msg:
             logger.info("[file_read_tool] %s", warning_msg)

@@ -9,6 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from ripperdoc.core.permissions import (
+    PermissionPreview,
     PermissionResult,
     make_permission_checker,
 )
@@ -232,6 +233,31 @@ def test_bash_permissions_apply_ask_rules(tmp_path: Path, isolated_config):
 
     assert result.result is False
     assert prompt_calls == 1
+
+
+def test_permission_checker_preview_detects_ask_for_read_only_bash(tmp_path: Path, isolated_config):
+    """Preview should require user input when ask-rules match read-only Bash commands."""
+    save_global_config(UserConfig(user_ask_rules=["ls"]))
+
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=lambda _: "n")
+    preview = asyncio.run(checker.preview(BashTool(), BashToolInput(command="ls")))
+
+    assert isinstance(preview, PermissionPreview)
+    assert preview.requires_user_input is True
+    assert preview.result is None
+
+
+def test_permission_checker_preview_skips_user_input_when_not_required(tmp_path: Path):
+    """Preview should auto-allow read-only Bash commands without matching ask-rules."""
+    checker = make_permission_checker(
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
+    preview = asyncio.run(checker.preview(BashTool(), BashToolInput(command="ls")))
+
+    assert isinstance(preview, PermissionPreview)
+    assert preview.requires_user_input is False
+    assert isinstance(preview.result, PermissionResult)
+    assert preview.result.result is True
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 from typing import Any
@@ -11,6 +12,7 @@ from ripperdoc.core.default_tools import filter_tools_by_names
 from ripperdoc.core.hooks.config import HookDefinition, HookMatcher, HooksConfig, DEFAULT_HOOK_TIMEOUT
 from ripperdoc.core.hooks.events import HookOutput
 from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.permissions import PermissionPreview, PermissionResult
 from ripperdoc.core.permissions import make_permission_checker
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.protocol.models import UserMessageData, UserStreamMessage
@@ -90,9 +92,263 @@ class StdioConfigMixin:
         hook_manager.set_permission_mode(mode)
 
         if yolo_mode:
+            self._local_can_use_tool = None
             self._can_use_tool = None
+            self._sdk_can_use_tool_supported = True
         else:
-            self._can_use_tool = make_permission_checker(self._project_path, yolo_mode=False)
+            self._local_can_use_tool = make_permission_checker(self._project_path, yolo_mode=False)
+            self._sdk_can_use_tool_supported = True
+
+            if self._sdk_can_use_tool_enabled:
+
+                async def sdk_can_use_tool(tool: Any, parsed_input: Any) -> PermissionResult:
+                    return await self._check_tool_permissions_via_sdk(
+                        tool,
+                        parsed_input,
+                        force_prompt=False,
+                    )
+
+                async def sdk_force_prompt(tool: Any, parsed_input: Any) -> PermissionResult:
+                    return await self._check_tool_permissions_via_sdk(
+                        tool,
+                        parsed_input,
+                        force_prompt=True,
+                    )
+
+                setattr(sdk_can_use_tool, "force_prompt", sdk_force_prompt)
+                self._can_use_tool = sdk_can_use_tool
+            else:
+                self._can_use_tool = self._local_can_use_tool
+
+    def _coerce_bool_option(self, value: Any, default: bool) -> bool:
+        """Parse flexible bool option values from SDK initialize payloads."""
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "y", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "n", "off"}:
+                return False
+        return default
+
+    def _should_route_sdk_can_use_tool(
+        self,
+        tool: Any,
+        parsed_input: Any,
+        *,
+        force_prompt: bool,
+    ) -> bool:
+        """Return True when SDK should be asked for approval/input."""
+        if force_prompt:
+            return True
+        tool_name = getattr(tool, "name", "")
+        if tool_name == "AskUserQuestion":
+            return True
+        try:
+            return bool(tool.needs_permissions(parsed_input))
+        except Exception:
+            logger.warning(
+                "[stdio] tool.needs_permissions failed for '%s'; routing to SDK can_use_tool",
+                tool_name,
+                exc_info=True,
+            )
+            return True
+
+    async def _preview_local_can_use_tool(
+        self,
+        tool: Any,
+        parsed_input: Any,
+        *,
+        force_prompt: bool,
+    ) -> tuple[bool, Optional[PermissionResult], bool]:
+        """Best-effort non-interactive preview using local checker internals.
+
+        Returns:
+            (has_preview, immediate_result, requires_user_input)
+        """
+        checker = self._local_can_use_tool
+        if checker is None:
+            return True, PermissionResult(result=True), False
+
+        preview_attr = "preview_force_prompt" if force_prompt else "preview"
+        preview_fn = getattr(checker, preview_attr, None)
+        if not callable(preview_fn):
+            return False, None, False
+
+        preview = preview_fn(tool, parsed_input)
+        if inspect.isawaitable(preview):
+            preview = await preview
+
+        if isinstance(preview, PermissionPreview):
+            if preview.requires_user_input:
+                return True, None, True
+            if preview.result is not None:
+                return True, preview.result, False
+            return True, PermissionResult(result=True), False
+
+        if isinstance(preview, dict):
+            requires_user_input = bool(
+                preview.get("requires_user_input") or preview.get("requiresUserInput")
+            )
+            if requires_user_input:
+                return True, None, True
+
+            result_obj = preview.get("result")
+            if isinstance(result_obj, PermissionResult):
+                return True, result_obj, False
+
+            if isinstance(result_obj, dict) and "result" in result_obj:
+                return (
+                    True,
+                    PermissionResult(
+                        result=bool(result_obj.get("result")),
+                        message=result_obj.get("message"),
+                        updated_input=result_obj.get("updated_input")
+                        or result_obj.get("updatedInput"),
+                    ),
+                    False,
+                )
+
+            return True, PermissionResult(result=True), False
+
+        return False, None, False
+
+    async def _evaluate_local_can_use_tool(
+        self,
+        tool: Any,
+        parsed_input: Any,
+        *,
+        force_prompt: bool,
+    ) -> PermissionResult:
+        """Fallback local permission evaluation."""
+        checker = self._local_can_use_tool
+        if checker is None:
+            return PermissionResult(result=True)
+
+        decision_fn = checker
+        if force_prompt and hasattr(checker, "force_prompt"):
+            decision_fn = getattr(checker, "force_prompt")
+
+        result = decision_fn(tool, parsed_input)
+        if inspect.isawaitable(result):
+            result = await result
+
+        if isinstance(result, PermissionResult):
+            return result
+        if isinstance(result, dict) and "result" in result:
+            return PermissionResult(
+                result=bool(result.get("result")),
+                message=result.get("message"),
+                updated_input=result.get("updated_input") or result.get("updatedInput"),
+            )
+        if isinstance(result, tuple) and len(result) == 2:
+            return PermissionResult(result=bool(result[0]), message=result[1])
+        return PermissionResult(result=bool(result))
+
+    async def _check_tool_permissions_via_sdk(
+        self,
+        tool: Any,
+        parsed_input: Any,
+        *,
+        force_prompt: bool,
+    ) -> PermissionResult:
+        """Call SDK can_use_tool callback for approvals/clarifying questions."""
+        tool_name = getattr(tool, "name", "")
+        must_route_to_sdk = tool_name == "AskUserQuestion"
+
+        if not must_route_to_sdk:
+            has_preview, preview_result, requires_user_input = await self._preview_local_can_use_tool(
+                tool,
+                parsed_input,
+                force_prompt=force_prompt,
+            )
+            if has_preview:
+                if not requires_user_input:
+                    return preview_result or PermissionResult(result=True)
+            elif not self._should_route_sdk_can_use_tool(tool, parsed_input, force_prompt=force_prompt):
+                return PermissionResult(result=True)
+
+        if not self._sdk_can_use_tool_supported:
+            return await self._evaluate_local_can_use_tool(
+                tool, parsed_input, force_prompt=force_prompt
+            )
+
+        tool_input = (
+            parsed_input.model_dump()
+            if hasattr(parsed_input, "model_dump")
+            else dict(parsed_input)
+            if isinstance(parsed_input, dict)
+            else {"value": str(parsed_input)}
+        )
+        tool_input = self._sanitize_for_json(tool_input)
+
+        request_payload = {
+            "subtype": "can_use_tool",
+            "tool_name": tool_name,
+            "input": tool_input,
+        }
+        if force_prompt:
+            request_payload["force_prompt"] = True
+
+        try:
+            response = await self._send_control_request(
+                request_payload,
+                timeout=STDIO_HOOK_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[stdio] SDK can_use_tool timed out; falling back to local permissions",
+            )
+            self._sdk_can_use_tool_supported = False
+            return await self._evaluate_local_can_use_tool(
+                tool, parsed_input, force_prompt=force_prompt
+            )
+        except Exception as exc:
+            logger.warning(
+                "[stdio] SDK can_use_tool unavailable (%s); falling back to local permissions",
+                exc,
+            )
+            self._sdk_can_use_tool_supported = False
+            return await self._evaluate_local_can_use_tool(
+                tool, parsed_input, force_prompt=force_prompt
+            )
+
+        if not isinstance(response, dict):
+            return PermissionResult(
+                result=False,
+                message="Invalid can_use_tool response from SDK",
+            )
+
+        behavior = str(response.get("behavior") or response.get("decision") or "").lower()
+        if behavior == "allow":
+            updated_input = response.get("updatedInput") or response.get("updated_input")
+            if updated_input is None:
+                updated_input = tool_input
+            return PermissionResult(result=True, updated_input=updated_input)
+
+        if behavior == "deny":
+            return PermissionResult(
+                result=False,
+                message=response.get("message") or "User denied this action",
+            )
+
+        # Compatibility with legacy payloads.
+        if "result" in response:
+            return PermissionResult(
+                result=bool(response.get("result")),
+                message=response.get("message"),
+                updated_input=response.get("updatedInput") or response.get("updated_input"),
+            )
+
+        return PermissionResult(
+            result=False,
+            message="Invalid can_use_tool response from SDK",
+        )
 
     def _collect_hook_contexts(self, hook_result: Any) -> list[str]:
         contexts: list[str] = []

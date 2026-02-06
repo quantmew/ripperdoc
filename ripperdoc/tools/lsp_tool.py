@@ -429,7 +429,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
             )
 
         should_proceed, warning_msg = check_path_for_tool(
-            resolved_path, tool_name="LSP", warn_only=True
+            resolved_path, tool_name="LSP", warn_only=True, warn_on_gitignore=False
         )
         if warning_msg:
             logger.info("[lsp_tool] %s", warning_msg)

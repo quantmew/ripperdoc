@@ -724,17 +724,6 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
                 )
                 return
 
-            # Display summary
-            def _print_summary() -> None:
-                print("\nAnswers received:")
-                for q, a in answers.items():
-                    print(f"  - {q}")
-                    print(f"    -> {a}")
-                print("")
-
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, _print_summary)
-
             output = AskUserQuestionToolOutput(
                 questions=questions,
                 answers=answers,

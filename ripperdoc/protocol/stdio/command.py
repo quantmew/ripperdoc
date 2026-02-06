@@ -127,6 +127,7 @@ async def _run_stdio(
                 "permission_mode": permission_mode,
                 "max_turns": max_turns,
                 "system_prompt": system_prompt,
+                "sdk_can_use_tool": False,
             },
             "prompt": prompt,
         }

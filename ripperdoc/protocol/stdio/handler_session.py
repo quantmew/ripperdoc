@@ -93,6 +93,10 @@ class StdioSessionMixin:
                 options.get("permission_mode", "default")
             )
             yolo_mode = permission_mode == "bypassPermissions"
+            self._sdk_can_use_tool_enabled = self._coerce_bool_option(
+                options.get("sdk_can_use_tool"),
+                self._input_format == "stream-json" and self._output_format == "stream-json",
+            )
 
             # Setup model
             model = options.get("model") or "main"
