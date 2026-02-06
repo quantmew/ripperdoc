@@ -426,18 +426,33 @@ class StdioQueryMixin:
         if not isinstance(content, list):
             return
 
-        text_parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict):
-                if block.get("type") == "text":
-                    text_parts.append(str(block.get("text", "")))
-                elif block.get("type") == "tool_use":
-                    text_parts.clear()
-            elif hasattr(block, "type") and block.type == "text":
-                text_parts.append(str(getattr(block, "text", "")))
+        text_parts = self._extract_final_text_parts(content)
 
         if text_parts:
             state.final_result_text = "\n".join(text_parts)
+
+    def _extract_final_text_parts(self, content_blocks: list[Any]) -> list[str]:
+        """Extract user-visible text for the final result summary.
+
+        A tool call resets text aggregation because pre-tool explanatory text should
+        not become the final answer text after a tool execution turn.
+        """
+        text_parts: list[str] = []
+        for block in content_blocks:
+            block_type = getattr(block, "type", None)
+            if isinstance(block, dict):
+                block_type = block.get("type")
+                if block_type == "text":
+                    text_parts.append(str(block.get("text", "")))
+                    continue
+                if block_type == "tool_use":
+                    text_parts.clear()
+                    continue
+            if block_type == "text":
+                text_parts.append(str(getattr(block, "text", "")))
+            elif block_type == "tool_use":
+                text_parts.clear()
+        return text_parts
 
     async def _send_final_result(self, state: _QueryRuntimeState, result: ResultMessage) -> None:
         """Send ResultMessage and mark as sent."""

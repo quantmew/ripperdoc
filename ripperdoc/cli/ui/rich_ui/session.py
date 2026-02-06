@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import FormattedText
@@ -951,10 +951,8 @@ class RichUI:
 
         return messages
 
-
-    async def process_query(self, user_input: str) -> None:
-        """Process a user query and display the response."""
-        # Initialize or reset query context
+    def _ensure_query_context(self) -> QueryContext:
+        """Initialize or refresh query context for a new user turn."""
         if not self.query_context:
             self.query_context = QueryContext(
                 tools=self.get_default_tools(),
@@ -967,9 +965,167 @@ class RichUI:
             abort_controller = getattr(self.query_context, "abort_controller", None)
             if abort_controller is not None:
                 abort_controller.clear()
-            # Update thinking tokens in case user toggled thinking mode
             self.query_context.max_thinking_tokens = self._get_thinking_tokens()
         self.query_context.stop_hook_active = False
+        return self.query_context
+
+    def _build_user_message_from_input(self, user_input: str) -> tuple[str, UserMessage]:
+        """Convert raw user input (including images) into a conversation message."""
+        processed_input, image_blocks = process_images_in_input(
+            user_input, self.project_path, self.model
+        )
+        if image_blocks:
+            content_blocks: list[dict[str, Any]] = []
+            for block in image_blocks:
+                content_blocks.append({"type": "image", **block})
+            if processed_input:
+                content_blocks.append({"type": "text", "text": processed_input})
+            return processed_input, create_user_message(content=content_blocks)
+        return processed_input, create_user_message(content=processed_input)
+
+    def _resolve_query_runtime_settings(self) -> tuple[int, bool, str]:
+        """Resolve context budget and protocol settings for this query."""
+        config = get_global_config()
+        model_profile = get_profile_for_pointer("main")
+        max_context_tokens = get_remaining_context_tokens(
+            model_profile, config.context_token_limit
+        )
+        auto_compact_enabled = resolve_auto_compact_enabled(config)
+        protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
+        return max_context_tokens, auto_compact_enabled, protocol
+
+    def _build_spinner_callbacks(
+        self, spinner: ThinkingSpinner
+    ) -> tuple[Callable[[], None], Callable[[], None]]:
+        """Build pause/resume callbacks shared by permission prompts and interrupts."""
+
+        def pause_ui() -> None:
+            self._pause_interrupt_listener()
+            try:
+                spinner.stop()
+            except (RuntimeError, ValueError, OSError):
+                logger.debug("[ui] Failed to pause spinner")
+
+        def resume_ui() -> None:
+            if self._esc_interrupt_seen:
+                return
+            try:
+                spinner.start()
+                spinner.update("Thinking...")
+            except (RuntimeError, ValueError, OSError) as exc:
+                logger.debug(
+                    "[ui] Failed to restart spinner after pause: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+            finally:
+                self._resume_interrupt_listener()
+
+        return pause_ui, resume_ui
+
+    def _build_permission_checker(
+        self,
+        pause_ui: Callable[[], None],
+        resume_ui: Callable[[], None],
+    ) -> Callable[[Any, Any], Awaitable[bool]]:
+        """Wrap base permission checker with UI pause/resume behavior."""
+        base_permission_checker = self._permission_checker
+
+        async def permission_checker(tool: Any, parsed_input: Any) -> bool:
+            pause_ui()
+            try:
+                if base_permission_checker is not None:
+                    result = await base_permission_checker(tool, parsed_input)
+                    allowed = result.result if hasattr(result, "result") else True
+                    logger.debug(
+                        "[ui] Permission check result",
+                        extra={
+                            "tool": getattr(tool, "name", None),
+                            "allowed": allowed,
+                            "session_id": self.session_id,
+                        },
+                    )
+                    return allowed
+                return True
+            finally:
+                resume_ui()
+
+        return permission_checker
+
+    async def _stream_query_messages(
+        self,
+        *,
+        messages: List[ConversationMessage],
+        system_prompt: str,
+        context: Dict[str, str],
+        permission_checker: Callable[[Any, Any], Awaitable[bool]],
+        spinner: ThinkingSpinner,
+        query_context: QueryContext,
+    ) -> None:
+        """Stream query output, render messages, and persist conversation state."""
+        tool_registry: Dict[str, Dict[str, Any]] = {}
+        last_tool_name: Optional[str] = None
+        output_token_est = 0
+
+        self._active_spinner = spinner
+        self._esc_interrupt_seen = False
+        self._query_in_progress = True
+        self._start_interrupt_listener()
+        spinner.start()
+        async for message in query(
+            messages,
+            system_prompt,
+            context,
+            query_context,
+            permission_checker,  # type: ignore[arg-type]
+        ):
+            if message.type == "assistant" and isinstance(message, AssistantMessage):
+                maybe_tool_name = handle_assistant_message(self, message, tool_registry, spinner)
+                if maybe_tool_name:
+                    last_tool_name = maybe_tool_name
+            elif message.type == "user" and isinstance(message, UserMessage):
+                handle_tool_result_message(self, message, tool_registry, last_tool_name, spinner)
+            elif message.type == "progress" and isinstance(message, ProgressMessage):
+                output_token_est = handle_progress_message(
+                    self, message, spinner, output_token_est
+                )
+
+            self._log_message(message)
+            messages.append(message)  # type: ignore[arg-type]
+
+    def _finalize_query_stream(
+        self,
+        spinner: ThinkingSpinner,
+        messages: List[ConversationMessage],
+    ) -> None:
+        """Best-effort stream cleanup and conversation state commit."""
+        try:
+            spinner.stop()
+        except (RuntimeError, ValueError, OSError) as exc:
+            logger.warning(
+                "[ui] Failed to stop spinner: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"session_id": self.session_id},
+            )
+
+        self._stop_interrupt_listener()
+        self._query_in_progress = False
+        self._active_spinner = None
+        self.conversation_messages = messages
+        logger.info(
+            "[ui] Query processing completed",
+            extra={
+                "session_id": self.session_id,
+                "conversation_messages": len(self.conversation_messages),
+                "project_path": str(self.project_path),
+            },
+        )
+
+
+    async def process_query(self, user_input: str) -> None:
+        """Process a user query and display the response."""
+        query_context = self._ensure_query_context()
 
         logger.info(
             "[ui] Starting query processing",
@@ -981,11 +1137,7 @@ class RichUI:
         )
 
         try:
-            queue = (
-                self.query_context.pending_message_queue
-                if self.query_context is not None
-                else None
-            )
+            queue = query_context.pending_message_queue
             with bind_pending_message_queue(queue):
                 hook_result = await hook_manager.run_user_prompt_submit_async(user_input)
             if hook_result.should_block or not hook_result.should_continue:
@@ -997,136 +1149,38 @@ class RichUI:
             self._display_hook_system_message(hook_result, "UserPromptSubmit")
             hook_instructions = self._collect_hook_contexts(hook_result)
 
-            # Prepare context and system prompt
             system_prompt, context = await self._prepare_query_context(
                 user_input, hook_instructions
             )
-
-            # Process images in user input
-            processed_input, image_blocks = process_images_in_input(
-                user_input, self.project_path, self.model
-            )
-
-            # Create and log user message
-            if image_blocks:
-                # Has images: use structured content
-                content_blocks = []
-                # Add images first
-                for block in image_blocks:
-                    content_blocks.append({"type": "image", **block})
-                # Add user's text input
-                if processed_input:
-                    content_blocks.append({"type": "text", "text": processed_input})
-                user_message = create_user_message(content=content_blocks)
-            else:
-                # No images: use plain text
-                user_message = create_user_message(content=processed_input)
+            processed_input, user_message = self._build_user_message_from_input(user_input)
 
             messages: List[ConversationMessage] = self.conversation_messages + [user_message]
             self._log_message(user_message)
             self._append_prompt_history(processed_input)
 
-            # Get model configuration
-            config = get_global_config()
-            model_profile = get_profile_for_pointer("main")
-            max_context_tokens = get_remaining_context_tokens(
-                model_profile, config.context_token_limit
-            )
-            auto_compact_enabled = resolve_auto_compact_enabled(config)
-            protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
-
-            # Check and potentially compact messages
+            max_context_tokens, auto_compact_enabled, protocol = self._resolve_query_runtime_settings()
             messages = await self._check_and_compact_messages(
                 messages, max_context_tokens, auto_compact_enabled, protocol
             )
 
-            # Setup spinner and callbacks
             prompt_tokens_est = estimate_conversation_tokens(messages, protocol=protocol)
             spinner = ThinkingSpinner(console, prompt_tokens_est)
-
-            def pause_ui() -> None:
-                self._pause_interrupt_listener()
-                try:
-                    spinner.stop()
-                except (RuntimeError, ValueError, OSError):
-                    logger.debug("[ui] Failed to pause spinner")
-
-            def resume_ui() -> None:
-                if self._esc_interrupt_seen:
-                    return
-                try:
-                    spinner.start()
-                    spinner.update("Thinking...")
-                except (RuntimeError, ValueError, OSError) as exc:
-                    logger.debug(
-                        "[ui] Failed to restart spinner after pause: %s: %s",
-                        type(exc).__name__,
-                        exc,
-                    )
-                finally:
-                    self._resume_interrupt_listener()
-
-            self.query_context.pause_ui = pause_ui
-            self.query_context.resume_ui = resume_ui
-
-            # Create permission checker with spinner control
-            base_permission_checker = self._permission_checker
-
-            async def permission_checker(tool: Any, parsed_input: Any) -> bool:
-                pause_ui()
-                try:
-                    if base_permission_checker is not None:
-                        result = await base_permission_checker(tool, parsed_input)
-                        allowed = result.result if hasattr(result, "result") else True
-                        logger.debug(
-                            "[ui] Permission check result",
-                            extra={
-                                "tool": getattr(tool, "name", None),
-                                "allowed": allowed,
-                                "session_id": self.session_id,
-                            },
-                        )
-                        return allowed
-                    return True
-                finally:
-                    resume_ui()
-
-            # Process query stream
-            tool_registry: Dict[str, Dict[str, Any]] = {}
-            last_tool_name: Optional[str] = None
-            output_token_est = 0
+            pause_ui, resume_ui = self._build_spinner_callbacks(spinner)
+            query_context.pause_ui = pause_ui
+            query_context.resume_ui = resume_ui
+            permission_checker = self._build_permission_checker(pause_ui, resume_ui)
 
             try:
-                self._active_spinner = spinner
-                self._esc_interrupt_seen = False
-                self._query_in_progress = True
-                self._start_interrupt_listener()
-                spinner.start()
-                async for message in query(
-                    messages,
-                    system_prompt,
-                    context,
-                    self.query_context,
-                    permission_checker,  # type: ignore[arg-type]
-                ):
-                    if message.type == "assistant" and isinstance(message, AssistantMessage):
-                        result = handle_assistant_message(self, message, tool_registry, spinner)
-                        if result:
-                            last_tool_name = result
-
-                    elif message.type == "user" and isinstance(message, UserMessage):
-                        handle_tool_result_message(self, message, tool_registry, last_tool_name, spinner)
-
-                    elif message.type == "progress" and isinstance(message, ProgressMessage):
-                        output_token_est = handle_progress_message(
-                            self, message, spinner, output_token_est
-                        )
-
-                    self._log_message(message)
-                    messages.append(message)  # type: ignore[arg-type]
+                await self._stream_query_messages(
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    context=context,
+                    permission_checker=permission_checker,
+                    spinner=spinner,
+                    query_context=query_context,
+                )
 
             except asyncio.CancelledError:
-                # Re-raise cancellation to allow proper cleanup
                 raise
             except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as e:
                 logger.warning(
@@ -1137,31 +1191,9 @@ class RichUI:
                 )
                 self.display_message("System", f"Error: {str(e)}", is_tool=True)
             finally:
-                try:
-                    spinner.stop()
-                except (RuntimeError, ValueError, OSError) as exc:
-                    logger.warning(
-                        "[ui] Failed to stop spinner: %s: %s",
-                        type(exc).__name__,
-                        exc,
-                        extra={"session_id": self.session_id},
-                    )
-
-                self._stop_interrupt_listener()
-                self._query_in_progress = False
-                self._active_spinner = None
-                self.conversation_messages = messages
-                logger.info(
-                    "[ui] Query processing completed",
-                    extra={
-                        "session_id": self.session_id,
-                        "conversation_messages": len(self.conversation_messages),
-                        "project_path": str(self.project_path),
-                    },
-                )
+                self._finalize_query_stream(spinner, messages)
 
         except asyncio.CancelledError:
-            # Re-raise cancellation to allow proper cleanup
             raise
         except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as exc:
             logger.warning(
