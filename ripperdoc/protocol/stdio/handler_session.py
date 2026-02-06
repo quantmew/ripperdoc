@@ -187,10 +187,17 @@ class StdioSessionMixin:
             mcp_instructions = format_mcp_instructions(servers)
 
             # Build system prompt components
-            from ripperdoc.core.skills import load_all_skills, build_skill_summary
+            from ripperdoc.core.skills import (
+                build_skill_summary,
+                filter_enabled_skills,
+                load_all_skills,
+            )
 
             skill_result = load_all_skills(self._project_path)
-            self._skill_instructions = build_skill_summary(skill_result.skills)
+            enabled_skills = filter_enabled_skills(
+                skill_result.skills, project_path=self._project_path
+            )
+            self._skill_instructions = build_skill_summary(enabled_skills)
 
             agent_result = load_agent_definitions()
 
@@ -217,7 +224,7 @@ class StdioSessionMixin:
             agent_names = [
                 _display_agent_name(agent.agent_type) for agent in agent_result.active_agents
             ]
-            skill_names = [skill.name for skill in skill_result.skills] if skill_result.skills else []
+            skill_names = [skill.name for skill in enabled_skills] if enabled_skills else []
 
             slash_commands = [cmd.name for cmd in list_slash_commands()]
             for custom_cmd in list_custom_commands(self._project_path):

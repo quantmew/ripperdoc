@@ -16,6 +16,7 @@ fields include:
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -32,6 +33,7 @@ logger = get_logger()
 
 SKILL_DIR_NAME = "skills"
 SKILL_FILE_NAME = "SKILL.md"
+SKILL_STATE_FILE_NAME = ".skills_state.json"
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9-]{1,64}$")
 
 
@@ -261,15 +263,198 @@ def load_all_skills(
     return SkillLoadResult(skills=list(skills_by_name.values()), errors=errors)
 
 
-def find_skill(
+def _normalize_skill_ref(skill_name: str) -> str:
+    return skill_name.strip().lstrip("/")
+
+
+def _normalize_disabled_skill_names(skill_names: Iterable[str]) -> set[str]:
+    normalized: set[str] = set()
+    for raw in skill_names:
+        if not isinstance(raw, str):
+            continue
+        name = _normalize_skill_ref(raw)
+        if name and _SKILL_NAME_RE.match(name):
+            normalized.add(name)
+    return normalized
+
+
+def _state_file_for_location(
+    location: SkillLocation, project_path: Optional[Path] = None, home: Optional[Path] = None
+) -> Optional[Path]:
+    for directory, loc in skill_directories(project_path=project_path, home=home):
+        if loc == location:
+            return directory / SKILL_STATE_FILE_NAME
+    return None
+
+
+def _load_disabled_from_state_file(path: Optional[Path]) -> set[str]:
+    if path is None or not path.exists():
+        return set()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return set()
+    if not isinstance(raw, dict):
+        return set()
+    raw_values = raw.get("disabled_skills")
+    if not isinstance(raw_values, list):
+        return set()
+    return _normalize_disabled_skill_names(raw_values)
+
+
+def _load_legacy_project_disabled_skills(project_path: Optional[Path]) -> set[str]:
+    project_dir = (project_path or Path.cwd()).resolve()
+    config_path = project_dir / ".ripperdoc" / "config.local.json"
+    if not config_path.exists():
+        return set()
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return set()
+    if not isinstance(raw, dict):
+        return set()
+    raw_values = raw.get("disabled_skills")
+    if not isinstance(raw_values, list):
+        return set()
+    return _normalize_disabled_skill_names(raw_values)
+
+
+def _save_disabled_to_state_file(path: Optional[Path], disabled_skill_names: set[str]) -> list[str]:
+    normalized = sorted(_normalize_disabled_skill_names(disabled_skill_names))
+    if path is None:
+        return normalized
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"disabled_skills": normalized}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return normalized
+
+
+def get_disabled_skill_names(
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+    *,
+    location: Optional[SkillLocation] = None,
+) -> set[str]:
+    """Return disabled skill names from state files under skills directories."""
+    if location is not None:
+        state_path = _state_file_for_location(location, project_path=project_path, home=home)
+        disabled = _load_disabled_from_state_file(state_path)
+        if disabled:
+            return disabled
+        if location == SkillLocation.PROJECT and (state_path is None or not state_path.exists()):
+            legacy_disabled = _load_legacy_project_disabled_skills(project_path)
+            if legacy_disabled:
+                _save_disabled_to_state_file(state_path, legacy_disabled)
+                return legacy_disabled
+        return disabled
+
+    disabled: set[str] = set()
+    for _, loc in skill_directories(project_path=project_path, home=home):
+        disabled.update(get_disabled_skill_names(project_path=project_path, home=home, location=loc))
+    return disabled
+
+
+def save_disabled_skill_names(
+    skill_names: Iterable[str],
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+    *,
+    location: SkillLocation = SkillLocation.PROJECT,
+) -> list[str]:
+    """Persist disabled skill names into the state file for a specific scope."""
+    state_path = _state_file_for_location(location, project_path=project_path, home=home)
+    return _save_disabled_to_state_file(state_path, set(skill_names))
+
+
+def is_skill_definition_disabled(
+    skill: SkillDefinition, project_path: Optional[Path] = None, home: Optional[Path] = None
+) -> bool:
+    """Check whether a specific skill definition is disabled in its source scope."""
+    disabled = get_disabled_skill_names(project_path=project_path, home=home, location=skill.location)
+    return skill.name in disabled
+
+
+def set_skill_enabled(
+    skill: SkillDefinition,
+    enabled: bool,
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+) -> bool:
+    """Enable or disable a skill in the state file for that skill's source scope."""
+    if skill.location not in (SkillLocation.USER, SkillLocation.PROJECT):
+        return False
+    disabled = get_disabled_skill_names(project_path=project_path, home=home, location=skill.location)
+    was_disabled = skill.name in disabled
+    if enabled and not was_disabled:
+        return False
+    if not enabled and was_disabled:
+        return False
+    if enabled:
+        disabled.discard(skill.name)
+    else:
+        disabled.add(skill.name)
+    save_disabled_skill_names(
+        disabled, project_path=project_path, home=home, location=skill.location
+    )
+    return True
+
+
+def filter_enabled_skills(
+    skills: Sequence[SkillDefinition],
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+    disabled_skill_names: Optional[Iterable[str]] = None,
+) -> List[SkillDefinition]:
+    """Filter out skills disabled in config."""
+    if disabled_skill_names is None:
+        disabled_by_location: Dict[SkillLocation, set[str]] = {}
+        for _, location in skill_directories(project_path=project_path, home=home):
+            disabled_by_location[location] = get_disabled_skill_names(
+                project_path=project_path, home=home, location=location
+            )
+        return [
+            skill
+            for skill in skills
+            if skill.name not in disabled_by_location.get(skill.location, set())
+        ]
+
+    disabled = {_normalize_skill_ref(name) for name in disabled_skill_names if name}
+    return [skill for skill in skills if skill.name not in disabled]
+
+
+def is_skill_disabled(
     skill_name: str, project_path: Optional[Path] = None, home: Optional[Path] = None
+) -> bool:
+    """Check whether a skill is disabled in config."""
+    skill = find_skill(
+        skill_name,
+        project_path=project_path,
+        home=home,
+        include_disabled=True,
+    )
+    if not skill:
+        return False
+    return is_skill_definition_disabled(skill, project_path=project_path, home=home)
+
+
+def find_skill(
+    skill_name: str,
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+    *,
+    include_disabled: bool = False,
 ) -> Optional[SkillDefinition]:
     """Find a skill by name (case-sensitive match)."""
-    normalized = skill_name.strip().lstrip("/")
+    normalized = _normalize_skill_ref(skill_name)
     if not normalized:
         return None
     result = load_all_skills(project_path=project_path, home=home)
-    return next((skill for skill in result.skills if skill.name == normalized), None)
+    skills = (
+        result.skills
+        if include_disabled
+        else filter_enabled_skills(result.skills, project_path=project_path, home=home)
+    )
+    return next((skill for skill in skills if skill.name == normalized), None)
 
 
 def build_skill_summary(skills: Sequence[SkillDefinition]) -> str:
@@ -300,8 +485,15 @@ __all__ = [
     "SkillLocation",
     "SKILL_DIR_NAME",
     "SKILL_FILE_NAME",
+    "SKILL_STATE_FILE_NAME",
     "load_all_skills",
     "find_skill",
+    "filter_enabled_skills",
+    "get_disabled_skill_names",
+    "save_disabled_skill_names",
+    "is_skill_disabled",
+    "is_skill_definition_disabled",
+    "set_skill_enabled",
     "build_skill_summary",
     "skill_directories",
 ]

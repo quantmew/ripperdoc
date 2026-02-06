@@ -23,7 +23,7 @@ from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.system_prompt import build_system_prompt
-from ripperdoc.core.skills import build_skill_summary, load_all_skills
+from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
@@ -793,7 +793,8 @@ class RichUI:
                 },
             )
 
-        skill_instructions = build_skill_summary(skill_result.skills)
+        enabled_skills = filter_enabled_skills(skill_result.skills, project_path=self.project_path)
+        skill_instructions = build_skill_summary(enabled_skills)
         additional_instructions: List[str] = []
         if skill_instructions:
             additional_instructions.append(skill_instructions)

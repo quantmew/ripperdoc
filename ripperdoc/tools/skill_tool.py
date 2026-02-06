@@ -11,7 +11,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from ripperdoc.core.skills import SkillDefinition, find_skill
+from ripperdoc.core.skills import SkillDefinition, find_skill, is_skill_disabled
 from ripperdoc.core.tool import (
     Tool,
     ToolOutput,
@@ -114,6 +114,12 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
             )
         skill = find_skill(skill_name, project_path=self._project_path, home=self._home)
         if not skill:
+            if is_skill_disabled(skill_name, project_path=self._project_path, home=self._home):
+                return ValidationResult(
+                    result=False,
+                    message=f"Skill {skill_name} is disabled. Re-enable it with /skills.",
+                    error_code=6,
+                )
             return ValidationResult(
                 result=False, message=f"Unknown skill: {skill_name}", error_code=2
             )
@@ -217,10 +223,13 @@ class SkillTool(Tool[SkillToolInput, SkillToolOutput]):
         skill_name = (input_data.skill or "").strip().lstrip("/")
         skill = find_skill(skill_name, project_path=self._project_path, home=self._home)
         if not skill:
-            error_text = (
-                f"Skill '{skill_name}' not found. Ensure it exists under "
-                "~/.ripperdoc/skills or ./.ripperdoc/skills."
-            )
+            if is_skill_disabled(skill_name, project_path=self._project_path, home=self._home):
+                error_text = f"Skill '{skill_name}' is disabled. Re-enable it with /skills."
+            else:
+                error_text = (
+                    f"Skill '{skill_name}' not found. Ensure it exists under "
+                    "~/.ripperdoc/skills or ./.ripperdoc/skills."
+                )
             yield ToolResult(data={"error": error_text}, result_for_assistant=error_text)
             return
         if skill.allowed_tools and context.tool_registry is not None:

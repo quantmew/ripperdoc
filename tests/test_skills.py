@@ -3,7 +3,15 @@ from typing import Optional
 
 import pytest
 
-from ripperdoc.core.skills import SkillLocation, build_skill_summary, load_all_skills
+from ripperdoc.core.skills import (
+    SKILL_STATE_FILE_NAME,
+    SkillLocation,
+    build_skill_summary,
+    find_skill,
+    get_disabled_skill_names,
+    load_all_skills,
+    save_disabled_skill_names,
+)
 from ripperdoc.core.query import QueryContext, _apply_skill_context_updates
 from ripperdoc.core.query_utils import tool_result_message
 from ripperdoc.core.tool import ToolUseContext
@@ -76,6 +84,69 @@ def test_load_all_skills_prefers_project_and_parses_fields(tmp_path: Path) -> No
     assert "Skills" in summary
     assert "worker" in summary
     assert "(project)" in summary
+
+
+def test_find_skill_respects_disabled_list(tmp_path: Path) -> None:
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_skill(
+        project_dir,
+        "helper",
+        "Provides help",
+        "Body",
+    )
+    save_disabled_skill_names(
+        ["helper"],
+        project_path=project_dir,
+        home=home_dir,
+        location=SkillLocation.PROJECT,
+    )
+
+    disabled = get_disabled_skill_names(project_dir, home=home_dir, location=SkillLocation.PROJECT)
+    assert disabled == {"helper"}
+    assert find_skill("helper", project_path=project_dir, home=home_dir) is None
+    assert find_skill("helper", project_path=project_dir, home=home_dir, include_disabled=True)
+
+
+def test_disabled_skill_state_is_scoped_by_location(tmp_path: Path) -> None:
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    save_disabled_skill_names(
+        ["user-only"],
+        project_path=project_dir,
+        home=home_dir,
+        location=SkillLocation.USER,
+    )
+    save_disabled_skill_names(
+        ["project-only"],
+        project_path=project_dir,
+        home=home_dir,
+        location=SkillLocation.PROJECT,
+    )
+
+    user_file = home_dir / ".ripperdoc" / "skills" / SKILL_STATE_FILE_NAME
+    project_file = project_dir / ".ripperdoc" / "skills" / SKILL_STATE_FILE_NAME
+    assert user_file.exists()
+    assert project_file.exists()
+
+    user_disabled = get_disabled_skill_names(
+        project_path=project_dir,
+        home=home_dir,
+        location=SkillLocation.USER,
+    )
+    project_disabled = get_disabled_skill_names(
+        project_path=project_dir,
+        home=home_dir,
+        location=SkillLocation.PROJECT,
+    )
+    assert user_disabled == {"user-only"}
+    assert project_disabled == {"project-only"}
 
 
 @pytest.mark.asyncio

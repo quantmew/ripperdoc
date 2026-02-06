@@ -6,7 +6,7 @@ from ripperdoc.cli.ui.context_display import format_tokens
 from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.query import QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
-from ripperdoc.core.skills import build_skill_summary, load_all_skills
+from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.message_compaction import (
     get_remaining_context_tokens,
@@ -65,7 +65,8 @@ def _handle(ui: Any, _: str) -> bool:
                 "session_id": getattr(ui, "session_id", None),
             },
         )
-    skill_instructions = build_skill_summary(skill_result.skills)
+    enabled_skills = filter_enabled_skills(skill_result.skills, project_path=ui.project_path)
+    skill_instructions = build_skill_summary(enabled_skills)
     additional_instructions: List[str] = []
     if skill_instructions:
         additional_instructions.append(skill_instructions)

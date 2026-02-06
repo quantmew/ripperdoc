@@ -36,7 +36,7 @@ TIPS: List[str] = [
 
     # Advanced Features
     "Use /memory to edit AGENTS.md for persistent preferences.",
-    "Use /skills to list available skill packages.",
+    "Use /skills to enable/disable skills, or /skills list to inspect details.",
     "Use /mcp to list configured Model Context Protocol servers and tools.",
     "Use /permissions add/remove to tune tool permission prompts.",
     "Use /context to view context usage and token budget.",
