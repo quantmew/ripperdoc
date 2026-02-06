@@ -15,6 +15,10 @@ from ripperdoc.utils.messages import (
     UserMessage,
 )
 from ripperdoc.utils.path_utils import project_storage_dir
+from ripperdoc.utils.session_index import (
+    list_session_index_entries,
+    update_session_index_for_payload,
+)
 
 
 logger = get_logger()
@@ -43,28 +47,6 @@ def _session_file(project_path: Path, session_id: str) -> Path:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _extract_prompt(payload: dict) -> str:
-    """Pull a short preview of the first user message."""
-    if payload.get("type") != "user":
-        return ""
-    message = payload.get("message") or {}
-    content = message.get("content")
-    preview = ""
-    if isinstance(content, str):
-        preview = content
-    elif isinstance(content, list):
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "text" and block.get("text"):
-                preview = str(block["text"])
-                break
-    preview = (preview or "").replace("\n", " ").strip()
-    if len(preview) > 80:
-        preview = preview[:77] + "..."
-    return preview
 
 
 def _deserialize_message(payload: dict) -> Optional[ConversationMessage]:
@@ -127,8 +109,9 @@ class SessionHistory:
             return
 
         payload = message.model_dump(mode="json")
+        logged_at = _now_iso()
         entry = {
-            "logged_at": _now_iso(),
+            "logged_at": logged_at,
             "project_path": str(self.project_path.resolve()),
             "payload": payload,
         }
@@ -140,6 +123,21 @@ class SessionHistory:
                 fh.write("\n")
             if isinstance(msg_uuid, str):
                 self._seen_ids.add(msg_uuid)
+            try:
+                update_session_index_for_payload(
+                    self.project_path,
+                    self.session_id,
+                    payload,
+                    logged_at=logged_at,
+                    session_file=self.path,
+                )
+            except (OSError, IOError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Failed to update session index: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={"session_id": self.session_id, "path": str(self.path)},
+                )
         except (OSError, IOError) as exc:
             # Avoid crashing the UI if logging fails
             logger.warning(
@@ -157,80 +155,31 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
     if not directory.exists():
         return []
 
-    current_project = str(project_path.resolve())
     summaries: List[SessionSummary] = []
-    for jsonl_path in directory.glob("*.jsonl"):
-        try:
-            with jsonl_path.open("r", encoding="utf-8") as fh:
-                messages = [json.loads(line) for line in fh if line.strip()]
-        except (OSError, IOError, json.JSONDecodeError) as exc:
-            logger.warning(
-                "Failed to load session summary: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"path": str(jsonl_path)},
-            )
+    for entry in list_session_index_entries(project_path):
+        session_path = directory / f"{entry.session_id}.jsonl"
+        if not session_path.exists():
             continue
 
-        # Check if this session belongs to the current project
-        # If any message has a project_path field, use it to verify
-        session_project_path = None
-        for entry in messages:
-            entry_path = entry.get("project_path")
-            if entry_path:
-                session_project_path = entry_path
-                break
-
-        # Skip sessions that belong to a different project
-        if session_project_path and session_project_path != current_project:
-            continue
-
-        payloads = [entry.get("payload") or {} for entry in messages]
-        conversation_payloads = [
-            payload for payload in payloads if payload.get("type") in ("user", "assistant")
-        ]
-        if not conversation_payloads:
-            continue
-
-        created_raw = messages[0].get("logged_at")
-        updated_raw = messages[-1].get("logged_at")
-        created_at = (
-            datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
-            if isinstance(created_raw, str)
-            else datetime.fromtimestamp(jsonl_path.stat().st_ctime)
+        created_at = entry.created_at or datetime.fromtimestamp(
+            session_path.stat().st_ctime, tz=timezone.utc
         )
-        updated_at = (
-            datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
-            if isinstance(updated_raw, str)
-            else datetime.fromtimestamp(jsonl_path.stat().st_mtime)
+        updated_at = entry.updated_at or datetime.fromtimestamp(
+            session_path.stat().st_mtime, tz=timezone.utc
         )
-        # Extract last user prompt with more than 10 characters
-        # If not found, fall back to any user prompt
-        last_prompt = ""
-        fallback_prompt = ""
-        for payload in reversed(conversation_payloads):
-            if payload.get("type") != "user":
-                continue
-            prompt = _extract_prompt(payload)
-            if not prompt:
-                continue
-            if not fallback_prompt:
-                fallback_prompt = prompt
-            if len(prompt) > 10:
-                last_prompt = prompt
-                break
+
         summaries.append(
             SessionSummary(
-                session_id=jsonl_path.stem,
-                path=jsonl_path,
-                message_count=len(conversation_payloads),
+                session_id=entry.session_id,
+                path=session_path,
+                message_count=entry.message_count,
                 created_at=created_at,
                 updated_at=updated_at,
-                last_prompt=last_prompt or fallback_prompt or "(no prompt)",
+                last_prompt=entry.preferred_prompt,
             )
         )
 
-    return sorted(summaries, key=lambda s: s.updated_at, reverse=True)
+    return summaries
 
 
 def load_session_messages(project_path: Path, session_id: str) -> List[ConversationMessage]:

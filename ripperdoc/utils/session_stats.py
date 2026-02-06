@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.session_history import list_session_summaries
+from ripperdoc.utils.session_index import list_session_index_entries
 
 logger = get_logger()
 
@@ -117,8 +117,8 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
         model_usage=defaultdict(int),
     )
 
-    summaries = list_session_summaries(project_path)
-    if not summaries:
+    index_entries = list_session_index_entries(project_path)
+    if not index_entries:
         return stats
 
     # Filter by date range (use timezone-aware cutoff if needed)
@@ -127,51 +127,69 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Ensure comparison works with both naive and aware datetimes
-    recent_summaries = []
-    for s in summaries:
-        # Make updated_at timezone-aware if it's naive
-        updated_at = s.updated_at
+    recent_entries = []
+    for entry in index_entries:
+        if entry.updated_at is None:
+            continue
+        updated_at = entry.updated_at
         if updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=timezone.utc)
         if updated_at >= cutoff:
-            recent_summaries.append(s)
+            recent_entries.append(entry)
 
-    if not recent_summaries:
+    if not recent_entries:
         return stats
 
     # Basic counts
-    stats.total_sessions = len(recent_summaries)
-    stats.total_messages = sum(s.message_count for s in recent_summaries)
+    stats.total_sessions = len(recent_entries)
+    stats.total_messages = sum(entry.message_count for entry in recent_entries)
 
     # Time statistics
-    stats.earliest_session = min(s.created_at for s in recent_summaries)
-    stats.latest_session = max(s.updated_at for s in recent_summaries)
+    created_times = [entry.created_at for entry in recent_entries if entry.created_at is not None]
+    updated_times = [entry.updated_at for entry in recent_entries if entry.updated_at is not None]
+    if not created_times or not updated_times:
+        return stats
+    stats.earliest_session = min(created_times)
+    stats.latest_session = max(updated_times)
     stats.total_days = (stats.latest_session - stats.earliest_session).days + 1
 
-    # Calculate longest session and activity patterns in single pass
+    # Calculate longest session, activity patterns, and usage totals in one pass.
     active_dates: List[datetime] = []
     date_set: set[str] = set()
 
-    for summary in recent_summaries:
+    for entry in recent_entries:
+        if entry.created_at is None or entry.updated_at is None:
+            continue
         # Longest session
-        duration = summary.updated_at - summary.created_at
+        duration = entry.updated_at - entry.created_at
         if duration > stats.longest_session_duration:
             stats.longest_session_duration = duration
 
         # Track dates
-        date_str = summary.updated_at.date().isoformat()
+        date_str = entry.updated_at.date().isoformat()
         if date_str not in date_set:
             date_set.add(date_str)
-            active_dates.append(summary.updated_at)
+            active_dates.append(entry.updated_at)
 
         # Hourly activity
-        stats.hourly_activity[summary.updated_at.hour] += 1
+        stats.hourly_activity[entry.updated_at.hour] += 1
 
         # Daily activity (for heatmap)
         stats.daily_activity[date_str] += 1
 
         # Weekday activity
-        stats.weekday_activity[summary.updated_at.weekday()] += 1
+        stats.weekday_activity[entry.updated_at.weekday()] += 1
+
+        # Model and token usage from sidecar aggregates
+        stats.total_input_tokens += entry.total_input_tokens
+        stats.total_output_tokens += entry.total_output_tokens
+        stats.total_cache_read_tokens += entry.total_cache_read_tokens
+        stats.total_cache_creation_tokens += entry.total_cache_creation_tokens
+        stats.total_cost_usd += entry.total_cost_usd
+        for model_name, count in entry.model_usage.items():
+            if not model_name:
+                continue
+            stats.model_usage[model_name] += count
 
     # Active days
     stats.active_days = len(date_set)
@@ -182,55 +200,6 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
     # Peak hour
     if stats.hourly_activity:
         stats.peak_hour = max(stats.hourly_activity.items(), key=lambda x: x[1])[0]
-
-    # Load detailed session data for token and model statistics
-    import json
-
-    for summary in recent_summaries:
-        session_file = summary.path
-        if not session_file.exists():
-            continue
-
-        try:
-            with session_file.open("r", encoding="utf-8") as fh:
-                for line in fh:
-                    if not line.strip():
-                        continue
-                    # Quick string check before full JSON parse
-                    if '"type":"assistant"' not in line and '"type": "assistant"' not in line:
-                        continue
-                    try:
-                        entry = json.loads(line)
-                        payload = entry.get("payload", {})
-
-                        # Only process assistant messages
-                        if payload.get("type") != "assistant":
-                            continue
-
-                        # Extract model and token information
-                        model = payload.get("model")
-                        if model:
-                            stats.model_usage[model] += 1
-
-                        # Extract token counts
-                        input_tokens = payload.get("input_tokens", 0)
-                        output_tokens = payload.get("output_tokens", 0)
-                        cache_read = payload.get("cache_read_tokens", 0)
-                        cache_creation = payload.get("cache_creation_tokens", 0)
-
-                        stats.total_input_tokens += input_tokens
-                        stats.total_output_tokens += output_tokens
-                        stats.total_cache_read_tokens += cache_read
-                        stats.total_cache_creation_tokens += cache_creation
-
-                        # Extract cost
-                        cost = payload.get("cost_usd", 0.0)
-                        stats.total_cost_usd += cost
-
-                    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-                        continue
-        except (OSError, IOError):
-            continue
 
     # Calculate total tokens
     stats.total_tokens = (
