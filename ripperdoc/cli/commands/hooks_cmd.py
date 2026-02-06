@@ -514,12 +514,12 @@ def _prompt_hook_details(
     run_async = async_choice in ("y", "yes")
 
     timeout = _prompt_timeout(console, timeout_default)
-    hook_def: Dict[str, Any] = {"type": "command", "command": command, "timeout": timeout}
+    command_hook_def: Dict[str, Any] = {"type": "command", "command": command, "timeout": timeout}
     if run_async:
-        hook_def["async"] = True
+        command_hook_def["async"] = True
     if status_text:
-        hook_def["statusMessage"] = status_text
-    return hook_def
+        command_hook_def["statusMessage"] = status_text
+    return command_hook_def
 
 
 def _select_hook(console: Any, matcher: Dict[str, Any]) -> Optional[int]:

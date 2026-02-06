@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import TracebackType
 from typing import Optional
 
 
@@ -37,7 +38,12 @@ class _TimeoutCompat:
             self._handle = loop.call_later(self._delay, self._trigger_timeout)
         return None
 
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
         if self._handle is not None:
             self._handle.cancel()
         if exc_type is asyncio.CancelledError and self._timed_out:

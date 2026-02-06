@@ -189,8 +189,9 @@ class AgentGenerateScreen(ModalScreen[Optional[str]]):
             self._set_error("Please enter a description.")
             return
         app = getattr(self, "app", None)
-        if hasattr(app, "start_agent_generation"):
-            app.start_agent_generation(description, self)
+        start_generation = getattr(app, "start_agent_generation", None)
+        if callable(start_generation):
+            start_generation(description, self)
 
     def _set_error(self, message: str) -> None:
         if not message:
@@ -367,7 +368,8 @@ class AgentFormScreen(ModalScreen[Optional[AgentFormResult]]):
             self._set_error("System prompt is required.")
             return
 
-        location_raw = (location_select.value or "").strip().lower()
+        location_value = location_select.value
+        location_raw = location_value.strip().lower() if isinstance(location_value, str) else "user"
         location = AgentLocation.PROJECT if location_raw == "project" else AgentLocation.USER
 
         model_value = (model_input.value or "").strip()
@@ -652,12 +654,12 @@ class AgentsApp(App[None]):
 
     def _handle_create_method(self, method: Optional[str]) -> None:
         if method == "manual":
-            screen = AgentFormScreen("add")
-            self.push_screen(screen, self._handle_add_result)
+            form_screen = AgentFormScreen("add")
+            self.push_screen(form_screen, self._handle_add_result)
             return
         if method == "generate":
-            screen = AgentGenerateScreen()
-            self.push_screen(screen)
+            generate_screen = AgentGenerateScreen()
+            self.push_screen(generate_screen)
 
     def start_agent_generation(self, description: str, screen: AgentGenerateScreen) -> None:
         if not description:
@@ -891,7 +893,7 @@ class AgentsApp(App[None]):
         self._selected_key = result.name
         self._refresh_agents(select_first=False)
 
-    def _handle_delete_confirm(self, confirmed: bool) -> None:
+    def _handle_delete_confirm(self, confirmed: Optional[bool]) -> None:
         if not confirmed:
             return
         agent = self._selected_agent()
@@ -999,11 +1001,6 @@ class AgentsApp(App[None]):
     def _move_cursor(self, table: DataTable, row_index: int) -> None:
         try:
             table.move_cursor(row=row_index)
-        except TypeError:
-            try:
-                table.move_cursor(row_index, 0)
-            except Exception:
-                pass
         except Exception:
             pass
 

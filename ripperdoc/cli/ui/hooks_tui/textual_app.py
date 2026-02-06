@@ -240,7 +240,8 @@ class MatcherScreen(ModalScreen[Optional[str]]):
         if event.button.id != "form_save":
             return
         if self._mode == "enum" and self._choices:
-            selected = (self.query_one("#matcher_select", Select).value or "").strip()
+            selected_value = self.query_one("#matcher_select", Select).value
+            selected = selected_value.strip() if isinstance(selected_value, str) else ""
             self.dismiss(selected or "*")
             return
         raw = (self.query_one("#matcher_input", Input).value or "").strip()
@@ -389,7 +390,7 @@ class HookFormScreen(ModalScreen[Optional[HookFormResult]]):
                 self._set_error("Prompt text is required.")
                 return
             hook_type = "prompt" if self._hook_type == "prompt" else "agent"
-            hook = {"type": hook_type, "prompt": prompt_text}
+            hook: Dict[str, Any] = {"type": hook_type, "prompt": prompt_text}
             if hook_type == "agent":
                 model_text = (self.query_one("#model_input", Input).value or "").strip()
                 if model_text:
@@ -597,7 +598,7 @@ class HooksApp(App[None]):
             self._set_status(f"Scope: {self._current_target().label}")
         self._refresh_view()
 
-    def action_back(self) -> None:
+    async def action_back(self) -> None:
         if len(self.screen_stack) > 1:
             return
         if self._view_mode == "hooks":
@@ -827,7 +828,7 @@ class HooksApp(App[None]):
         if matcher is None:
             return "*"
         pattern = matcher.get("matcher")
-        return pattern if pattern not in (None, "") else "*"
+        return str(pattern) if pattern not in (None, "") else "*"
 
     def _add_hook_in_current_matcher(self, hook: Dict[str, Any]) -> None:
         if not self._event_name:
@@ -1327,7 +1328,9 @@ class HooksApp(App[None]):
             return None
         hooks = matcher.get("hooks", [])
         if 0 <= hook_index < len(hooks):
-            return hooks[hook_index]
+            hook = hooks[hook_index]
+            if isinstance(hook, dict):
+                return hook
         return None
 
     def _current_matcher_label(self) -> str:
@@ -1404,7 +1407,7 @@ class HooksApp(App[None]):
 
     def _matcher_label(self, matcher: Dict[str, Any]) -> str:
         label = matcher.get("matcher")
-        return label if label not in (None, "") else "*"
+        return str(label) if label not in (None, "") else "*"
 
     def _match_all_index(self) -> Optional[int]:
         if not self._event_name:

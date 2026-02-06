@@ -9,18 +9,20 @@ from collections import deque
 import threading
 from typing import Any, Deque, Dict, List, Optional
 
-from ripperdoc.utils.messages import UserMessage, create_user_message
+from ripperdoc.utils.messages import ProgressMessage, UserMessage, create_user_message
+
+PendingMessage = UserMessage | ProgressMessage
 
 
 class PendingMessageQueue:
     """Thread-safe queue for pending user messages."""
 
     def __init__(self) -> None:
-        self._queue: Deque[UserMessage] = deque()
+        self._queue: Deque[PendingMessage] = deque()
         self._lock = threading.Lock()
 
-    def enqueue(self, message: UserMessage) -> None:
-        """Add a pre-built UserMessage to the queue."""
+    def enqueue(self, message: PendingMessage) -> None:
+        """Add a pre-built pending message to the queue."""
         with self._lock:
             self._queue.append(message)
 
@@ -35,7 +37,7 @@ class PendingMessageQueue:
                 pass
         self.enqueue(message)
 
-    def drain(self) -> List[UserMessage]:
+    def drain(self) -> List[PendingMessage]:
         """Drain all pending messages in FIFO order."""
         with self._lock:
             if not self._queue:

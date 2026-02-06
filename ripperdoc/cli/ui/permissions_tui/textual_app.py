@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from rich.text import Text
-
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll

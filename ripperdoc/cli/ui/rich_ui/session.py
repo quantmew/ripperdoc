@@ -152,20 +152,19 @@ class RichUI:
         self._esc_interrupt_seen = False
         self._query_in_progress = False
         self._active_spinner: Optional[ThinkingSpinner] = None
+        self._permission_checker: Any = None
         hook_manager.set_transcript_path(str(self._session_history.path))
 
         # Create permission checker with Rich console and PromptSession support
         if not yolo_mode:
             # Create a dedicated PromptSession for permission dialogs
             # This provides better interrupt handling than console.input()
-            from prompt_toolkit import PromptSession
-
             # Disable CPR (Cursor Position Request) to avoid warnings in terminals
             # that don't support it (like some remote/CI terminals)
             import os
             os.environ['PROMPT_TOOLKIT_NO_CPR'] = '1'
 
-            permission_session = PromptSession()
+            permission_session: PromptSession = PromptSession()
 
             self._permission_checker = make_permission_checker(
                 self.project_path,
@@ -645,7 +644,7 @@ class RichUI:
         self._rollback_to_index(target_index)
         return True
 
-    def replay_conversation(self, messages: List[Dict[str, Any]]) -> None:
+    def replay_conversation(self, messages: List[ConversationMessage]) -> None:
         """Render a conversation history in the console and seed prompt history."""
         if not messages:
             return
@@ -668,13 +667,13 @@ class RichUI:
                         has_tool_result = True
                         break
 
-            if msg_type == "assistant":
+            if msg_type == "assistant" and isinstance(msg, AssistantMessage):
                 last = handle_assistant_message(self, msg, tool_registry, spinner=None)
                 if last:
                     last_tool_name = last
                 continue
 
-            if msg_type == "user" and has_tool_result:
+            if msg_type == "user" and has_tool_result and isinstance(msg, UserMessage):
                 handle_tool_result_message(
                     self, msg, tool_registry, last_tool_name, spinner=None
                 )

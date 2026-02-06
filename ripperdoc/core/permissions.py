@@ -7,7 +7,7 @@ import html
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, Set, TYPE_CHECKING, TYPE_CHECKING as TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, Set
 
 from ripperdoc.cli.ui.choice import prompt_choice
 from ripperdoc.core.config import config_manager

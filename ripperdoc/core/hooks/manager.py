@@ -357,13 +357,13 @@ class HookManager:
         metadata = {"source": "hook_async", "hook_event": event, "tool_name": tool_name}
 
         if output.system_message:
-            notice = create_hook_notice_message(
-                str(output.system_message),
-                hook_event=event,
-                tool_name=tool_name,
-            )
             try:
-                queue.enqueue(notice)  # ProgressMessage is filtered from model input.
+                notice = create_hook_notice_message(
+                    str(output.system_message),
+                    hook_event=event,
+                    tool_name=tool_name,
+                )
+                queue.enqueue(notice)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "[hook_manager] Failed to enqueue async hook notice: %s: %s",

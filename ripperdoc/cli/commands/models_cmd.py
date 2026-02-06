@@ -1,6 +1,6 @@
 import sys
 import textwrap
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from rich import box
 from rich.layout import Layout
@@ -426,7 +426,7 @@ def _default_selected_model(config: Any, preferred: Optional[str] = None) -> Opt
     if main_pointer in config.model_profiles:
         return main_pointer
     if config.model_profiles:
-        return next(iter(config.model_profiles))
+        return str(next(iter(config.model_profiles)))
     return None
 
 
@@ -526,15 +526,15 @@ def _prompt_models_command(console: Any) -> str:
         from prompt_toolkit import prompt as pt_prompt
         from prompt_toolkit.key_binding import KeyBindings
     except (ImportError, OSError, RuntimeError):
-        return console.input("Command (a/e/d/m/k/q/r or model #/name): ").strip()
+        return str(console.input("Command (a/e/d/m/k/q/r or model #/name): ")).strip()
 
     key_bindings = KeyBindings()
 
-    def _exit_with(value: str) -> None:
+    def _exit_with(value: str) -> Callable[[Any], None]:
         def _handler(event: Any) -> None:  # noqa: ANN001
             event.app.exit(result=value)
 
-        return _handler  # type: ignore[return-value]
+        return _handler
 
     for key in ("a", "A"):
         key_bindings.add(key, eager=True)(_exit_with("a"))
@@ -580,7 +580,7 @@ def _resolve_model_selection(
             return selected_name
         names = list(config.model_profiles.keys())
         if 1 <= idx <= len(names):
-            return names[idx - 1]
+            return str(names[idx - 1])
         return selected_name
     if raw in config.model_profiles:
         return raw
@@ -685,6 +685,7 @@ def _handle_models_rich_tui(ui: Any) -> bool:
             selected_name = profile_name
             continue
 
+        model_name: Optional[str]
         if command in ("e", "edit", "d", "delete", "del", "remove", "m", "main", "k", "quick"):
             if not selected_name:
                 console.print("[yellow]No model selected.[/yellow]")

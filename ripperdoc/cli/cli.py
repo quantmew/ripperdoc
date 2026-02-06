@@ -244,7 +244,7 @@ async def run_query(
                     content = getattr(message, "content", None)
                     from ripperdoc.utils.messages import is_hook_notice_payload
 
-                    if is_hook_notice_payload(content):
+                    if is_hook_notice_payload(content) and isinstance(content, dict):
                         event = content.get("hook_event", "Hook")
                         tool_name = content.get("tool_name")
                         label = f"{event}:{tool_name}" if tool_name else str(event)

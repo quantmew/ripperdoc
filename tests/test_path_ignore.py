@@ -297,7 +297,7 @@ class TestIsPathIgnored:
 # =============================================================================
 
 
-class TestCheckPathForTool:
+class TestCheckPathForToolGitignoreWarnings:
     """Tests for check_path_for_tool function."""
 
     def test_binary_file_warning(self):

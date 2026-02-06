@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 import re
 import shutil
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.filters import Condition, has_focus, is_done
@@ -374,7 +374,7 @@ def prompt_choice(
         message=formatted_prompt,
         options=choice_options_formatted,
         style=style or resolve_choice_style(style_variant),
-        show_frame=~is_done,
+        show_frame=cast(Any, ~is_done),
         key_bindings=key_bindings if allow_esc else None,
     )
 
@@ -573,7 +573,7 @@ async def prompt_choice_async(
         if external_header:
             print(external_header)
 
-        result = await Application(
+        result: str = await Application(
             layout=layout,
             full_screen=False,
             key_bindings=key_bindings,
@@ -613,7 +613,7 @@ async def prompt_choice_async(
     for _ in range(lines_to_clear):
         print("\033[F\033[2K", end="", flush=True)
 
-    return result
+    return str(result)
 
 
 async def prompt_checkbox_async(
@@ -712,10 +712,10 @@ async def prompt_checkbox_async(
     if custom_input_label:
         body_children.append(custom_input_container)
 
-    container = HSplit(body_children)
+    base_container: Any = HSplit(body_children)
     container = ConditionalContainer(
-        Frame(container),
-        alternative_content=container,
+        Frame(base_container),
+        alternative_content=base_container,
         filter=~is_done,
     )
     layout = Layout(container, focused_element=checkbox_list)
@@ -793,7 +793,7 @@ async def prompt_checkbox_async(
     def _interrupt(event: Any) -> None:  # noqa: ANN401
         event.app.exit(result=None, style="class:aborting")
 
-    result = await Application(
+    result: Optional[list[str]] = await Application(
         layout=layout,
         full_screen=False,
         key_bindings=kb,

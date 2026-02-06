@@ -4,7 +4,7 @@ import asyncio
 import os
 import sys
 from asyncio import CancelledError
-from typing import Any, AsyncGenerator, Awaitable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Dict, List, Optional, Union, cast
 
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
 from ripperdoc.core.hooks.state import bind_hook_status_emitter
@@ -21,6 +21,9 @@ from ripperdoc.utils.messages import (
 )
 
 from .context import _append_hook_context
+
+if TYPE_CHECKING:
+    from ripperdoc.core.query.loop import ToolRegistry
 
 logger = get_logger()
 
@@ -69,13 +72,14 @@ async def _run_hook_call_with_status(
             )
 
     with bind_hook_status_emitter(_emit_status):
-        task = asyncio.create_task(awaitable)
+        task: asyncio.Future[HookResult] = asyncio.ensure_future(awaitable)
         while True:
             if task.done():
                 break
-            get_task = asyncio.create_task(status_queue.get())
-            done, pending = await asyncio.wait(
-                {task, get_task}, timeout=0.2, return_when=asyncio.FIRST_COMPLETED
+            get_task: asyncio.Task[str] = asyncio.create_task(status_queue.get())
+            wait_tasks = cast(set[asyncio.Future[Any]], {task, get_task})
+            done, pending_tasks = await asyncio.wait(
+                wait_tasks, timeout=0.2, return_when=asyncio.FIRST_COMPLETED
             )
             if get_task in done:
                 msg = get_task.result()
@@ -85,10 +89,10 @@ async def _run_hook_call_with_status(
                     content=msg,
                 )
             if task in done:
-                for p in pending:
+                for p in pending_tasks:
                     p.cancel()
                 break
-            for p in pending:
+            for p in pending_tasks:
                 if p is not task:
                     p.cancel()
                     try:
@@ -96,8 +100,8 @@ async def _run_hook_call_with_status(
                     except asyncio.CancelledError:
                         pass
 
-        async for pending in _drain_status_queue():
-            yield pending
+        async for progress_update in _drain_status_queue():
+            yield progress_update
         result = await task
         yield result
 

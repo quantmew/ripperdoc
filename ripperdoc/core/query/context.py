@@ -8,7 +8,7 @@ from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.file_watch import BoundedFileCache
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messages import UserMessage
+from ripperdoc.utils.messages import ProgressMessage, UserMessage
 from ripperdoc.utils.pending_messages import PendingMessageQueue
 
 logger = get_logger()
@@ -265,7 +265,7 @@ class QueryContext:
             "active_tool_count": len(self.tool_registry.active_tools),
         }
 
-    def drain_pending_messages(self) -> List[UserMessage]:
+    def drain_pending_messages(self) -> List[UserMessage | ProgressMessage]:
         """Drain queued messages waiting to be injected into the conversation."""
         return self.pending_message_queue.drain()
 

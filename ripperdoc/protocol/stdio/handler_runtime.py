@@ -201,7 +201,7 @@ class StdioRuntimeMixin:
             cleanup_tasks = []
 
             # Add MCP runtime shutdown
-            async def cleanup_mcp():
+            async def cleanup_mcp() -> None:
                 try:
                     async with asyncio_timeout(10):
                         await shutdown_mcp_runtime()
@@ -213,7 +213,7 @@ class StdioRuntimeMixin:
             cleanup_tasks.append(asyncio.create_task(cleanup_mcp()))
 
             # Add LSP manager shutdown
-            async def cleanup_lsp():
+            async def cleanup_lsp() -> None:
                 try:
                     async with asyncio_timeout(10):
                         await shutdown_lsp_manager()
@@ -225,7 +225,7 @@ class StdioRuntimeMixin:
             cleanup_tasks.append(asyncio.create_task(cleanup_lsp()))
 
             # Add background shell shutdown
-            async def cleanup_shell():
+            async def cleanup_shell() -> None:
                 try:
                     shutdown_background_shell(force=True)
                 except Exception:

@@ -477,19 +477,19 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 else:  # content mode
                     parsed_files = []
                     for line in lines:
-                        parsed = _parse_content_line(line, search_path)
-                        if parsed:
-                            parsed_files.append(parsed[0])
+                        parsed_content = _parse_content_line(line, search_path)
+                        if parsed_content:
+                            parsed_files.append(parsed_content[0])
                     total_files = len(set(parsed_files))
                     total_matches = len(lines)
                     for line in display_lines:
-                        parsed = _parse_content_line(line, search_path)
-                        if parsed:
+                        parsed_content = _parse_content_line(line, search_path)
+                        if parsed_content:
                             matches.append(
                                 GrepMatch(
-                                    file=parsed[0],
-                                    line_number=parsed[1],
-                                    content=parsed[2],
+                                    file=parsed_content[0],
+                                    line_number=parsed_content[1],
+                                    content=parsed_content[2],
                                 )
                             )
 

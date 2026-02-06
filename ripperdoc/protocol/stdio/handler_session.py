@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import time
 import uuid
 from pathlib import Path
@@ -36,6 +37,13 @@ logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
 
 class StdioSessionMixin:
+    _query_context: QueryContext | None
+    _session_id: str | None
+    _custom_system_prompt: str | None
+    _skill_instructions: str | None
+    _session_start_time: float | None
+    _session_history: SessionHistory | None
+
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
 

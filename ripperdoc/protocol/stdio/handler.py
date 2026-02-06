@@ -7,6 +7,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from ripperdoc.core.hooks.config import HooksConfig
+from ripperdoc.core.query import QueryContext
+from ripperdoc.utils.session_history import SessionHistory
+
 from .handler_config import StdioConfigMixin
 from .handler_control import StdioControlMixin
 from .handler_io import StdioIOMixin
@@ -69,13 +73,13 @@ class StdioProtocolHandler(
         self._initialized = False
         self._session_id: str | None = None
         self._project_path: Path = Path.cwd()
-        self._query_context = None
+        self._query_context: QueryContext | None = None
         self._can_use_tool: Any | None = None
         self._local_can_use_tool: Any | None = None
         self._sdk_can_use_tool_enabled: bool = False
         self._sdk_can_use_tool_supported: bool = True
         self._hooks: dict[str, list[dict[str, Any]]] = {}
-        self._sdk_hook_scope = None
+        self._sdk_hook_scope: HooksConfig | None = None
         self._pending_requests: dict[str, Any] = {}
         self._request_lock = asyncio.Lock()
         self._inflight_tasks: set[asyncio.Task[None]] = set()
@@ -92,7 +96,7 @@ class StdioProtocolHandler(
         self._session_start_time: float | None = None
         self._session_end_sent = False
         self._session_hook_contexts: list[str] = []
-        self._session_history = None
+        self._session_history: SessionHistory | None = None
 
 
 __all__ = ["StdioProtocolHandler"]

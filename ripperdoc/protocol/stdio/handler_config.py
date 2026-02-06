@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable, Coroutine, Optional, cast
 
 from ripperdoc.core.default_tools import filter_tools_by_names
 from ripperdoc.core.hooks.config import HookDefinition, HookMatcher, HooksConfig, DEFAULT_HOOK_TIMEOUT
@@ -25,6 +25,13 @@ logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
 class StdioConfigMixin:
     _PERMISSION_MODES: set[str]
+    _can_use_tool: Any | None
+    _local_can_use_tool: Any | None
+    _query_context: Any | None
+    _custom_system_prompt: str | None
+    _skill_instructions: str | None
+    _session_id: str | None
+    _sdk_hook_scope: HooksConfig | None
 
     def _normalize_permission_mode(self, mode: Any) -> str:
         """Normalize permission mode to a supported value."""
@@ -118,7 +125,10 @@ class StdioConfigMixin:
                 setattr(sdk_can_use_tool, "force_prompt", sdk_force_prompt)
                 self._can_use_tool = sdk_can_use_tool
             else:
-                self._can_use_tool = self._local_can_use_tool
+                self._can_use_tool = cast(
+                    Optional[Callable[[Any, Any], Coroutine[Any, Any, PermissionResult]]],
+                    self._local_can_use_tool,
+                )
 
     def _coerce_bool_option(self, value: Any, default: bool) -> bool:
         """Parse flexible bool option values from SDK initialize payloads."""
@@ -234,9 +244,12 @@ class StdioConfigMixin:
         if force_prompt and hasattr(checker, "force_prompt"):
             decision_fn = getattr(checker, "force_prompt")
 
-        result = decision_fn(tool, parsed_input)
-        if inspect.isawaitable(result):
-            result = await result
+        raw_result = decision_fn(tool, parsed_input)
+        result: Any
+        if inspect.isawaitable(raw_result):
+            result = await cast(Awaitable[Any], raw_result)
+        else:
+            result = raw_result
 
         if isinstance(result, PermissionResult):
             return result
@@ -387,7 +400,7 @@ class StdioConfigMixin:
     ) -> str:
         """Resolve the system prompt for the current session/query."""
         if self._custom_system_prompt:
-            return self._custom_system_prompt
+            return str(self._custom_system_prompt)
 
         additional_instructions: list[str] = []
         if self._skill_instructions:

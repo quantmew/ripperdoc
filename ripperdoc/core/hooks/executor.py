@@ -59,7 +59,7 @@ def _extract_message_text(message: AssistantMessage) -> str:
     return ""
 
 
-def _build_hook_agent_tools():
+def _build_hook_agent_tools() -> list[Any]:
     """Create a constrained toolset for agent-based hooks."""
     return [
         FileReadTool(),

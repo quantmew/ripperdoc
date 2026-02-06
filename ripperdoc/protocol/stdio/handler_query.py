@@ -29,6 +29,9 @@ logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
 
 class StdioQueryMixin:
+    _session_history: SessionHistory | None
+    _session_id: str | None
+
     async def _handle_query(self, request: dict[str, Any], request_id: str) -> None:
         """Handle query request from SDK with comprehensive timeout and error handling.
 
@@ -44,7 +47,7 @@ class StdioQueryMixin:
         # Variables to track query state (using lists for mutable reference across async contexts)
         num_turns = [0]  # [int]
         is_error = [False]  # [bool]
-        final_result_text = [None]  # [str | None]
+        final_result_text: list[str | None] = [None]
 
         # Track token usage
         total_input_tokens = [0]  # [int]
@@ -240,12 +243,15 @@ class StdioQueryMixin:
                             # Handle progress messages
                             if msg_type == "progress":
                                 notice_content = getattr(message, "content", None)
-                                if is_hook_notice_payload(notice_content):
+                                if is_hook_notice_payload(notice_content) and isinstance(
+                                    notice_content, dict
+                                ):
+                                    notice_payload: dict[str, Any] = notice_content
                                     stream_message = self._build_hook_notice_stream_message(
-                                        str(notice_content.get("text", "")),
-                                        str(notice_content.get("hook_event", "")),
-                                        tool_name=notice_content.get("tool_name"),
-                                        level=notice_content.get("level") or "info",
+                                        str(notice_payload.get("text", "")),
+                                        str(notice_payload.get("hook_event", "")),
+                                        tool_name=notice_payload.get("tool_name"),
+                                        level=notice_payload.get("level") or "info",
                                     )
                                     await self._write_message_stream(model_to_dict(stream_message))
                                     continue
@@ -295,16 +301,16 @@ class StdioQueryMixin:
                                         if isinstance(content, str):
                                             final_result_text[0] = content
                                         elif isinstance(content, list):
-                                            text_parts = []
+                                            text_parts: list[str] = []
                                             for block in content:
                                                 if isinstance(block, dict):
                                                     if block.get("type") == "text":
-                                                        text_parts.append(block.get("text", ""))
+                                                        text_parts.append(str(block.get("text", "")))
                                                     elif block.get("type") == "tool_use":
                                                         text_parts.clear()
                                                 elif hasattr(block, "type"):
                                                     if block.type == "text":
-                                                        text_parts.append(getattr(block, "text", ""))
+                                                        text_parts.append(str(getattr(block, "text", "")))
                                             if text_parts:
                                                 final_result_text[0] = "\n".join(text_parts)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Any, Callable, Optional
 
 from rich import box
 from rich.panel import Panel
@@ -225,7 +225,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 self._set_error("Profile name is required.")
                 return
 
-        provider_value = (provider_select.value or "").strip()
+        provider_raw = provider_select.value
+        provider_value = provider_raw.strip() if isinstance(provider_raw, str) else ""
         try:
             provider = ProviderType(provider_value)
         except ValueError:
@@ -281,7 +282,10 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             if context_window is None:
                 return
 
-        supports_value = (vision_select.value or "auto").strip().lower()
+        vision_raw = vision_select.value
+        supports_value = (
+            vision_raw.strip().lower() if isinstance(vision_raw, str) and vision_raw else "auto"
+        )
         if supports_value == "yes":
             supports_vision = True
         elif supports_value == "no":
@@ -557,7 +561,7 @@ class ModelsApp(App[None]):
         self._set_status(f"Updated {result.name}.")
         self._refresh_models(select_first=False)
 
-    def _handle_delete_confirm(self, confirmed: bool) -> None:
+    def _handle_delete_confirm(self, confirmed: Optional[bool]) -> None:
         if not confirmed or not self._selected_name:
             return
         try:
@@ -617,11 +621,6 @@ class ModelsApp(App[None]):
     def _move_cursor(self, table: DataTable, row_index: int) -> None:
         try:
             table.move_cursor(row=row_index)
-        except TypeError:
-            try:
-                table.move_cursor(row_index, 0)
-            except Exception:
-                pass
         except Exception:
             pass
 

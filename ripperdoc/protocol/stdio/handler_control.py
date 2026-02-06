@@ -140,6 +140,7 @@ class StdioControlMixin:
             return
 
         tool = self._query_context.tool_registry.get(tool_name)
+        perm_response: PermissionResponseAllow | PermissionResponseDeny
         if tool is None:
             perm_response = PermissionResponseDeny(message=f"Tool '{tool_name}' not found")
             await self._write_control_response(request_id, response=model_to_dict(perm_response))

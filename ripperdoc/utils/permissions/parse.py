@@ -156,7 +156,8 @@ def has_metachars_outside_quotes(command: str) -> bool:
             token = lex.get_token()
             if token == lex.eof:
                 break
-            tokens.append(token)
+            if isinstance(token, str):
+                tokens.append(token)
     except ValueError:
         # If shlex fails (e.g., unmatched quotes), be cautious.
         return True

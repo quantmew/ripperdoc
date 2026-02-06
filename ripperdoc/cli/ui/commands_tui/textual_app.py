@@ -361,7 +361,7 @@ class CommandsApp(App):
         screen = ConfirmScreen(f"Delete /{row.command.name} ({row.command.location.value})?")
         self.push_screen(screen, self._handle_delete_confirm)
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         self.exit()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -391,7 +391,7 @@ class CommandsApp(App):
         self._set_status(f"Updated /{result.name}.")
         self._refresh_commands(select_first=False, prefer_name=result.name)
 
-    def _handle_delete_confirm(self, confirmed: bool) -> None:
+    def _handle_delete_confirm(self, confirmed: Optional[bool]) -> None:
         if not confirmed:
             return
         row = self._selected_row()

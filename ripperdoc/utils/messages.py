@@ -42,7 +42,7 @@ class MessageContent(BaseModel):
 
     @field_validator("input", mode="before")
     @classmethod
-    def validate_input(cls, v):
+    def validate_input(cls, v: Any) -> Any:
         """Ensure input is always a dict, never a Pydantic model."""
         if v is not None and not isinstance(v, dict):
             if hasattr(v, "model_dump"):

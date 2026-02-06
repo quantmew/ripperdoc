@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Callable, Generator, Optional, Sequence, List
+from typing import Callable, Generator, List, Optional, Sequence
 
 from ripperdoc.core.hooks.config import HooksConfig
 

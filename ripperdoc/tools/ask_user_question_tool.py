@@ -167,7 +167,7 @@ def format_question_prompt(
                 )
             else:
                 lines.append(
-                    f"  Select options (e.g., 1,3), 'o' for other, 'b' to go back, or 'q' to cancel: "
+                    "  Select options (e.g., 1,3), 'o' for other, 'b' to go back, or 'q' to cancel: "
                 )
         else:
             if allow_next:
