@@ -42,7 +42,7 @@ def _api_key_status(provider: ProviderType, profile_key: Optional[str]) -> Tuple
     """Check API key presence and source."""
     import os
 
-    # 首先检查全局 RIPPERDOC_API_KEY
+    # First check global RIPPERDOC_API_KEY
     if ripperdoc_api_key := os.getenv("RIPPERDOC_API_KEY"):
         masked = ripperdoc_api_key[:4] + "…" if len(ripperdoc_api_key) > 4 else "set"
         return ("ok", f"Found in $RIPPERDOC_API_KEY ({masked})")
@@ -220,7 +220,7 @@ def _handle(ui: Any, _: str) -> bool:
     results.append(_onboarding_status())
     results.extend(_model_status(project_path))
 
-    # 检查 RIPPERDOC_* 环境变量
+    # Check RIPPERDOC_* environment variables
     results.extend(_ripperdoc_env_status())
 
     project_row = _project_status(project_path)

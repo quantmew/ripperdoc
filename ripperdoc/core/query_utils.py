@@ -127,16 +127,16 @@ def estimate_cost_usd(model_profile: ModelProfile, usage_tokens: Dict[str, int])
 def resolve_model_profile(model: str) -> ModelProfile:
     """Resolve a model pointer to a concrete profile, falling back to a safe default.
 
-    此函数现在尊重 RIPPERDOC_* 环境变量的覆盖。
+    This function now respects RIPPERDOC_* environment variable overrides.
     """
     from ripperdoc.core.config import get_effective_model_profile
 
-    # 首先尝试使用 get_effective_model_profile 来应用环境变量覆盖
+    # First try using get_effective_model_profile to apply environment variable overrides
     model_profile = get_effective_model_profile(model)
     if model_profile:
         return model_profile
 
-    # 如果仍然没有找到，使用默认配置
+    # If still not found, use default configuration
     logger.warning(
         "[config] No model profile found; using built-in default profile",
         extra={"model_pointer": model},
@@ -275,7 +275,7 @@ def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
             lines.append("  ```")
 
     example_blocks = [
-        {"type": "text", "text": "好的，我来帮你查看一下README.md文件"},
+        {"type": "text", "text": "OK, let me help you check the README.md file"},
         {
             "type": "tool_use",
             "tool_use_id": "tool_id_000001",

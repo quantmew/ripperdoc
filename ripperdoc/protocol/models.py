@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
+from ripperdoc import __version__
 
 
 # ============================================================================
@@ -276,7 +277,7 @@ class InitializeResponseData(BaseModel):
     mcp_servers: list[MCPServerInfo] = Field(default_factory=list)
     slash_commands: list[Any] = Field(default_factory=list)
     apiKeySource: str = "none"
-    claude_code_version: str = "0.1.0"
+    ripperdoc_version: str = __version__
     output_style: str = "default"
     agents: list[str] = Field(default_factory=list)
     skills: list[Any] = Field(default_factory=list)

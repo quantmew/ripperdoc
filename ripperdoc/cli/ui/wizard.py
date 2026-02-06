@@ -48,12 +48,12 @@ def check_onboarding() -> bool:
     if config.has_completed_onboarding:
         return True
 
-    # 检查是否有有效的 RIPPERDOC_* 环境变量配置
-    # 如果设置了任意 RIPPERDOC_*，可以跳过 onboarding
-    # 不写入配置文件，只在内存中处理
+    # Check if there are valid RIPPERDOC_* environment variable configurations
+    # If any RIPPERDOC_* is set, can skip onboarding
+    # Don't write to config file, only handle in memory
     if has_ripperdoc_env_overrides():
-        # 在内存中标记已完成 onboarding，但不保存到配置文件
-        # 这样下次启动时如果环境变量存在仍然可以工作
+        # Mark onboarding as completed in memory, but don't save to config file
+        # This way it will still work next time if environment variables exist
         config.has_completed_onboarding = True
         config.last_onboarding_version = get_version()
         save_global_config(config)

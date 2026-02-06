@@ -655,10 +655,10 @@ def save_project_local_config(
 
 
 # ==============================================================================
-# RIPPERDOC_* 全局环境变量支持
+# RIPPERDOC_* global environment variable support
 # ==============================================================================
 
-# 环境变量名称常量
+# Environment variable name constants
 RIPPERDOC_BASE_URL = "RIPPERDOC_BASE_URL"
 RIPPERDOC_AUTH_TOKEN = "RIPPERDOC_AUTH_TOKEN"
 RIPPERDOC_MODEL = "RIPPERDOC_MODEL"
@@ -668,46 +668,46 @@ RIPPERDOC_PROTOCOL = "RIPPERDOC_PROTOCOL"
 
 
 def _infer_protocol_from_url_and_model(base_url: str, model_name: str = "") -> ProviderType:
-    """根据 BASE_URL 和模型名称推断协议类型.
+    """Infer protocol type from BASE_URL and model name.
 
     Args:
-        base_url: API基础URL
-        model_name: 模型名称
+        base_url: API base URL
+        model_name: Model name
 
     Returns:
-        推断的 ProviderType
+        Inferred ProviderType
     """
     base_lower = base_url.lower()
     model_lower = model_name.lower()
 
-    # 显式域名检测
+    # Explicit domain detection
     if "anthropic.com" in base_lower:
         return ProviderType.ANTHROPIC
     if "generativelanguage.googleapis.com" in base_lower or "gemini" in model_lower:
         return ProviderType.GEMINI
 
-    # URL 路径检测 - 检查路径中是否包含协议标识
+    # URL path detection - check if path contains protocol identifier
     if "/anthropic" in base_lower or base_lower.endswith("/anthropic"):
         return ProviderType.ANTHROPIC
     if "/v1/" in base_lower or "/v1" in base_lower:
-        # 大多数 /v1/ 路径是 OpenAI 兼容格式
+        # Most /v1/ paths are OpenAI compatible format
         return ProviderType.OPENAI_COMPATIBLE
 
-    # 模型名称前缀检测
+    # Model name prefix detection
     if model_lower.startswith("claude-"):
         return ProviderType.ANTHROPIC
     if model_lower.startswith("gemini-"):
         return ProviderType.GEMINI
 
-    # 默认使用 OpenAI 兼容协议
+    # Default to OpenAI compatible protocol
     return ProviderType.OPENAI_COMPATIBLE
 
 
 def _get_ripperdoc_env_overrides() -> Dict[str, Any]:
-    """获取所有 RIPPERDOC_* 环境变量的值.
+    """Get values of all RIPPERDOC_* environment variables.
 
     Returns:
-        包含所有已设置环境变量的字典
+        Dictionary containing all set environment variables
     """
     overrides: Dict[str, Any] = {}
     if base_url := os.getenv(RIPPERDOC_BASE_URL):
@@ -732,21 +732,22 @@ def _get_ripperdoc_env_overrides() -> Dict[str, Any]:
 
 
 def has_ripperdoc_env_overrides() -> bool:
-    """检查是否设置了任何 RIPPERDOC_* 环境变量."""
+    """Check if any RIPPERDOC_* environment variables are set."""
     return bool(_get_ripperdoc_env_overrides())
 
 
 def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]:
-    """获取模型配置，应用 RIPPERDOC_* 环境变量覆盖.
+    """Get model profile with RIPPERDOC_* environment variable overrides applied.
 
-    仅使用 RIPPERDOC_* 环境变量做覆盖，不再读取 provider 特定的环境变量。
-    任何 RIPPERDOC_* 被设置时，会覆盖配置文件中的对应字段（若存在）。
+    Only uses RIPPERDOC_* environment variables for overrides; no longer reads
+    provider-specific environment variables. When any RIPPERDOC_* variable is set,
+    it overrides the corresponding field in the config file (if present).
 
     Args:
-        pointer: 模型指针名称 ("main" 或 "quick")
+        pointer: Model pointer name ("main" or "quick")
 
     Returns:
-        应用环境变量覆盖后的 ModelProfile，如果没有则返回 None
+        ModelProfile with environment variable overrides applied, or None if not found
     """
     env_overrides = _get_ripperdoc_env_overrides()
     profile = get_current_model_profile(pointer)
@@ -801,10 +802,10 @@ def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]
 
 
 def get_ripperdoc_env_status() -> Dict[str, str]:
-    """获取 RIPPERDOC_* 环境变量状态信息用于诊断显示.
+    """Get RIPPERDOC_* environment variable status information for diagnostic display.
 
     Returns:
-        字典，键为环境变量名称，值为格式化的显示字符串
+        Dictionary with environment variable names as keys and formatted display strings as values
     """
     status: Dict[str, str] = {}
     if base_url := os.getenv(RIPPERDOC_BASE_URL):

@@ -134,8 +134,8 @@ class SessionHistory:
         }
         try:
             with self.path.open("a", encoding="utf-8") as fh:
-                # ensure_ascii=False 避免中文等字符被转义为 \uXXXX
-                # separators 去掉多余空格，减小体积
+                # ensure_ascii=False prevents Chinese characters from being escaped to \uXXXX
+                # separators removes extra spaces to reduce file size
                 json.dump(entry, fh, ensure_ascii=False, separators=(",", ":"))
                 fh.write("\n")
             if isinstance(msg_uuid, str):

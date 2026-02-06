@@ -20,7 +20,7 @@ def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[
     if not profile:
         return ("Not configured", None)
 
-    # 首先检查全局 RIPPERDOC_AUTH_TOKEN
+    # First check global RIPPERDOC_AUTH_TOKEN
     if os.getenv("RIPPERDOC_AUTH_TOKEN"):
         return ("RIPPERDOC_AUTH_TOKEN (env)", "RIPPERDOC_AUTH_TOKEN")
     if os.getenv("RIPPERDOC_API_KEY"):
@@ -36,7 +36,7 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
     if not profile:
         return "API base URL: Not configured"
 
-    # 首先检查全局 RIPPERDOC_BASE_URL
+    # First check global RIPPERDOC_BASE_URL
     if base_url := os.getenv("RIPPERDOC_BASE_URL"):
         return f"API base URL: {base_url} (RIPPERDOC_BASE_URL env)"
 
