@@ -2,6 +2,7 @@
 
 from rich.console import Console
 
+from ripperdoc.cli.commands.memory_cmd import command as memory_command
 from ripperdoc.cli.commands.tasks_cmd import command as tasks_command
 from ripperdoc.cli.commands.todos_cmd import command as todos_command
 from ripperdoc.tools import background_shell
@@ -90,3 +91,38 @@ def test_tasks_command_lists_tasks(tmp_path, monkeypatch):
 
     # Clean up
     background_shell._get_tasks().clear()
+
+
+def test_memory_command_existing_file_editor_not_opened(tmp_path, monkeypatch):
+    """Memory command should not claim file was opened when editor launch fails."""
+    (tmp_path / "AGENTS.md").write_text("persisted prefs", encoding="utf-8")
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    monkeypatch.setattr("ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: False)
+    memory_command.handler(ui, "project")
+
+    output = ui.console.export_text()
+    assert "Opened existing memory file." not in output
+    assert "Editor did not launch." in output
+
+
+def test_memory_command_existing_file_editor_opened(tmp_path, monkeypatch):
+    """Memory command should report opened state when editor launch succeeds."""
+    (tmp_path / "AGENTS.md").write_text("persisted prefs", encoding="utf-8")
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    monkeypatch.setattr("ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: True)
+    memory_command.handler(ui, "project")
+
+    output = ui.console.export_text()
+    assert "Opened existing memory file." in output
+
+
+def test_memory_command_created_file_editor_opened(tmp_path, monkeypatch):
+    """Memory command should report created+opened state for new files."""
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    monkeypatch.setattr("ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: True)
+    memory_command.handler(ui, "project")
+
+    output = ui.console.export_text()
+    assert "Created and opened new memory file." in output

@@ -7,10 +7,11 @@ from typing import Any, List
 
 import pytest
 
+from ripperdoc.core.config import ModelProfile, ProviderType
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_config, handler_query, handler_session
-from ripperdoc.utils.messages import create_assistant_message
+from ripperdoc.utils.messages import create_assistant_message, create_progress_message
 from ripperdoc.core.query_utils import tool_result_message
 
 
@@ -154,3 +155,115 @@ async def test_stdio_query_timeout_reports_timeout_not_name_error(monkeypatch, t
     result_messages = [msg for msg in stream_messages if msg.get("type") == "result"]
     assert result_messages
     assert "Query timed out" in (result_messages[-1].get("result") or "")
+
+
+@pytest.mark.asyncio
+async def test_stdio_result_cost_uses_model_profile_pricing(monkeypatch, tmp_path):
+    _patch_stdio_dependencies(monkeypatch, tools=[])
+
+    async def fake_query(messages, system_prompt, context, query_context, can_use_tool):  # noqa: ARG001
+        yield create_assistant_message(
+            "priced reply",
+            input_tokens=1000,
+            output_tokens=500,
+            cache_read_tokens=100,
+            cache_creation_tokens=50,
+        )
+
+    monkeypatch.setattr(handler_query, "query", fake_query)
+    monkeypatch.setattr(
+        handler_query,
+        "resolve_model_profile",
+        lambda _model: ModelProfile(
+            provider=ProviderType.OPENAI_COMPATIBLE,
+            model="priced-model",
+            input_cost_per_million_tokens=10.0,
+            output_cost_per_million_tokens=20.0,
+        ),
+    )
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    stream_messages: list[dict[str, Any]] = []
+
+    async def noop_write_control_response(*_args, **_kwargs):
+        return None
+
+    async def capture_stream(payload: dict[str, Any]):
+        stream_messages.append(payload)
+
+    monkeypatch.setattr(handler, "_write_control_response", noop_write_control_response)
+    monkeypatch.setattr(handler, "_write_message_stream", capture_stream)
+
+    await handler._handle_initialize({"options": {"permission_mode": "bypassPermissions"}}, "init")
+    await handler._handle_query({"prompt": "cost test"}, "q_cost")
+
+    result_messages = [msg for msg in stream_messages if msg.get("type") == "result"]
+    assert result_messages
+    assert result_messages[-1].get("total_cost_usd") == pytest.approx(0.0215, rel=0, abs=1e-8)
+
+
+@pytest.mark.asyncio
+async def test_stdio_num_turns_excludes_progress_messages(monkeypatch, tmp_path):
+    _patch_stdio_dependencies(monkeypatch, tools=[])
+
+    async def fake_query(messages, system_prompt, context, query_context, can_use_tool):  # noqa: ARG001
+        yield create_progress_message("tool-1", set(), "progress before assistant")
+        yield create_assistant_message("assistant turn")
+        yield create_progress_message("tool-1", set(), "progress after assistant")
+
+    monkeypatch.setattr(handler_query, "query", fake_query)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    stream_messages: list[dict[str, Any]] = []
+
+    async def noop_write_control_response(*_args, **_kwargs):
+        return None
+
+    async def capture_stream(payload: dict[str, Any]):
+        stream_messages.append(payload)
+
+    monkeypatch.setattr(handler, "_write_control_response", noop_write_control_response)
+    monkeypatch.setattr(handler, "_write_message_stream", capture_stream)
+
+    await handler._handle_initialize({"options": {"permission_mode": "bypassPermissions"}}, "init")
+    await handler._handle_query({"prompt": "turn count test"}, "q_turns")
+
+    result_messages = [msg for msg in stream_messages if msg.get("type") == "result"]
+    assert result_messages
+    assert result_messages[-1].get("num_turns") == 1
+
+
+@pytest.mark.asyncio
+async def test_stdio_num_turns_excludes_tool_result_user_messages(monkeypatch, tmp_path):
+    _patch_stdio_dependencies(monkeypatch, tools=[])
+
+    async def fake_query(messages, system_prompt, context, query_context, can_use_tool):  # noqa: ARG001
+        yield create_assistant_message("assistant turn")
+        yield tool_result_message("tool-1", "tool finished")
+
+    monkeypatch.setattr(handler_query, "query", fake_query)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    stream_messages: list[dict[str, Any]] = []
+
+    async def noop_write_control_response(*_args, **_kwargs):
+        return None
+
+    async def capture_stream(payload: dict[str, Any]):
+        stream_messages.append(payload)
+
+    monkeypatch.setattr(handler, "_write_control_response", noop_write_control_response)
+    monkeypatch.setattr(handler, "_write_message_stream", capture_stream)
+
+    await handler._handle_initialize({"options": {"permission_mode": "bypassPermissions"}}, "init")
+    await handler._handle_query({"prompt": "turn count tool-result test"}, "q_turns_tool_result")
+
+    result_messages = [msg for msg in stream_messages if msg.get("type") == "result"]
+    assert result_messages
+    assert result_messages[-1].get("num_turns") == 1

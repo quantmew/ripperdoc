@@ -85,7 +85,7 @@ rd
 
 ### 快速开始
 
-如需引导式介绍，请查看 [QUICKSTART.md](QUICKSTART.md) 指南。
+如需引导式介绍，请先阅读本文“交互模式（推荐）”和“Python SDK（无头模式）”章节。
 
 ### Python SDK（无头模式）
 
@@ -98,7 +98,7 @@ rd
 - **工具集成**：直接工具访问和自定义
 - **配置**：自定义模型提供商和设置
 
-查看 [examples/](examples/) 目录获取完整的 SDK 使用示例。
+查看 [SDK 文档](https://ripperdoc-docs.pages.dev/docs/sdk-overview/) 获取完整的 SDK 使用示例。
 
 ### 安全模式权限
 

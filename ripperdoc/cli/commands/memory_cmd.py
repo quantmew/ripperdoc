@@ -173,15 +173,19 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         if resolved_scope == "local":
             gitignore_added = _ensure_gitignore_entry(project_path, LOCAL_MEMORY_FILE_NAME)
 
-        _open_in_editor(target_path, ui.console)
+        editor_opened = _open_in_editor(target_path, ui.console)
 
         messages: List[str] = [f"{heading}: {escape(_shorten_path(target_path, project_path))}"]
-        if created:
+        if created and editor_opened:
+            messages.append("Created and opened new memory file.")
+        elif created:
             messages.append("Created new memory file.")
         if gitignore_added:
             messages.append("Added AGENTS.local.md to .gitignore.")
-        if not created:
+        if not created and editor_opened:
             messages.append("Opened existing memory file.")
+        if not editor_opened:
+            messages.append("Editor did not launch. Open the memory file manually if needed.")
 
         ui.console.print(Panel("\n".join(messages), title="/memory"))
         return True

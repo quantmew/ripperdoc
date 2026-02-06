@@ -12,6 +12,7 @@ from typing import Any
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
 from ripperdoc.core.query import query
+from ripperdoc.core.query_utils import estimate_cost_usd, resolve_model_profile
 from ripperdoc.protocol.models import ResultMessage, UsageInfo, model_to_dict
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
@@ -238,7 +239,6 @@ class StdioQueryMixin:
                                 f"num_turns={num_turns[0]}, "
                                 f"elapsed_ms={int((time.time() - start_time) * 1000)}"
                             )
-                            num_turns[0] += 1
 
                             # Handle progress messages
                             if msg_type == "progress":
@@ -273,6 +273,7 @@ class StdioQueryMixin:
                                             subagent_msg_type = getattr(subagent_message, "type", "")
                                             if subagent_msg_type == "assistant":
                                                 self._conversation_messages.append(subagent_message)
+                                                num_turns[0] += 1
 
                                                 # Track token usage from subagent assistant messages
                                                 total_input_tokens[0] += getattr(subagent_message, "input_tokens", 0)
@@ -323,6 +324,8 @@ class StdioQueryMixin:
                             # Add to conversation history
                             if msg_type in ("assistant", "user"):
                                 self._conversation_messages.append(message)
+                            if msg_type == "assistant":
+                                num_turns[0] += 1
 
                             # Add to local history and session history
                             messages.append(message)  # type: ignore[arg-type]
@@ -345,12 +348,16 @@ class StdioQueryMixin:
             if not is_error[0] and not result_message_sent[0]:
                 logger.debug("[stdio] Building usage info")
 
-                # Calculate cost
-                cost_per_million_input = 3.0
-                cost_per_million_output = 15.0
-                total_cost_usd = (total_input_tokens[0] * cost_per_million_input / 1_000_000) + (
-                    total_output_tokens[0] * cost_per_million_output / 1_000_000
-                )
+                # Calculate cost using configured model pricing.
+                usage_tokens = {
+                    "input_tokens": total_input_tokens[0],
+                    "output_tokens": total_output_tokens[0],
+                    "cache_read_input_tokens": total_cache_read_tokens[0],
+                    "cache_creation_input_tokens": total_cache_creation_tokens[0],
+                }
+                model_pointer = self._query_context.model if self._query_context else "main"
+                model_profile = resolve_model_profile(model_pointer)
+                total_cost_usd = estimate_cost_usd(model_profile, usage_tokens)
 
                 # Build usage info
                 usage_info = None

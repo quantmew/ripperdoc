@@ -21,7 +21,7 @@ Ripperdoc is your on-machine AI coding assistant, similar to [Claude Code](https
 
 Designed for maximum flexibility, Ripperdoc works with **any LLM** (Anthropic Claude, OpenAI, DeepSeek, local models via OpenAI-compatible APIs), supports **custom hooks** to intercept and control tool execution, and offers both an interactive CLI and a **Python SDK** for headless automation.
 
-[中文文档](README_CN.md) | [Contributing](CONTRIBUTING.md) | [Documentation](docs/)
+[中文文档](README_CN.md) | [Contributing](CONTRIBUTING.md) | [Documentation](https://ripperdoc-docs.pages.dev/)
 
 ## Features
 
@@ -98,7 +98,7 @@ Use Ripperdoc without the terminal UI via the Python SDK. See [SDK Documentation
 - **Tool Integration**: Direct tool access and customization
 - **Configuration**: Custom model providers and settings
 
-See the [examples/](examples/) directory for complete SDK usage examples.
+See [SDK Documentation](https://ripperdoc-docs.pages.dev/docs/sdk-overview/) for complete SDK usage examples.
 
 ### Safe Mode Permissions
 
