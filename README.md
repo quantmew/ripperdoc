@@ -15,9 +15,18 @@ _an open-source, extensible AI coding agent that runs in your terminal_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
   <a href="https://pypi.org/project/ripperdoc/">
-    <img src="https://img.shields.io/badge/version-0.3.3-orange.svg">
+    <img src="https://img.shields.io/badge/version-0.4.0-orange.svg">
   </a>
 </p>
+
+> **⚠️ Important: v0.4.0 Release Notice**
+>
+> Version 0.4.0 includes **breaking changes** to the configuration file format. Before upgrading, please:
+> 1. **Backup your configuration**: `cp ~/.ripperdoc/ ~/.ripperdoc.backup` and `cp ~/.ripperdoc.json ~/.ripperdoc.json.backup`
+> 2. **Read the migration guide**: [MIGRATION_v0.4.0.md](MIGRATION_v0.4.0.md)
+>
+> The main change is renaming `provider` to `protocol` in configuration files.
+>
 </div>
 
 **Ripperdoc** is a powerful, extensible AI coding agent that runs directly in your terminal. Inspired by tools like [Claude Code](https://claude.com/claude-code), [Aider](https://github.com/paul-gauthier/aider), and [Goose](https://github.com/block/goose), Ripperdoc helps you write code, refactor projects, execute shell commands, and manage files through natural language conversations.

@@ -15,6 +15,15 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
 </p>
+
+> **⚠️ 重要：v0.4.0 版本发布通知**
+>
+> v0.4.0 版本包含**配置文件格式不兼容的重大变更**。在升级之前，请：
+> 1. **备份您的配置**：`cp ~/.ripperdoc/ ~/.ripperdoc.backup` and `cp ~/.ripperdoc.json ~/.ripperdoc.json.backup`
+> 2. **阅读迁移指南**：[MIGRATION_v0.4.0.md](MIGRATION_v0.4.0.md)
+>
+> 主要变更是将配置文件中的 `provider` 重命名为 `protocol`。
+>
 </div>
 
 Ripperdoc 是你的本地 AI 编程助手，类似于 [Claude Code](https://claude.com/claude-code)、[Codex](https://github.com/openai/codex)、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Aider](https://github.com/paul-gauthier/aider) 和 [Goose](https://github.com/block/goose)。它可以编写代码、重构项目、执行 shell 命令、管理文件——全部通过终端中的自然语言对话完成。

@@ -5,6 +5,75 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-08
+
+### ⚠️ BREAKING CHANGES - Configuration File Format Incompatible
+
+**IMPORTANT: Please backup your configuration files before upgrading!**
+
+This release includes major architectural changes that introduce **incompatible changes to the configuration file format**. Before upgrading to v0.4.0, please:
+
+1. **Backup your configuration**: Copy your `~/.ripperdoc/c`, `~/.ripperdoc.json`, and any project-specific `.ripperdoc/` files
+2. **Review provider settings**: The `provider` field has been renamed to `protocol`
+3. **Update model configurations**: Model profiles now use a new structure with auto-completion from the built-in model catalog
+
+### Added
+- **Task graph and team collaboration system** - Complete task management with persistent task graph, dependency tracking, and multi-agent team coordination
+- **Model catalog system** - Comprehensive built-in model catalog with pricing, context windows, and capability metadata for 200+ models
+- **Output style customization** - New `/output-style` command with 8+ predefined output styles (concise, detailed, json, markdown, etc.)
+- **Output language control** - New `/output-language` command to control AI response language independently from UI language
+- **Session-scoped working directories** - Support for multiple working directories per session with `/add-dir` command
+- **Interactive question system** - New `AskUserQuestion` tool for single and multi-select interactive prompts
+- **Custom commands management TUI** - Interactive terminal UI for managing custom commands with `/commands` slash command
+- **Skills enable/disable** - New TUI and commands to enable/disable individual skills
+- **Enhanced bash output** - Detailed truncation metadata for command output with size and line limit information
+- **SDK can_use_tool integration** - Permission preview support for SDK tool usage
+- **Async hook support** - Hooks now support async commands and bidirectional SDK protocol callbacks
+- **Hook scopes** - Add hook scopes for skills and agents for more granular control
+- **Agent hook type** - New hook event type specifically for agent lifecycle events
+- **JSON output format** - New JSON output mode for programmatic consumption
+- **Auto input format** - Enhanced input parsing with automatic format detection
+- **Custom system prompts** - Support for per-query custom system prompts
+- **Max turns option** - Limit conversation turns with `--max-turns` option
+- **Sidecar session index** - Fast session lookup and statistics with new index file format
+- **Python 3.10 asyncio compatibility** - Add asyncio.timeout compatibility layer for Python 3.10
+
+### Changed
+- **Provider → Protocol rename** - Renamed `ProviderType` to `ProtocolType` throughout codebase for clarity
+- **Core module reorganization** - Major refactoring of core modules:
+  - `query_utils.py` → `message_utils.py`
+  - `permissions.py` → `permission_engine.py`
+  - `provider_catalog.py` → `provider_metadata.py`
+  - `default_tools.py` → `tool_defaults.py`
+- **Model profile structure** - Model profiles now auto-populate from model catalog with pricing, context windows, and capabilities
+- **Bash output rendering** - Simplified bash output rendering with improved test coverage
+- **Query runtime helpers** - Extracted query runtime helpers for better modularity
+- **Message normalization** - Enhanced message normalization in query loop
+- **Permission decision engine** - Modularized permission decision engine into separate functions
+- **Dynamic subagent prompts** - Subagent prompts now adapt based on available tools
+- **Environment variable handling** - Simplified environment variable handling across the codebase
+- **Stdio handler** - Split stdio handler into mixins for better separation of concerns
+- **Session resume replay** - Improved tool rendering in conversation replay for session resume
+- **SessionStart/End hooks** - Ensure hooks execute once per session with deterministic cleanup
+- **Permission mode synchronization** - Sync permission mode across query context, hooks, and permissions
+- **Thinking spinner** - Auto-refresh thinking spinner via async tick loop
+- **CLI integration** - Integrated stdio mode into main CLI with SDK-compatible options
+- **TUI notifications** - Replace inline error widgets with app notifications in TUI forms
+- **Internationalization** - Translated Chinese comments to English in source code
+- **Public API promotion** - Promoted internal utilities to public API for extensibility
+- **Type annotation coverage** - Improved type annotation coverage and mypy compatibility
+
+### Fixed
+- **Model profile pricing** - Use model profile pricing and fix num_turns calculation
+- **Permission override** - Ensure deny/block decisions override allow in hooks
+- **Gitignore warnings** - Suppress gitignore warnings when writing files
+- **Input validation** - Add input validation tests and edge case coverage
+
+### Removed
+- **Outdated examples** - Removed outdated example scripts and documentation
+- **Unused commands module** - Removed unused core commands module
+- **Legacy provider aliases** - Removed legacy provider string aliases (use protocol types instead)
+
 ## [0.3.3] - 2026-02-04
 
 ### Added
@@ -268,6 +337,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple command execution
 - Basic project navigation
 
+[0.4.0]: https://github.com/quantmew/Ripperdoc/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/quantmew/Ripperdoc/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/quantmew/Ripperdoc/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/quantmew/Ripperdoc/compare/v0.3.0...v0.3.1
