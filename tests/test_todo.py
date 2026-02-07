@@ -12,6 +12,7 @@ from ripperdoc.tools.todo_tool import (
     TodoWriteToolInput,
 )
 from ripperdoc.utils.todo import TodoItem, format_todo_summary, load_todos, set_todos
+from ripperdoc.utils.tasks import create_task
 
 
 def test_todo_storage_roundtrip(tmp_path, monkeypatch):
@@ -82,3 +83,19 @@ def test_todo_tools_flow(tmp_path, monkeypatch):
         assert "Next actionable todo" in read_result.data.summary
 
     asyncio.run(_run())
+
+
+def test_load_todos_reads_task_graph_when_enabled(tmp_path, monkeypatch):
+    """When task graph is active and has tasks, legacy todo reads should mirror it."""
+    monkeypatch.setenv("RIPPERDOC_ENABLE_TASKS", "true")
+    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_task(subject="task one", task_id="t1", status="in_progress")
+    create_task(subject="task two", task_id="t2", status="pending")
+
+    loaded = load_todos()
+    assert [todo.id for todo in loaded] == ["t1", "t2"]
+    assert [todo.content for todo in loaded] == ["task one", "task two"]
+    assert loaded[0].status == "in_progress"

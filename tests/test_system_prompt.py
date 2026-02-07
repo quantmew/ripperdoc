@@ -142,3 +142,21 @@ def test_system_prompt_omits_output_language_instruction_for_auto() -> None:
     )
 
     assert "# Output language" not in prompt
+
+
+def test_system_prompt_prefers_task_graph_when_available() -> None:
+    prompt = build_system_prompt(
+        [
+            DummyTool("Read"),
+            DummyTool("TaskCreate"),
+            DummyTool("TaskGet"),
+            DummyTool("TaskUpdate"),
+            DummyTool("TaskList"),
+        ]
+    )
+
+    assert "persistent task graph" in prompt
+    assert "TaskCreate" in prompt
+    assert "TaskUpdate" in prompt
+    assert "`subject`, `description`, and optional `activeForm` / `metadata`" in prompt
+    assert "optional `owner`, and optional `blocks` / `blockedBy`" not in prompt

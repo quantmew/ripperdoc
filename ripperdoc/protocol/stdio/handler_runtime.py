@@ -18,6 +18,7 @@ from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.utils.mcp import shutdown_mcp_runtime
+from ripperdoc.utils.tasks import set_runtime_task_scope
 
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC
 
@@ -162,6 +163,7 @@ class StdioRuntimeMixin:
         except Exception as e:
             logger.error(f"Unexpected error in stdio loop: {type(e).__name__}: {e}", exc_info=True)
         finally:
+            set_runtime_task_scope(session_id=None)
             # Comprehensive cleanup with timeout
             logger.info("Stdio protocol handler shutting down...")
 

@@ -42,6 +42,13 @@ from ripperdoc.utils.messages import (
     create_user_message,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.teams import (
+    TeamMember,
+    TeamMessageType,
+    get_team,
+    send_team_message,
+    upsert_team_member,
+)
 
 logger = get_logger()
 
@@ -69,6 +76,8 @@ class AgentRunRecord:
     task: Optional[asyncio.Task] = None
     is_background: bool = False
     hook_scopes: List[HooksConfig] = field(default_factory=list)
+    team_name: Optional[str] = None
+    teammate_name: Optional[str] = None
 
 
 _AGENT_RUNS: Dict[str, AgentRunRecord] = {}
@@ -108,6 +117,8 @@ def _snapshot_agent_run(record: AgentRunRecord) -> dict:
         "result_text": record.result_text,
         "error": record.error,
         "is_background": record.is_background,
+        "team_name": record.team_name,
+        "teammate_name": record.teammate_name,
     }
 
 
@@ -174,7 +185,15 @@ class TaskToolInput(BaseModel):
     )
     subagent_type: Optional[str] = Field(
         default=None,
-        description="Agent type to run (matches agent frontmatter name). Required for new runs.",
+        description="Agent type to run (matches agent frontmatter name). Required for new runs unless team_name+teammate_name are provided.",
+    )
+    team_name: Optional[str] = Field(
+        default=None,
+        description="Optional Team domain name. When provided with teammate_name, agent type is resolved from the team roster.",
+    )
+    teammate_name: Optional[str] = Field(
+        default=None,
+        description="Optional teammate identifier inside team_name. Resolves to that member's configured agent type.",
     )
     run_in_background: bool = Field(
         default=False,
@@ -335,6 +354,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 result=False,
                 message="run_in_background cannot be used when resuming an agent.",
             )
+        if input_data.teammate_name and not input_data.team_name:
+            return ValidationResult(
+                result=False,
+                message="team_name is required when teammate_name is provided.",
+            )
         if input_data.resume:
             if input_data.prompt is not None and not input_data.prompt.strip():
                 return ValidationResult(
@@ -343,10 +367,15 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 )
             return ValidationResult(result=True)
 
-        if not input_data.subagent_type:
+        if not input_data.subagent_type and not (
+            input_data.team_name and input_data.teammate_name
+        ):
             return ValidationResult(
                 result=False,
-                message="subagent_type is required when starting a new agent.",
+                message=(
+                    "subagent_type is required when starting a new agent "
+                    "(unless team_name + teammate_name is provided)."
+                ),
             )
         if not input_data.prompt or not input_data.prompt.strip():
             return ValidationResult(
@@ -376,7 +405,10 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         del verbose
         if input_data.resume:
             return f"Resume subagent {input_data.resume}"
-        label = f"Task via {input_data.subagent_type}: {input_data.prompt}"
+        target = input_data.subagent_type or "team-resolved"
+        if input_data.team_name and input_data.teammate_name:
+            target = f"{input_data.team_name}/{input_data.teammate_name}"
+        label = f"Task via {target}: {input_data.prompt}"
         if input_data.run_in_background:
             label += " (background)"
         return label
@@ -407,6 +439,77 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
     def _render_tool_result(self, output: TaskToolOutput) -> ToolResult:
         return ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+
+    def _resolve_team_agent_target(
+        self,
+        *,
+        team_name: Optional[str],
+        teammate_name: Optional[str],
+        fallback_agent_type: Optional[str],
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Resolve agent type from team roster when team context is provided."""
+        if not team_name:
+            return fallback_agent_type, None, None
+
+        team = get_team(team_name)
+        if team is None:
+            raise ValueError(f"Team '{team_name}' not found.")
+
+        if teammate_name:
+            member = next((item for item in team.members if item.name == teammate_name), None)
+            if member is None:
+                resolved_type = (
+                    (fallback_agent_type or "").strip()
+                    or str(team.metadata.get("agent_type") or "").strip()
+                    or "general-purpose"
+                )
+                try:
+                    upsert_team_member(
+                        team.name,
+                        TeamMember(
+                            name=teammate_name,
+                            agent_type=resolved_type,
+                            role="worker",
+                            active=True,
+                        ),
+                    )
+                except (ValueError, OSError, RuntimeError, KeyError, TypeError) as exc:
+                    raise ValueError(
+                        f"Teammate '{teammate_name}' not found in team '{team_name}', "
+                        "and automatic teammate registration failed."
+                    ) from exc
+                return resolved_type, team.name, teammate_name
+            return member.agent_type, team.name, member.name
+
+        return fallback_agent_type, team.name, None
+
+    def _send_team_event(
+        self,
+        *,
+        record: AgentRunRecord,
+        message_type: TeamMessageType,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not record.team_name:
+            return
+        recipients = [record.teammate_name] if record.teammate_name else ["*"]
+        try:
+            send_team_message(
+                team_name=record.team_name,
+                sender="system",
+                recipients=recipients,
+                message_type=message_type,
+                content=content,
+                metadata=metadata or {},
+            )
+        except (ValueError, OSError, RuntimeError, KeyError, TypeError) as exc:
+            logger.warning(
+                "[task_tool] Failed to emit team event: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"team_name": record.team_name, "message_type": message_type},
+            )
 
     async def _wait_for_running_record(self, record: AgentRunRecord) -> None:
         if not record.task or record.task.done():
@@ -501,6 +604,20 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         record.tool_use_count = tool_use_count
         record.result_text = result_text.strip()
         record.status = "completed"
+        self._send_team_event(
+            record=record,
+            message_type="status",
+            content=(
+                f"Subagent '{record.agent_type}' completed"
+                + (f" for teammate '{record.teammate_name}'" if record.teammate_name else "")
+                + "."
+            ),
+            metadata={
+                "agent_id": record.agent_id,
+                "status": record.status,
+                "tool_use_count": record.tool_use_count,
+            },
+        )
 
     async def _run_subagent_foreground(
         self,
@@ -630,13 +747,26 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         clear_agent_cache()
         agents = load_agent_definitions()
 
+        resolved_agent_type, resolved_team_name, resolved_teammate_name = (
+            self._resolve_team_agent_target(
+                team_name=input_data.team_name,
+                teammate_name=input_data.teammate_name,
+                fallback_agent_type=input_data.subagent_type,
+            )
+        )
+        if not resolved_agent_type:
+            raise ValueError(
+                "Unable to resolve target agent type. Provide subagent_type or "
+                "team_name + teammate_name."
+            )
+
         target_agent = next(
-            (agent for agent in agents.active_agents if agent.agent_type == input_data.subagent_type),
+            (agent for agent in agents.active_agents if agent.agent_type == resolved_agent_type),
             None,
         )
         if not target_agent:
             raise ValueError(
-                f"Agent type '{input_data.subagent_type}' not found. "
+                f"Agent type '{resolved_agent_type}' not found. "
                 f"Available agents: {', '.join(agent.agent_type for agent in agents.active_agents)}"
             )
 
@@ -685,8 +815,25 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             start_time=time.time(),
             is_background=bool(input_data.run_in_background),
             hook_scopes=agent_hook_scopes,
+            team_name=resolved_team_name,
+            teammate_name=resolved_teammate_name,
         )
         _register_agent_run(record)
+
+        if resolved_team_name:
+            self._send_team_event(
+                record=record,
+                message_type="delegate",
+                content=(
+                    f"Delegated work to subagent '{target_agent.agent_type}'"
+                    + (f" ({resolved_teammate_name})" if resolved_teammate_name else "")
+                    + "."
+                ),
+                metadata={
+                    "agent_id": record.agent_id,
+                    "run_in_background": bool(input_data.run_in_background),
+                },
+            )
 
         subagent_context = self._build_subagent_query_context(
             tools=typed_agent_tools,
@@ -883,6 +1030,18 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 )
                 record.result_text = result_text.strip()
                 record.status = "completed"
+            self._send_team_event(
+                record=record,
+                message_type="status",
+                content=(
+                    f"Subagent '{record.agent_type}' finished in background with status '{record.status}'."
+                ),
+                metadata={
+                    "agent_id": record.agent_id,
+                    "status": record.status,
+                    "tool_use_count": record.tool_use_count,
+                },
+            )
             record.task = None
 
     def _build_agent_prompt(self, agent: AgentDefinition, tools: List[Tool[Any, Any]]) -> str:

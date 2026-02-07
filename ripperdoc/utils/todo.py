@@ -1,9 +1,9 @@
 """Todo storage and utilities for Ripperdoc.
 
-This module provides simple, file-based todo management so tools can
-persist and query tasks between turns. Todos are stored under the user's
-home directory at `~/.ripperdoc/todos/<project>/todos.json`, where
-`<project>` is a sanitized form of the project path.
+This module provides file-based todo management for the legacy Todo tools.
+When the new task-graph system is enabled and task graph entries exist for
+the current project, reads transparently project task nodes as todo items so
+legacy viewers (for example `/todos`) reflect the new system.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.path_utils import project_storage_dir
+from ripperdoc.utils.tasks import is_task_system_enabled, list_tasks
 
 
 logger = get_logger()
@@ -77,6 +78,32 @@ def validate_todos(
 
 def load_todos(project_root: Optional[Path] = None) -> List[TodoItem]:
     """Load todos from disk."""
+    if is_task_system_enabled():
+        task_items = list_tasks(project_root=project_root)
+        if task_items:
+            todos_from_tasks: List[TodoItem] = []
+            for task in task_items:
+                metadata = task.metadata if isinstance(task.metadata, dict) else {}
+                raw_priority = str(
+                    metadata.get("priority") or metadata.get("todo_priority") or "medium"
+                ).lower()
+                priority: TodoPriority = (
+                    raw_priority
+                    if raw_priority in ("high", "medium", "low")
+                    else "medium"
+                )
+                todos_from_tasks.append(
+                    TodoItem(
+                        id=task.id,
+                        content=task.subject,
+                        status=task.status,
+                        priority=priority,
+                        created_at=task.created_at,
+                        updated_at=task.updated_at,
+                    )
+                )
+            return todos_from_tasks
+
     path = _storage_path(project_root, ensure_dir=False)
     if not path.exists():
         return []

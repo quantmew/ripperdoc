@@ -9,6 +9,7 @@ from ripperdoc.cli.commands.todos_cmd import command as todos_command
 from ripperdoc.tools import background_shell
 from ripperdoc.utils.working_directories import normalize_directory_inputs
 from ripperdoc.utils.todo import TodoItem, set_todos
+from ripperdoc.utils.tasks import create_task
 
 
 class _DummyUI:
@@ -74,6 +75,24 @@ def test_todos_command_lists_items(tmp_path, monkeypatch):
     assert "write code" in output
     assert "add tests" in output
     assert "Todos updated" in output
+
+
+def test_todos_command_reads_task_graph_when_enabled(tmp_path, monkeypatch):
+    """Todos command should display task graph items when task system is enabled."""
+    monkeypatch.setenv("RIPPERDOC_ENABLE_TASKS", "true")
+    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_task(subject="write code", task_id="t1", status="in_progress")
+    create_task(subject="add tests", task_id="t2", status="pending")
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    todos_command.handler(ui, "")
+
+    output = ui.console.export_text()
+    assert "write code" in output
+    assert "add tests" in output
 
 
 def test_tasks_command_no_tasks(tmp_path, monkeypatch):

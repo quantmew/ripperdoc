@@ -14,162 +14,73 @@ _an open-source, extensible AI coding agent that runs in your terminal_
   <a href="https://github.com/quantmew/ripperdoc/stargazers">
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
+  <a href="https://pypi.org/project/ripperdoc/">
+    <img src="https://img.shields.io/badge/version-0.3.3-orange.svg">
+  </a>
 </p>
 </div>
 
-Ripperdoc is your on-machine AI coding assistant, similar to [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Aider](https://github.com/paul-gauthier/aider), and [Goose](https://github.com/block/goose). It can write code, refactor projects, execute shell commands, and manage files - all through natural language conversations in your terminal.
+**Ripperdoc** is a powerful, extensible AI coding agent that runs directly in your terminal. Inspired by tools like [Claude Code](https://claude.com/claude-code), [Aider](https://github.com/paul-gauthier/aider), and [Goose](https://github.com/block/goose), Ripperdoc helps you write code, refactor projects, execute shell commands, and manage files through natural language conversations.
 
-Designed for maximum flexibility, Ripperdoc works with **any LLM** (Anthropic Claude, OpenAI, DeepSeek, local models via OpenAI-compatible APIs), supports **custom hooks** to intercept and control tool execution, and offers both an interactive CLI and a **Python SDK** for headless automation.
+## What Makes Ripperdoc Different?
+
+- **🔌 Model Agnostic** - Works with Anthropic Claude, OpenAI, Google Gemini, DeepSeek, and any OpenAI-compatible API
+- **🎣 Extensible Architecture** - 26+ built-in tools with hooks system for custom workflows
+- **🤖 Multi-Agent Coordination** - Built-in task graph and team collaboration for complex workflows
+- **📚 Skill System** - Load capability bundles on-demand (PDF, Excel, PowerPoint, custom languages)
+- **🔌 MCP Integration** - First-class Model Context Protocol server support
+- **🛡️ Safe by Default** - Permission system with configurable rules and hooks
+- **🎨 Beautiful UI** - Rich terminal interface with themes, syntax highlighting, and interactive TUIs
+- **⚡ Background Tasks** - Run long-running commands asynchronously with real-time monitoring
 
 [中文文档](README_CN.md) | [Contributing](CONTRIBUTING.md) | [Documentation](https://ripperdoc-docs.pages.dev/)
 
-## Features
+## Core Features
 
-- **AI-Powered Assistance** - Uses AI models to understand and respond to coding requests
-- **Multi-Model Support** - Support for Anthropic Claude and OpenAI models
-- **Rich UI** - Beautiful terminal interface with syntax highlighting
-- **Code Editing** - Directly edit files with intelligent suggestions
-- **Codebase Understanding** - Analyzes project structure and code relationships
-- **Command Execution** - Run shell commands with real-time feedback
-- **Tool System** - Extensible architecture with specialized tools
-- **Agent Skills** - Load SKILL.md bundles to extend the agent on demand
-- **Subagents** - Delegate tasks to specialized agents with their own tool scopes
-- **File Operations** - Read, write, edit, search, and manage files
-- **Todo Tracking** - Plan, read, and update persistent todo lists per project
-- **Background Commands** - Run commands in background and monitor output
-- **Permission System** - Safe mode with permission prompts for operations
-- **Multi-Edit Support** - Batch edit operations on files
-- **MCP Server Support** - Integration with Model Context Protocol servers
-- **Session Management** - Persistent session history and usage tracking
-- **Jupyter Notebook Support** - Edit .ipynb files directly
+### 🛠️ Powerful Tool System
+- **26+ Built-in Tools** - File operations (Read, Write, Edit, MultiEdit), code search (Grep, Glob), shell execution (Bash, Background), LSP integration, and more
+- **Jupyter Support** - Direct .ipynb notebook editing with cell manipulation
+- **Background Tasks** - Run commands asynchronously with output monitoring and status tracking
+
+### 🤖 Multi-Agent Architecture
+- **Task Graph System** - Persistent task management with dependencies, blockers, and ownership
+- **Team Coordination** - Multi-agent collaboration with structured messaging and coordination
+- **Specialized Subagents** - Built-in agents for code review, exploration, planning, and test generation
+
+### 🔌 Extensibility
+- **Skill System** - Load SKILL.md bundles to extend capabilities (PDF, Excel, PowerPoint, custom languages)
 - **Hooks System** - Execute custom scripts at lifecycle events with decision control
 - **Custom Commands** - Define reusable slash commands with parameter substitution
+- **MCP Integration** - Connect to Model Context Protocol servers for extended capabilities
+
+### 🎨 User Experience
+- **Rich Terminal UI** - Beautiful interface with syntax highlighting and progress indicators
+- **Theme Support** - Customizable color schemes and styling options
+- **Interactive TUIs** - Terminal UIs for managing agents, models, permissions, and hooks
+- **Safe Mode** - Permission prompts with configurable rules for dangerous operations
+
+### 💾 Session Management
+- **Persistent History** - Full conversation history with search and replay
+- **Session Forking** - Create branches from any conversation state
+- **Usage Tracking** - Monitor token usage and costs across sessions
 
 ## Installation
 
-### Quick Installation
-Install from git repository:
+### Quick Install
 ```bash
 pip install git+https://github.com/quantmew/ripperdoc.git
 ```
 
-Or install from source:
+### From Source
 ```bash
-# Clone the repository
 git clone https://github.com/quantmew/ripperdoc.git
 cd ripperdoc
-
-# Install from source
 pip install -e .
 ```
 
-
-
-## Usage
-
-### Interactive Mode (Recommended)
+### Development Setup
 ```bash
-ripperdoc
-# or use the short alias
-rd
-```
-
-This launches an interactive session where you can:
-- Ask questions about your codebase
-- Request code modifications
-- Execute commands
-- Navigate and explore files
-
-**Options:**
-- `--yolo` - Skip permission prompts (safe mode is on by default)
-- `--model <model_name>` - Specify a model (e.g., `claude-sonnet-4-20250514`, `gpt-4o`)
-- `--tools <tool_list>` - Filter available tools (comma-separated, or "" for none)
-- `--no-mcp` - Disable MCP server integration
-- `--verbose` - Enable verbose logging
-
-### Python SDK (headless)
-
-Use Ripperdoc without the terminal UI via the Python SDK. See [SDK Documentation](https://ripperdoc-docs.pages.dev/docs/sdk-overview/) for examples of the one-shot `query` helper and the session-based `RipperdocClient`.
-
-#### SDK Examples
-
-- **Basic Usage**: Simple one-shot queries
-- **Session Management**: Persistent sessions with context
-- **Tool Integration**: Direct tool access and customization
-- **Configuration**: Custom model providers and settings
-
-See [SDK Documentation](https://ripperdoc-docs.pages.dev/docs/sdk-overview/) for complete SDK usage examples.
-
-### Safe Mode Permissions
-
-Safe mode is enabled by default. When prompted:
-- Type `y` or `yes` to allow a single operation
-- Type `a` or `always` to allow all operations of that type for the session
-- Type `n` or `no` to deny the operation
-
-Use `--yolo` flag to skip all permission prompts:
-```bash
-ripperdoc --yolo
-```
-
-### Agent Skills
-
-Extend Ripperdoc with reusable Skill bundles:
-
-- **Personal skills**: `~/.ripperdoc/skills/<skill-name>/SKILL.md`
-- **Project skills**: `.ripperdoc/skills/<skill-name>/SKILL.md` (can be checked into git)
-- Each `SKILL.md` starts with YAML frontmatter:
-  - `name` - Skill identifier
-  - `description` - What the skill does
-  - `allowed-tools` (optional) - Restrict which tools the skill can use
-  - `model` (optional) - Suggest a specific model for this skill
-  - `max-thinking-tokens` (optional) - Control thinking budget
-  - `disable-model-invocation` (optional) - Use skill without calling the model
-- Add supporting files alongside `SKILL.md` as needed
-- Skills are auto-discovered and loaded on demand via the `Skill` tool
-
-**Built-in skills:** PDF manipulation (`pdf`), PowerPoint (`pptx`), Excel (`xlsx`)
-
-## Examples
-
-### Code Analysis
-```
-> Can you explain what this function does?
-> Find all references to the `parse_config` function
-```
-
-### File Operations
-```
-> Read the main.py file and suggest improvements
-> Create a new component called UserProfile.tsx
-> Update all imports to use the new package structure
-```
-
-### Code Generation
-```
-> Create a new Python script that implements a REST API client
-> Generate unit tests for the auth module
-> Add error handling to the database connection code
-```
-
-### Project Navigation
-```
-> Show me all the Python files in the project
-> Find where the user authentication logic is implemented
-> List all API endpoints in the project
-```
-
-### MCP Integration
-```
-> What MCP servers are available?
-> Query the context7 documentation for React hooks
-```
-
-## Development
-
-### Setup Development Environment
-```bash
-# Install development dependencies
+# Install with development dependencies
 pip install -e ".[dev]"
 
 # Run tests
@@ -185,24 +96,376 @@ black ripperdoc
 ruff ripperdoc
 ```
 
+
+
+## Quick Start
+
+### Launch Interactive Session
+```bash
+ripperdoc
+# or use the short alias
+rd
+```
+
+### Command-Line Options
+```bash
+ripperdoc [OPTIONS]
+```
+
+**Options:**
+- `--yolo` - Skip permission prompts (safe mode is on by default)
+- `--model <model_name>` - Specify model (e.g., `claude-sonnet-4-20250514`, `gpt-4o`)
+- `--tools <tool_list>` - Filter available tools (comma-separated, or "" for none)
+- `--no-mcp` - Disable MCP server integration
+- `--verbose` - Enable verbose logging
+- `--theme <theme_name>` - Set UI theme
+
+**Environment Variables:**
+- `RIPPERDOC_ENABLE_TASKS=false` - Use legacy Todo tools instead of Task Graph
+- `RIPPERDOC_TASK_LIST_ID` - Force a shared Task Graph list ID across sessions
+- `RIPPERDOC_MODEL` - Default model to use
+- `RIPPERDOC_TEMPERATURE` - Default temperature (0.0-2.0)
+- `RIPPERDOC_API_KEY` - API key for configured provider
+
+Task Graph scope behavior:
+- By default, task lists are session-scoped (new session starts clean; resume/continue keeps the same tasks)
+- Set `RIPPERDOC_TASK_LIST_ID` to intentionally share one task list across sessions
+
+### Basic Usage Examples
+
+**Code Analysis:**
+```
+> Can you explain what this function does?
+> Find all references to the `parse_config` function
+```
+
+**File Operations:**
+```
+> Read the main.py file and suggest improvements
+> Create a new component called UserProfile.tsx
+> Update all imports to use the new package structure
+```
+
+**Code Generation:**
+```
+> Create a new Python script that implements a REST API client
+> Generate unit tests for the auth module
+> Add error handling to the database connection code
+```
+
+## Advanced Features
+
+### Skills System
+
+Extend Ripperdoc with reusable Skill bundles stored in `SKILL.md` files:
+
+**Skill Locations:**
+- `~/.ripperdoc/skills/<skill-name>/SKILL.md` (personal skills)
+- `.ripperdoc/skills/<skill-name>/SKILL.md` (project-specific, can be committed to git)
+
+**Skill Frontmatter:**
+```yaml
+---
+name: pdf-processing
+description: Comprehensive PDF manipulation toolkit
+allowed-tools: Read, Write, Bash
+model: claude-sonnet-4-20250514
+max-thinking-tokens: 20000
+---
+```
+
+**Built-in Skills:**
+- `pdf` - PDF manipulation (extract text/tables, create, merge/split)
+- `pptx` - PowerPoint presentation creation and editing
+- `xlsx` - Excel spreadsheet operations with formulas
+- `cangjie` - 仓颉 programming language support
+
+### Hooks System
+
+Execute custom scripts at lifecycle events with decision control:
+
+**Hook Events:**
+- `PreToolUse` - Before tool execution (can block/modify)
+- `PostToolUse` - After successful tool execution
+- `PostToolUseFailure` - After tool execution failure
+- `PermissionRequest` - When permission is requested
+- `UserPromptSubmit` - When user submits input
+- `SessionStart/End` - Session lifecycle
+- `SubagentStart/Stop` - Subagent lifecycle
+
+**Hook Configuration:**
+```json
+{
+  "hooks": [
+    {
+      "event": "PreToolUse",
+      "command": "npm run lint",
+      "blocking": true,
+      "include_tools": ["Write", "Edit"]
+    }
+  ]
+}
+```
+
+### MCP Integration
+
+Ripperdoc supports the Model Context Protocol for extending capabilities:
+
+```bash
+# List available MCP servers
+> /mcp
+
+# Query MCP resources
+> What MCP servers are available?
+> Query the context7 documentation for React hooks
+```
+
+### Custom Commands
+
+Define reusable slash commands with parameter substitution:
+
+**Command File:** `.ripperdoc/commands/deploy.md`
+```markdown
+---
+description: Deploy application to production
+---
+
+Deploying $ARGUMENTS to production...
+
+!`npm run build && npm run deploy`
+```
+
+**Usage:** `/deploy my-feature-branch`
+
+## Slash Commands
+
+Ripperdoc provides powerful slash commands for session management:
+
+**Session Commands:**
+- `/exit` - Exit the session
+- `/clear` - Clear conversation history
+- `/compact` - Compact conversation history
+- `/fork` - Create new session branch from current state
+- `/resume` - Resume a previous session
+
+**Configuration Commands:**
+- `/config` - Manage configuration
+- `/models` - Manage model providers
+- `/tools` - View available tools
+- `/permissions` - Manage permission rules
+- `/hooks` - Manage hooks configuration
+- `/themes` - Change UI theme
+- `/output_language` - Set output language
+- `/output_style` - Set output style
+
+**Information Commands:**
+- `/help` - Show help information
+- `/status` - Show session status
+- `/stats` - Show usage statistics
+- `/cost` - Show cost tracking
+- `/doctor` - Run system diagnostics
+
+**Feature Commands:**
+- `/skills` - List available skills
+- `/agents` - Manage subagents
+- `/tasks` - Task graph management
+- `/todos` - Legacy todo management
+- `/commands` - List custom commands
+- `/context` - Manage context
+- `/memory` - Manage memory
+- `/mcp` - MCP server management
+
+## Project Navigation
+
+```
+> Show me all the Python files in the project
+> Find where the user authentication logic is implemented
+> List all API endpoints in the project
+> Explain the architecture of this codebase
+```
+
+## Background Tasks
+
+```
+> Run the tests in the background
+> Start the dev server and monitor its output
+> Check status of background tasks
+```
+
+## Architecture
+
+### Core Components
+
+- **CLI Layer** (`ripperdoc/cli/`) - Terminal interface, UI components, command handlers
+- **Core Layer** (`ripperdoc/core/`) - Agent definitions, configuration, hooks, providers
+- **Tools Layer** (`ripperdoc/tools/`) - 26+ built-in tools for file operations, code analysis, etc.
+- **Protocol Layer** (`ripperdoc/protocol/`) - Stdio protocol handler for SDK communication
+- **Utils Layer** (`ripperdoc/utils/`) - Shared utilities for logging, permissions, file operations
+
+### Tool Categories
+
+**File Operations:**
+- `Read` - Read file contents with optional offset/limit
+- `Write` - Create new files or overwrite existing
+- `Edit` - Replace exact string matches in files
+- `MultiEdit` - Batch edit operations on single file
+- `NotebookEdit` - Edit Jupyter notebook cells
+
+**Code Analysis:**
+- `Grep` - Search code using regex patterns
+- `Glob` - File pattern matching
+- `LSP` - Language Server Protocol integration
+
+**Shell Operations:**
+- `Bash` - Execute shell commands
+- `KillBash` - Kill background shell processes
+- `BashOutput` - Read output from background tasks
+
+**Agent Features:**
+- `TaskCreate/Update/Get/List` - Task graph management
+- `TeamCreate/Delete` - Multi-agent team coordination
+- `SendMessage` - Inter-agent messaging
+- `Task` - Delegate to specialized subagents
+
+**Extensibility:**
+- `Skill` - Load skill bundles on-demand
+- `ToolSearch` - Discover and activate tools
+- `AskUserQuestion` - Interactive user prompts
+
+### Supported Providers
+
+- **Anthropic** - Claude 3.5 Sonnet, Claude 3 Opus, Haiku
+- **OpenAI** - GPT-4, GPT-4 Turbo, GPT-3.5
+- **Google** - Gemini Pro, Gemini Flash
+- **DeepSeek** - DeepSeek Coder, DeepSeek Chat
+- **Custom** - Any OpenAI-compatible API
+
+## Development
+
+### Project Structure
+
+```
+ripperdoc/
+├── cli/              # CLI interface and UI components
+├── core/             # Core functionality and configuration
+│   ├── hooks/        # Hooks system implementation
+│   ├── providers/    # LLM provider implementations
+│   └── query/        # Query processing loop
+├── tools/            # Built-in tool implementations
+├── protocol/         # Stdio protocol handler
+│   └── stdio/        # Protocol implementation
+├── utils/            # Utility functions
+└── data/             # Model pricing and context data
+```
+
+### Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_bash_tool.py
+
+# Run with coverage
+pytest --cov=ripperdoc
+```
+
+### Code Quality
+
+```bash
+# Type checking
+mypy ripperdoc
+
+# Code formatting
+black ripperdoc
+
+# Linting
+ruff check ripperdoc
+
+# Format with Black
+black ripperdoc
+```
+
+## Configuration
+
+### Config File Location
+- `~/.ripperdoc/config.json` - User-level configuration
+- `.ripperdoc/config.json` - Project-level configuration (overrides user config)
+
+### Example Configuration
+
+```json
+{
+  "model": "claude-sonnet-4-20250514",
+  "temperature": 1.0,
+  "api_key": "your-api-key",
+  "permission_rules": {
+    "Bash": {
+      "rule": "ask",
+      "commands": ["rm -rf", "sudo", ">:"]
+    }
+  },
+  "hooks": {
+    "hooks": [
+      {
+        "event": "PreToolUse",
+        "command": "npm run lint",
+        "blocking": true
+      }
+    ]
+  },
+  "theme": "default",
+  "enable_tasks": true
+}
+```
+
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Development Setup
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests and linting
+5. Submit a pull request
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ### Key License Terms
 
-- **Commercial Use**: Permitted
-- **Distribution**: Permitted
-- **Modification**: Permitted
-- **Patent Grant**: Included
-- **Private Use**: Permitted
-- **Sublicensing**: Permitted
-- **Trademark Use**: Not granted
+- ✅ Commercial Use
+- ✅ Distribution
+- ✅ Modification
+- ✅ Patent Grant
+- ✅ Private Use
+- ✅ Sublicensing
+- ❌ Trademark Use
 
-For full license terms and conditions, please refer to the [LICENSE](LICENSE) file.
+## Acknowledgments
 
-## Credits
-
-Inspired by:
-- [Claude Code](https://claude.com/claude-code) - Anthropic 官方 CLI
+Inspired by and built with ideas from:
+- [Claude Code](https://claude.com/claude-code) - Anthropic's official CLI
 - [aider](https://github.com/paul-gauthier/aider) - AI pair programming tool
+- [Goose](https://github.com/block/goose) - Extensible AI assistant
+- [Cursor](https://cursor.sh) - AI-powered code editor
+
+## Resources
+
+- [Documentation](https://ripperdoc-docs.pages.dev/)
+- [中文文档](README_CN.md)
+- [Contributing Guidelines](CONTRIBUTING.md)
+- [Issue Tracker](https://github.com/quantmew/ripperdoc/issues)
+- [Discussions](https://github.com/quantmew/ripperdoc/discussions)
+
+---
+
+**Made with ❤️ by the Ripperdoc team**

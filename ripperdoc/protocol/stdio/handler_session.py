@@ -39,6 +39,7 @@ from ripperdoc.tools.dynamic_mcp_tool import (
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
 from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.working_directories import coerce_directory_list, normalize_directory_inputs
 
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC
@@ -157,6 +158,10 @@ class StdioSessionMixin:
                 self._project_path = Path(cwd)
             else:
                 self._project_path = Path.cwd()
+            set_runtime_task_scope(
+                session_id=self._session_id,
+                project_root=self._project_path,
+            )
 
             raw_additional_dirs = options.get("additional_directories")
             additional_dirs = coerce_directory_list(raw_additional_dirs)

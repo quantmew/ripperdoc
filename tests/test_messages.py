@@ -1,5 +1,7 @@
 """Test message utilities."""
 
+from pydantic import BaseModel, Field
+
 from ripperdoc.utils.messages import (
     MessageRole,
     create_user_message,
@@ -69,6 +71,33 @@ def test_message_with_tool_result():
     assert msg.type == "user"
     assert isinstance(msg.message.content, list)
     assert len(msg.message.content) == 1
+
+
+class _AliasStatusChange(BaseModel):
+    from_status: str = Field(serialization_alias="from")
+    to_status: str = Field(serialization_alias="to")
+
+
+class _AliasToolResult(BaseModel):
+    task_id: str = Field(serialization_alias="taskId")
+    updated_fields: list[str] = Field(serialization_alias="updatedFields")
+    status_change: _AliasStatusChange = Field(serialization_alias="statusChange")
+
+
+def test_create_user_message_serializes_tool_result_with_aliases():
+    payload = _AliasToolResult(
+        task_id="1",
+        updated_fields=["status"],
+        status_change=_AliasStatusChange(from_status="pending", to_status="completed"),
+    )
+
+    msg = create_user_message("ok", tool_use_result=payload)
+
+    assert isinstance(msg.tool_use_result, dict)
+    assert msg.tool_use_result["taskId"] == "1"
+    assert msg.tool_use_result["updatedFields"] == ["status"]
+    assert msg.tool_use_result["statusChange"] == {"from": "pending", "to": "completed"}
+    assert "task_id" not in msg.tool_use_result
 
 
 def test_sanitize_tool_history_folds_multiple_tool_results_to_single_next_message():

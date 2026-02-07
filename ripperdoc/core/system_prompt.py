@@ -6,7 +6,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Literal, Optional
 
 from ripperdoc.core.agents import (
     ASK_USER_QUESTION_TOOL_NAME,
@@ -34,6 +34,13 @@ DEFENSIVE_SECURITY_GUIDELINE = (
     "Allow security analysis, detection rules, vulnerability explanations, defensive tools, and security documentation."
 )
 FEEDBACK_URL = "https://github.com/quantmew/Ripperdoc/issues"
+TASK_CREATE_TOOL_NAME = "TaskCreate"
+TASK_GET_TOOL_NAME = "TaskGet"
+TASK_UPDATE_TOOL_NAME = "TaskUpdate"
+TASK_LIST_TOOL_NAME = "TaskList"
+TEAM_CREATE_TOOL_NAME = "TeamCreate"
+TEAM_DELETE_TOOL_NAME = "TeamDelete"
+SEND_MESSAGE_TOOL_NAME = "SendMessage"
 
 
 def _detect_git_repo(cwd: Path) -> bool:
@@ -288,12 +295,64 @@ def _build_main_prompt(
     return "\n\n".join(section for section in sections if section.strip())
 
 
-def _build_task_management_section(todo_tool_name: str, shell_tool_name: str | None) -> str:
+def _build_task_management_section(
+    *,
+    mode: Literal["todo", "task_graph"],
+    todo_tool_name: str,
+    task_create_tool_name: str,
+    task_update_tool_name: str,
+    task_get_tool_name: str,
+    task_list_tool_name: str,
+    shell_tool_name: str | None,
+) -> str:
     run_build_line = (
         f"I'm now going to run the build using {shell_tool_name}."
         if shell_tool_name
         else "I'll continue by inspecting project files with the available tools, then ask the user to run build/typecheck commands if command output is needed."
     )
+
+    if mode == "task_graph":
+        return dedent(
+            f"""\
+            # Task Management
+            You have access to a persistent task graph via {task_create_tool_name}, {task_get_tool_name}, {task_update_tool_name}, and {task_list_tool_name}.
+            Use these tools VERY frequently to keep progress, ownership, and dependency edges accurate across turns and sessions.
+            These tools are EXTREMELY important for planning and execution in multi-step work. If you skip them, you may lose important state and dependency relationships.
+
+            Mental model (legacy Todo equivalent):
+            - {task_create_tool_name} is the Task Graph equivalent of TodoWrite for creating new TODO items.
+            - {task_update_tool_name} is the Task Graph equivalent of TODO update (updating status/details/owner/dependencies on existing items).
+            - {task_list_tool_name} is your board-level read view to pick the next actionable item.
+            - {task_get_tool_name} is your detailed read view for one specific item.
+
+            How to use each tool:
+            - Start with {task_list_tool_name} to inspect current graph state, blockers, and the next actionable task.
+            - Use {task_create_tool_name} to create concrete tasks with `subject`, `description`, and optional `activeForm` / `metadata`.
+            - Use {task_get_tool_name} when you need full details for one task id before editing or executing it.
+            - Use {task_update_tool_name} IMMEDIATELY when status changes (pending -> in_progress -> completed), ownership changes, or dependencies change.
+
+            Core rules:
+            - Keep one active task in_progress at a time whenever possible, and update state in real time.
+            - Do not batch status updates; record progress as soon as it changes.
+            - Use {task_list_tool_name} before starting new work to avoid duplicate or conflicting tasks.
+            - Keep dependency edges explicit: if task A blocks task B, record the relationship with `blocks` / `blockedBy`.
+
+            Examples:
+
+            <example>
+            user: Run the build and fix any type errors
+            assistant: I'll create two tasks with {task_create_tool_name}: (1) run build, (2) fix errors from build.
+
+            {run_build_line}
+
+            I found 10 errors. I'll create 10 concrete fix tasks and link them to the build task, then mark the first one in_progress with {task_update_tool_name}.
+            </example>
+
+            <example>
+            user: Implement usage metrics and export support
+            assistant: I'll break this into a task graph first with {task_create_tool_name}, then iterate with {task_update_tool_name} and inspect progress using {task_list_tool_name}.
+            </example>"""
+        ).strip()
 
     return dedent(
         f"""\
@@ -347,9 +406,8 @@ def _build_task_management_section(todo_tool_name: str, shell_tool_name: str | N
 
 
 def _build_doing_tasks_section(
-    todo_available: bool,
+    task_tracking_hint: Optional[str],
     ask_available: bool,
-    todo_tool_name: str,
     ask_tool_name: str,
     shell_tool_name: str | None,
     *,
@@ -359,8 +417,8 @@ def _build_doing_tasks_section(
         "# Doing tasks",
         "The user will primarily request you perform software engineering tasks. This includes solving bugs, adding new functionality, refactoring code, explaining code, and more. For these tasks the following steps are recommended:",
     ]
-    if todo_available:
-        doing_tasks_lines.append(f"- Use the {todo_tool_name} tool to plan the task if required")
+    if task_tracking_hint:
+        doing_tasks_lines.append(f"- {task_tracking_hint}")
     if ask_available:
         doing_tasks_lines.append(
             f"- Use the {ask_tool_name} tool to ask questions, clarify, and gather information as needed."
@@ -451,10 +509,12 @@ def _build_tool_usage_section(
 
 
 def _build_git_workflow_section(
-    shell_tool_name: str | None, todo_tool_name: str, task_tool_name: str
+    shell_tool_name: str | None, task_tracking_tool_label: str, task_tool_name: str
 ) -> str:
     if shell_tool_name:
-        return build_commit_workflow_prompt(shell_tool_name, todo_tool_name, task_tool_name)
+        return build_commit_workflow_prompt(
+            shell_tool_name, task_tracking_tool_label, task_tool_name
+        )
     return dedent(
         """\
         # Git and GitHub operations
@@ -503,7 +563,22 @@ def build_system_prompt(
     tool_names = {tool.name for tool in tools}
     todo_tool_name = TODO_WRITE_TOOL_NAME
     todo_available = todo_tool_name in tool_names
+    task_create_tool_name = TASK_CREATE_TOOL_NAME
+    task_get_tool_name = TASK_GET_TOOL_NAME
+    task_update_tool_name = TASK_UPDATE_TOOL_NAME
+    task_list_tool_name = TASK_LIST_TOOL_NAME
+    task_graph_available = {
+        task_create_tool_name,
+        task_update_tool_name,
+        task_list_tool_name,
+        task_get_tool_name,
+    }.issubset(tool_names)
     task_available = TASK_TOOL_NAME in tool_names
+    team_available = (
+        TEAM_CREATE_TOOL_NAME in tool_names
+        and TEAM_DELETE_TOOL_NAME in tool_names
+        and SEND_MESSAGE_TOOL_NAME in tool_names
+    )
     ask_tool_name = ASK_USER_QUESTION_TOOL_NAME
     ask_available = ask_tool_name in tool_names
     read_tool_name = READ_TOOL_NAME
@@ -518,9 +593,23 @@ def build_system_prompt(
         keep_coding_instructions=keep_coding_instructions,
     )
 
+    task_tracking_mode: Optional[Literal["todo", "task_graph"]] = None
+    if task_graph_available:
+        task_tracking_mode = "task_graph"
+    elif todo_available:
+        task_tracking_mode = "todo"
+
     task_management_section = ""
-    if todo_available and keep_coding_instructions:
-        task_management_section = _build_task_management_section(todo_tool_name, shell_tool_name)
+    if task_tracking_mode and keep_coding_instructions:
+        task_management_section = _build_task_management_section(
+            mode=task_tracking_mode,
+            todo_tool_name=todo_tool_name,
+            task_create_tool_name=task_create_tool_name,
+            task_update_tool_name=task_update_tool_name,
+            task_get_tool_name=task_get_tool_name,
+            task_list_tool_name=task_list_tool_name,
+            shell_tool_name=shell_tool_name,
+        )
 
     ask_questions_section = ""
     if ask_available:
@@ -536,10 +625,18 @@ def build_system_prompt(
         Users may configure 'hooks', shell commands that execute in response to events like tool calls, in settings. Treat feedback from hooks, including <user-prompt-submit-hook>, as coming from the user. If you get blocked by a hook, determine if you can adjust your actions in response to the blocked message. If not, ask the user to check their hooks configuration."""
     ).strip()
 
+    task_tracking_hint = ""
+    if task_tracking_mode == "task_graph":
+        task_tracking_hint = (
+            f"Use {task_list_tool_name} to inspect current graph state, "
+            f"{task_create_tool_name} for new tasks, and {task_update_tool_name} for progress changes."
+        )
+    elif task_tracking_mode == "todo":
+        task_tracking_hint = f"Use the {todo_tool_name} tool to plan the task if required"
+
     doing_tasks_section = _build_doing_tasks_section(
-        todo_available,
+        task_tracking_hint,
         ask_available,
-        todo_tool_name,
         ask_tool_name,
         shell_tool_name,
         keep_coding_instructions=keep_coding_instructions,
@@ -556,14 +653,36 @@ def build_system_prompt(
     )
 
     always_use_todo = ""
-    if todo_available and keep_coding_instructions:
-        always_use_todo = f"IMPORTANT: Always use the {todo_tool_name} tool to plan and track tasks throughout the conversation."
+    task_tracking_tool_label = todo_tool_name
+    if task_tracking_mode == "task_graph":
+        task_tracking_tool_label = (
+            f"{task_create_tool_name}/{task_get_tool_name}/{task_update_tool_name}/{task_list_tool_name}"
+        )
+        if keep_coding_instructions:
+            always_use_todo = (
+                "IMPORTANT: Always maintain a persistent task graph with "
+                f"{task_tracking_tool_label} throughout the conversation."
+            )
+    elif task_tracking_mode == "todo":
+        if keep_coding_instructions:
+            always_use_todo = (
+                f"IMPORTANT: Always use the {todo_tool_name} tool to plan and track tasks throughout the conversation."
+            )
 
     git_workflow_section = (
-        _build_git_workflow_section(shell_tool_name, todo_tool_name, TASK_TOOL_NAME)
+        _build_git_workflow_section(shell_tool_name, task_tracking_tool_label, TASK_TOOL_NAME)
         if keep_coding_instructions
         else ""
     )
+
+    team_section = ""
+    if team_available and keep_coding_instructions:
+        team_section = dedent(
+            f"""\
+            # Teams
+            Team collaboration tools are available: {TEAM_CREATE_TOOL_NAME}, {TEAM_DELETE_TOOL_NAME}, {SEND_MESSAGE_TOOL_NAME}.
+            Team represents a collaboration domain (members + shared task list). Prefer assigning task owners and coordinating via structured team messages instead of ad-hoc text notes."""
+        ).strip()
 
     agent_section = ""
     if task_available and keep_coding_instructions:
@@ -619,6 +738,7 @@ def build_system_prompt(
         hooks_section,
         doing_tasks_section,
         tool_usage_section,
+        team_section,
         agent_section,
         build_environment_prompt(),
         always_use_todo,

@@ -77,6 +77,7 @@ from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.tips import get_random_tip
 from ripperdoc.utils.message_formatting import stringify_message_content
+from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.working_directories import normalize_directory_inputs
 
 from ripperdoc.cli.ui.rich_ui.commands import handle_slash_command as _handle_slash_command
@@ -142,6 +143,7 @@ class RichUI:
         self.output_language = getattr(project_local_config, "output_language", "auto") or "auto"
         # Track a stable session identifier for the current UI run.
         self.session_id = session_id or str(uuid.uuid4())
+        set_runtime_task_scope(session_id=self.session_id, project_root=self.project_path)
         if log_file_path:
             self.log_file_path = log_file_path
             logger.attach_file_handler(self.log_file_path)
@@ -339,6 +341,7 @@ class RichUI:
     def _set_session(self, session_id: str) -> None:
         """Switch to a different session id and reset logging."""
         self.session_id = session_id
+        set_runtime_task_scope(session_id=self.session_id, project_root=self.project_path)
         self.log_file_path = enable_session_file_logging(self.project_path, self.session_id)
         logger.info(
             "[ui] Switched session",
@@ -1510,6 +1513,7 @@ class RichUI:
 
                         console.print(traceback.format_exc())
         finally:
+            set_runtime_task_scope(session_id=None)
             # Cancel any running tasks before shutdown
             if self.query_context:
                 abort_controller = getattr(self.query_context, "abort_controller", None)

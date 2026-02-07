@@ -51,6 +51,7 @@ from ripperdoc.tools.dynamic_mcp_tool import (
     merge_tools_with_dynamic,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
+from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.working_directories import (
     extract_additional_directories,
     normalize_directory_inputs,
@@ -452,6 +453,7 @@ async def run_query(
         )
 
     project_path = Path.cwd()
+    set_runtime_task_scope(session_id=session_id, project_root=project_path)
     project_local_config = get_project_local_config(project_path)
     output_style = getattr(project_local_config, "output_style", "default") or "default"
     output_language = getattr(project_local_config, "output_language", "auto") or "auto"
@@ -557,6 +559,7 @@ async def run_query(
             extra={"session_id": session_id, "message_count": len(messages)},
         )
     finally:
+        set_runtime_task_scope(session_id=None)
         duration = max(time.time() - session_start_time, 0.0)
         try:
             await hook_manager.run_session_end_async(
@@ -1282,135 +1285,138 @@ def cli(
         resume_session=resume_session,
         continue_session=continue_session,
     )
+    set_runtime_task_scope(session_id=session_id, project_root=project_path)
+    try:
+        log_file = enable_session_file_logging(project_path, session_id)
 
-    log_file = enable_session_file_logging(project_path, session_id)
+        if cwd_changed:
+            logger.debug(
+                "[cli] Changed working directory via --cwd",
+                extra={"cwd": cwd_changed, "session_id": session_id},
+            )
 
-    if cwd_changed:
-        logger.debug(
-            "[cli] Changed working directory via --cwd",
-            extra={"cwd": cwd_changed, "session_id": session_id},
+        _log_resume_state(
+            session_id=session_id,
+            log_file=log_file,
+            resume_messages=resume_messages,
+            resumed_summary=resumed_summary,
+            most_recent=most_recent,
+            continue_session=continue_session,
         )
 
-    _log_resume_state(
-        session_id=session_id,
-        log_file=log_file,
-        resume_messages=resume_messages,
-        resumed_summary=resumed_summary,
-        most_recent=most_recent,
-        continue_session=continue_session,
-    )
-
-    logger.info(
-        "[cli] Starting CLI invocation",
-        extra={
-            "session_id": session_id,
-            "project_path": str(project_path),
-            "log_file": str(log_file),
-            "prompt_mode": bool(prompt),
-        },
-    )
-
-    # Ensure onboarding is complete
-    if not check_onboarding():
         logger.info(
-            "[cli] Onboarding check failed or aborted; exiting.",
-            extra={"session_id": session_id},
+            "[cli] Starting CLI invocation",
+            extra={
+                "session_id": session_id,
+                "project_path": str(project_path),
+                "log_file": str(log_file),
+                "prompt_mode": bool(prompt),
+            },
         )
-        sys.exit(1)
 
-    # Initialize project configuration for the current working directory
-    get_project_config(project_path)
+        # Ensure onboarding is complete
+        if not check_onboarding():
+            logger.info(
+                "[cli] Onboarding check failed or aborted; exiting.",
+                extra={"session_id": session_id},
+            )
+            sys.exit(1)
 
-    yolo_mode = effective_permission_mode == "bypassPermissions"
-    # Parse --tools option
-    allowed_tools = parse_tools_option(tools)
+        # Initialize project configuration for the current working directory
+        get_project_config(project_path)
 
-    setup_trigger = _resolve_setup_trigger(
-        setup_init=setup_init,
-        setup_init_only=setup_init_only,
-        setup_maintenance=setup_maintenance,
-    )
-    if _run_setup_if_needed(
-        setup_trigger=setup_trigger,
-        project_path=project_path,
-        session_id=session_id,
-        setup_init_only=setup_init_only,
-        setup_maintenance=setup_maintenance,
-    ):
-        return
+        yolo_mode = effective_permission_mode == "bypassPermissions"
+        # Parse --tools option
+        allowed_tools = parse_tools_option(tools)
 
-    initial_query = _read_initial_query_from_stdin(
-        prompt=prompt,
-        invoked_subcommand=ctx.invoked_subcommand,
-        session_id=session_id,
-    )
+        setup_trigger = _resolve_setup_trigger(
+            setup_init=setup_init,
+            setup_init_only=setup_init_only,
+            setup_maintenance=setup_maintenance,
+        )
+        if _run_setup_if_needed(
+            setup_trigger=setup_trigger,
+            project_path=project_path,
+            session_id=session_id,
+            setup_init_only=setup_init_only,
+            setup_maintenance=setup_maintenance,
+        ):
+            return
 
-    logger.debug(
-        "[cli] Configuration initialized",
-        extra={
-            "session_id": session_id,
-            "yolo_mode": yolo_mode,
-            "verbose": verbose,
-            "allowed_tools": allowed_tools,
-            "model": model,
-            "has_system_prompt": system_prompt is not None,
-            "has_append_system_prompt": append_system_prompt is not None,
-            "continue_session": continue_session,
-        },
-    )
+        initial_query = _read_initial_query_from_stdin(
+            prompt=prompt,
+            invoked_subcommand=ctx.invoked_subcommand,
+            session_id=session_id,
+        )
 
-    # If prompt is provided, run directly
-    if prompt:
-        tool_list = get_default_tools(allowed_tools=allowed_tools)
-        asyncio.run(
-            run_query(
-                prompt,
-                tool_list,
-                yolo_mode,
-                verbose,
+        logger.debug(
+            "[cli] Configuration initialized",
+            extra={
+                "session_id": session_id,
+                "yolo_mode": yolo_mode,
+                "verbose": verbose,
+                "allowed_tools": allowed_tools,
+                "model": model,
+                "has_system_prompt": system_prompt is not None,
+                "has_append_system_prompt": append_system_prompt is not None,
+                "continue_session": continue_session,
+            },
+        )
+
+        # If prompt is provided, run directly
+        if prompt:
+            tool_list = get_default_tools(allowed_tools=allowed_tools)
+            asyncio.run(
+                run_query(
+                    prompt,
+                    tool_list,
+                    yolo_mode,
+                    verbose,
+                    session_id=session_id,
+                    custom_system_prompt=system_prompt,
+                    append_system_prompt=append_system_prompt,
+                    model=model,
+                    fallback_model=fallback_model,
+                    max_thinking_tokens=max_thinking_tokens,
+                    max_turns=max_turns,
+                    permission_mode=effective_permission_mode,
+                    allowed_tools=allowed_tools,
+                    additional_working_dirs=additional_working_dirs,
+                )
+            )
+            return
+
+        # If no command specified, start interactive REPL with Rich interface
+        if ctx.invoked_subcommand is None:
+            # Use Rich interface by default
+            from ripperdoc.cli.ui.rich_ui import main_rich
+
+            interactive_model = _resolve_model_pointer_with_fallback(
+                model,
+                fallback_model,
                 session_id=session_id,
+                route="interactive",
+            )
+            main_rich(
+                yolo_mode=yolo_mode,
+                verbose=verbose,
+                show_full_thinking=show_full_thinking,
+                session_id=session_id,
+                log_file_path=log_file,
+                allowed_tools=allowed_tools,
                 custom_system_prompt=system_prompt,
                 append_system_prompt=append_system_prompt,
-                model=model,
-                fallback_model=fallback_model,
+                model=interactive_model,
                 max_thinking_tokens=max_thinking_tokens,
                 max_turns=max_turns,
                 permission_mode=effective_permission_mode,
-                allowed_tools=allowed_tools,
+                resume_messages=resume_messages,
+                initial_query=initial_query,
                 additional_working_dirs=additional_working_dirs,
             )
-        )
-        return
-
-    # If no command specified, start interactive REPL with Rich interface
-    if ctx.invoked_subcommand is None:
-        # Use Rich interface by default
-        from ripperdoc.cli.ui.rich_ui import main_rich
-
-        interactive_model = _resolve_model_pointer_with_fallback(
-            model,
-            fallback_model,
-            session_id=session_id,
-            route="interactive",
-        )
-        main_rich(
-            yolo_mode=yolo_mode,
-            verbose=verbose,
-            show_full_thinking=show_full_thinking,
-            session_id=session_id,
-            log_file_path=log_file,
-            allowed_tools=allowed_tools,
-            custom_system_prompt=system_prompt,
-            append_system_prompt=append_system_prompt,
-            model=interactive_model,
-            max_thinking_tokens=max_thinking_tokens,
-            max_turns=max_turns,
-            permission_mode=effective_permission_mode,
-            resume_messages=resume_messages,
-            initial_query=initial_query,
-            additional_working_dirs=additional_working_dirs,
-        )
-        return
+            return
+    finally:
+        set_runtime_task_scope(session_id=None)
 
 
 @cli.command(name="config")

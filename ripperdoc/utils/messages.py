@@ -310,7 +310,7 @@ def create_user_message(
     if tool_use_result is not None:
         try:
             if hasattr(tool_use_result, "model_dump"):
-                tool_use_result = tool_use_result.model_dump()
+                tool_use_result = tool_use_result.model_dump(by_alias=True, mode="json")
         except (AttributeError, TypeError, ValueError) as exc:
             # Fallback: keep as-is if conversion fails
             logger.warning(

@@ -20,6 +20,12 @@ from ripperdoc.tools.grep_tool import GrepTool
 from ripperdoc.tools.lsp_tool import LspTool
 from ripperdoc.tools.skill_tool import SkillTool
 from ripperdoc.tools.todo_tool import TodoReadTool, TodoWriteTool
+from ripperdoc.tools.task_graph_tool import TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool
+from ripperdoc.tools.team_tool import (
+    SendMessageTool,
+    TeamCreateTool,
+    TeamDeleteTool,
+)
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
 from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
 from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool
@@ -32,6 +38,7 @@ from ripperdoc.tools.mcp_tools import (
 )
 from ripperdoc.tools.dynamic_mcp_tool import load_dynamic_mcp_tools_sync
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.tasks import is_task_system_enabled
 
 logger = get_logger()
 
@@ -52,6 +59,13 @@ BUILTIN_TOOL_NAMES = [
     "Skill",
     "TodoRead",
     "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskUpdate",
+    "TaskList",
+    "TeamCreate",
+    "TeamDelete",
+    "SendMessage",
     "AskUserQuestion",
     "EnterPlanMode",
     "ExitPlanMode",
@@ -104,6 +118,7 @@ def filter_tools_by_names(
 
 def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[Any, Any]]:
     """Construct the default tool set (base tools + Task subagent launcher)."""
+    tasks_enabled = is_task_system_enabled()
     base_tools: List[Tool[Any, Any]] = [
         BashTool(),
         BashOutputTool(),
@@ -118,8 +133,6 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
         GrepTool(),
         LspTool(),
         SkillTool(),
-        TodoReadTool(),
-        TodoWriteTool(),
         AskUserQuestionTool(),
         EnterPlanModeTool(),
         ExitPlanModeTool(),
@@ -128,6 +141,21 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
         ListMcpResourcesTool(),
         ReadMcpResourceTool(),
     ]
+    if tasks_enabled:
+        base_tools.extend(
+            [
+                TaskCreateTool(),
+                TaskGetTool(),
+                TaskUpdateTool(),
+                TaskListTool(),
+                TeamCreateTool(),
+                TeamDeleteTool(),
+                SendMessageTool(),
+            ]
+        )
+    else:
+        base_tools.extend([TodoReadTool(), TodoWriteTool()])
+
     dynamic_tools: List[Tool[Any, Any]] = []
     try:
         mcp_tools = load_dynamic_mcp_tools_sync()
@@ -169,6 +197,7 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
         logger.debug(
             "[tool_defaults] Built tool inventory",
             extra={
+                "tasks_enabled": tasks_enabled,
                 "base_tools": len(base_tools),
                 "dynamic_mcp_tools": len(dynamic_tools),
                 "total_tools": len(all_tools),

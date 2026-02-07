@@ -4,10 +4,13 @@ This module provides a strategy pattern implementation for rendering different
 tool results in the Rich CLI interface.
 """
 
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Literal, Optional, TypedDict
 
 from rich.console import Console
 from rich.markup import escape
+
+from ripperdoc.utils.tasks import list_tasks, resolve_task_list_id
+from ripperdoc.utils.teams import get_active_team_name, get_team
 
 
 class ToolResultRenderer:
@@ -32,20 +35,179 @@ class ToolResultRenderer:
         return getattr(data, key, default)
 
 
+TaskRenderStatus = Literal["pending", "in_progress", "completed"]
+
+
+class TaskRenderEntry(TypedDict):
+    id: str
+    subject: str
+    status: TaskRenderStatus
+    owner: Optional[str]
+    blockedBy: list[str]
+
+
 class TodoResultRenderer(ToolResultRenderer):
     """Render Todo tool results."""
+
+    @staticmethod
+    def _render_text(console: Console, content: str, fallback: str) -> None:
+        lines = content.splitlines()
+        if lines:
+            console.print(f"  ⎿  [dim]{escape(lines[0])}[/]")
+            for line in lines[1:]:
+                console.print(f"    {line}", markup=False)
+        else:
+            console.print(f"  ⎿  [dim]{fallback}[/]")
 
     def can_handle(self, sender: str) -> bool:
         return "Todo" in sender
 
     def render(self, content: str, _tool_data: Any) -> None:
-        lines = content.splitlines()
-        if lines:
-            self.console.print(f"  ⎿  [dim]{escape(lines[0])}[/]")
-            for line in lines[1:]:
-                self.console.print(f"    {line}", markup=False)
-        else:
-            self.console.print("  ⎿  [dim]Todo update[/]")
+        self._render_text(self.console, content, "Todo update")
+
+
+class TaskGraphResultRenderer(ToolResultRenderer):
+    """Render Task Graph tool results as a todo-like task panel."""
+
+    _HANDLED_TOOLS = {"TaskCreate", "TaskUpdate", "TaskList"}
+    _STATUS_MARKER = {"completed": "●", "in_progress": "◐", "pending": "○"}
+
+    def can_handle(self, sender: str) -> bool:
+        return sender in self._HANDLED_TOOLS
+
+    def _resolve_active_task_list_id(self) -> str:
+        team_name = get_active_team_name()
+        if team_name:
+            team = get_team(team_name)
+            if team is not None:
+                return team.task_list_id
+        return resolve_task_list_id()
+
+    def _task_sort_key(self, task_id: str) -> tuple[int, int | str]:
+        if str(task_id).isdigit():
+            return (0, int(task_id))
+        return (1, str(task_id))
+
+    def _entries_from_tool_data(self, tool_data: Any) -> list[TaskRenderEntry]:
+        tasks = self._get_field(tool_data, "tasks")
+        if not isinstance(tasks, list):
+            return []
+
+        entries: list[TaskRenderEntry] = []
+        for raw in tasks:
+            if hasattr(raw, "model_dump"):
+                raw = raw.model_dump(by_alias=True, mode="json")
+            if not isinstance(raw, dict):
+                continue
+
+            task_id = str(raw.get("id", "")).strip()
+            subject = str(raw.get("subject", "")).strip()
+            raw_status = str(raw.get("status", "pending")).strip() or "pending"
+            status: TaskRenderStatus = (
+                raw_status if raw_status in {"pending", "in_progress", "completed"} else "pending"
+            )
+            owner = raw.get("owner")
+            blocked_by = raw.get("blockedBy")
+            if not isinstance(blocked_by, list):
+                blocked_by = raw.get("blocked_by")
+            if not isinstance(blocked_by, list):
+                blocked_by = []
+
+            if not task_id or not subject:
+                continue
+
+            entries.append(
+                {
+                    "id": task_id,
+                    "subject": subject,
+                    "status": status,
+                    "owner": str(owner).strip() if owner else None,
+                    "blockedBy": [str(dep).strip() for dep in blocked_by if str(dep).strip()],
+                }
+            )
+
+        entries.sort(key=lambda item: self._task_sort_key(item["id"]))
+        return entries
+
+    def _entries_from_storage(self) -> list[TaskRenderEntry]:
+        try:
+            task_list_id = self._resolve_active_task_list_id()
+            tasks = list_tasks(task_list_id=task_list_id)
+        except (OSError, RuntimeError, ValueError, TypeError):
+            return []
+
+        by_id = {task.id: task for task in tasks}
+        entries: list[TaskRenderEntry] = []
+        for task in tasks:
+            metadata = task.metadata if isinstance(task.metadata, dict) else {}
+            if metadata.get("_internal"):
+                continue
+
+            blockers = [
+                dep
+                for dep in task.blocked_by
+                if (by_id.get(dep) is not None and by_id[dep].status != "completed")
+            ]
+            entries.append(
+                {
+                    "id": task.id,
+                    "subject": task.subject,
+                    "status": task.status,
+                    "owner": task.owner,
+                    "blockedBy": blockers,
+                }
+            )
+
+        entries.sort(key=lambda item: self._task_sort_key(item["id"]))
+        return entries
+
+    def _summary(self, entries: list[TaskRenderEntry]) -> str:
+        pending = len([item for item in entries if item["status"] == "pending"])
+        in_progress = len([item for item in entries if item["status"] == "in_progress"])
+        completed = len([item for item in entries if item["status"] == "completed"])
+        return (
+            f"Tasks updated (total {len(entries)}; "
+            f"{pending} pending, {in_progress} in progress, {completed} completed)."
+        )
+
+    def _render_task_list_text(self, entries: list[TaskRenderEntry]) -> str:
+        lines: list[str] = []
+        for entry in entries:
+            marker = self._STATUS_MARKER.get(entry["status"], "○")
+            task_id = entry["id"]
+            subject = entry["subject"]
+            owner_raw = entry["owner"]
+            owner = str(owner_raw).strip() if owner_raw is not None else ""
+            blocked_by = entry["blockedBy"]
+
+            line = f"{marker} {subject}"
+            if owner:
+                line += f" @{owner}"
+            if blocked_by:
+                blocker_text = ", ".join([str(dep).strip() for dep in blocked_by if str(dep).strip()])
+                if blocker_text:
+                    line += f" (blocked by {blocker_text})"
+            if task_id:
+                line += f" [id:{task_id}]"
+            lines.append(line)
+        summary = self._summary(entries)
+        return "\n".join([summary, *lines]) if lines else summary
+
+    def render(self, content: str, tool_data: Any) -> None:
+        entries = self._entries_from_tool_data(tool_data)
+        if not entries:
+            entries = self._entries_from_storage()
+
+        if entries:
+            text = self._render_task_list_text(entries)
+            TodoResultRenderer._render_text(self.console, text, "Task update")
+            return
+
+        if content:
+            TodoResultRenderer._render_text(self.console, content, "Task update")
+            return
+
+        TodoResultRenderer._render_text(self.console, "", "Task update")
 
 
 class ReadResultRenderer(ToolResultRenderer):
@@ -253,6 +415,7 @@ class ToolResultRendererRegistry:
         self.console = console
         self.verbose = verbose
         self._renderers: List[ToolResultRenderer] = [
+            TaskGraphResultRenderer(console, verbose),
             TodoResultRenderer(console, verbose),
             ReadResultRenderer(console, verbose),
             EditResultRenderer(console, verbose),
@@ -281,6 +444,7 @@ class ToolResultRendererRegistry:
 __all__ = [
     "ToolResultRenderer",
     "ToolResultRendererRegistry",
+    "TaskGraphResultRenderer",
     "TodoResultRenderer",
     "ReadResultRenderer",
     "EditResultRenderer",
