@@ -57,13 +57,16 @@ def _render_skills_plain(ui: Any) -> bool:
 
     user_skills = [s for s in result.skills if s.location == SkillLocation.USER]
     project_skills = [s for s in result.skills if s.location == SkillLocation.PROJECT]
+    plugin_skills = [s for s in result.skills if s.location == SkillLocation.PLUGIN]
     other_skills = [s for s in result.skills if s.location == SkillLocation.OTHER]
 
     def print_skill(skill: SkillDefinition) -> None:
         location_tag = f"[dim]({skill.location.value})[/dim]" if skill.location else ""
         disabled = is_skill_definition_disabled(skill, project_path=project_path)
         status_tag = "[yellow]disabled[/yellow]" if disabled else "[green]enabled[/green]"
-        console.print(f"\n[bold cyan]{escape(skill.name)}[/bold cyan] {location_tag} [dim]- {status_tag}[/dim]")
+        console.print(
+            f"\n[bold cyan]{escape(skill.name)}[/bold cyan] {location_tag} [dim]- {status_tag}[/dim]"
+        )
         console.print(f"  {escape(skill.description)}")
 
         if skill.allowed_tools:
@@ -92,6 +95,11 @@ def _render_skills_plain(ui: Any) -> bool:
     if user_skills:
         console.print("\n[bold]User skills:[/bold]")
         for skill in user_skills:
+            print_skill(skill)
+
+    if plugin_skills:
+        console.print("\n[bold]Plugin skills:[/bold]")
+        for skill in plugin_skills:
             print_skill(skill)
 
     if other_skills:

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ripperdoc import __version__
+from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.token_estimation import estimate_tokens
 
@@ -182,6 +183,19 @@ def _parse_servers(data: Dict[str, Any]) -> Dict[str, McpServerInfo]:
             if not server_name:
                 continue
             servers[server_name] = _parse_server(server_name, raw)
+    if servers:
+        return servers
+
+    # Support direct top-level map of server_name -> config.
+    for name, raw in data.items():
+        if not isinstance(raw, dict):
+            continue
+        if not any(key in raw for key in ("command", "args", "url", "uri", "type", "transport")):
+            continue
+        server_name = str(name).strip()
+        if not server_name:
+            continue
+        servers[server_name] = _parse_server(server_name, raw)
     return servers
 
 
@@ -198,6 +212,35 @@ def _load_server_configs(project_path: Optional[Path]) -> Dict[str, McpServerInf
     for path in candidates:
         data = _load_json_file(path)
         merged.update(_parse_servers(data))
+
+    plugin_result = discover_plugins(project_path=project_path)
+    for plugin_error in plugin_result.errors:
+        logger.warning(
+            "[mcp] Plugin discovery warning: %s (%s)",
+            plugin_error.path,
+            plugin_error.reason,
+        )
+
+    for plugin in plugin_result.plugins:
+        for mcp_path in plugin.mcp_paths:
+            resolved_path = mcp_path
+            if resolved_path.is_dir():
+                if (resolved_path / ".mcp.json").exists():
+                    resolved_path = resolved_path / ".mcp.json"
+                elif (resolved_path / "mcp.json").exists():
+                    resolved_path = resolved_path / "mcp.json"
+            data = _load_json_file(resolved_path)
+            if not data:
+                continue
+            expanded = expand_plugin_root_vars(data, plugin.root)
+            if isinstance(expanded, dict):
+                merged.update(_parse_servers(expanded))
+
+        for inline_entry in plugin.mcp_inline:
+            expanded_inline = expand_plugin_root_vars(inline_entry, plugin.root)
+            if isinstance(expanded_inline, dict):
+                merged.update(_parse_servers(expanded_inline))
+
     logger.debug(
         "[mcp] Loaded MCP server configs",
         extra={

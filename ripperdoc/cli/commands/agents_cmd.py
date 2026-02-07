@@ -352,6 +352,11 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         if target_agent.location == AgentLocation.BUILT_IN:
             console.print("[yellow]Built-in agents cannot be edited.[/yellow]")
             return True
+        if target_agent.location == AgentLocation.PLUGIN:
+            console.print(
+                "[yellow]Plugin agents are read-only. Duplicate it into user/project scope if needed.[/yellow]"
+            )
+            return True
 
         default_location = target_agent.location
         location_raw = (

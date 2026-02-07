@@ -25,6 +25,7 @@ from .models_cmd import command as models_command
 from .output_language_cmd import command as output_language_command
 from .output_style_cmd import command as output_style_command
 from .permissions_cmd import command as permissions_command
+from .plugins_cmd import command as plugins_command
 from .rewind_cmd import command as rewind_command
 from .resume_cmd import command as resume_command
 from .skills_cmd import command as skills_command
@@ -68,6 +69,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     doctor_command,
     memory_command,
     permissions_command,
+    plugins_command,
     tasks_command,
     todos_command,
     mcp_command,

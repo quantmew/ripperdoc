@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from ripperdoc.core.hooks.events import HookEvent
+from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -365,9 +366,7 @@ def parse_hooks_config(data: Any, *, source: Optional[str] = None) -> HooksConfi
         return _parse_hooks_file(data)
     except Exception as exc:  # pragma: no cover - defensive
         label = f" for {source}" if source else ""
-        logger.warning(
-            f"Failed to parse hooks config{label}: {type(exc).__name__}: {exc}"
-        )
+        logger.warning(f"Failed to parse hooks config{label}: {type(exc).__name__}: {exc}")
         return HooksConfig()
 
 
@@ -389,6 +388,19 @@ def load_hooks_config(config_path: Path) -> HooksConfig:
         return HooksConfig()
     except (OSError, IOError) as e:
         logger.warning(f"Error reading hooks config {config_path}: {e}")
+        return HooksConfig()
+
+
+def _load_hooks_config_from_data(data: Dict[str, Any], *, source: str) -> HooksConfig:
+    try:
+        return _parse_hooks_file(data)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "[hooks] Failed to parse hooks config from %s: %s: %s",
+            source,
+            type(exc).__name__,
+            exc,
+        )
         return HooksConfig()
 
 
@@ -426,5 +438,47 @@ def get_merged_hooks_config(project_path: Optional[Path] = None) -> HooksConfig:
         # Merge local config
         local_config = load_hooks_config(get_project_local_hooks_path(project_path))
         config = config.merge_with(local_config)
+
+    plugin_result = discover_plugins(project_path=project_path)
+    for plugin_error in plugin_result.errors:
+        logger.warning(
+            "[hooks] Plugin discovery warning: %s (%s)",
+            plugin_error.path,
+            plugin_error.reason,
+        )
+
+    for plugin in plugin_result.plugins:
+        for hooks_path in plugin.hooks_paths:
+            resolved_path = hooks_path
+            if resolved_path.is_dir():
+                resolved_path = resolved_path / "hooks.json"
+            if not resolved_path.exists() or not resolved_path.is_file():
+                continue
+            try:
+                raw = json.loads(resolved_path.read_text(encoding="utf-8"))
+            except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                logger.warning(
+                    "[hooks] Failed to load plugin hooks config %s: %s: %s",
+                    resolved_path,
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
+            if not isinstance(raw, dict):
+                continue
+            expanded = expand_plugin_root_vars(raw, plugin.root)
+            plugin_config = _load_hooks_config_from_data(
+                expanded, source=f"{plugin.name}:{resolved_path}"
+            )
+            config = config.merge_with(plugin_config)
+
+        for inline_entry in plugin.hooks_inline:
+            expanded_inline = expand_plugin_root_vars(inline_entry, plugin.root)
+            if not isinstance(expanded_inline, dict):
+                continue
+            inline_config = _load_hooks_config_from_data(
+                expanded_inline, source=f"{plugin.name}:inline-hooks"
+            )
+            config = config.merge_with(inline_config)
 
     return config

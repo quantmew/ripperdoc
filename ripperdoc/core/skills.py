@@ -26,6 +26,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import yaml
 
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
+from ripperdoc.core.plugins import discover_plugins
 from ripperdoc.utils.coerce import parse_boolish, parse_optional_int
 from ripperdoc.utils.log import get_logger
 
@@ -42,6 +43,7 @@ class SkillLocation(str, Enum):
 
     USER = "user"
     PROJECT = "project"
+    PLUGIN = "plugin"
     OTHER = "other"
 
 
@@ -61,6 +63,7 @@ class SkillDefinition:
     skill_type: str = "prompt"
     disable_model_invocation: bool = False
     hooks: HooksConfig = field(default_factory=HooksConfig)
+    plugin_name: Optional[str] = None
 
 
 @dataclass
@@ -120,7 +123,12 @@ def _normalize_allowed_tools(value: object) -> List[str]:
 
 
 def _load_skill_file(
-    path: Path, location: SkillLocation
+    path: Path,
+    location: SkillLocation,
+    *,
+    default_name: Optional[str] = None,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
 ) -> Tuple[Optional[SkillDefinition], Optional[SkillLoadError]]:
     """Parse a single SKILL.md file."""
     try:
@@ -140,9 +148,12 @@ def _load_skill_file(
 
     raw_name = frontmatter.get("name")
     raw_description = frontmatter.get("description")
-    if not isinstance(raw_name, str) or not raw_name.strip():
+    resolved_name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
+    if resolved_name is None and default_name:
+        resolved_name = default_name.strip()
+    if not resolved_name:
         return None, SkillLoadError(path=path, reason='Missing required "name" field')
-    if not _SKILL_NAME_RE.match(raw_name.strip()):
+    if not _SKILL_NAME_RE.match(resolved_name):
         return None, SkillLoadError(
             path=path,
             reason='Invalid "name" format. Use lowercase letters, numbers, and hyphens only (max 64 chars).',
@@ -168,10 +179,11 @@ def _load_skill_file(
     disable_model_invocation = parse_boolish(
         frontmatter.get("disable-model-invocation") or frontmatter.get("disable_model_invocation")
     )
-    hooks = parse_hooks_config(frontmatter.get("hooks"), source=f"skill:{raw_name.strip()}")
+    hooks = parse_hooks_config(frontmatter.get("hooks"), source=f"skill:{resolved_name}")
+    full_name = f"{namespace_prefix}:{resolved_name}" if namespace_prefix else resolved_name
 
     skill = SkillDefinition(
-        name=raw_name.strip(),
+        name=full_name,
         description=raw_description.strip(),
         content=body.strip(),
         path=path,
@@ -183,12 +195,17 @@ def _load_skill_file(
         skill_type=skill_type or "prompt",
         disable_model_invocation=disable_model_invocation,
         hooks=hooks,
+        plugin_name=plugin_name,
     )
     return skill, None
 
 
 def _load_skill_dir(
-    path: Path, location: SkillLocation
+    path: Path,
+    location: SkillLocation,
+    *,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
 ) -> Tuple[List[SkillDefinition], List[SkillLoadError]]:
     """Load skills from a directory that either contains SKILL.md or subdirectories."""
     skills: List[SkillDefinition] = []
@@ -198,7 +215,13 @@ def _load_skill_dir(
 
     single_skill = path / SKILL_FILE_NAME
     if single_skill.exists():
-        skill, error = _load_skill_file(single_skill, location)
+        skill, error = _load_skill_file(
+            single_skill,
+            location,
+            default_name=path.name,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
         if skill:
             skills.append(skill)
         elif error:
@@ -215,12 +238,50 @@ def _load_skill_dir(
         candidate = entry / SKILL_FILE_NAME
         if not candidate.exists():
             continue
-        skill, error = _load_skill_file(candidate, location)
+        skill, error = _load_skill_file(
+            candidate,
+            location,
+            default_name=entry.name,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
         if skill:
             skills.append(skill)
         elif error:
             errors.append(error)
     return skills, errors
+
+
+def _load_skill_path(
+    path: Path,
+    location: SkillLocation,
+    *,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
+) -> Tuple[List[SkillDefinition], List[SkillLoadError]]:
+    if path.is_file():
+        if path.name != SKILL_FILE_NAME:
+            return [], []
+        skill, error = _load_skill_file(
+            path,
+            location,
+            default_name=path.parent.name,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
+        if skill:
+            return [skill], []
+        if error:
+            return [], [error]
+        return [], []
+    if path.is_dir():
+        return _load_skill_dir(
+            path,
+            location,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
+    return [], []
 
 
 def skill_directories(
@@ -260,6 +321,21 @@ def load_all_skills(
                     },
                 )
             skills_by_name[skill.name] = skill
+
+    plugin_result = discover_plugins(project_path=project_path, home=home)
+    for plugin_error in plugin_result.errors:
+        errors.append(SkillLoadError(path=plugin_error.path, reason=plugin_error.reason))
+    for plugin in plugin_result.plugins:
+        for skills_path in plugin.skills_paths:
+            loaded, dir_errors = _load_skill_path(
+                skills_path,
+                SkillLocation.PLUGIN,
+                namespace_prefix=plugin.name,
+                plugin_name=plugin.name,
+            )
+            errors.extend(dir_errors)
+            for skill in loaded:
+                skills_by_name[skill.name] = skill
     return SkillLoadResult(skills=list(skills_by_name.values()), errors=errors)
 
 
@@ -326,7 +402,9 @@ def get_disabled_skill_names(
 
     disabled: set[str] = set()
     for _, loc in skill_directories(project_path=project_path, home=home):
-        disabled.update(get_disabled_skill_names(project_path=project_path, home=home, location=loc))
+        disabled.update(
+            get_disabled_skill_names(project_path=project_path, home=home, location=loc)
+        )
     return disabled
 
 
@@ -346,7 +424,9 @@ def is_skill_definition_disabled(
     skill: SkillDefinition, project_path: Optional[Path] = None, home: Optional[Path] = None
 ) -> bool:
     """Check whether a specific skill definition is disabled in its source scope."""
-    disabled = get_disabled_skill_names(project_path=project_path, home=home, location=skill.location)
+    disabled = get_disabled_skill_names(
+        project_path=project_path, home=home, location=skill.location
+    )
     return skill.name in disabled
 
 
@@ -359,7 +439,9 @@ def set_skill_enabled(
     """Enable or disable a skill in the state file for that skill's source scope."""
     if skill.location not in (SkillLocation.USER, SkillLocation.PROJECT):
         return False
-    disabled = get_disabled_skill_names(project_path=project_path, home=home, location=skill.location)
+    disabled = get_disabled_skill_names(
+        project_path=project_path, home=home, location=skill.location
+    )
     was_disabled = skill.name in disabled
     if enabled and not was_disabled:
         return False

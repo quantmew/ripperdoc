@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
+from ripperdoc.core.plugins import discover_plugins
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.log import get_logger
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
@@ -83,6 +83,7 @@ class AgentLocation(str, Enum):
     BUILT_IN = "built-in"
     USER = "user"
     PROJECT = "project"
+    PLUGIN = "plugin"
 
 
 @dataclass
@@ -99,6 +100,7 @@ class AgentDefinition:
     filename: Optional[str] = None
     fork_context: bool = False
     hooks: HooksConfig = field(default_factory=HooksConfig)
+    plugin_name: Optional[str] = None
 
 
 @dataclass
@@ -123,6 +125,7 @@ CODE_REVIEW_AGENT_PROMPT = (
     "missing tests, security concerns, and regressions. Do not make code changes. "
     "Provide clear, actionable feedback that the parent agent can relay to the user."
 )
+
 
 def _tool_available(agent_tools: Iterable[str], tool_name: str) -> bool:
     names = {name for name in agent_tools if isinstance(name, str)}
@@ -162,7 +165,9 @@ def _build_explore_agent_prompt(agent_tools: Iterable[str]) -> str:
         guidelines.append(f"- Use {GREP_TOOL_NAME} for searching file contents with regex")
     if _tool_available(agent_tools, READ_TOOL_NAME):
         strengths.append("Reading and analyzing file contents")
-        guidelines.append(f"- Use {READ_TOOL_NAME} when you know the specific file path you need to read")
+        guidelines.append(
+            f"- Use {READ_TOOL_NAME} when you know the specific file path you need to read"
+        )
 
     if not strengths:
         strengths.append("Analyzing existing code and reporting findings clearly")
@@ -340,17 +345,23 @@ def _built_in_agents() -> List[AgentDefinition]:
     ]
 
 
-def _agent_dirs() -> List[Tuple[Path, AgentLocation]]:
-    home_dir = Path.home() / ".ripperdoc" / AGENT_DIR_NAME
-    project_dir = Path.cwd() / ".ripperdoc" / AGENT_DIR_NAME
+def _agent_dirs(
+    project_path: Optional[Path] = None, home: Optional[Path] = None
+) -> List[Tuple[Path, AgentLocation]]:
+    home_dir = (home or Path.home()) / ".ripperdoc" / AGENT_DIR_NAME
+    project_dir = (project_path or Path.cwd()).resolve() / ".ripperdoc" / AGENT_DIR_NAME
     return [
         (home_dir, AgentLocation.USER),
         (project_dir, AgentLocation.PROJECT),
     ]
 
 
-def _agent_dir_for_location(location: AgentLocation) -> Path:
-    for path, loc in _agent_dirs():
+def _agent_dir_for_location(
+    location: AgentLocation,
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+) -> Path:
+    for path, loc in _agent_dirs(project_path=project_path, home=home):
         if loc == location:
             return path
     raise ValueError(f"Unsupported agent location: {location}")
@@ -423,7 +434,11 @@ def _normalize_agent_hooks(raw_hooks: object) -> object:
 
 
 def _parse_agent_file(
-    path: Path, location: AgentLocation
+    path: Path,
+    location: AgentLocation,
+    *,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
 ) -> Tuple[Optional[AgentDefinition], Optional[str]]:
     """Parse a single agent file."""
     try:
@@ -444,10 +459,16 @@ def _parse_agent_file(
 
     agent_name = frontmatter.get("name")
     description = frontmatter.get("description")
-    if not isinstance(agent_name, str) or not agent_name.strip():
+    resolved_agent_name = (
+        agent_name.strip() if isinstance(agent_name, str) and agent_name.strip() else path.stem
+    )
+    if not resolved_agent_name:
         return None, 'Missing required "name" field in frontmatter'
     if not isinstance(description, str) or not description.strip():
         return None, 'Missing required "description" field in frontmatter'
+    full_agent_name = (
+        f"{namespace_prefix}:{resolved_agent_name}" if namespace_prefix else resolved_agent_name
+    )
 
     tools = _normalize_tools(frontmatter.get("tools"))
     model_value = frontmatter.get("model")
@@ -456,11 +477,11 @@ def _parse_agent_file(
     color = color_value if isinstance(color_value, str) else None
     fork_context = parse_boolish(frontmatter.get("fork_context") or frontmatter.get("fork-context"))
     hooks = parse_hooks_config(
-        _normalize_agent_hooks(frontmatter.get("hooks")), source=f"agent:{agent_name.strip()}"
+        _normalize_agent_hooks(frontmatter.get("hooks")), source=f"agent:{full_agent_name}"
     )
 
     agent = AgentDefinition(
-        agent_type=agent_name.strip(),
+        agent_type=full_agent_name,
         when_to_use=description.replace("\\n", "\n").strip(),
         tools=tools,
         system_prompt=body.strip(),
@@ -470,12 +491,17 @@ def _parse_agent_file(
         filename=path.stem,
         fork_context=fork_context,
         hooks=hooks,
+        plugin_name=plugin_name,
     )
     return agent, None
 
 
 def _load_agent_dir(
-    path: Path, location: AgentLocation
+    path: Path,
+    location: AgentLocation,
+    *,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
 ) -> Tuple[List[AgentDefinition], List[Tuple[Path, str]]]:
     agents: List[AgentDefinition] = []
     errors: List[Tuple[Path, str]] = []
@@ -483,7 +509,12 @@ def _load_agent_dir(
         return agents, errors
 
     for file_path in sorted(path.glob("*.md")):
-        agent, error = _parse_agent_file(file_path, location)
+        agent, error = _parse_agent_file(
+            file_path,
+            location,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
         if agent:
             agents.append(agent)
         elif error:
@@ -491,17 +522,63 @@ def _load_agent_dir(
     return agents, errors
 
 
-@lru_cache(maxsize=1)
-def load_agent_definitions() -> AgentLoadResult:
+def _load_agent_path(
+    path: Path,
+    location: AgentLocation,
+    *,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
+) -> Tuple[List[AgentDefinition], List[Tuple[Path, str]]]:
+    if path.is_file():
+        if path.suffix.lower() != ".md":
+            return [], []
+        parsed, error = _parse_agent_file(
+            path,
+            location,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
+        if parsed:
+            return [parsed], []
+        if error:
+            return [], [(path, error)]
+        return [], []
+    if path.is_dir():
+        return _load_agent_dir(
+            path,
+            location,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
+    return [], []
+
+
+def load_agent_definitions(
+    project_path: Optional[Path] = None, home: Optional[Path] = None
+) -> AgentLoadResult:
     """Load built-in, user, and project agents."""
     built_ins = _built_in_agents()
     collected_agents = list(built_ins)
     errors: List[Tuple[Path, str]] = []
 
-    for directory, location in _agent_dirs():
+    for directory, location in _agent_dirs(project_path=project_path, home=home):
         loaded, dir_errors = _load_agent_dir(directory, location)
         collected_agents.extend(loaded)
         errors.extend(dir_errors)
+
+    plugin_result = discover_plugins(project_path=project_path, home=home)
+    for plugin_error in plugin_result.errors:
+        errors.append((plugin_error.path, plugin_error.reason))
+    for plugin in plugin_result.plugins:
+        for agent_path in plugin.agents_paths:
+            loaded, dir_errors = _load_agent_path(
+                agent_path,
+                AgentLocation.PLUGIN,
+                namespace_prefix=plugin.name,
+                plugin_name=plugin.name,
+            )
+            collected_agents.extend(loaded)
+            errors.extend(dir_errors)
 
     agent_map: Dict[str, AgentDefinition] = {}
     for agent in collected_agents:
@@ -517,7 +594,8 @@ def load_agent_definitions() -> AgentLoadResult:
 
 def clear_agent_cache() -> None:
     """Reset cached agent definitions."""
-    load_agent_definitions.cache_clear()  # type: ignore[attr-defined]
+    # No-op. Agent loading is intentionally uncached so plugin updates are visible immediately.
+    return
 
 
 def summarize_agent(agent: AgentDefinition) -> str:

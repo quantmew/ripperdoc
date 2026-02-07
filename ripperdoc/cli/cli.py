@@ -31,6 +31,7 @@ from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
+from ripperdoc.core.plugins import set_runtime_plugin_dirs
 from ripperdoc.utils.messages import create_user_message
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.core.permission_engine import make_permission_checker
@@ -74,7 +75,6 @@ _SDK_ONLY_OPTION_FLAGS: tuple[tuple[str, str], ...] = (
     ("fork_session", "--fork-session"),
     ("agents", "--agents"),
     ("setting_sources", "--setting-sources"),
-    ("plugin_dirs", "--plugin-dir"),
     ("betas", "--betas"),
     ("max_budget_usd", "--max-budget-usd"),
     ("json_schema", "--json-schema"),
@@ -113,7 +113,9 @@ def _resolve_permission_mode(yolo: bool, permission_mode: str) -> str:
 
 def _is_stdio_mode_request(ctx: click.Context, output_format: str, print_mode: bool) -> bool:
     """Return True when invocation should run through stdio mode."""
-    return ctx.invoked_subcommand is None and (output_format in ("json", "stream-json") or print_mode)
+    return ctx.invoked_subcommand is None and (
+        output_format in ("json", "stream-json") or print_mode
+    )
 
 
 def _collect_sdk_only_option_uses(
@@ -1092,8 +1094,7 @@ def _read_initial_query_from_stdin(
     "plugin_dirs",
     multiple=True,
     type=click.Path(),
-    help="Plugin directory (SDK only).",
-    hidden=True,
+    help="Additional plugin directory (repeatable).",
 )
 @click.option(
     "--betas",
@@ -1233,7 +1234,9 @@ def cli(
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
     effective_permission_mode = _resolve_permission_mode(yolo, permission_mode)
-    print_prompt = _resolve_root_extra_args(ctx=ctx, print_mode=print_mode, print_prompt=print_prompt)
+    print_prompt = _resolve_root_extra_args(
+        ctx=ctx, print_mode=print_mode, print_prompt=print_prompt
+    )
     cwd_changed = _change_cwd_if_requested(cwd)
 
     project_path, additional_working_dirs, sdk_default_options = _prepare_cli_runtime_inputs(
@@ -1257,6 +1260,7 @@ def cli(
         max_thinking_tokens=max_thinking_tokens,
         json_schema=json_schema,
     )
+    set_runtime_plugin_dirs(plugin_dirs, base_dir=project_path)
 
     if _run_stdio_mode_if_requested(
         ctx=ctx,

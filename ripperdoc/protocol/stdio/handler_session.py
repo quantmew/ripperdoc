@@ -19,6 +19,7 @@ from ripperdoc.core.config import (
     get_project_local_config,
 )
 from ripperdoc.core.output_styles import resolve_output_style
+from ripperdoc.core.plugins import discover_plugins, set_runtime_plugin_dirs
 from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
@@ -124,7 +125,9 @@ class StdioSessionMixin:
                 try:
                     parsed_schema = json.loads(raw_json_schema)
                 except json.JSONDecodeError:
-                    logger.warning("[stdio] Invalid json_schema payload; expected valid JSON object")
+                    logger.warning(
+                        "[stdio] Invalid json_schema payload; expected valid JSON object"
+                    )
                 else:
                     if isinstance(parsed_schema, dict):
                         self._json_schema = parsed_schema
@@ -138,7 +141,6 @@ class StdioSessionMixin:
                 "fork_session",
                 "agents",
                 "setting_sources",
-                "plugin_dirs",
                 "betas",
             ]
             ignored_in_use = [
@@ -158,6 +160,19 @@ class StdioSessionMixin:
                 self._project_path = Path(cwd)
             else:
                 self._project_path = Path.cwd()
+            plugin_dirs_option = options.get("plugin_dirs")
+            if isinstance(plugin_dirs_option, list):
+                set_runtime_plugin_dirs(
+                    [str(item) for item in plugin_dirs_option if item],
+                    base_dir=self._project_path,
+                )
+            elif isinstance(plugin_dirs_option, tuple):
+                set_runtime_plugin_dirs(
+                    [str(item) for item in plugin_dirs_option if item],
+                    base_dir=self._project_path,
+                )
+            else:
+                set_runtime_plugin_dirs([])
             set_runtime_task_scope(
                 session_id=self._session_id,
                 project_root=self._project_path,
@@ -183,10 +198,7 @@ class StdioSessionMixin:
             configured_output_style = (
                 getattr(project_local_config, "output_style", "default") or "default"
             )
-            requested_output_style = (
-                options.get("output_style")
-                or configured_output_style
-            )
+            requested_output_style = options.get("output_style") or configured_output_style
             resolved_output_style, _ = resolve_output_style(
                 str(requested_output_style),
                 project_path=self._project_path,
@@ -195,10 +207,7 @@ class StdioSessionMixin:
             configured_output_language = (
                 getattr(project_local_config, "output_language", "auto") or "auto"
             )
-            requested_output_language = (
-                options.get("output_language")
-                or configured_output_language
-            )
+            requested_output_language = options.get("output_language") or configured_output_language
             self._output_language = str(requested_output_language or "auto").strip() or "auto"
 
             # Parse tool options
@@ -286,9 +295,7 @@ class StdioSessionMixin:
                         session_start_result = await hook_manager.run_session_start_async("startup")
                     if getattr(session_start_result, "system_message", None):
                         session_start_notices.append(str(session_start_result.system_message))
-                    self._session_hook_contexts = self._collect_hook_contexts(
-                        session_start_result
-                    )
+                    self._session_hook_contexts = self._collect_hook_contexts(session_start_result)
                 except asyncio.TimeoutError:
                     logger.warning(
                         f"[stdio] Session start hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s"
@@ -329,7 +336,9 @@ class StdioSessionMixin:
             )
             self._skill_instructions = build_skill_summary(enabled_skills)
 
-            agent_result = load_agent_definitions()
+            agent_result = load_agent_definitions(project_path=self._project_path)
+            plugin_result = discover_plugins(project_path=self._project_path)
+            plugin_names = [plugin.name for plugin in plugin_result.plugins]
 
             system_prompt = self._resolve_system_prompt(
                 tools,
@@ -362,7 +371,9 @@ class StdioSessionMixin:
                     slash_commands.append(custom_cmd.name)
 
             resolved_model_profile = resolve_model_profile(model or "main")
-            resolved_model = resolved_model_profile.model if resolved_model_profile else (model or "main")
+            resolved_model = (
+                resolved_model_profile.model if resolved_model_profile else (model or "main")
+            )
 
             init_response = InitializeResponseData(
                 session_id=self._session_id or "",
@@ -375,7 +386,7 @@ class StdioSessionMixin:
                 output_language=self._output_language,
                 agents=agent_names,
                 skills=skill_names,
-                plugins=[],
+                plugins=plugin_names,
             )
 
             # Emit a system/init stream message first (Claude CLI compatibility)
@@ -386,12 +397,14 @@ class StdioSessionMixin:
                     api_key_source=init_response.apiKeySource,
                     cwd=str(self._project_path),
                     tools=[t.name for t in tools],
-                    mcp_servers=[
-                        MCPServerStatusInfo(name=s.name, status=getattr(s, "status", "unknown"))
-                        for s in servers
-                    ]
-                    if servers
-                    else [],
+                    mcp_servers=(
+                        [
+                            MCPServerStatusInfo(name=s.name, status=getattr(s, "status", "unknown"))
+                            for s in servers
+                        ]
+                        if servers
+                        else []
+                    ),
                     model=resolved_model,
                     permission_mode=permission_mode,
                     slash_commands=slash_commands,
@@ -400,7 +413,7 @@ class StdioSessionMixin:
                     output_language=init_response.output_language,
                     agents=agent_names,
                     skills=skill_names,
-                    plugins=[],
+                    plugins=plugin_names,
                 )
                 await self._write_message_stream(model_to_dict(system_message))
             except Exception as e:

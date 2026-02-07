@@ -23,6 +23,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
+from ripperdoc.core.plugins import discover_plugins
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -52,6 +53,7 @@ class CommandLocation(str, Enum):
 
     USER = "user"
     PROJECT = "project"
+    PLUGIN = "plugin"
     OTHER = "other"
 
 
@@ -69,6 +71,7 @@ class CustomCommandDefinition:
     argument_hint: Optional[str] = None
     model: Optional[str] = None
     thinking_mode: Optional[str] = None
+    plugin_name: Optional[str] = None
 
 
 @dataclass
@@ -154,7 +157,12 @@ def _derive_command_name(path: Path, base_commands_dir: Path) -> str:
 
 
 def _load_command_file(
-    path: Path, location: CommandLocation, base_commands_dir: Path
+    path: Path,
+    location: CommandLocation,
+    base_commands_dir: Path,
+    *,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
 ) -> Tuple[Optional[CustomCommandDefinition], Optional[CustomCommandLoadError]]:
     """Parse a single command .md file."""
     try:
@@ -174,6 +182,8 @@ def _load_command_file(
 
     # Derive command name from path (supports nested commands)
     command_name = _derive_command_name(path, base_commands_dir)
+    if namespace_prefix:
+        command_name = f"{namespace_prefix}:{command_name}"
 
     # Get description from frontmatter or use first line of content
     raw_description = frontmatter.get("description")
@@ -211,12 +221,17 @@ def _load_command_file(
         argument_hint=argument_hint.strip() if argument_hint else None,
         model=model,
         thinking_mode=thinking_mode.strip() if isinstance(thinking_mode, str) else None,
+        plugin_name=plugin_name,
     )
     return command, None
 
 
 def _load_commands_from_dir(
-    commands_dir: Path, location: CommandLocation
+    commands_dir: Path,
+    location: CommandLocation,
+    *,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
 ) -> Tuple[List[CustomCommandDefinition], List[CustomCommandLoadError]]:
     """Load all custom commands from a directory, including nested subdirectories."""
     commands: List[CustomCommandDefinition] = []
@@ -231,7 +246,13 @@ def _load_commands_from_dir(
             if not md_file.is_file():
                 continue
 
-            command, error = _load_command_file(md_file, location, commands_dir)
+            command, error = _load_command_file(
+                md_file,
+                location,
+                commands_dir,
+                namespace_prefix=namespace_prefix,
+                plugin_name=plugin_name,
+            )
             if command:
                 commands.append(command)
             elif error:
@@ -245,6 +266,39 @@ def _load_commands_from_dir(
         )
 
     return commands, errors
+
+
+def _load_commands_from_path(
+    command_path: Path,
+    location: CommandLocation,
+    *,
+    namespace_prefix: Optional[str] = None,
+    plugin_name: Optional[str] = None,
+) -> Tuple[List[CustomCommandDefinition], List[CustomCommandLoadError]]:
+    """Load commands from either a directory or a single markdown file."""
+    if command_path.is_file():
+        if command_path.suffix.lower() != COMMAND_FILE_SUFFIX:
+            return [], []
+        command, error = _load_command_file(
+            command_path,
+            location,
+            command_path.parent,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
+        if command:
+            return [command], []
+        if error:
+            return [], [error]
+        return [], []
+    if command_path.is_dir():
+        return _load_commands_from_dir(
+            command_path,
+            location,
+            namespace_prefix=namespace_prefix,
+            plugin_name=plugin_name,
+        )
+    return [], []
 
 
 def command_directories(
@@ -269,7 +323,7 @@ def load_all_custom_commands(
     commands_by_name: Dict[str, CustomCommandDefinition] = {}
     errors: List[CustomCommandLoadError] = []
 
-    # Load user commands first so project commands take precedence
+    # Load user commands first so project commands take precedence.
     for directory, location in command_directories(project_path=project_path, home=home):
         loaded, dir_errors = _load_commands_from_dir(directory, location)
         errors.extend(dir_errors)
@@ -284,6 +338,21 @@ def load_all_custom_commands(
                     },
                 )
             commands_by_name[cmd.name] = cmd
+
+    plugin_result = discover_plugins(project_path=project_path, home=home)
+    for plugin_error in plugin_result.errors:
+        errors.append(CustomCommandLoadError(path=plugin_error.path, reason=plugin_error.reason))
+    for plugin in plugin_result.plugins:
+        for command_path in plugin.commands_paths:
+            loaded, dir_errors = _load_commands_from_path(
+                command_path,
+                CommandLocation.PLUGIN,
+                namespace_prefix=plugin.name,
+                plugin_name=plugin.name,
+            )
+            errors.extend(dir_errors)
+            for cmd in loaded:
+                commands_by_name[cmd.name] = cmd
 
     return CustomCommandLoadResult(commands=list(commands_by_name.values()), errors=errors)
 
@@ -357,11 +426,7 @@ def parse_command_markdown(raw_text: str) -> Tuple[Dict[str, Any], str, Optional
 
 def render_command_markdown(frontmatter: Dict[str, Any], body: str) -> str:
     """Render a command markdown string from frontmatter and body."""
-    cleaned = {
-        key: value
-        for key, value in frontmatter.items()
-        if value not in (None, "", [], {})
-    }
+    cleaned = {key: value for key, value in frontmatter.items() if value not in (None, "", [], {})}
     body_text = body.rstrip("\n")
     if not cleaned:
         return f"{body_text}\n" if body_text else ""

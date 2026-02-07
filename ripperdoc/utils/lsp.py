@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
 from ripperdoc.utils.git_utils import get_git_root, is_git_repository
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import is_windows
@@ -320,6 +321,34 @@ def load_lsp_server_configs(project_path: Optional[Path] = None) -> Dict[str, Ls
     for path in candidates:
         data = _load_json_file(path)
         merged.update(_parse_servers(data))
+
+    plugin_result = discover_plugins(project_path=project_path)
+    for plugin_error in plugin_result.errors:
+        logger.warning(
+            "[lsp] Plugin discovery warning: %s (%s)",
+            plugin_error.path,
+            plugin_error.reason,
+        )
+
+    for plugin in plugin_result.plugins:
+        for lsp_path in plugin.lsp_paths:
+            resolved_path = lsp_path
+            if resolved_path.is_dir():
+                if (resolved_path / ".lsp.json").exists():
+                    resolved_path = resolved_path / ".lsp.json"
+                elif (resolved_path / "lsp.json").exists():
+                    resolved_path = resolved_path / "lsp.json"
+            data = _load_json_file(resolved_path)
+            if not data:
+                continue
+            expanded = expand_plugin_root_vars(data, plugin.root)
+            if isinstance(expanded, dict):
+                merged.update(_parse_servers(expanded))
+
+        for inline_entry in plugin.lsp_inline:
+            expanded_inline = expand_plugin_root_vars(inline_entry, plugin.root)
+            if isinstance(expanded_inline, dict):
+                merged.update(_parse_servers(expanded_inline))
 
     logger.debug(
         "[lsp] Loaded LSP server configs",

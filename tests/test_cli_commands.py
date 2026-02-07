@@ -3,9 +3,12 @@
 from rich.console import Console
 
 from ripperdoc.cli.commands.add_dir_cmd import command as add_dir_command
+from ripperdoc.cli.commands import get_slash_command
 from ripperdoc.cli.commands.memory_cmd import command as memory_command
+from ripperdoc.cli.commands.plugins_cmd import command as plugins_command
 from ripperdoc.cli.commands.tasks_cmd import command as tasks_command
 from ripperdoc.cli.commands.todos_cmd import command as todos_command
+from ripperdoc.core.plugins import clear_runtime_plugin_dirs
 from ripperdoc.tools import background_shell
 from ripperdoc.utils.working_directories import normalize_directory_inputs
 from ripperdoc.utils.todo import TodoItem, set_todos
@@ -142,7 +145,9 @@ def test_memory_command_existing_file_editor_not_opened(tmp_path, monkeypatch):
     (tmp_path / "AGENTS.md").write_text("persisted prefs", encoding="utf-8")
 
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
-    monkeypatch.setattr("ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        "ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: False
+    )
     memory_command.handler(ui, "project")
 
     output = ui.console.export_text()
@@ -155,7 +160,9 @@ def test_memory_command_existing_file_editor_opened(tmp_path, monkeypatch):
     (tmp_path / "AGENTS.md").write_text("persisted prefs", encoding="utf-8")
 
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
-    monkeypatch.setattr("ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: True
+    )
     memory_command.handler(ui, "project")
 
     output = ui.console.export_text()
@@ -165,7 +172,9 @@ def test_memory_command_existing_file_editor_opened(tmp_path, monkeypatch):
 def test_memory_command_created_file_editor_opened(tmp_path, monkeypatch):
     """Memory command should report created+opened state for new files."""
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
-    monkeypatch.setattr("ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: True
+    )
     memory_command.handler(ui, "project")
 
     output = ui.console.export_text()
@@ -191,3 +200,42 @@ def test_add_dir_command_reports_missing_directory(tmp_path):
 
     output = ui.console.export_text()
     assert "does not exist" in output
+
+
+def test_plugins_command_add_list_remove(tmp_path):
+    clear_runtime_plugin_dirs()
+    plugin_dir = tmp_path / "plugins" / "demo-plugin"
+    manifest = plugin_dir / ".ripperdoc-plugin" / "plugin.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text('{"name":"demo-plugin","description":"demo"}', encoding="utf-8")
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    plugins_command.handler(ui, f"add {plugin_dir} project")
+    plugins_command.handler(ui, "list")
+    plugins_command.handler(ui, "remove demo-plugin project")
+
+    output = ui.console.export_text()
+    assert "Enabled plugin" in output
+    assert "demo-plugin" in output
+    assert "Removed plugin" in output
+
+
+def test_plugins_command_defaults_to_tui_and_supports_plugin_alias(tmp_path, monkeypatch):
+    called = {"count": 0}
+
+    def _fake_run_plugins_tui(project_path):
+        called["count"] += 1
+        assert project_path == tmp_path
+        return True
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.plugins_tui.run_plugins_tui",
+        _fake_run_plugins_tui,
+    )
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    plugins_command.handler(ui, "")
+
+    assert called["count"] == 1
+    assert get_slash_command("plugin") == plugins_command

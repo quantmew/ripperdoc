@@ -59,7 +59,6 @@ command = SlashCommand(
     name="add-dir",
     description="Add session-scoped additional working directories",
     handler=_handle,
-    aliases=("adddir",),
 )
 
 
