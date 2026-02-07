@@ -102,7 +102,7 @@ def _prepare_request_messages(
     model_profile: ModelProfile,
 ) -> tuple[str, str, List[Union[UserMessage, AssistantMessage, ProgressMessage]]]:
     """Prepare protocol/tool-mode and conversation payload for provider request."""
-    protocol = provider_protocol(model_profile.provider)
+    protocol = provider_protocol(model_profile.protocol)
     tool_mode = determine_tool_mode(model_profile)
     if tool_mode == "text":
         messages_for_model = cast(
@@ -153,7 +153,7 @@ def _resolve_provider_client_or_error(
 ) -> tuple[Optional[ProviderClient], Optional[AssistantMessage]]:
     """Resolve provider client or return a user-facing error message."""
     try:
-        client: Optional[ProviderClient] = get_provider_client(model_profile.provider)
+        client: Optional[ProviderClient] = get_provider_client(model_profile.protocol)
     except RuntimeError as exc:
         duration_ms = (time.time() - start_time) * 1000
         return None, _create_api_error_message(
@@ -164,8 +164,8 @@ def _resolve_provider_client_or_error(
 
     if client is None:
         duration_ms = (time.time() - start_time) * 1000
-        provider_label = getattr(model_profile.provider, "value", None) or str(
-            model_profile.provider
+        provider_label = getattr(model_profile.protocol, "value", None) or str(
+            model_profile.protocol
         )
         return None, _create_api_error_message(
             (
@@ -236,7 +236,7 @@ async def query_llm(
         "[query_llm] Preparing model request",
         extra={
             "model_pointer": model,
-            "provider": getattr(model_profile.provider, "value", str(model_profile.provider)),
+            "provider": getattr(model_profile.protocol, "value", str(model_profile.protocol)),
             "model": model_profile.model,
             "normalized_messages": len(normalized_messages),
             "tool_count": len(tools),
@@ -325,7 +325,7 @@ async def query_llm(
                 "model": getattr(model_profile, "model", None),
                 "model_pointer": model,
                 "provider": (
-                    getattr(model_profile.provider, "value", None) if model_profile else None
+                    getattr(model_profile.protocol, "value", None) if model_profile else None
                 ),
             },
         )
@@ -338,14 +338,14 @@ async def query_llm(
             content = f"The request exceeded the model's context window. {context_error.message}"
             error_metadata = {
                 "context_length_exceeded": True,
-                "context_length_provider": context_error.provider,
+                "context_length_protocol": context_error.protocol,
                 "context_length_error_code": context_error.error_code,
                 "context_length_status_code": context_error.status_code,
             }
             logger.info(
                 "[query_llm] Detected context-length error; consider compacting history",
                 extra={
-                    "provider": context_error.provider,
+                    "protocol": context_error.protocol,
                     "error_code": context_error.error_code,
                     "status_code": context_error.status_code,
                 },

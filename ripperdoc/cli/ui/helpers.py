@@ -3,7 +3,11 @@
 import random
 from typing import List, Optional
 
-from ripperdoc.core.config import get_effective_model_profile, get_global_config, ModelProfile
+from ripperdoc.core.config import (
+    ModelProfile,
+    get_effective_config,
+    get_effective_model_profile,
+)
 
 
 # Fun words to display while the AI is "thinking"
@@ -110,7 +114,7 @@ def get_profile_for_pointer(pointer: str = "main") -> Optional[ModelProfile]:
     profile = get_effective_model_profile(pointer)
     if profile:
         return profile
-    config = get_global_config()
+    config = get_effective_config()
     if "default" in config.model_profiles:
         return config.model_profiles.get("default")
     if config.model_profiles:

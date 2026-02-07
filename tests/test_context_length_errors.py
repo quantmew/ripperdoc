@@ -25,7 +25,7 @@ def test_detects_openai_context_length_error():
     info = detect_context_length_error(error)
 
     assert info is not None
-    assert info.provider == "openai"
+    assert info.protocol == "openai"
     assert info.error_code == "context_length_exceeded"
     assert "maximum context length" in info.message.lower()
 
@@ -45,7 +45,7 @@ def test_detects_anthropic_context_length_error():
     info = detect_context_length_error(error)
 
     assert info is not None
-    assert info.provider == "anthropic"
+    assert info.protocol == "anthropic"
     assert "prompt is too long" in info.message.lower()
 
 
@@ -66,7 +66,7 @@ def test_detects_gemini_context_length_error():
     info = detect_context_length_error(error)
 
     assert info is not None
-    assert info.provider == "gemini"
+    assert info.protocol == "gemini"
     assert "too long" in info.message.lower()
 
 

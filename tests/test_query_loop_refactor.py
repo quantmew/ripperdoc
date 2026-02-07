@@ -6,7 +6,7 @@ from typing import Any, List
 
 import pytest
 
-from ripperdoc.core.config import ModelProfile, ProviderType
+from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.providers.base import ProviderResponse
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.query import loop as loop_module
@@ -15,7 +15,7 @@ from ripperdoc.utils.messages import create_assistant_message, create_user_messa
 
 def test_infer_thinking_mode_respects_explicit_disable() -> None:
     profile = ModelProfile(
-        provider=ProviderType.OPENAI_COMPATIBLE,
+         protocol=ProtocolType.OPENAI_COMPATIBLE,
         model="deepseek-reasoner",
         thinking_mode="off",
     )
@@ -33,7 +33,7 @@ def test_infer_thinking_mode_respects_explicit_disable() -> None:
 )
 def test_infer_thinking_mode_auto_detection(api_base: str, model_name: str, expected: str) -> None:
     profile = ModelProfile(
-        provider=ProviderType.OPENAI_COMPATIBLE,
+         protocol=ProtocolType.OPENAI_COMPATIBLE,
         model=model_name,
         api_base=api_base,
     )
@@ -43,7 +43,7 @@ def test_infer_thinking_mode_auto_detection(api_base: str, model_name: str, expe
 @pytest.mark.asyncio
 async def test_query_llm_uses_reasoning_mode_for_reasoner_models(monkeypatch: Any) -> None:
     profile = ModelProfile(
-        provider=ProviderType.OPENAI_COMPATIBLE,
+         protocol=ProtocolType.OPENAI_COMPATIBLE,
         model="deepseek-reasoner",
         api_base="https://api.deepseek.com",
     )
@@ -53,7 +53,7 @@ async def test_query_llm_uses_reasoning_mode_for_reasoner_models(monkeypatch: An
     def fake_resolve_model_profile(_model: str) -> ModelProfile:
         return profile
 
-    def fake_provider_protocol(_provider: ProviderType) -> str:
+    def fake_provider_protocol(_provider: ProtocolType) -> str:
         return "openai"
 
     def fake_determine_tool_mode(_profile: ModelProfile) -> str:

@@ -25,7 +25,7 @@ def create_welcome_panel() -> Panel:
 
     profile = get_profile_for_pointer("main")
     model_name = profile.model if profile else "Not configured"
-    protocol = profile.provider.value if profile else "unknown"
+    protocol = profile.protocol.value if profile else "unknown"
     cwd = os.getcwd()
 
     secondary = theme_color("secondary")

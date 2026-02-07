@@ -12,7 +12,7 @@ from rich.text import Text
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.config import (
     ModelProfile,
-    ProviderType,
+    ProtocolType,
     add_model_profile,
     delete_model_profile,
     get_global_config,
@@ -49,19 +49,19 @@ def _parse_float(console: Any, prompt_text: str, default_value: float) -> float:
         return default_value
 
 
-def _prompt_provider(console: Any, default_provider: str) -> Optional[ProviderType]:
-    provider_input = (
+def _prompt_protocol(console: Any, default_protocol: str) -> Optional[ProtocolType]:
+    protocol_input = (
         console.input(
-            f"Protocol ({', '.join(p.value for p in ProviderType)}) [{default_provider}]: "
+            f"Protocol ({', '.join(p.value for p in ProtocolType)}) [{default_protocol}]: "
         )
         .strip()
         .lower()
-        or default_provider
+        or default_protocol
     )
     try:
-        return ProviderType(provider_input)
+        return ProtocolType(protocol_input)
     except ValueError:
-        console.print(f"[red]Invalid provider: {escape(provider_input)}[/red]")
+        console.print(f"[red]Invalid protocol: {escape(protocol_input)}[/red]")
         return None
 
 
@@ -109,11 +109,11 @@ def _collect_add_profile_input(
     existing_profile: Optional[ModelProfile],
     current_profile: Optional[ModelProfile],
 ) -> tuple[Optional[ModelProfile], bool]:
-    default_provider = (
-        (current_profile.provider.value) if current_profile else ProviderType.ANTHROPIC.value
+    default_protocol = (
+        (current_profile.protocol.value) if current_profile else ProtocolType.ANTHROPIC.value
     )
-    provider = _prompt_provider(console, default_provider)
-    if provider is None:
+    protocol = _prompt_protocol(console, default_protocol)
+    if protocol is None:
         return None, False
 
     default_model = (
@@ -127,11 +127,13 @@ def _collect_add_profile_input(
         console.print("[red]Model name is required.[/red]")
         return None, False
 
+    inferred_profile = ModelProfile(protocol=protocol, model=model_name)
+
     api_key_input = prompt_secret("API key (leave blank to keep unset)").strip()
     api_key = api_key_input or (existing_profile.api_key if existing_profile else None)
 
     auth_token = existing_profile.auth_token if existing_profile else None
-    if provider == ProviderType.ANTHROPIC:
+    if protocol == ProtocolType.ANTHROPIC:
         auth_token_input = prompt_secret(
             "Auth token (Anthropic only, leave blank to keep unset)"
         ).strip()
@@ -148,7 +150,9 @@ def _collect_add_profile_input(
         or None
     )
 
-    max_tokens_default = existing_profile.max_tokens if existing_profile else 4096
+    max_tokens_default = (
+        existing_profile.max_tokens if existing_profile else inferred_profile.max_tokens
+    )
     max_tokens = (
         _parse_int(
             console,
@@ -165,15 +169,44 @@ def _collect_add_profile_input(
         temp_default,
     )
 
-    context_window_default = existing_profile.context_window if existing_profile else None
+    context_window_default = (
+        existing_profile.context_window
+        if existing_profile
+        else inferred_profile.max_input_tokens
+    )
     context_prompt = "Context window tokens (optional"
     if context_window_default:
         context_prompt += f", current {context_window_default}"
     context_prompt += "): "
     context_window = _parse_int(console, context_prompt, context_window_default)
 
-    supports_vision_default = existing_profile.supports_vision if existing_profile else None
+    supports_vision_default = (
+        existing_profile.supports_vision if existing_profile else inferred_profile.supports_vision
+    )
     supports_vision = _prompt_supports_vision_add(console, supports_vision_default)
+
+    currency_default = (
+        existing_profile.currency if existing_profile else inferred_profile.currency
+    ) or "USD"
+    currency = (
+        console.input(f"Currency [{currency_default}]: ").strip().upper() or currency_default
+    )
+    input_price_default = (
+        existing_profile.price.input if existing_profile else inferred_profile.price.input
+    )
+    output_price_default = (
+        existing_profile.price.output if existing_profile else inferred_profile.price.output
+    )
+    input_price = _parse_float(
+        console,
+        f"Input price per 1M tokens [{input_price_default}]: ",
+        input_price_default,
+    )
+    output_price = _parse_float(
+        console,
+        f"Output price per 1M tokens [{output_price_default}]: ",
+        output_price_default,
+    )
 
     default_set_main = (
         not config.model_profiles
@@ -187,7 +220,7 @@ def _collect_add_profile_input(
     set_as_main = set_main_input in ("y", "yes") if set_main_input else default_set_main
 
     profile = ModelProfile(
-        provider=provider,
+        protocol=protocol,
         model=model_name,
         api_key=api_key,
         api_base=api_base,
@@ -196,6 +229,8 @@ def _collect_add_profile_input(
         context_window=context_window,
         auth_token=auth_token,
         supports_vision=supports_vision,
+        price={"input": input_price, "output": output_price},
+        currency=currency,
     )
 
     return profile, set_as_main
@@ -205,9 +240,9 @@ def _collect_edit_profile_input(
     console: Any,
     existing_profile: ModelProfile,
 ) -> Optional[ModelProfile]:
-    provider_default = existing_profile.provider.value
-    provider = _prompt_provider(console, provider_default)
-    if provider is None:
+    protocol_default = existing_profile.protocol.value
+    protocol = _prompt_protocol(console, protocol_default)
+    if protocol is None:
         return None
 
     model_name = (
@@ -226,7 +261,7 @@ def _collect_edit_profile_input(
         api_key = existing_profile.api_key
 
     auth_token = existing_profile.auth_token
-    if provider == ProviderType.ANTHROPIC or existing_profile.provider == ProviderType.ANTHROPIC:
+    if protocol == ProtocolType.ANTHROPIC or existing_profile.protocol == ProtocolType.ANTHROPIC:
         auth_label = "[set]" if auth_token else "[not set]"
         auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear)"
         auth_token_input = prompt_secret(auth_prompt).strip()
@@ -267,8 +302,24 @@ def _collect_edit_profile_input(
 
     supports_vision = _prompt_supports_vision_edit(console, existing_profile.supports_vision)
 
+    currency = (
+        console.input(f"Currency [{existing_profile.currency or 'USD'}]: ").strip().upper()
+        or existing_profile.currency
+        or "USD"
+    )
+    input_price = _parse_float(
+        console,
+        f"Input price per 1M tokens [{existing_profile.price.input}]: ",
+        existing_profile.price.input,
+    )
+    output_price = _parse_float(
+        console,
+        f"Output price per 1M tokens [{existing_profile.price.output}]: ",
+        existing_profile.price.output,
+    )
+
     updated_profile = ModelProfile(
-        provider=provider,
+        protocol=protocol,
         model=model_name,
         api_key=api_key,
         api_base=api_base,
@@ -277,6 +328,8 @@ def _collect_edit_profile_input(
         context_window=context_window,
         auth_token=auth_token,
         supports_vision=supports_vision,
+        price={"input": input_price, "output": output_price},
+        currency=currency,
     )
     return updated_profile
 
@@ -305,7 +358,7 @@ def _render_models_plain(console: Any, config: Any) -> None:
         markers = [ptr for ptr, value in pointer_map.items() if value == name]
         marker_text = f" ({', '.join(markers)})" if markers else ""
         console.print(f"  • {escape(name)}{marker_text}", markup=False)
-        console.print(f"      protocol: {profile.provider.value}", markup=False)
+        console.print(f"      protocol: {profile.protocol.value}", markup=False)
         console.print(f"      model: {profile.model}", markup=False)
         if profile.api_base:
             console.print(f"      api_base: {profile.api_base}", markup=False)
@@ -315,8 +368,12 @@ def _render_models_plain(console: Any, config: Any) -> None:
             f"      max_tokens: {profile.max_tokens}, temperature: {profile.temperature}",
             markup=False,
         )
+        console.print(
+            f"      price: in={profile.price.input}/1M, out={profile.price.output}/1M ({profile.currency})",
+            markup=False,
+        )
         console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}", markup=False)
-        if profile.provider == ProviderType.ANTHROPIC:
+        if profile.protocol == ProtocolType.ANTHROPIC:
             console.print(
                 f"      auth_token: {'***' if getattr(profile, 'auth_token', None) else 'Not set'}",
                 markup=False,
@@ -341,7 +398,7 @@ def _render_models_table(console: Any, config: Any) -> None:
     table = Table(box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("Name", style="cyan", no_wrap=True)
     table.add_column("Ptr", style="magenta", no_wrap=True)
-    table.add_column("Provider", style="green", no_wrap=True)
+    table.add_column("Protocol", style="green", no_wrap=True)
     table.add_column("Model", style="white", overflow="fold")
     table.add_column("Ctx", style="dim", justify="right", no_wrap=True)
     table.add_column("Max", style="dim", justify="right", no_wrap=True)
@@ -362,7 +419,7 @@ def _render_models_table(console: Any, config: Any) -> None:
         table.add_row(
             escape(name),
             pointer_label,
-            profile.provider.value,
+            profile.protocol.value,
             escape(profile.model),
             context_display,
             str(profile.max_tokens),
@@ -390,15 +447,21 @@ def _build_model_details_panel(
     details.add_column(style="white")
     details.add_row("Profile", escape(name))
     details.add_row("Pointers", escape(marker_text))
-    details.add_row("Provider", escape(profile.provider.value))
+    details.add_row("Protocol", escape(profile.protocol.value))
     details.add_row("Model", escape(profile.model))
     details.add_row("API base", escape(profile.api_base or "-"))
     details.add_row("Context", escape(str(profile.context_window) if profile.context_window else "auto"))
     details.add_row("Max tokens", escape(str(profile.max_tokens)))
     details.add_row("Temperature", escape(str(profile.temperature)))
+    details.add_row(
+        "Price",
+        escape(
+            f"in={profile.price.input}/1M, out={profile.price.output}/1M ({profile.currency})"
+        ),
+    )
     details.add_row("Vision", escape(vision_detail if vision_short == "auto" else vision_short))
     details.add_row("API key", "set" if profile.api_key else "unset")
-    if profile.provider == ProviderType.ANTHROPIC:
+    if profile.protocol == ProtocolType.ANTHROPIC:
         details.add_row("Auth token", "set" if getattr(profile, "auth_token", None) else "unset")
     if profile.openai_tool_mode:
         details.add_row("OpenAI tool mode", escape(profile.openai_tool_mode))
@@ -448,7 +511,7 @@ def _build_models_list_panel(
         markers = _pointer_markers(pointer_map, name)
         pointer_label = ",".join(markers) if markers else "-"
         pointer_text = Text(pointer_label, style="magenta" if markers else "dim")
-        model_label = f"{profile.provider.value} • {profile.model}"
+        model_label = f"{profile.protocol.value} • {profile.model}"
         model_text = Text(model_label, style="dim")
         table.add_row(index_text, marker_text, name_text, pointer_text, model_text)
 

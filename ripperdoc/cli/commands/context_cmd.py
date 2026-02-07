@@ -35,7 +35,7 @@ def _handle(ui: Any, _: str) -> bool:
     model_profile = get_profile_for_pointer("main")
     max_context_tokens = get_remaining_context_tokens(model_profile, config.context_token_limit)
     auto_compact_enabled = resolve_auto_compact_enabled(config)
-    protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
+    protocol = provider_protocol(model_profile.protocol) if model_profile else "openai"
 
     if not ui.query_context:
         ui.query_context = QueryContext(

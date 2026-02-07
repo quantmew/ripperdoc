@@ -9,33 +9,98 @@ options so that protocol-specific defaults stay unambiguous.
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
+from urllib.parse import urlparse
 
-from ripperdoc.core.config import ProviderType
+from ripperdoc.core.config import ModelProfile, ProtocolType
+from ripperdoc.core.provider_catalog import Provider
+
+
+def _derive_website(key: str, base_url: Optional[str]) -> str:
+    """Best-effort provider website from base_url or provider key."""
+    if base_url:
+        parsed = urlparse(base_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    return f"https://{key}"
 
 
 @dataclass(frozen=True)
 class ProviderOption:
-    """A single provider choice with protocol and UX defaults."""
+    """Provider option keyed for onboarding selection."""
 
     key: str
-    protocol: ProviderType
-    default_model: str
-    model_suggestions: Tuple[str, ...] = ()
-    default_api_base: Optional[str] = None
+    provider: Provider
+
+    def __init__(
+        self,
+        key: str,
+        provider: Optional[Provider] = None,
+        *,
+        protocol: Optional[ProtocolType] = None,
+        default_model: str = "",
+        model_suggestions: Tuple[str, ...] = (),
+        default_api_base: Optional[str] = None,
+        website: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> None:
+        resolved_provider = provider
+        if resolved_provider is None:
+            resolved_protocol = protocol or ProtocolType.OPENAI_COMPATIBLE
+            suggestion_list = tuple(model_suggestions) if model_suggestions else ()
+            fallback_model = default_model or default_model_for_protocol(resolved_protocol)
+            if not suggestion_list:
+                suggestion_list = (fallback_model,)
+            elif fallback_model and suggestion_list[0] != fallback_model:
+                suggestion_list = (fallback_model, *tuple(m for m in suggestion_list if m != fallback_model))
+
+            resolved_provider = Provider(
+                protocol=resolved_protocol,
+                website=website or _derive_website(key, default_api_base),
+                description=description or f"{key} provider",
+                base_url=default_api_base,
+                model_list=tuple(
+                    ModelProfile(protocol=resolved_protocol, model=model_name)
+                    for model_name in suggestion_list
+                ),
+            )
+        object.__setattr__(self, "key", key)
+        object.__setattr__(self, "provider", resolved_provider)
 
     @property
     def label(self) -> str:
         """Display label shown to the user."""
         return self.key
 
+    @property
+    def protocol(self) -> ProtocolType:
+        return self.provider.protocol
+
+    @property
+    def default_model(self) -> str:
+        if self.provider.model_list:
+            return self.provider.model_list[0].model
+        return default_model_for_protocol(self.provider.protocol)
+
+    @property
+    def model_suggestions(self) -> Tuple[str, ...]:
+        return tuple(profile.model for profile in self.provider.model_list)
+
+    @property
+    def default_api_base(self) -> Optional[str]:
+        return self.provider.base_url
+
     def with_api_base(self, api_base: Optional[str]) -> "ProviderOption":
         """Return a copy that overrides the default API base."""
+        provider = Provider(
+            protocol=self.provider.protocol,
+            website=self.provider.website,
+            description=self.provider.description,
+            base_url=api_base if api_base else self.provider.base_url,
+            model_list=self.provider.model_list,
+        )
         return ProviderOption(
             key=self.key,
-            protocol=self.protocol,
-            default_model=self.default_model,
-            model_suggestions=self.model_suggestions,
-            default_api_base=api_base if api_base else self.default_api_base,
+            provider=provider,
         )
 
 
@@ -70,11 +135,11 @@ class ProviderRegistry:
         return [p.key for p in self._providers]
 
 
-def default_model_for_protocol(protocol: ProviderType) -> str:
+def default_model_for_protocol(protocol: ProtocolType) -> str:
     """Reasonable default model per protocol family."""
-    if protocol == ProviderType.ANTHROPIC:
+    if protocol == ProtocolType.ANTHROPIC:
         return "claude-3-5-sonnet-20241022"
-    if protocol == ProviderType.GEMINI:
+    if protocol == ProtocolType.GEMINI:
         return "gemini-1.5-pro"
     return "gpt-4o-mini"
 
@@ -84,7 +149,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         # === Major Cloud Providers ===
         ProviderOption(
             key="openai",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="gpt-4o-mini",
             model_suggestions=(
                 "gpt-4o",
@@ -97,7 +162,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="anthropic",
-            protocol=ProviderType.ANTHROPIC,
+            protocol=ProtocolType.ANTHROPIC,
             default_model="claude-3-5-sonnet-20241022",
             model_suggestions=(
                 "claude-3-5-sonnet-20241022",
@@ -108,7 +173,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="google",
-            protocol=ProviderType.GEMINI,
+            protocol=ProtocolType.GEMINI,
             default_model="gemini-1.5-pro",
             model_suggestions=(
                 "gemini-2.0-flash-exp",
@@ -120,7 +185,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         # === Aggregators & Open Router ===
         ProviderOption(
             key="openrouter",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="openai/gpt-4o-mini",
             model_suggestions=(
                 "openai/gpt-4o-mini",
@@ -132,7 +197,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="poe",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="gpt-4o",
             model_suggestions=(
                 "gpt-4o",
@@ -145,7 +210,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         # === Chinese Providers ===
         ProviderOption(
             key="deepseek",
-            protocol=ProviderType.ANTHROPIC,
+            protocol=ProtocolType.ANTHROPIC,
             default_model="deepseek-chat",
             model_suggestions=(
                 "deepseek-chat",
@@ -155,7 +220,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="zhipu",
-            protocol=ProviderType.ANTHROPIC,
+            protocol=ProtocolType.ANTHROPIC,
             default_model="glm-4-flash",
             model_suggestions=(
                 "glm-4-plus",
@@ -169,7 +234,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="moonshot",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="moonshot-v1-auto",
             model_suggestions=(
                 "moonshot-v1-auto",
@@ -182,7 +247,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="volcengine",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="doubao-pro-32k",
             model_suggestions=(
                 # Doubao Pro 系列
@@ -215,7 +280,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="aliyun",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="qwen-plus",
             model_suggestions=(
                 "qwen-plus",
@@ -227,7 +292,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="minimax",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="abab6.5s",
             model_suggestions=(
                 # abab 系列
@@ -247,7 +312,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="z.ai",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="glm-4-flash",
             model_suggestions=(
                 "glm-4-flash",
@@ -259,7 +324,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         # === Western AI Companies ===
         ProviderOption(
             key="mistralai",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="mistral-large-latest",
             model_suggestions=(
                 # Mistral Chat 系列
@@ -279,7 +344,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="groq",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="llama-3.3-70b-versatile",
             model_suggestions=(
                 # Llama 系列
@@ -298,7 +363,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="grok",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="grok-3",
             model_suggestions=(
                 "grok-4",
@@ -311,7 +376,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="cohere",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="command-r-plus-08-2024",
             model_suggestions=(
                 "command-r-plus-08-2024",
@@ -322,7 +387,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="together",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
             model_suggestions=(
                 "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
@@ -333,7 +398,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="perplexity",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="llama-3.1-sonar-small-128k-online",
             model_suggestions=(
                 "llama-3.1-sonar-small-128k-online",
@@ -343,7 +408,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="siliconflow",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="Qwen/Qwen2.5-72B-Instruct",
             model_suggestions=(
                 "Qwen/Qwen2.5-72B-Instruct",
@@ -355,7 +420,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         # === Generic / Custom ===
         ProviderOption(
             key="openai_compatible",
-            protocol=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="gpt-4o-mini",
             model_suggestions=(
                 "gpt-4o-mini",
@@ -366,7 +431,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ),
         ProviderOption(
             key="anthropic_compatible",
-            protocol=ProviderType.ANTHROPIC,
+            protocol=ProtocolType.ANTHROPIC,
             default_model="claude-3-5-sonnet-20241022",
             model_suggestions=(
                 "claude-3-5-sonnet-20241022",
@@ -381,6 +446,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
 
 __all__ = [
     "KNOWN_PROVIDERS",
+    "Provider",
     "ProviderOption",
     "ProviderRegistry",
     "default_model_for_protocol",

@@ -950,7 +950,7 @@ def config_cmd() -> None:
         console.print("[bold]Model Profiles:[/bold]")
         for name, profile in config.model_profiles.items():
             console.print(f"  {name}:")
-            console.print(f"    Provider: {profile.provider}")
+            console.print(f"    Protocol: {profile.protocol}")
             console.print(f"    Model: {profile.model}")
             console.print(f"    API Key: {'***' if profile.api_key else 'Not set'}")
         console.print()

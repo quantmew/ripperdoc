@@ -30,9 +30,8 @@ def extract_additional_directories(settings_data: Any) -> list[str]:
     if not isinstance(settings_data, dict):
         return []
 
-    for key in ("additionalDirectories", "additional_directories", "working_directories"):
-        if key in settings_data:
-            return coerce_directory_list(settings_data.get(key))
+    if "working_directories" in settings_data:
+        return coerce_directory_list(settings_data.get("working_directories"))
     return []
 
 

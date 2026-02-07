@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Union
 
-from ripperdoc.core.config import UserConfig, ModelProfile, get_global_config
+from ripperdoc.core.config import UserConfig, ModelProfile, get_effective_config
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.messages import (
@@ -247,21 +247,41 @@ def get_model_context_limit(
         return explicit_limit
 
     try:
+        configured_context = (
+            int(getattr(model_profile, "context_window", 0) or 0) if model_profile else 0
+        )
+    except (TypeError, ValueError):
+        configured_context = 0
+    if configured_context > 0:
+        return configured_context
+
+    try:
         model = getattr(model_profile, "model", None) or ""
     except Exception:
         model = ""
 
     # Fallback mapping; tuned for common providers.
     model = model.lower()
+    heuristic_limit = DEFAULT_CONTEXT_TOKENS
     if "1000k" in model or "1m" in model:
-        return 1_000_000
-    if "gpt-4o" in model or "gpt4o" in model:
-        return 128_000
-    if "gpt-4" in model:
-        return 32_000
-    if "deepseek" in model:
-        return 128_000
-    return DEFAULT_CONTEXT_TOKENS
+        heuristic_limit = 1_000_000
+    elif "gpt-4o" in model or "gpt4o" in model:
+        heuristic_limit = 128_000
+    elif "gpt-4" in model:
+        heuristic_limit = 32_000
+    elif "deepseek" in model:
+        heuristic_limit = 128_000
+
+    try:
+        inferred_input_limit = (
+            int(getattr(model_profile, "max_input_tokens", 0) or 0) if model_profile else 0
+        )
+    except (TypeError, ValueError):
+        inferred_input_limit = 0
+    if inferred_input_limit > 0:
+        return max(heuristic_limit, inferred_input_limit)
+
+    return heuristic_limit
 
 
 def get_remaining_context_tokens(
@@ -527,7 +547,7 @@ def micro_compact_messages(
         resolved_auto_compact = (
             auto_compact_enabled
             if auto_compact_enabled is not None
-            else resolve_auto_compact_enabled(get_global_config())
+            else resolve_auto_compact_enabled(get_effective_config())
         )
         usage_tokens = estimate_used_tokens(
             messages, protocol=protocol, precomputed_total_tokens=tokens_before

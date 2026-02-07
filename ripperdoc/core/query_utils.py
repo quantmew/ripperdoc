@@ -10,7 +10,7 @@ from uuid import uuid4
 from json_repair import repair_json  # type: ignore[import-not-found]
 from pydantic import ValidationError
 
-from ripperdoc.core.config import ModelProfile, ProviderType, get_global_config
+from ripperdoc.core.config import ModelProfile, ProtocolType, get_effective_config
 from ripperdoc.core.tool import Tool, build_tool_description, tool_input_examples
 from ripperdoc.utils.json_utils import safe_parse_json
 from ripperdoc.utils.log import get_logger
@@ -109,9 +109,10 @@ def openai_usage_tokens(usage: Optional[Mapping[str, Any] | object]) -> Dict[str
 
 
 def estimate_cost_usd(model_profile: ModelProfile, usage_tokens: Dict[str, int]) -> float:
-    """Compute USD cost using per-1M token pricing from the model profile."""
-    input_price = getattr(model_profile, "input_cost_per_million_tokens", 0.0) or 0.0
-    output_price = getattr(model_profile, "output_cost_per_million_tokens", 0.0) or 0.0
+    """Compute cost using model_profile.price rates (per 1M tokens)."""
+    input_price = float(getattr(model_profile.price, "input", 0.0) or 0.0)
+    output_price = float(getattr(model_profile.price, "output", 0.0) or 0.0)
+    currency = (getattr(model_profile, "currency", "USD") or "USD").upper()
 
     total_input_tokens = (
         _safe_int(usage_tokens.get("input_tokens"))
@@ -121,6 +122,11 @@ def estimate_cost_usd(model_profile: ModelProfile, usage_tokens: Dict[str, int])
     output_tokens = _safe_int(usage_tokens.get("output_tokens"))
 
     cost = (total_input_tokens * input_price + output_tokens * output_price) / 1_000_000
+    if currency != "USD" and cost > 0:
+        logger.debug(
+            "[cost] Non-USD model currency configured; reporting numeric cost without FX conversion",
+            extra={"currency": currency, "model": model_profile.model},
+        )
     return float(cost)
 
 
@@ -141,17 +147,17 @@ def resolve_model_profile(model: str) -> ModelProfile:
         "[config] No model profile found; using built-in default profile",
         extra={"model_pointer": model},
     )
-    return ModelProfile(provider=ProviderType.OPENAI_COMPATIBLE, model="gpt-4o-mini")
+    return ModelProfile(protocol=ProtocolType.OPENAI_COMPATIBLE, model="gpt-4o-mini")
 
 
 def determine_tool_mode(model_profile: ModelProfile) -> str:
     """Return configured tool mode for provider."""
-    if model_profile.provider != ProviderType.OPENAI_COMPATIBLE:
+    if model_profile.protocol != ProtocolType.OPENAI_COMPATIBLE:
         return "native"
     configured = getattr(model_profile, "openai_tool_mode", "native") or "native"
     configured = configured.lower()
     if configured not in {"native", "text"}:
-        configured = getattr(get_global_config(), "openai_tool_mode", "native") or "native"
+        configured = getattr(get_effective_config(), "openai_tool_mode", "native") or "native"
         configured = configured.lower()
     return configured if configured in {"native", "text"} else "native"
 

@@ -8,8 +8,9 @@ from ripperdoc import __version__
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.config import (
     ModelProfile,
-    ProviderType,
-    get_global_config,
+    ProtocolType,
+    get_effective_config,
+    get_global_config_path,
 )
 from ripperdoc.utils.memory import MAX_CONTENT_LENGTH, MemoryFile, collect_all_memory_files
 
@@ -42,11 +43,11 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
         return f"API base URL: {base_url} (RIPPERDOC_BASE_URL env)"
 
     label_map = {
-        ProviderType.ANTHROPIC: "Anthropic base URL",
-        ProviderType.OPENAI_COMPATIBLE: "OpenAI-compatible base URL",
-        ProviderType.GEMINI: "Gemini base URL",
+        ProtocolType.ANTHROPIC: "Anthropic base URL",
+        ProtocolType.OPENAI_COMPATIBLE: "OpenAI-compatible base URL",
+        ProtocolType.GEMINI: "Gemini base URL",
     }
-    label = label_map.get(profile.provider, "API base URL")
+    label = label_map.get(profile.protocol, "API base URL")
     base_url = profile.api_base
 
     return f"{label}: {base_url or 'default'}"
@@ -75,12 +76,15 @@ def _setting_sources_summary(
 ) -> str:
     """Describe where settings for this session were sourced from."""
     sources: list[str] = []
-    if (Path.home() / ".ripperdoc.json").exists():
+    if get_global_config_path().exists():
         sources.append("User settings")
 
     project_config_path = project_path / ".ripperdoc" / "config.json"
     if project_config_path.exists():
         sources.append("Project settings")
+    local_config_path = project_path / ".ripperdoc" / "config.local.json"
+    if local_config_path.exists():
+        sources.append("Local settings")
 
     if any(memory.type == "Local" for memory in memory_files):
         sources.append("Local memory")
@@ -105,7 +109,7 @@ def _setting_sources_summary(
 
 
 def _handle(ui: Any, _: str) -> bool:
-    config = get_global_config()
+    config = get_effective_config(ui.project_path)
     profile = get_profile_for_pointer("main")
     memory_files = collect_all_memory_files()
 

@@ -25,7 +25,7 @@ ContextLengthErrorCode = Optional[str]
 class ContextLengthErrorInfo:
     """Normalized metadata about a context-length error."""
 
-    provider: Optional[str]
+    protocol: Optional[str]
     message: str
     error_code: ContextLengthErrorCode = None
     status_code: Optional[int] = None
@@ -58,7 +58,7 @@ def detect_context_length_error(error: Any) -> Optional[ContextLengthErrorInfo]:
     if error is None:
         return None
 
-    provider = _guess_provider(error)
+    protocol = _guess_protocol(error)
     status_code = _extract_status_code(error)
     codes = _extract_codes(error)
     messages = _collect_strings(error)
@@ -79,7 +79,7 @@ def detect_context_length_error(error: Any) -> Optional[ContextLengthErrorInfo]:
         ):
             message = messages[0] if messages else code
             return ContextLengthErrorInfo(
-                provider=provider,
+                protocol=protocol,
                 message=message,
                 error_code=code,
                 status_code=status_code,
@@ -89,7 +89,7 @@ def detect_context_length_error(error: Any) -> Optional[ContextLengthErrorInfo]:
     for text in messages:
         if _looks_like_context_length_message(text):
             return ContextLengthErrorInfo(
-                provider=provider,
+                protocol=protocol,
                 message=text,
                 error_code=codes[0] if codes else None,
                 status_code=status_code,
@@ -113,7 +113,7 @@ def _looks_like_context_length_message(text: str) -> bool:
     return False
 
 
-def _guess_provider(error: Any) -> Optional[str]:
+def _guess_protocol(error: Any) -> Optional[str]:
     module = getattr(getattr(error, "__class__", None), "__module__", "") or ""
     name = getattr(getattr(error, "__class__", None), "__name__", "").lower()
     if "openai" in module or "openai" in name:

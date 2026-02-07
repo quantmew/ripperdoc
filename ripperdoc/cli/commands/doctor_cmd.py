@@ -11,8 +11,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ripperdoc.core.config import (
-    ProviderType,
-    get_global_config,
+    ProtocolType,
+    get_effective_config,
     get_project_config,
     get_ripperdoc_env_status,
     has_ripperdoc_env_overrides,
@@ -38,7 +38,7 @@ def _status_row(label: str, status: str, detail: str = "") -> Tuple[str, str, st
     return (label, icon, detail)
 
 
-def _api_key_status(provider: ProviderType, profile_key: Optional[str]) -> Tuple[str, str]:
+def _api_key_status(protocol: ProtocolType, profile_key: Optional[str]) -> Tuple[str, str]:
     """Check API key presence and source."""
     import os
 
@@ -54,7 +54,7 @@ def _api_key_status(provider: ProviderType, profile_key: Optional[str]) -> Tuple
 
 
 def _model_status(project_path: Path) -> List[Tuple[str, str, str]]:
-    config = get_global_config()
+    config = get_effective_config(project_path)
     pointer = getattr(config.model_pointers, "main", "default")
     profile = get_profile_for_pointer("main")
     rows: List[Tuple[str, str, str]] = []
@@ -77,17 +77,17 @@ def _model_status(project_path: Path) -> List[Tuple[str, str, str]]:
         _status_row(
             "Model",
             "ok",
-            f"{profile.model} ({profile.provider.value})",
+            f"{profile.model} ({profile.protocol.value})",
         )
     )
 
-    key_status, key_detail = _api_key_status(profile.provider, profile.api_key)
+    key_status, key_detail = _api_key_status(profile.protocol, profile.api_key)
     rows.append(_status_row("API key", key_status, key_detail))
     return rows
 
 
 def _onboarding_status() -> Tuple[str, str, str]:
-    config = get_global_config()
+    config = get_effective_config(Path.cwd())
     if config.has_completed_onboarding:
         return _status_row(
             "Onboarding",
@@ -241,7 +241,7 @@ def _handle(ui: Any, _: str) -> bool:
 
     ui.console.print(
         "\n[dim]If a check is failing, run `ripperdoc` without flags "
-        "to rerun onboarding or update ~/.ripperdoc.json[/dim]"
+        "to rerun onboarding or update ~/.ripperdoc/config.json[/dim]"
     )
     return True
 

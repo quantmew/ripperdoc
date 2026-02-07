@@ -14,6 +14,7 @@ from ripperdoc.core.config import (
     UserConfig,
     ProjectConfig,
     ProjectLocalConfig,
+    get_global_config_path,
     get_global_config,
     get_project_config,
     get_project_local_config,
@@ -46,7 +47,7 @@ def _shorten_path(path: Path, project_path: Path) -> str:
 def _get_scope_info(scope: ScopeType, project_path: Path) -> tuple[str, str]:
     """Return (heading, config_path) for a given scope."""
     if scope == "user":
-        return "User settings", str(Path.home() / ".ripperdoc.json")
+        return "User settings", str(get_global_config_path())
     elif scope == "project":
         return "Project (shared)", str(project_path / ".ripperdoc" / "config.json")
     else:  # local
@@ -203,7 +204,7 @@ def _render_all_rules(console: Any, project_path: Path) -> None:
 
     console.print()
     console.print("[dim]Scopes (in priority order):[/dim]")
-    console.print("[dim]  - user: User rules (~/.ripperdoc.json)[/dim]")
+    console.print("[dim]  - user: User rules (~/.ripperdoc/config.json)[/dim]")
     console.print("[dim]  - project: Shared project rules (.ripperdoc/config.json)[/dim]")
     console.print("[dim]  - local: Private project rules (.ripperdoc/config.local.json)[/dim]")
 

@@ -15,14 +15,14 @@ def test_coerce_directory_list_handles_scalar_and_list_inputs():
     assert coerce_directory_list(["a", " ", None, Path("b")]) == ["a", "b"]
 
 
-def test_extract_additional_directories_accepts_claude_style_key():
-    payload = {"additionalDirectories": ["./foo", "/tmp/bar"]}
-    assert extract_additional_directories(payload) == ["./foo", "/tmp/bar"]
-
-
-def test_extract_additional_directories_accepts_internal_aliases():
+def test_extract_additional_directories_uses_working_directories_key():
     payload = {"working_directories": ["./foo"]}
     assert extract_additional_directories(payload) == ["./foo"]
+
+
+def test_extract_additional_directories_ignores_legacy_aliases():
+    payload = {"additionalDirectories": ["./foo"], "additional_directories": ["./bar"]}
+    assert extract_additional_directories(payload) == []
 
 
 def test_normalize_directory_inputs_resolves_and_deduplicates(tmp_path: Path):

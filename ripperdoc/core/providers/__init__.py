@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from typing import Optional, TYPE_CHECKING, Type, cast
 
-from ripperdoc.core.config import ProviderType
+from ripperdoc.core.config import ProtocolType
 from ripperdoc.core.providers.base import ProviderClient
 from ripperdoc.utils.log import get_logger
 
@@ -32,15 +32,15 @@ def _load_client(module: str, cls: str, extra: str) -> Type[ProviderClient]:
         ) from exc
 
 
-def get_provider_client(provider: ProviderType) -> Optional[ProviderClient]:
+def get_provider_client(protocol: ProtocolType) -> Optional[ProviderClient]:
     """Return a provider client for the given protocol."""
-    if provider == ProviderType.ANTHROPIC:
+    if protocol == ProtocolType.ANTHROPIC:
         return _load_client("anthropic", "AnthropicClient", "anthropic")()
-    if provider == ProviderType.OPENAI_COMPATIBLE:
+    if protocol == ProtocolType.OPENAI_COMPATIBLE:
         return _load_client("openai", "OpenAIClient", "openai")()
-    if provider == ProviderType.GEMINI:
+    if protocol == ProtocolType.GEMINI:
         return _load_client("gemini", "GeminiClient", "gemini")()
-    logger.warning("[providers] Unsupported provider", extra={"provider": provider})
+    logger.warning("[providers] Unsupported protocol", extra={"protocol": protocol})
     return None
 
 

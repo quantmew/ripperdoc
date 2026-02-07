@@ -89,8 +89,6 @@ class StdioSessionMixin:
 
             raw_additional_dirs = options.get("additional_directories")
             if raw_additional_dirs is None:
-                raw_additional_dirs = options.get("additionalDirectories")
-            if raw_additional_dirs is None:
                 raw_additional_dirs = options.get("add_dirs")
             additional_dirs = coerce_directory_list(raw_additional_dirs)
             normalized_dirs, dir_errors = normalize_directory_inputs(

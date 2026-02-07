@@ -7,7 +7,7 @@ including API keys, model settings, and user preferences.
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Literal
+from typing import Any, Dict, Optional, Literal, cast
 from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
@@ -16,129 +16,61 @@ from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
+USER_CONFIG_DIR_NAME = ".ripperdoc"
+USER_CONFIG_FILE_NAME = "config.json"
 
-class ProviderType(str, Enum):
+
+class ProtocolType(str, Enum):
     """Supported model protocols (not individual model vendors)."""
 
     ANTHROPIC = "anthropic"
     OPENAI_COMPATIBLE = "openai_compatible"
     GEMINI = "gemini"
 
-    @classmethod
-    def _legacy_aliases(cls) -> Dict[str, "ProviderType"]:
-        """Map legacy provider labels to protocol families."""
-        return {
-            "openai": cls.OPENAI_COMPATIBLE,
-            "openai-compatible": cls.OPENAI_COMPATIBLE,
-            "openai compatible": cls.OPENAI_COMPATIBLE,
-            "mistral": cls.OPENAI_COMPATIBLE,
-            "deepseek": cls.OPENAI_COMPATIBLE,
-            "kimi": cls.OPENAI_COMPATIBLE,
-            "qwen": cls.OPENAI_COMPATIBLE,
-            "glm": cls.OPENAI_COMPATIBLE,
-            "google": cls.GEMINI,
-        }
 
-    @classmethod
-    def _missing_(cls, value: object) -> Optional["ProviderType"]:
-        """Support legacy provider strings by mapping to their protocol."""
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            mapped = cls._legacy_aliases().get(normalized)
-            if mapped:
-                return mapped
-        return None
-
-
-def provider_protocol(provider: ProviderType) -> str:
-    """Return the message formatting protocol for a provider."""
-    if provider == ProviderType.ANTHROPIC:
+def provider_protocol(protocol: ProtocolType) -> str:
+    """Return the message formatting protocol for a model protocol type."""
+    if protocol == ProtocolType.ANTHROPIC:
         return "anthropic"
-    if provider == ProviderType.OPENAI_COMPATIBLE:
+    if protocol == ProtocolType.OPENAI_COMPATIBLE:
         return "openai"
-    if provider == ProviderType.GEMINI:
+    if protocol == ProtocolType.GEMINI:
         # Gemini support is planned; default to OpenAI-style formatting for now.
         return "openai"
     return "openai"
 
 
-def _default_model_for_protocol(protocol: ProviderType) -> str:
+def _default_model_for_protocol(protocol: ProtocolType) -> str:
     """Reasonable default model per protocol family."""
-    if protocol == ProviderType.ANTHROPIC:
+    if protocol == ProtocolType.ANTHROPIC:
         # Keep existing Anthropic default for RIPPERDOC_BASE_URL-only setups.
         return "claude-sonnet-4-5-20250929"
-    if protocol == ProviderType.GEMINI:
+    if protocol == ProtocolType.GEMINI:
         return "gemini-1.5-pro"
     return "gpt-4o-mini"
 
 
-# Known vision-enabled model patterns for auto-detection
-VISION_ENABLED_MODELS = {
-    # Anthropic Claude models
-    "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-5-20250929",
-    "claude-opus-4-5-20251101",
-    "claude-haiku-4-5",
-    "claude-sonnet-4-5",
-    "claude-opus-4-5",
-    "claude-3-5-sonnet",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-sonnet-20240620",
-    "claude-3-5-haiku",
-    "claude-3-5-haiku-20241022",
-    "claude-3-opus",
-    "claude-3-opus-20240229",
-    "claude-3-sonnet",
-    "claude-3-sonnet-20240229",
-    "claude-3-haiku",
-    "claude-3-haiku-20240307",
-    # OpenAI models
-    "gpt-4o",
-    "gpt-4o-2024-08-06",
-    "gpt-4o-mini",
-    "gpt-4o-mini-2024-07-18",
-    "gpt-4-turbo",
-    "gpt-4-turbo-2024-04-09",
-    "gpt-4",
-    "gpt-4-0314",
-    "gpt-4-vision-preview",
-    "chatgpt-4o-latest",
-    # Google Gemini models
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash-exp",
-    "gemini-2.0-flash-thinking-exp",
-    "gemini-exp-1206",
-    "gemini-pro-vision",
-    "gemini-1.5-pro",
-    "gemini-1.5-pro-001",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-001",
-    # Alibaba Qwen models (vision)
-    "qwen-vl-max",
-    "qwen-vl-plus",
-    "qwen-vl-plus-latest",
-    "qwen2-vl-72b-instruct",
-    "qwen-vl-chat",
-    "qwen-vl-7b-chat",
-    # DeepSeek models (some support vision)
-    "deepseek-vl",
-    "deepseek-vl-chat",
-    # Other vision models
-    "glm-4v",
-    "glm-4v-plus",
-    "minivision-3b",
-    "internvl2",
-}
+def _lookup_model_metadata_safely(model_name: str, protocol: Optional[ProtocolType] = None) -> Any:
+    """Best-effort model catalog lookup without importing model_catalog at module import time."""
+    try:
+        from ripperdoc.core.model_catalog import lookup_model_metadata
+
+        return lookup_model_metadata(model_name, protocol)
+    except (ModuleNotFoundError, ImportError, ValueError, TypeError):
+        return None
+
+
+class ModelPrice(BaseModel):
+    """Token pricing for a model, per 1M tokens."""
+
+    input: float = 0.0
+    output: float = 0.0
 
 
 class ModelProfile(BaseModel):
     """Configuration for a specific AI model."""
 
-    provider: ProviderType
+    protocol: ProtocolType
     model: str
     api_key: Optional[str] = None
     # Anthropic supports either api_key or auth_token; api_key takes precedence when both are set.
@@ -148,17 +80,66 @@ class ModelProfile(BaseModel):
     temperature: float = 0.7
     # Total context window in tokens (if known). Falls back to heuristics when unset.
     context_window: Optional[int] = None
+    # Optional split limits if provider reports separate input/output budgets.
+    max_input_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    # Model mode from catalog (e.g. chat, completion, responses, image_generation).
+    mode: Optional[str] = None
     # Tool handling for OpenAI-compatible providers. "native" uses tool_calls, "text" flattens tool
     # interactions into plain text to support providers that reject tool roles.
     openai_tool_mode: Literal["native", "text"] = "native"
     # Optional override for thinking protocol handling (e.g., "deepseek", "openrouter",
     # "qwen", "gemini_openai", "openai"). When unset, provider heuristics are used.
     thinking_mode: Optional[str] = None
-    # Vision support flag. None = auto-detect based on model name, True/False = override.
+    # Optional reasoning capability flag from model catalog.
+    supports_reasoning: Optional[bool] = None
+    # Vision support flag. None = infer from packaged model catalog when available.
     supports_vision: Optional[bool] = None
-    # Pricing (USD per 1M tokens). Leave as 0 to skip cost calculation.
-    input_cost_per_million_tokens: float = 0.0
-    output_cost_per_million_tokens: float = 0.0
+    # Pricing (per 1M tokens). Leave as 0 to skip cost calculation.
+    price: ModelPrice = Field(default_factory=ModelPrice)
+    currency: str = "USD"
+
+    @model_validator(mode="after")
+    def _apply_catalog_defaults(self) -> "ModelProfile":
+        """Fill optional capability/pricing fields from packaged model catalog."""
+        metadata = _lookup_model_metadata_safely(self.model, self.protocol)
+        if metadata is None:
+            return self
+
+        fields_set = set(getattr(self, "model_fields_set", set()))
+        if self.max_input_tokens is None and metadata.max_input_tokens is not None:
+            self.max_input_tokens = metadata.max_input_tokens
+        if self.max_output_tokens is None and metadata.max_output_tokens is not None:
+            self.max_output_tokens = metadata.max_output_tokens
+        if self.mode is None and metadata.mode:
+            self.mode = metadata.mode
+        if self.supports_reasoning is None and metadata.supports_reasoning is not None:
+            self.supports_reasoning = metadata.supports_reasoning
+        if self.supports_vision is None and metadata.supports_vision is not None:
+            self.supports_vision = metadata.supports_vision
+
+        inferred_max_tokens = (
+            metadata.max_tokens or metadata.max_output_tokens or metadata.max_input_tokens
+        )
+        if inferred_max_tokens is not None and "max_tokens" not in fields_set:
+            self.max_tokens = inferred_max_tokens
+
+        if (
+            "price" not in fields_set
+            and self.price.input == 0.0
+            and self.price.output == 0.0
+            and metadata.input_cost_per_token is not None
+            and metadata.output_cost_per_token is not None
+        ):
+            self.price = ModelPrice(
+                input=metadata.input_cost_per_token * 1_000_000,
+                output=metadata.output_cost_per_token * 1_000_000,
+            )
+
+        if "currency" not in fields_set and metadata.currency:
+            self.currency = metadata.currency.upper()
+
+        return self
 
 
 def model_supports_vision(model_profile: ModelProfile) -> bool:
@@ -174,9 +155,10 @@ def model_supports_vision(model_profile: ModelProfile) -> bool:
     if model_profile.supports_vision is not None:
         return model_profile.supports_vision
 
-    # Auto-detect based on model name
-    model_name = model_profile.model.lower()
-    return any(pattern in model_name for pattern in VISION_ENABLED_MODELS)
+    metadata = _lookup_model_metadata_safely(model_profile.model, model_profile.protocol)
+    if metadata and metadata.supports_vision is not None:
+        return metadata.supports_vision
+    return False
 
 
 class ModelPointers(BaseModel):
@@ -187,7 +169,7 @@ class ModelPointers(BaseModel):
 
 
 class UserConfig(BaseModel):
-    """User configuration stored in ~/.ripperdoc.json"""
+    """User configuration stored in ~/.ripperdoc/config.json."""
 
     model_config = {"protected_namespaces": (), "populate_by_name": True}
 
@@ -216,19 +198,6 @@ class UserConfig(BaseModel):
 
     # Statistics
     num_startups: int = 0
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_safe_mode(cls, data: Any) -> Any:
-        """Translate legacy safe_mode to the new yolo_mode flag."""
-        if isinstance(data, dict) and "safe_mode" in data and "yolo_mode" not in data:
-            data = dict(data)
-            try:
-                data["yolo_mode"] = not bool(data.pop("safe_mode"))
-            except Exception:
-                data["yolo_mode"] = False
-        return data
-
 
 class ProjectConfig(BaseModel):
     """Project-specific configuration stored in .ripperdoc/config.json"""
@@ -264,23 +233,6 @@ class ProjectConfig(BaseModel):
     last_duration: Optional[float] = None
     last_session_id: Optional[str] = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_additional_directories(cls, data: Any) -> Any:
-        """Allow Claude-style additionalDirectories as an alias."""
-        if not isinstance(data, dict):
-            return data
-        if "working_directories" in data:
-            return data
-
-        migrated = dict(data)
-        if "additionalDirectories" in migrated:
-            migrated["working_directories"] = migrated.get("additionalDirectories")
-        elif "additional_directories" in migrated:
-            migrated["working_directories"] = migrated.get("additional_directories")
-        return migrated
-
-
 class ProjectLocalConfig(BaseModel):
     """Project-local configuration stored in .ripperdoc/config.local.json (not checked into git)"""
 
@@ -299,52 +251,141 @@ class ConfigManager:
     """Manages user and project-specific configuration."""
 
     def __init__(self) -> None:
-        self.global_config_path = Path.home() / ".ripperdoc.json"
+        home = Path.home()
+        self.global_config_path = home / USER_CONFIG_DIR_NAME / USER_CONFIG_FILE_NAME
         self.current_project_path: Optional[Path] = None
         self._global_config: Optional[UserConfig] = None
         self._project_config: Optional[ProjectConfig] = None
         self._project_local_config: Optional[ProjectLocalConfig] = None
 
+    @staticmethod
+    def _merge_dict_layers(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        """Recursively merge dict values while replacing scalars/lists."""
+        merged: Dict[str, Any] = dict(base)
+        for key, value in override.items():
+            existing = merged.get(key)
+            if isinstance(existing, dict) and isinstance(value, dict):
+                merged[key] = ConfigManager._merge_dict_layers(
+                    cast(Dict[str, Any], existing),
+                    cast(Dict[str, Any], value),
+                )
+            else:
+                merged[key] = value
+        return merged
+
+    @staticmethod
+    def _read_json_file(path: Path) -> Optional[Dict[str, Any]]:
+        """Read a JSON object from disk."""
+        try:
+            data = json.loads(path.read_text())
+            if isinstance(data, dict):
+                return data
+            logger.warning(
+                "[config] Ignoring non-object JSON config",
+                extra={"path": str(path), "type": type(data).__name__},
+            )
+            return None
+        except (
+            json.JSONDecodeError,
+            OSError,
+            IOError,
+            UnicodeDecodeError,
+            ValueError,
+            TypeError,
+        ) as e:
+            logger.warning(
+                "Error loading config file %s: %s: %s",
+                path,
+                type(e).__name__,
+                e,
+                extra={"error": str(e), "path": str(path)},
+            )
+            return None
+
+    @staticmethod
+    def _filter_user_config_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep only keys that belong to UserConfig."""
+        allowed = set(UserConfig.model_fields.keys())
+        return {key: value for key, value in data.items() if key in allowed}
+
+    def get_global_config_path(self) -> Path:
+        """Return the active user config path."""
+        return self.global_config_path
+
     def get_global_config(self) -> UserConfig:
-        """Load and return user configuration."""
+        """Load and return raw user configuration from ~/.ripperdoc/config.json."""
         if self._global_config is None:
+            source_path: Optional[Path] = None
+            data: Dict[str, Any] = {}
+
             if self.global_config_path.exists():
-                try:
-                    data = json.loads(self.global_config_path.read_text())
-                    self._global_config = UserConfig(**data)
+                source_path = self.global_config_path
+                loaded = self._read_json_file(self.global_config_path)
+                if loaded is not None:
+                    data = loaded
+
+            try:
+                self._global_config = UserConfig(**data)
+                if source_path is not None:
                     logger.debug(
                         "[config] Loaded user configuration",
                         extra={
-                            "path": str(self.global_config_path),
+                            "path": str(source_path),
                             "profile_count": len(self._global_config.model_profiles),
                         },
                     )
-                except (
-                    json.JSONDecodeError,
-                    OSError,
-                    IOError,
-                    UnicodeDecodeError,
-                    ValueError,
-                    TypeError,
-                ) as e:
-                    logger.warning(
-                        "Error loading user config: %s: %s",
-                        type(e).__name__,
-                        e,
-                        extra={"error": str(e)},
+                else:
+                    logger.debug(
+                        "[config] User config not found; using defaults",
+                        extra={"path": str(self.global_config_path)},
                     )
-                    self._global_config = UserConfig()
-            else:
-                self._global_config = UserConfig()
-                logger.debug(
-                    "[config] User config not found; using defaults",
-                    extra={"path": str(self.global_config_path)},
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    "Error parsing user config: %s: %s",
+                    type(e).__name__,
+                    e,
+                    extra={"error": str(e), "path": str(source_path or self.global_config_path)},
                 )
+                self._global_config = UserConfig()
+
         return self._global_config
 
+    def get_effective_config(self, project_path: Optional[Path] = None) -> UserConfig:
+        """Return effective config merged as local > project > user."""
+        merged: Dict[str, Any] = self.get_global_config().model_dump()
+        resolved_project_path = project_path or self.current_project_path or Path.cwd()
+
+        project_config_path = resolved_project_path / ".ripperdoc" / "config.json"
+        if project_config_path.exists():
+            project_data = self._read_json_file(project_config_path)
+            if project_data is not None:
+                merged = self._merge_dict_layers(
+                    merged, self._filter_user_config_fields(project_data)
+                )
+
+        local_config_path = resolved_project_path / ".ripperdoc" / "config.local.json"
+        if local_config_path.exists():
+            local_data = self._read_json_file(local_config_path)
+            if local_data is not None:
+                merged = self._merge_dict_layers(
+                    merged, self._filter_user_config_fields(local_data)
+                )
+
+        try:
+            return UserConfig(**merged)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Error building effective config; falling back to user config: %s: %s",
+                type(e).__name__,
+                e,
+                extra={"error": str(e), "project_path": str(resolved_project_path)},
+            )
+            return self.get_global_config()
+
     def save_global_config(self, config: UserConfig) -> None:
-        """Save user configuration."""
+        """Save user configuration to ~/.ripperdoc/config.json."""
         self._global_config = config
+        self.global_config_path.parent.mkdir(parents=True, exist_ok=True)
         self.global_config_path.write_text(config.model_dump_json(indent=2))
         logger.debug(
             "[config] Saved user configuration",
@@ -526,29 +567,31 @@ class ConfigManager:
         except (OSError, IOError):
             return False
 
-    def get_api_key(self, provider: ProviderType) -> Optional[str]:
-        """Get API key for a provider."""
+    def get_api_key(self, protocol: ProtocolType, project_path: Optional[Path] = None) -> Optional[str]:
+        """Get API key for a protocol."""
         # Only honor RIPPERDOC_* environment overrides
         if ripperdoc_api_key := os.getenv(RIPPERDOC_API_KEY):
             return ripperdoc_api_key
 
-        # Then check user config
-        global_config = self.get_global_config()
-        for profile in global_config.model_profiles.values():
-            if profile.provider == provider and profile.api_key:
+        # Then check effective layered config
+        effective_config = self.get_effective_config(project_path=project_path)
+        for profile in effective_config.model_profiles.values():
+            if profile.protocol == protocol and profile.api_key:
                 return profile.api_key
 
         return None
 
-    def get_current_model_profile(self, pointer: str = "main") -> Optional[ModelProfile]:
+    def get_current_model_profile(
+        self, pointer: str = "main", project_path: Optional[Path] = None
+    ) -> Optional[ModelProfile]:
         """Get the current model profile for a given pointer."""
-        global_config = self.get_global_config()
+        effective_config = self.get_effective_config(project_path=project_path)
 
         # Get the profile name from the pointer
-        profile_name = getattr(global_config.model_pointers, pointer, "default")
+        profile_name = getattr(effective_config.model_pointers, pointer, "default")
 
         # Return the profile
-        return global_config.model_profiles.get(profile_name)
+        return effective_config.model_profiles.get(profile_name)
 
     def _fallback_profile_name(self, preferred: str = "default") -> str:
         """Pick a valid profile name to use as a fallback for pointers."""
@@ -614,8 +657,18 @@ config_manager = ConfigManager()
 
 
 def get_global_config() -> UserConfig:
-    """Get user configuration."""
+    """Get raw user-level configuration."""
     return config_manager.get_global_config()
+
+
+def get_global_config_path() -> Path:
+    """Get the active user config file path."""
+    return config_manager.get_global_config_path()
+
+
+def get_effective_config(project_path: Optional[Path] = None) -> UserConfig:
+    """Get effective config merged as local > project > user."""
+    return config_manager.get_effective_config(project_path)
 
 
 def save_global_config(config: UserConfig) -> None:
@@ -658,9 +711,11 @@ def set_model_pointer(pointer: str, profile_name: str) -> UserConfig:
     return config_manager.set_model_pointer(pointer, profile_name)
 
 
-def get_current_model_profile(pointer: str = "main") -> Optional[ModelProfile]:
+def get_current_model_profile(
+    pointer: str = "main", project_path: Optional[Path] = None
+) -> Optional[ModelProfile]:
     """Convenience wrapper to fetch the active profile for a pointer."""
-    return config_manager.get_current_model_profile(pointer)
+    return config_manager.get_current_model_profile(pointer, project_path=project_path)
 
 
 def get_project_local_config(project_path: Optional[Path] = None) -> ProjectLocalConfig:
@@ -688,7 +743,7 @@ RIPPERDOC_API_KEY = "RIPPERDOC_API_KEY"
 RIPPERDOC_PROTOCOL = "RIPPERDOC_PROTOCOL"
 
 
-def _infer_protocol_from_url_and_model(base_url: str, model_name: str = "") -> ProviderType:
+def _infer_protocol_from_url_and_model(base_url: str, model_name: str = "") -> ProtocolType:
     """Infer protocol type from BASE_URL and model name.
 
     Args:
@@ -696,32 +751,35 @@ def _infer_protocol_from_url_and_model(base_url: str, model_name: str = "") -> P
         model_name: Model name
 
     Returns:
-        Inferred ProviderType
+        Inferred ProtocolType
     """
     base_lower = base_url.lower()
     model_lower = model_name.lower()
 
     # Explicit domain detection
     if "anthropic.com" in base_lower:
-        return ProviderType.ANTHROPIC
-    if "generativelanguage.googleapis.com" in base_lower or "gemini" in model_lower:
-        return ProviderType.GEMINI
+        return ProtocolType.ANTHROPIC
+    if "generativelanguage.googleapis.com" in base_lower:
+        return ProtocolType.GEMINI
 
     # URL path detection - check if path contains protocol identifier
     if "/anthropic" in base_lower or base_lower.endswith("/anthropic"):
-        return ProviderType.ANTHROPIC
+        return ProtocolType.ANTHROPIC
     if "/v1/" in base_lower or "/v1" in base_lower:
         # Most /v1/ paths are OpenAI compatible format
-        return ProviderType.OPENAI_COMPATIBLE
+        return ProtocolType.OPENAI_COMPATIBLE
 
-    # Model name prefix detection
-    if model_lower.startswith("claude-"):
-        return ProviderType.ANTHROPIC
-    if model_lower.startswith("gemini-"):
-        return ProviderType.GEMINI
+    # Fall back to packaged model catalog when model name is known.
+    if model_lower:
+        metadata = _lookup_model_metadata_safely(model_lower)
+        provider = str(getattr(metadata, "provider", "") or "").lower()
+        if "anthropic" in provider:
+            return ProtocolType.ANTHROPIC
+        if any(token in provider for token in ("gemini", "vertex", "google")):
+            return ProtocolType.GEMINI
 
     # Default to OpenAI compatible protocol
-    return ProviderType.OPENAI_COMPATIBLE
+    return ProtocolType.OPENAI_COMPATIBLE
 
 
 def _get_ripperdoc_env_overrides() -> Dict[str, Any]:
@@ -743,7 +801,7 @@ def _get_ripperdoc_env_overrides() -> Dict[str, Any]:
         overrides["small_fast_model"] = small_fast_model
     if protocol_str := os.getenv(RIPPERDOC_PROTOCOL):
         try:
-            overrides["protocol"] = ProviderType(protocol_str.lower())
+            overrides["protocol"] = ProtocolType(protocol_str.lower())
         except ValueError:
             logger.warning(
                 "[config] Invalid RIPPERDOC_PROTOCOL value: %s (must be anthropic, openai_compatible, or gemini)",
@@ -796,12 +854,12 @@ def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]
         if model_override:
             updates["model"] = model_override
         if protocol_override:
-            updates["provider"] = protocol_override
+            updates["protocol"] = protocol_override
         elif base_override or model_override:
             inferred = _infer_protocol_from_url_and_model(
                 base_override or profile.api_base or "", model_override or profile.model
             )
-            updates["provider"] = inferred
+            updates["protocol"] = inferred
         return profile.model_copy(update=updates)
 
     # No profile exists; only synthesize a profile if env provides enough context.
@@ -814,7 +872,7 @@ def get_effective_model_profile(pointer: str = "main") -> Optional[ModelProfile]
     model_name = model_override or _default_model_for_protocol(protocol)
 
     return ModelProfile(
-        provider=protocol,
+        protocol=protocol,
         model=model_name,
         api_base=base_override,
         api_key=api_key_override,

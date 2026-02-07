@@ -17,7 +17,11 @@ from prompt_toolkit.formatted_text import FormattedText
 from rich.console import Console
 from rich.markup import escape
 
-from ripperdoc.core.config import get_global_config, get_project_local_config, provider_protocol
+from ripperdoc.core.config import (
+    get_effective_config,
+    get_project_local_config,
+    provider_protocol,
+)
 from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
 from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
@@ -202,7 +206,7 @@ class RichUI:
         )
 
         # Get global config for display preferences
-        config = get_global_config()
+        config = get_effective_config(self.project_path)
         if show_full_thinking is None:
             self.show_full_thinking = config.show_full_thinking
         else:
@@ -263,13 +267,13 @@ class RichUI:
     def _supports_thinking_mode(self) -> bool:
         """Check if the current model supports extended thinking mode."""
         from ripperdoc.core.query import infer_thinking_mode
-        from ripperdoc.core.config import ProviderType
+        from ripperdoc.core.config import ProtocolType
 
         model_profile = get_profile_for_pointer("main")
         if not model_profile:
             return False
         # Anthropic natively supports thinking mode
-        if model_profile.provider == ProviderType.ANTHROPIC:
+        if model_profile.protocol == ProtocolType.ANTHROPIC:
             return True
         # For other providers, check if we can infer a thinking mode
         return infer_thinking_mode(model_profile) is not None
@@ -285,7 +289,7 @@ class RichUI:
         """Get the thinking tokens budget based on current mode."""
         if not self._thinking_mode_enabled:
             return 0
-        config = get_global_config()
+        config = get_effective_config(self.project_path)
         return config.default_thinking_tokens
 
     def _get_prompt(self) -> str:
@@ -1042,13 +1046,13 @@ class RichUI:
 
     def _resolve_query_runtime_settings(self) -> tuple[int, bool, str]:
         """Resolve context budget and protocol settings for this query."""
-        config = get_global_config()
+        config = get_effective_config(self.project_path)
         model_profile = get_profile_for_pointer("main")
         max_context_tokens = get_remaining_context_tokens(
             model_profile, config.context_token_limit
         )
         auto_compact_enabled = resolve_auto_compact_enabled(config)
-        protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
+        protocol = provider_protocol(model_profile.protocol) if model_profile else "openai"
         return max_context_tokens, auto_compact_enabled, protocol
 
     def _build_spinner_callbacks(
@@ -1554,7 +1558,7 @@ class RichUI:
         from rich.markup import escape
 
         model_profile = get_profile_for_pointer("main")
-        protocol = provider_protocol(model_profile.provider) if model_profile else "openai"
+        protocol = provider_protocol(model_profile.protocol) if model_profile else "openai"
 
         if len(self.conversation_messages) < 2:
             self.console.print("[yellow]Not enough conversation history to compact.[/yellow]")
@@ -1630,7 +1634,7 @@ class RichUI:
 
 def check_onboarding_rich() -> bool:
     """Check if onboarding is complete and run if needed."""
-    config = get_global_config()
+    config = get_effective_config(Path.cwd())
 
     if config.has_completed_onboarding:
         return True

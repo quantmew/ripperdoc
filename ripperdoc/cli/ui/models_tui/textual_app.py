@@ -25,7 +25,7 @@ from textual.widgets import (
 
 from ripperdoc.core.config import (
     ModelProfile,
-    ProviderType,
+    ProtocolType,
     add_model_profile,
     delete_model_profile,
     get_global_config,
@@ -98,18 +98,18 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     yield Static(f"{name_display}", id="name_static", classes="field_value")
 
                 current_profile = get_profile_for_pointer("main")
-                provider_default = (
-                    self._existing_profile.provider.value
+                protocol_default = (
+                    self._existing_profile.protocol.value
                     if self._existing_profile
                     else (
-                        current_profile.provider.value
+                        current_profile.protocol.value
                         if current_profile
-                        else ProviderType.ANTHROPIC.value
+                        else ProtocolType.ANTHROPIC.value
                     )
                 )
-                provider_options = [(p.value, p.value) for p in ProviderType]
-                yield Static("Provider", classes="field_label")
-                yield Select(provider_options, value=provider_default, id="provider_select")
+                provider_options = [(p.value, p.value) for p in ProtocolType]
+                yield Static("Protocol", classes="field_label")
+                yield Select(provider_options, value=protocol_default, id="provider_select")
 
                 model_default = (
                     self._existing_profile.model if self._existing_profile else ""
@@ -169,6 +169,34 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     id="context_window_input",
                 )
 
+                input_price_default = (
+                    self._existing_profile.price.input if self._existing_profile else 0.0
+                )
+                output_price_default = (
+                    self._existing_profile.price.output if self._existing_profile else 0.0
+                )
+                currency_default = (
+                    (self._existing_profile.currency if self._existing_profile else "USD") or "USD"
+                )
+                yield Static("Input price / 1M tokens", classes="field_label")
+                yield Input(
+                    value=str(input_price_default),
+                    placeholder="Input price per 1M tokens",
+                    id="input_price_input",
+                )
+                yield Static("Output price / 1M tokens", classes="field_label")
+                yield Input(
+                    value=str(output_price_default),
+                    placeholder="Output price per 1M tokens",
+                    id="output_price_input",
+                )
+                yield Static("Currency", classes="field_label")
+                yield Input(
+                    value=currency_default,
+                    placeholder="Currency (e.g. USD)",
+                    id="currency_input",
+                )
+
                 yield Static("Supports vision", classes="field_label")
                 supports_default = (
                     "auto"
@@ -216,6 +244,9 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         max_tokens_input = self.query_one("#max_tokens_input", Input)
         temperature_input = self.query_one("#temperature_input", Input)
         context_window_input = self.query_one("#context_window_input", Input)
+        input_price_input = self.query_one("#input_price_input", Input)
+        output_price_input = self.query_one("#output_price_input", Input)
+        currency_input = self.query_one("#currency_input", Input)
         vision_select = self.query_one("#vision_select", Select)
 
         name = self._existing_name or ""
@@ -225,18 +256,19 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 self._set_error("Profile name is required.")
                 return
 
-        provider_raw = provider_select.value
-        provider_value = provider_raw.strip() if isinstance(provider_raw, str) else ""
+        protocol_raw = provider_select.value
+        protocol_value = protocol_raw.strip() if isinstance(protocol_raw, str) else ""
         try:
-            provider = ProviderType(provider_value)
+            protocol = ProtocolType(protocol_value)
         except ValueError:
-            self._set_error("Invalid provider.")
+            self._set_error("Invalid protocol.")
             return
 
         model_name = (model_input.value or "").strip()
         if not model_name:
             self._set_error("Model name is required.")
             return
+        inferred_profile = ModelProfile(protocol=protocol, model=model_name)
 
         api_key_raw = (api_key_input.value or "").strip()
         if self._existing_profile:
@@ -250,8 +282,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             api_key = api_key_raw or None
 
         auth_token_raw = (auth_token_input.value or "").strip()
-        if provider == ProviderType.ANTHROPIC or (
-            self._existing_profile and self._existing_profile.provider == ProviderType.ANTHROPIC
+        if protocol == ProtocolType.ANTHROPIC or (
+            self._existing_profile and self._existing_profile.protocol == ProtocolType.ANTHROPIC
         ):
             if self._existing_profile:
                 if auth_token_raw == "-":
@@ -267,7 +299,14 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
 
         api_base = (api_base_input.value or "").strip() or None
 
-        max_tokens = self._parse_int(max_tokens_input.value, "Max output tokens")
+        max_tokens_default = (
+            self._existing_profile.max_tokens if self._existing_profile else inferred_profile.max_tokens
+        )
+        max_tokens = self._parse_int(
+            max_tokens_input.value,
+            "Max output tokens",
+            default_value=max_tokens_default,
+        )
         if max_tokens is None:
             return
 
@@ -281,6 +320,37 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             context_window = self._parse_int(context_raw, "Context window tokens")
             if context_window is None:
                 return
+        elif self._existing_profile:
+            context_window = self._existing_profile.context_window
+        else:
+            context_window = inferred_profile.max_input_tokens
+
+        input_price_default = (
+            self._existing_profile.price.input if self._existing_profile else inferred_profile.price.input
+        )
+        input_price = self._parse_float(
+            input_price_input.value,
+            "Input price",
+            default_value=input_price_default,
+        )
+        if input_price is None:
+            return
+        output_price_default = (
+            self._existing_profile.price.output
+            if self._existing_profile
+            else inferred_profile.price.output
+        )
+        output_price = self._parse_float(
+            output_price_input.value,
+            "Output price",
+            default_value=output_price_default,
+        )
+        if output_price is None:
+            return
+        currency_default = (
+            self._existing_profile.currency if self._existing_profile else inferred_profile.currency
+        )
+        currency = ((currency_input.value or "").strip().upper() or currency_default or "USD")
 
         vision_raw = vision_select.value
         supports_value = (
@@ -291,13 +361,17 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         elif supports_value == "no":
             supports_vision = False
         else:
-            supports_vision = None
+            supports_vision = (
+                self._existing_profile.supports_vision
+                if self._existing_profile
+                else inferred_profile.supports_vision
+            )
 
         set_as_main = bool(self.query_one("#set_main", Checkbox).value)
         set_as_quick = bool(self.query_one("#set_quick", Checkbox).value)
 
         profile = ModelProfile(
-            provider=provider,
+            protocol=protocol,
             model=model_name,
             api_key=api_key,
             auth_token=auth_token,
@@ -306,6 +380,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             temperature=temperature,
             context_window=context_window,
             supports_vision=supports_vision,
+            price={"input": input_price, "output": output_price},
+            currency=currency,
         )
 
         self.dismiss(
@@ -322,9 +398,11 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         if app:
             app.notify(message, title="Validation error", severity="error", timeout=6)
 
-    def _parse_int(self, raw: str, label: str) -> Optional[int]:
+    def _parse_int(self, raw: str, label: str, default_value: Optional[int] = None) -> Optional[int]:
         raw = (raw or "").strip()
         if not raw:
+            if default_value is not None:
+                return default_value
             if self._existing_profile and label == "Max output tokens":
                 return self._existing_profile.max_tokens
             if self._existing_profile and label == "Context window tokens":
@@ -338,13 +416,21 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             self._set_error(f"Invalid number for {label}.")
             return None
 
-    def _parse_float(self, raw: str, label: str) -> Optional[float]:
+    def _parse_float(self, raw: str, label: str, default_value: Optional[float] = None) -> Optional[float]:
         raw = (raw or "").strip()
         if not raw:
+            if default_value is not None:
+                return default_value
             if self._existing_profile and label == "Temperature":
                 return self._existing_profile.temperature
+            if self._existing_profile and label == "Input price":
+                return self._existing_profile.price.input
+            if self._existing_profile and label == "Output price":
+                return self._existing_profile.price.output
             if label == "Temperature":
                 return 1.0
+            if label in {"Input price", "Output price"}:
+                return 0.0
             return None
         try:
             return float(raw)
@@ -447,7 +533,7 @@ class ModelsApp(App[None]):
 
     def on_mount(self) -> None:
         table = self.query_one("#models_table", DataTable)
-        table.add_columns("#", "Name", "Ptr", "Provider", "Model")
+        table.add_columns("#", "Name", "Ptr", "Protocol", "Model")
         try:
             table.cursor_type = "row"
             table.zebra_stripes = True
@@ -588,7 +674,7 @@ class ModelsApp(App[None]):
                 str(idx),
                 name,
                 pointer_label,
-                profile.provider.value,
+                profile.protocol.value,
                 profile.model,
             )
 
@@ -650,7 +736,7 @@ class ModelsApp(App[None]):
         table.add_column()
         table.add_row("Profile", self._selected_name)
         table.add_row("Pointers", marker_text)
-        table.add_row("Provider", profile.provider.value)
+        table.add_row("Protocol", profile.protocol.value)
         table.add_row("Model", profile.model)
         table.add_row("API base", profile.api_base or "-")
         table.add_row(
@@ -659,9 +745,13 @@ class ModelsApp(App[None]):
         )
         table.add_row("Max tokens", str(profile.max_tokens))
         table.add_row("Temperature", str(profile.temperature))
+        table.add_row(
+            "Price",
+            f"in={profile.price.input}/1M, out={profile.price.output}/1M ({profile.currency})",
+        )
         table.add_row("Vision", vision_display)
         table.add_row("API key", "set" if profile.api_key else "unset")
-        if profile.provider == ProviderType.ANTHROPIC:
+        if profile.protocol == ProtocolType.ANTHROPIC:
             table.add_row(
                 "Auth token",
                 "set" if getattr(profile, "auth_token", None) else "unset",

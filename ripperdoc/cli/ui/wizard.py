@@ -16,11 +16,13 @@ from ripperdoc.cli.ui.provider_options import (
 from ripperdoc.core.config import (
     UserConfig,
     ModelProfile,
-    ProviderType,
+    ProtocolType,
+    get_effective_config,
     get_global_config,
     has_ripperdoc_env_overrides,
     save_global_config,
 )
+from ripperdoc.core.provider_catalog import Provider
 from ripperdoc.utils.prompt import prompt_secret
 
 
@@ -43,10 +45,11 @@ def resolve_provider_choice(raw_choice: str, provider_keys: List[str]) -> Option
 
 def check_onboarding() -> bool:
     """Check if onboarding is complete and run if needed."""
-    config = get_global_config()
-
-    if config.has_completed_onboarding:
+    effective_config = get_effective_config()
+    if effective_config.has_completed_onboarding:
         return True
+
+    config = get_global_config()
 
     # Check if there are valid RIPPERDOC_* environment variable configurations
     # If any RIPPERDOC_* is set, can skip onboarding
@@ -106,9 +109,9 @@ def run_onboarding_wizard(config: UserConfig) -> bool:
             ChoiceOption(
                 p.value,
                 p.value,  # Plain text
-                is_default=(p == ProviderType.OPENAI_COMPATIBLE),
+                is_default=(p == ProtocolType.OPENAI_COMPATIBLE),
             )
-            for p in ProviderType
+            for p in ProtocolType
         ]
 
         protocol_input = prompt_choice(
@@ -116,10 +119,10 @@ def run_onboarding_wizard(config: UserConfig) -> bool:
             options=protocol_options,
             title="Custom Provider - Protocol Selection",
             allow_esc=True,
-            esc_value=ProviderType.OPENAI_COMPATIBLE.value,
+            esc_value=ProtocolType.OPENAI_COMPATIBLE.value,
             style=onboarding_style(),
         )
-        protocol = ProviderType(protocol_input)
+        protocol = ProtocolType(protocol_input)
 
         # Get API base URL - use click.prompt for free-form text input
         console.print("\n[dim]Now we need your API Base URL.[/dim]")
@@ -127,16 +130,29 @@ def run_onboarding_wizard(config: UserConfig) -> bool:
 
         provider_option = ProviderOption(
             key="custom",
-            protocol=protocol,
-            default_model=default_model_for_protocol(protocol),
-            model_suggestions=(),
+            provider=Provider(
+                protocol=protocol,
+                website=_guess_provider_website(api_base_override),
+                description="custom provider",
+                base_url=api_base_override,
+                model_list=(ModelProfile(protocol=protocol, model=default_model_for_protocol(protocol)),),
+            ),
         )
     else:
         provider_option = KNOWN_PROVIDERS.get(provider_choice) or ProviderOption(
             key=provider_choice,
-            protocol=ProviderType.OPENAI_COMPATIBLE,
-            default_model=default_model_for_protocol(ProviderType.OPENAI_COMPATIBLE),
-            model_suggestions=(),
+            provider=Provider(
+                protocol=ProtocolType.OPENAI_COMPATIBLE,
+                website=f"https://{provider_choice}",
+                description=f"{provider_choice} provider",
+                base_url=None,
+                model_list=(
+                    ModelProfile(
+                        protocol=ProtocolType.OPENAI_COMPATIBLE,
+                        model=default_model_for_protocol(ProtocolType.OPENAI_COMPATIBLE),
+                    ),
+                ),
+            ),
         )
 
     api_key = ""
@@ -153,7 +169,7 @@ def run_onboarding_wizard(config: UserConfig) -> bool:
 
     # Create model profile
     config.model_profiles["default"] = ModelProfile(
-        provider=provider_option.protocol,
+        protocol=provider_option.protocol,
         model=model,
         api_key=api_key,
         api_base=api_base,
@@ -216,7 +232,7 @@ def get_model_name_with_suggestions(
         model = default_model
 
     # Prompt for API base if still not set (for OpenAI-compatible providers)
-    if provider.protocol == ProviderType.OPENAI_COMPATIBLE and api_base is None:
+    if provider.protocol == ProtocolType.OPENAI_COMPATIBLE and api_base is None:
         api_base_input = prompt_choice(
             message="Enter API base URL (or press Enter to skip)",
             options=[ChoiceOption("", "<dim>Skip</dim>")],
@@ -226,7 +242,7 @@ def get_model_name_with_suggestions(
             style=onboarding_style(),
         )
         api_base = api_base_input or None
-    elif provider.protocol == ProviderType.GEMINI and api_base is None:
+    elif provider.protocol == ProtocolType.GEMINI and api_base is None:
         api_base_input = prompt_choice(
             message="Enter API base URL (or press Enter to skip)",
             options=[ChoiceOption("", "<dim>Skip</dim>")],
@@ -238,6 +254,18 @@ def get_model_name_with_suggestions(
         api_base = api_base_input or None
 
     return model, api_base
+
+
+def _guess_provider_website(api_base: Optional[str]) -> str:
+    """Best-effort website from API base."""
+    if not api_base:
+        return "https://localhost"
+    value = api_base.strip()
+    if value.startswith("http://") or value.startswith("https://"):
+        parts = value.split("/")
+        if len(parts) >= 3:
+            return f"{parts[0]}//{parts[2]}"
+    return "https://localhost"
 
 
 def get_context_window() -> Optional[int]:

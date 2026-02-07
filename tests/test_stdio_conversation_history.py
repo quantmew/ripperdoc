@@ -7,7 +7,7 @@ from typing import Any, List
 
 import pytest
 
-from ripperdoc.core.config import ModelProfile, ProviderType
+from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_config, handler_query, handler_session
@@ -175,10 +175,10 @@ async def test_stdio_result_cost_uses_model_profile_pricing(monkeypatch, tmp_pat
         handler_query,
         "resolve_model_profile",
         lambda _model: ModelProfile(
-            provider=ProviderType.OPENAI_COMPATIBLE,
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
             model="priced-model",
-            input_cost_per_million_tokens=10.0,
-            output_cost_per_million_tokens=20.0,
+            price={"input": 10.0, "output": 20.0},
+            currency="USD",
         ),
     )
 
