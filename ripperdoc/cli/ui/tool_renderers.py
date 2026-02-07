@@ -225,33 +225,20 @@ class BashResultRenderer(ToolResultRenderer):
         else:
             self.console.print("  ⎿  [dim]Command executed[/]")
 
-        # Render stdout
-        if stdout_lines:
-            preview = stdout_lines if self.verbose else stdout_lines[:5]
-            self.console.print("[dim]stdout:[/]")
-            for line in preview:
-                self.console.print(f"    {line}", markup=False)
-            if not self.verbose and len(stdout_lines) > len(preview):
-                self.console.print(
-                    f"[dim]... ({len(stdout_lines) - len(preview)} more stdout lines)[/]"
-                )
-        else:
-            self.console.print("[dim]stdout:[/]")
-            self.console.print("    [dim](no stdout)[/]")
+        # Render stream sections only when they contain content.
+        self._render_stream_section("stdout", stdout_lines)
+        self._render_stream_section("stderr", stderr_lines)
 
-        # Render stderr
-        if stderr_lines:
-            preview = stderr_lines if self.verbose else stderr_lines[:5]
-            self.console.print("[dim]stderr:[/]")
-            for line in preview:
-                self.console.print(f"    {line}", markup=False)
-            if not self.verbose and len(stderr_lines) > len(preview):
-                self.console.print(
-                    f"[dim]... ({len(stderr_lines) - len(preview)} more stderr lines)[/]"
-                )
-        else:
-            self.console.print("[dim]stderr:[/]")
-            self.console.print("    [dim](no stderr)[/]")
+    def _render_stream_section(self, label: str, lines: List[str]) -> None:
+        """Render one stream section (stdout/stderr) when lines are present."""
+        if not lines:
+            return
+        preview = lines if self.verbose else lines[:5]
+        self.console.print(f"[dim]{label}:[/]")
+        for line in preview:
+            self.console.print(f"    {line}", markup=False)
+        if not self.verbose and len(lines) > len(preview):
+            self.console.print(f"[dim]... ({len(lines) - len(preview)} more {label} lines)[/]")
 
 
 class ToolResultRendererRegistry:
