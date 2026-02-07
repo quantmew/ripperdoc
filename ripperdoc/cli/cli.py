@@ -339,6 +339,7 @@ def _build_effective_system_prompt(
     context: Dict[str, Any],
     mcp_instructions: str,
     output_style: str,
+    output_language: str,
     project_path: Path,
 ) -> str:
     if custom_system_prompt:
@@ -357,6 +358,7 @@ def _build_effective_system_prompt(
         additional_instructions=all_instructions or None,
         mcp_instructions=mcp_instructions,
         output_style=output_style,
+        output_language=output_language,
         project_path=project_path,
     )
 
@@ -452,6 +454,7 @@ async def run_query(
     project_path = Path.cwd()
     project_local_config = get_project_local_config(project_path)
     output_style = getattr(project_local_config, "output_style", "default") or "default"
+    output_language = getattr(project_local_config, "output_language", "auto") or "auto"
     can_use_tool = (
         None
         if yolo_mode
@@ -516,6 +519,7 @@ async def run_query(
             context=context,
             mcp_instructions=mcp_instructions,
             output_style=output_style,
+            output_language=output_language,
             project_path=project_path,
         )
 

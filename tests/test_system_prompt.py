@@ -123,3 +123,22 @@ Teach with coding examples.
     assert "Teach with coding examples." in prompt
     assert "Verify the solution if possible with tests." in prompt
     assert "# Committing changes with git" in prompt
+
+
+def test_system_prompt_includes_output_language_instruction_when_configured() -> None:
+    prompt = build_system_prompt(
+        [DummyTool("Read"), DummyTool("Bash")],
+        output_language="Chinese",
+    )
+
+    assert "# Output language" in prompt
+    assert "respond in Chinese" in prompt
+
+
+def test_system_prompt_omits_output_language_instruction_for_auto() -> None:
+    prompt = build_system_prompt(
+        [DummyTool("Read"), DummyTool("Bash")],
+        output_language="auto",
+    )
+
+    assert "# Output language" not in prompt

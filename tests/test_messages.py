@@ -71,8 +71,8 @@ def test_message_with_tool_result():
     assert len(msg.message.content) == 1
 
 
-def test_sanitize_tool_history_keeps_multiple_tool_results():
-    """Ensure tool_use blocks are retained when results arrive in later messages."""
+def test_sanitize_tool_history_folds_multiple_tool_results_to_single_next_message():
+    """Tool results for one assistant tool turn should be folded into one next user message."""
     normalized = [
         {
             "role": "assistant",
@@ -93,10 +93,19 @@ def test_sanitize_tool_history_keeps_multiple_tool_results():
 
     sanitized = sanitize_tool_history(normalized)
 
+    assert len(sanitized) == 2
+    assert sanitized[0]["role"] == "assistant"
+    assert sanitized[1]["role"] == "user"
     tool_use_ids = [
         block["id"] for block in sanitized[0]["content"] if block.get("type") == "tool_use"
     ]
     assert set(tool_use_ids) == {"call_1", "call_2"}
+    tool_result_ids = [
+        block["tool_use_id"]
+        for block in sanitized[1]["content"]
+        if block.get("type") == "tool_result"
+    ]
+    assert tool_result_ids == ["call_1", "call_2"]
 
 
 def test_sanitize_tool_history_drops_unpaired_tool_use():
@@ -121,6 +130,136 @@ def test_sanitize_tool_history_drops_unpaired_tool_use():
         block["id"] for block in sanitized[0]["content"] if block.get("type") == "tool_use"
     ]
     assert tool_use_ids == ["call_1"]
+
+
+def test_sanitize_tool_history_keeps_non_tool_user_content_after_fold():
+    """Non-tool user content should remain after folding paired tool results."""
+    normalized = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "call_1", "name": "foo", "input": {}},
+                {"type": "tool_use", "id": "call_2", "name": "bar", "input": {}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "call_1", "text": "ok"}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "note"}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "call_2", "text": "ok"}],
+        },
+    ]
+
+    sanitized = sanitize_tool_history(normalized)
+
+    assert [msg.get("role") for msg in sanitized] == ["assistant", "user", "user"]
+    folded_result_ids = [
+        block["tool_use_id"]
+        for block in sanitized[1]["content"]
+        if block.get("type") == "tool_result"
+    ]
+    assert folded_result_ids == ["call_1", "call_2"]
+    assert sanitized[2]["content"] == [{"type": "text", "text": "note"}]
+
+
+def test_sanitize_tool_history_replays_real_session_parallel_git_tool_calls():
+    """Regression: Anthropic requires all tool_results in the immediate next user message."""
+    normalized = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "首先，让我并行运行git命令来分析当前状态："},
+                {
+                    "type": "tool_use",
+                    "id": "call_00_vfVcN1GWWKIR4fnNEsbLMaWS",
+                    "name": "Bash",
+                    "input": {"command": "git status"},
+                },
+                {
+                    "type": "tool_use",
+                    "id": "call_01_MPKMZePGjQafIWuHMFXqbkoY",
+                    "name": "Bash",
+                    "input": {"command": "git diff --cached"},
+                },
+                {
+                    "type": "tool_use",
+                    "id": "call_02_eDQKzu84FV4zS4JtuDUutT2p",
+                    "name": "Bash",
+                    "input": {"command": "git diff"},
+                },
+                {
+                    "type": "tool_use",
+                    "id": "call_03_nBli3PtFi7ptFNSh12Iput45",
+                    "name": "Bash",
+                    "input": {"command": "git log --oneline -10"},
+                },
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_00_vfVcN1GWWKIR4fnNEsbLMaWS",
+                    "text": "stdout: git status ...",
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_01_MPKMZePGjQafIWuHMFXqbkoY",
+                    "text": "stdout: git diff --cached ...",
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_02_eDQKzu84FV4zS4JtuDUutT2p",
+                    "text": "stdout: git diff ...",
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_03_nBli3PtFi7ptFNSh12Iput45",
+                    "text": "stdout: git log --oneline -10 ...",
+                }
+            ],
+        },
+    ]
+
+    sanitized = sanitize_tool_history(normalized)
+
+    assert len(sanitized) == 2
+    assert sanitized[0]["role"] == "assistant"
+    assert sanitized[1]["role"] == "user"
+
+    folded_result_ids = [
+        block["tool_use_id"]
+        for block in sanitized[1]["content"]
+        if block.get("type") == "tool_result"
+    ]
+    assert folded_result_ids == [
+        "call_00_vfVcN1GWWKIR4fnNEsbLMaWS",
+        "call_01_MPKMZePGjQafIWuHMFXqbkoY",
+        "call_02_eDQKzu84FV4zS4JtuDUutT2p",
+        "call_03_nBli3PtFi7ptFNSh12Iput45",
+    ]
 
 
 def test_normalize_messages_with_reasoning_metadata():

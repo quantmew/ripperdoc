@@ -183,6 +183,7 @@ class SystemStreamMessage(BaseModel):
     slash_commands: list[str] = Field(default_factory=list)
     ripperdoc_version: str = "0.1.0"
     output_style: str = "default"
+    output_language: str = "auto"
     agents: list[str] = Field(default_factory=list)
     skills: list[Any] = Field(default_factory=list)
     plugins: list[Any] = Field(default_factory=list)
@@ -279,6 +280,7 @@ class InitializeResponseData(BaseModel):
     apiKeySource: str = "none"
     ripperdoc_version: str = __version__
     output_style: str = "default"
+    output_language: str = "auto"
     agents: list[str] = Field(default_factory=list)
     skills: list[Any] = Field(default_factory=list)
     plugins: list[Any] = Field(default_factory=list)

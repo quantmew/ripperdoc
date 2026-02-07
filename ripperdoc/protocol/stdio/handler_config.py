@@ -31,6 +31,7 @@ class StdioConfigMixin:
     _custom_system_prompt: str | None
     _skill_instructions: str | None
     _output_style: str
+    _output_language: str
     _session_id: str | None
     _sdk_hook_scope: HooksConfig | None
     _session_additional_working_dirs: set[str]
@@ -385,6 +386,7 @@ class StdioConfigMixin:
             additional_instructions=additional_instructions or None,
             mcp_instructions=mcp_instructions,
             output_style=self._output_style,
+            output_language=self._output_language,
             project_path=self._project_path,
         )
 

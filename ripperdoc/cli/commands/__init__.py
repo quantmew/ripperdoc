@@ -22,6 +22,7 @@ from .hooks_cmd import command as hooks_command
 from .memory_cmd import command as memory_command
 from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
+from .output_language_cmd import command as output_language_command
 from .output_style_cmd import command as output_style_command
 from .permissions_cmd import command as permissions_command
 from .rewind_cmd import command as rewind_command
@@ -60,6 +61,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     tools_command,
     models_command,
     output_style_command,
+    output_language_command,
     exit_command,
     status_command,
     stats_command,

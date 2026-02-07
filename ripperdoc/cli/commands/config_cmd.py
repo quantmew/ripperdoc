@@ -22,6 +22,9 @@ def _handle(ui: Any, _: str) -> bool:
     ui.console.print(
         f"[bold]Output Style:[/bold] {escape(str(getattr(project_local_config, 'output_style', 'default')))}"
     )
+    ui.console.print(
+        f"[bold]Output Language:[/bold] {escape(str(getattr(project_local_config, 'output_language', 'auto')))}"
+    )
     return True
 
 

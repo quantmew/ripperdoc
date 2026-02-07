@@ -82,29 +82,38 @@ class ProviderClient(ABC):
 
 
 def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Strip tool_use blocks that lack a following tool_result to satisfy provider constraints."""
+    """Normalize tool-call history for strict provider sequencing requirements.
+
+    This function enforces two invariants for assistant `tool_use` turns:
+    1. Drop unpaired `tool_use` blocks that have no later `tool_result`.
+    2. Collapse matching `tool_result` blocks into a single immediate next user
+       message after the assistant turn (Anthropic-compatible requirement).
+    """
+
+    def _part_type(part: Any) -> Any:
+        if isinstance(part, dict):
+            return part.get("type")
+        return getattr(part, "type", None)
+
+    def _part_tool_id(part: Any) -> str:
+        if isinstance(part, dict):
+            return str(part.get("tool_use_id") or part.get("id") or "")
+        return str(getattr(part, "tool_use_id", None) or getattr(part, "id", None) or "")
 
     def _tool_result_ids(msg: Dict[str, Any]) -> set[str]:
         ids: set[str] = set()
         content = msg.get("content")
-        if isinstance(content, list):
-            for part in content:
-                part_type = getattr(
-                    part, "get", lambda k, default=None: part.__dict__.get(k, default)
-                )("type", None)
-                if part_type == "tool_result":
-                    tid = (
-                        getattr(part, "tool_use_id", None)
-                        or getattr(part, "id", None)
-                        or part.get("tool_use_id")
-                        or part.get("id")
-                    )
-                    if tid:
-                        ids.add(str(tid))
+        if not isinstance(content, list):
+            return ids
+        for part in content:
+            if _part_type(part) != "tool_result":
+                continue
+            tid = _part_tool_id(part)
+            if tid:
+                ids.add(tid)
         return ids
 
-    # Build a lookahead map so we can pair tool_use blocks with tool_results that may
-    # appear in any later message (not just the immediate next one).
+    # Build lookahead map to identify paired tool_use IDs.
     tool_results_after: List[set[str]] = []
     if normalized_messages:
         tool_results_after = [set() for _ in normalized_messages]
@@ -114,76 +123,104 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
             future_ids.update(_tool_result_ids(normalized_messages[idx]))
 
     sanitized: List[Dict[str, Any]] = []
-    for idx, message in enumerate(normalized_messages):
+    i = 0
+    while i < len(normalized_messages):
+        message = normalized_messages[i]
         if message.get("role") != "assistant":
             sanitized.append(message)
+            i += 1
             continue
 
         content = message.get("content")
         if not isinstance(content, list):
             sanitized.append(message)
+            i += 1
             continue
 
-        tool_use_blocks = [
+        tool_use_ids = [
+            _part_tool_id(part)
+            for part in content
+            if _part_type(part) == "tool_use" and _part_tool_id(part)
+        ]
+        if not tool_use_ids:
+            sanitized.append(message)
+            i += 1
+            continue
+
+        future_results = tool_results_after[i] if tool_results_after else set()
+        paired_ids = {tool_id for tool_id in tool_use_ids if tool_id in future_results}
+        unpaired_ids = {tool_id for tool_id in tool_use_ids if tool_id not in future_results}
+
+        filtered_content = [
             part
             for part in content
-            if (
-                getattr(part, "type", None)
-                or (part.get("type") if isinstance(part, dict) else None)
-            )
-            == "tool_use"
+            if not (_part_type(part) == "tool_use" and _part_tool_id(part) in unpaired_ids)
         ]
-        if not tool_use_blocks:
-            sanitized.append(message)
-            continue
-
-        future_results = tool_results_after[idx] if tool_results_after else set()
-
-        # Identify unpaired tool_use IDs
-        unpaired_ids: set[str] = set()
-        for block in tool_use_blocks:
-            block_id = (
-                getattr(block, "tool_use_id", None)
-                or getattr(block, "id", None)
-                or (block.get("tool_use_id") if isinstance(block, dict) else None)
-                or (block.get("id") if isinstance(block, dict) else None)
-            )
-            if block_id and str(block_id) not in future_results:
-                unpaired_ids.add(str(block_id))
-
-        if not unpaired_ids:
-            sanitized.append(message)
-            continue
-
-        # Drop unpaired tool_use blocks
-        filtered_content = []
-        for part in content:
-            part_type = getattr(part, "type", None) or (
-                part.get("type") if isinstance(part, dict) else None
-            )
-            if part_type == "tool_use":
-                block_id = (
-                    getattr(part, "tool_use_id", None)
-                    or getattr(part, "id", None)
-                    or (part.get("tool_use_id") if isinstance(part, dict) else None)
-                    or (part.get("id") if isinstance(part, dict) else None)
-                )
-                if block_id and str(block_id) in unpaired_ids:
-                    continue
-            filtered_content.append(part)
-
         if not filtered_content:
             logger.debug(
                 "[provider_clients] Dropped assistant message with unpaired tool_use blocks",
                 extra={"unpaired_ids": list(unpaired_ids)},
             )
+            i += 1
             continue
 
         sanitized.append({**message, "content": filtered_content})
-        logger.debug(
-            "[provider_clients] Sanitized message to remove unpaired tool_use blocks",
-            extra={"unpaired_ids": list(unpaired_ids)},
-        )
+        if unpaired_ids:
+            logger.debug(
+                "[provider_clients] Sanitized message to remove unpaired tool_use blocks",
+                extra={"unpaired_ids": list(unpaired_ids)},
+            )
+
+        # No paired IDs left: nothing to fold.
+        if not paired_ids:
+            i += 1
+            continue
+
+        # Collect paired tool_result blocks from following user messages until we hit
+        # the next assistant turn, then insert a single immediate user message.
+        collected_results: List[Any] = []
+        consumed_user_messages: List[Dict[str, Any]] = []
+        seen_result_ids: set[str] = set()
+        j = i + 1
+        while j < len(normalized_messages):
+            next_message = normalized_messages[j]
+            if next_message.get("role") == "assistant":
+                break
+
+            if next_message.get("role") != "user":
+                consumed_user_messages.append(next_message)
+                j += 1
+                continue
+
+            next_content = next_message.get("content")
+            if not isinstance(next_content, list):
+                consumed_user_messages.append(next_message)
+                j += 1
+                continue
+
+            remaining_parts: List[Any] = []
+            for part in next_content:
+                if _part_type(part) != "tool_result":
+                    remaining_parts.append(part)
+                    continue
+                result_id = _part_tool_id(part)
+                if result_id in paired_ids and result_id not in seen_result_ids:
+                    collected_results.append(part)
+                    seen_result_ids.add(result_id)
+                else:
+                    remaining_parts.append(part)
+
+            if remaining_parts:
+                consumed_user_messages.append({**next_message, "content": remaining_parts})
+            if paired_ids.issubset(seen_result_ids):
+                j += 1
+                break
+            j += 1
+
+        if collected_results:
+            sanitized.append({"role": "user", "content": collected_results})
+        sanitized.extend(consumed_user_messages)
+        i = j
 
     return sanitized
 

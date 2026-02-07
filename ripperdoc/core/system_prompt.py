@@ -463,6 +463,27 @@ def _build_git_workflow_section(
     ).strip()
 
 
+def _normalize_output_language(output_language: Optional[str]) -> str:
+    if not output_language:
+        return "auto"
+    normalized = str(output_language).strip()
+    if not normalized:
+        return "auto"
+    if normalized.lower() in {"auto", "default", "follow-user", "follow_user"}:
+        return "auto"
+    return normalized
+
+
+def _build_output_language_section(output_language: str) -> str:
+    if output_language == "auto":
+        return ""
+    return dedent(
+        f"""\
+        # Output language
+        Unless the user explicitly asks for a different language, respond in {output_language}."""
+    ).strip()
+
+
 def build_system_prompt(
     tools: List[Tool[Any, Any]],
     user_prompt: str = "",
@@ -470,12 +491,14 @@ def build_system_prompt(
     additional_instructions: Optional[Iterable[str]] = None,
     mcp_instructions: Optional[str] = None,
     output_style: str = "default",
+    output_language: str = "auto",
     project_path: Optional[Path] = None,
 ) -> str:
     _ = user_prompt, context
     resolved_style, _ = resolve_output_style(output_style, project_path=project_path)
     include_efficiency_instructions = resolved_style.include_efficiency_instructions
     keep_coding_instructions = resolved_style.keep_coding_instructions
+    resolved_output_language = _normalize_output_language(output_language)
 
     tool_names = {tool.name for tool in tools}
     todo_tool_name = TODO_WRITE_TOOL_NAME
@@ -587,6 +610,7 @@ def build_system_prompt(
         resolved_style.instructions.strip(),
         style_adherence_reminder(resolved_style),
     ]
+    output_language_section = _build_output_language_section(resolved_output_language)
 
     sections: List[str] = [
         main_prompt,
@@ -600,6 +624,7 @@ def build_system_prompt(
         always_use_todo,
         git_workflow_section,
         code_references,
+        output_language_section,
         *style_sections,
     ]
 

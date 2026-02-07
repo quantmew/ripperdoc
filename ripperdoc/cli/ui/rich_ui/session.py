@@ -139,6 +139,7 @@ class RichUI:
         self.project_path = Path.cwd()
         project_local_config = get_project_local_config(self.project_path)
         self.output_style = getattr(project_local_config, "output_style", "default") or "default"
+        self.output_language = getattr(project_local_config, "output_language", "auto") or "auto"
         # Track a stable session identifier for the current UI run.
         self.session_id = session_id or str(uuid.uuid4())
         if log_file_path:
@@ -362,6 +363,14 @@ class RichUI:
     def set_output_style(self, style_key: str) -> None:
         """Update active output style for subsequent turns."""
         self.output_style = style_key or "default"
+
+    def get_output_language(self) -> str:
+        """Return the active output language for this session."""
+        return self.output_language
+
+    def set_output_language(self, language: str) -> None:
+        """Update active output language for subsequent turns."""
+        self.output_language = language or "auto"
 
     def add_additional_working_directory(self, raw_path: str) -> tuple[bool, str]:
         """Add a working directory for this session.
@@ -904,6 +913,7 @@ class RichUI:
                 additional_instructions=all_instructions or None,
                 mcp_instructions=mcp_instructions,
                 output_style=self.output_style,
+                output_language=self.output_language,
                 project_path=self.project_path,
             )
 

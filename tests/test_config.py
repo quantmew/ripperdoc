@@ -163,6 +163,12 @@ def test_project_local_config_ignores_output_style_alias():
     assert config.output_style == "default"
 
 
+def test_project_local_config_ignores_output_language_alias():
+    """ProjectLocalConfig should ignore legacy outputLanguage alias."""
+    config = ProjectLocalConfig(**{"outputLanguage": "Chinese"})
+    assert config.output_language == "auto"
+
+
 def test_known_providers_use_model_profile_objects():
     """Provider model_list entries should be ModelProfile objects."""
     provider = KNOWN_PROVIDERS.default_choice.provider

@@ -243,6 +243,8 @@ class ProjectLocalConfig(BaseModel):
 
     # Output style for this project/session context
     output_style: str = Field(default="default")
+    # Preferred assistant output language for this project/session context ("auto" = follow user)
+    output_language: str = Field(default="auto")
 
 
 class ConfigManager:

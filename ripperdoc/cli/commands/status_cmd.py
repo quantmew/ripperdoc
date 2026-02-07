@@ -146,6 +146,7 @@ def _handle(ui: Any, _: str) -> bool:
     ui.console.print()
     ui.console.print(f" Model: {model_label}")
     ui.console.print(f" Output style: {escape(str(getattr(ui, 'output_style', 'default')))}")
+    ui.console.print(f" Output language: {escape(str(getattr(ui, 'output_language', 'auto')))}")
     ui.console.print(" Memory:")
     for line in memory_lines:
         ui.console.print(f"  {line}")

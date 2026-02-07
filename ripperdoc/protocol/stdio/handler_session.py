@@ -52,6 +52,7 @@ class StdioSessionMixin:
     _custom_system_prompt: str | None
     _skill_instructions: str | None
     _output_style: str
+    _output_language: str
     _session_start_time: float | None
     _session_history: SessionHistory | None
     _session_additional_working_dirs: set[str]
@@ -186,6 +187,14 @@ class StdioSessionMixin:
                 project_path=self._project_path,
             )
             self._output_style = resolved_output_style.key
+            configured_output_language = (
+                getattr(project_local_config, "output_language", "auto") or "auto"
+            )
+            requested_output_language = (
+                options.get("output_language")
+                or configured_output_language
+            )
+            self._output_language = str(requested_output_language or "auto").strip() or "auto"
 
             # Parse tool options
             self._allowed_tools = self._normalize_tool_list(options.get("allowed_tools"))
@@ -358,6 +367,7 @@ class StdioSessionMixin:
                 slash_commands=slash_commands,
                 ripperdoc_version=__version__,
                 output_style=self._output_style,
+                output_language=self._output_language,
                 agents=agent_names,
                 skills=skill_names,
                 plugins=[],
@@ -382,6 +392,7 @@ class StdioSessionMixin:
                     slash_commands=slash_commands,
                     ripperdoc_version=init_response.ripperdoc_version,
                     output_style=init_response.output_style,
+                    output_language=init_response.output_language,
                     agents=agent_names,
                     skills=skill_names,
                     plugins=[],

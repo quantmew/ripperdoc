@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, List
 
 import pytest
@@ -535,3 +536,76 @@ async def test_stdio_set_output_style_ignores_legacy_output_style_alias(monkeypa
 
     assert captured_style["name"] == "default"
     assert responses["set_style"]["response"]["output_style"] == "default"
+
+
+@pytest.mark.asyncio
+async def test_stdio_initialize_uses_project_output_language(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    config_dir = tmp_path / ".ripperdoc"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.local.json").write_text(
+        json.dumps({"output_language": "Chinese"}),
+        encoding="utf-8",
+    )
+
+    captured_language: dict[str, str] = {}
+
+    def fake_build_system_prompt(*_args, **kwargs):
+        captured_language["value"] = kwargs.get("output_language")
+        return "system"
+
+    monkeypatch.setattr(handler_config, "build_system_prompt", fake_build_system_prompt)
+
+    handler = handler_module.StdioProtocolHandler()
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize({"options": {"cwd": str(tmp_path)}}, "init")
+
+    assert captured_language["value"] == "Chinese"
+    assert responses["init"]["response"]["output_language"] == "Chinese"
+
+
+@pytest.mark.asyncio
+async def test_stdio_initialize_output_language_option_overrides_project(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    config_dir = tmp_path / ".ripperdoc"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.local.json").write_text(
+        json.dumps({"output_language": "Chinese"}),
+        encoding="utf-8",
+    )
+
+    captured_language: dict[str, str] = {}
+
+    def fake_build_system_prompt(*_args, **kwargs):
+        captured_language["value"] = kwargs.get("output_language")
+        return "system"
+
+    monkeypatch.setattr(handler_config, "build_system_prompt", fake_build_system_prompt)
+
+    handler = handler_module.StdioProtocolHandler()
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize(
+        {"options": {"cwd": str(tmp_path), "output_language": "Japanese"}},
+        "init",
+    )
+
+    assert captured_language["value"] == "Japanese"
+    assert responses["init"]["response"]["output_language"] == "Japanese"
