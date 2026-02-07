@@ -8,12 +8,12 @@ import json
 import logging
 from typing import Any, Awaitable, Callable, Coroutine, Optional, cast
 
-from ripperdoc.core.default_tools import filter_tools_by_names
+from ripperdoc.core.tool_defaults import filter_tools_by_names
 from ripperdoc.core.hooks.config import HookDefinition, HookMatcher, HooksConfig, DEFAULT_HOOK_TIMEOUT
 from ripperdoc.core.hooks.events import HookOutput
 from ripperdoc.core.hooks.manager import hook_manager
-from ripperdoc.core.permissions import PermissionPreview, PermissionResult
-from ripperdoc.core.permissions import make_permission_checker
+from ripperdoc.core.permission_engine import PermissionPreview, PermissionResult
+from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.protocol.models import UserMessageData, UserStreamMessage
 from ripperdoc.utils.memory import build_memory_instructions

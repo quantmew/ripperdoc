@@ -18,11 +18,11 @@ from ripperdoc.core.providers.base import (
     call_with_timeout_and_retries,
     iter_with_timeout,
 )
-from ripperdoc.core.query_utils import normalize_tool_args, build_tool_description
+from ripperdoc.core.message_utils import normalize_tool_args, build_tool_description
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.session_usage import record_usage
-from ripperdoc.core.query_utils import estimate_cost_usd
+from ripperdoc.core.message_utils import estimate_cost_usd
 
 logger = get_logger()
 

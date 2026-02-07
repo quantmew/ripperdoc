@@ -5,7 +5,7 @@ from typing import Any, List
 import pytest
 from pydantic import BaseModel
 
-from ripperdoc.core.permissions import PermissionResult
+from ripperdoc.core.permission_engine import PermissionResult
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.utils.messages import create_assistant_message, create_user_message

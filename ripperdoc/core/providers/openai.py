@@ -21,7 +21,7 @@ from ripperdoc.core.providers.base import (
     iter_with_timeout,
     sanitize_tool_history,
 )
-from ripperdoc.core.query_utils import (
+from ripperdoc.core.message_utils import (
     build_openai_tool_schemas,
     content_blocks_from_openai_choice,
     estimate_cost_usd,

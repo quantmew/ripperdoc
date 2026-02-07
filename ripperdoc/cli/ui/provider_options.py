@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 from ripperdoc.core.config import ModelProfile, ProtocolType
-from ripperdoc.core.provider_catalog import Provider
+from ripperdoc.core.provider_metadata import Provider
 
 
 def _derive_website(key: str, base_url: Optional[str]) -> str:

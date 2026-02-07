@@ -23,7 +23,7 @@ from ripperdoc.core.config import (
     get_project_local_config,
     provider_protocol,
 )
-from ripperdoc.core.default_tools import filter_tools_by_names, get_default_tools
+from ripperdoc.core.tool_defaults import filter_tools_by_names, get_default_tools
 from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.hooks.state import bind_pending_message_queue
@@ -33,7 +33,7 @@ from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
-from ripperdoc.core.permissions import make_permission_checker
+from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines

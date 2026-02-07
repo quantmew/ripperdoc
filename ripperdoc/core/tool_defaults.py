@@ -147,7 +147,7 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
     ) as exc:
         # If MCP runtime is not available, continue with base tools only.
         logger.warning(
-            "[default_tools] Failed to load dynamic MCP tools: %s: %s",
+            "[tool_defaults] Failed to load dynamic MCP tools: %s: %s",
             type(exc).__name__,
             exc,
         )
@@ -159,7 +159,7 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
     if allowed_tools is not None:
         all_tools = filter_tools_by_names(all_tools, allowed_tools)
         logger.debug(
-            "[default_tools] Filtered tool inventory",
+            "[tool_defaults] Filtered tool inventory",
             extra={
                 "allowed_tools": allowed_tools,
                 "filtered_tools": len(all_tools),
@@ -167,7 +167,7 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
         )
     else:
         logger.debug(
-            "[default_tools] Built tool inventory",
+            "[tool_defaults] Built tool inventory",
             extra={
                 "base_tools": len(base_tools),
                 "dynamic_mcp_tools": len(dynamic_tools),

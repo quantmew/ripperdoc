@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from ripperdoc.core.permissions import (
+from ripperdoc.core.permission_engine import (
     PermissionPreview,
     PermissionResult,
     make_permission_checker,
@@ -394,7 +394,7 @@ def test_permission_checker_can_add_session_working_dir_dynamically(tmp_path: Pa
 async def test_glob_rules_in_permission_checker(tmp_path: Path):
     """Permission checker should handle glob-format allow rules."""
     from ripperdoc.core.config import save_project_config, ProjectConfig
-    from ripperdoc.core.permissions import make_permission_checker
+    from ripperdoc.core.permission_engine import make_permission_checker
     from ripperdoc.tools.bash_tool import BashTool, BashToolInput
 
     # Setup config with glob rules.

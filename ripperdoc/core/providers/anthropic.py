@@ -20,7 +20,7 @@ from ripperdoc.core.providers.base import (
     call_with_timeout_and_retries,
     sanitize_tool_history,
 )
-from ripperdoc.core.query_utils import (
+from ripperdoc.core.message_utils import (
     anthropic_usage_tokens,
     build_anthropic_tool_schemas,
     estimate_cost_usd,

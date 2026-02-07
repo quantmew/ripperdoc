@@ -19,12 +19,12 @@ from ripperdoc.core.config import (
     get_project_local_config,
 )
 from ripperdoc.core.output_styles import resolve_output_style
-from ripperdoc.core.default_tools import get_default_tools
+from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
 from ripperdoc.core.query import QueryContext
-from ripperdoc.core.query_utils import resolve_model_profile
+from ripperdoc.core.message_utils import resolve_model_profile
 from ripperdoc.protocol.models import (
     InitializeResponseData,
     MCPServerInfo,

@@ -8,7 +8,7 @@ from typing import Any, List
 import pytest
 from pydantic import BaseModel
 
-from ripperdoc.core.permissions import PermissionPreview, PermissionResult
+from ripperdoc.core.permission_engine import PermissionPreview, PermissionResult
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_control

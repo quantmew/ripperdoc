@@ -20,7 +20,7 @@ from ripperdoc.core.config import (
     get_project_config,
 )
 from ripperdoc.cli.ui.wizard import check_onboarding
-from ripperdoc.core.default_tools import (
+from ripperdoc.core.tool_defaults import (
     BUILTIN_TOOL_NAMES,
     filter_tools_by_names,
     get_default_tools,
@@ -33,7 +33,7 @@ from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.utils.messages import create_user_message
 from ripperdoc.utils.memory import build_memory_instructions
-from ripperdoc.core.permissions import make_permission_checker
+from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.utils.session_history import (
     SessionHistory,
     list_session_summaries,

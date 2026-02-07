@@ -14,7 +14,7 @@ from typing import Any, Optional
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
 from ripperdoc.core.query import query
-from ripperdoc.core.query_utils import estimate_cost_usd, resolve_model_profile
+from ripperdoc.core.message_utils import estimate_cost_usd, resolve_model_profile
 from ripperdoc.protocol.models import ResultMessage, UsageInfo, model_to_dict
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async

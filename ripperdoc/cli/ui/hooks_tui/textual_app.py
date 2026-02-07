@@ -16,7 +16,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Footer, Header, Input, OptionList, Select, Static, TextArea
 from textual.widgets.option_list import Option
 
-from ripperdoc.core.default_tools import BUILTIN_TOOL_NAMES
+from ripperdoc.core.tool_defaults import BUILTIN_TOOL_NAMES
 from ripperdoc.core.hooks import (
     HookEvent,
     get_global_hooks_path,

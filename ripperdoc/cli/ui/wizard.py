@@ -22,7 +22,7 @@ from ripperdoc.core.config import (
     has_ripperdoc_env_overrides,
     save_global_config,
 )
-from ripperdoc.core.provider_catalog import Provider
+from ripperdoc.core.provider_metadata import Provider
 from ripperdoc.utils.prompt import prompt_secret
 
 

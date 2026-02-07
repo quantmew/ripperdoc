@@ -4,7 +4,7 @@ import asyncio
 import inspect
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Union
 
-from ripperdoc.core.permissions import PermissionResult
+from ripperdoc.core.permission_engine import PermissionResult
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 

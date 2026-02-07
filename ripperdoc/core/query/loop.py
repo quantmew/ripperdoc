@@ -14,7 +14,7 @@ from ripperdoc.core.config import ModelProfile, provider_protocol
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
 from ripperdoc.core.hooks.state import bind_hook_scopes, bind_pending_message_queue
 from ripperdoc.core.providers import ProviderClient, get_provider_client
-from ripperdoc.core.query_utils import (
+from ripperdoc.core.message_utils import (
     build_full_system_prompt,
     determine_tool_mode,
     extract_tool_use_blocks,

@@ -9,8 +9,8 @@ from typing import Any
 from pydantic import ValidationError
 
 from ripperdoc.core.output_styles import resolve_output_style
-from ripperdoc.core.permissions import PermissionResult
-from ripperdoc.core.query_utils import format_pydantic_errors
+from ripperdoc.core.permission_engine import PermissionResult
+from ripperdoc.core.message_utils import format_pydantic_errors
 from ripperdoc.protocol.models import PermissionResponseAllow, PermissionResponseDeny, model_to_dict
 
 logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
