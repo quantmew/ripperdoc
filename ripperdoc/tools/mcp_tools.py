@@ -27,7 +27,7 @@ from ripperdoc.utils.mcp import (
     format_mcp_instructions,
     load_mcp_servers_async,
 )
-from ripperdoc.utils.token_estimation import estimate_tokens
+from ripperdoc.tools.mcp_output_limits import evaluate_mcp_output_size
 
 
 logger = get_logger()
@@ -37,11 +37,6 @@ try:
 except (ImportError, ModuleNotFoundError):  # pragma: no cover - SDK may be missing at runtime
     mcp_types = None  # type: ignore[assignment]
     logger.debug("[mcp_tools] MCP SDK unavailable during import")
-
-DEFAULT_MAX_MCP_OUTPUT_TOKENS = 25_000
-MIN_MCP_OUTPUT_TOKENS = 1_000
-DEFAULT_MCP_WARNING_FRACTION = 0.8
-
 
 # =============================================================================
 # Base class for MCP tools to reduce code duplication
@@ -84,53 +79,6 @@ class BaseMcpTool(Tool):  # type: ignore[type-arg]
 # =============================================================================
 # End BaseMcpTool
 # =============================================================================
-
-
-def _get_mcp_token_limits() -> tuple[int, int]:
-    """Compute warning and hard limits for MCP output size."""
-    max_tokens = os.getenv("RIPPERDOC_MCP_MAX_OUTPUT_TOKENS")
-    try:
-        max_tokens_int = int(max_tokens) if max_tokens else DEFAULT_MAX_MCP_OUTPUT_TOKENS
-    except (TypeError, ValueError):
-        max_tokens_int = DEFAULT_MAX_MCP_OUTPUT_TOKENS
-    max_tokens_int = max(MIN_MCP_OUTPUT_TOKENS, max_tokens_int)
-
-    warn_env = os.getenv("RIPPERDOC_MCP_WARNING_TOKENS")
-    try:
-        warn_tokens_int = (
-            int(warn_env) if warn_env else int(max_tokens_int * DEFAULT_MCP_WARNING_FRACTION)
-        )
-    except (TypeError, ValueError):
-        warn_tokens_int = int(max_tokens_int * DEFAULT_MCP_WARNING_FRACTION)
-    warn_tokens_int = max(MIN_MCP_OUTPUT_TOKENS, min(warn_tokens_int, max_tokens_int))
-    return warn_tokens_int, max_tokens_int
-
-
-def evaluate_mcp_output_size(
-    result_text: Optional[str],
-    server_name: str,
-    tool_name: str,
-) -> tuple[Optional[str], Optional[str], int]:
-    """Return (warning, error, token_estimate) for an MCP result text."""
-    warn_tokens, max_tokens = _get_mcp_token_limits()
-    token_estimate = estimate_tokens(result_text or "")
-
-    if token_estimate > max_tokens:
-        error_text = (
-            f"MCP response from {server_name}:{tool_name} is ~{token_estimate:,} tokens, "
-            f"which exceeds the configured limit of {max_tokens}. "
-            "Refine the request (pagination/filtering) or raise RIPPERDOC_MCP_MAX_OUTPUT_TOKENS."
-        )
-        return None, error_text, token_estimate
-
-    warning_text = None
-    if result_text and token_estimate >= warn_tokens:
-        line_count = result_text.count("\n") + 1
-        warning_text = (
-            f"WARNING: Large MCP response (~{token_estimate:,} tokens, {line_count:,} lines). "
-            "This can fill the context quickly; consider pagination or filters."
-        )
-    return warning_text, None, token_estimate
 
 
 class ListMcpServersInput(BaseModel):
@@ -570,25 +518,8 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
             result_for_assistant=final_text,  # type: ignore[arg-type]
         )
 
-
-# Re-export DynamicMcpTool and related functions from the dedicated module
-# for backward compatibility. The imports are placed at the end to avoid
-# circular import issues since dynamic_mcp_tool.py imports evaluate_mcp_output_size.
-from ripperdoc.tools.dynamic_mcp_tool import (  # noqa: E402
-    DynamicMcpTool,
-    McpToolCallOutput,
-    load_dynamic_mcp_tools_async,
-    load_dynamic_mcp_tools_sync,
-    merge_tools_with_dynamic,
-)
-
 __all__ = [
     "ListMcpServersTool",
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",
-    "DynamicMcpTool",
-    "McpToolCallOutput",
-    "load_dynamic_mcp_tools_async",
-    "load_dynamic_mcp_tools_sync",
-    "merge_tools_with_dynamic",
 ]

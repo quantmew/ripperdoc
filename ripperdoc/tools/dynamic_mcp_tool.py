@@ -24,6 +24,7 @@ from ripperdoc.utils.mcp import (
     ensure_mcp_runtime,
     get_existing_mcp_runtime,
 )
+from ripperdoc.tools.mcp_output_limits import evaluate_mcp_output_size
 
 logger = get_logger()
 
@@ -244,8 +245,6 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
         input_data: BaseModel,
         _context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
-        from ripperdoc.tools.mcp_tools import evaluate_mcp_output_size
-
         runtime = await ensure_mcp_runtime(self.project_path)
         session = runtime.sessions.get(self.server_name) if runtime else None
         if not session:

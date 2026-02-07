@@ -22,6 +22,7 @@ from ripperdoc.core.config import (
     save_project_config,
     save_project_local_config,
 )
+from ripperdoc.utils.permissions.rule_syntax import normalize_permission_rule
 
 from .base import SlashCommand
 
@@ -299,7 +300,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
     if action == "add":
         if len(args) < 4:
             ui.console.print("[red]Usage: /permissions add <scope> <type> <rule>[/red]")
-            ui.console.print("[dim]Example: /permissions add local allow npm test[/dim]")
+            ui.console.print("[dim]Example: /permissions add local allow Bash(npm run *)[/dim]")
             return True
 
         scope_arg = args[1].lower()
@@ -316,7 +317,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             return True
         rule_type: Literal["allow", "deny", "ask"] = rule_type_arg  # type: ignore[assignment]
 
-        rule = " ".join(args[3:])
+        rule = normalize_permission_rule(" ".join(args[3:]))
         if _add_rule(scope, rule_type, rule, project_path):
             ui.console.print(
                 Panel(
@@ -332,7 +333,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
     if action in ("remove", "rm", "delete", "del"):
         if len(args) < 4:
             ui.console.print("[red]Usage: /permissions remove <scope> <type> <rule>[/red]")
-            ui.console.print("[dim]Example: /permissions remove local allow npm test[/dim]")
+            ui.console.print("[dim]Example: /permissions remove local allow Bash(npm run *)[/dim]")
             return True
 
         scope_arg = args[1].lower()
@@ -349,8 +350,14 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
             return True
         remove_rule_type: Literal["allow", "deny", "ask"] = rule_type_arg  # type: ignore[assignment]
 
-        rule = " ".join(args[3:])
-        if _remove_rule(scope, remove_rule_type, rule, project_path):
+        raw_rule = " ".join(args[3:]).strip()
+        rule = normalize_permission_rule(raw_rule)
+        removed = _remove_rule(scope, remove_rule_type, rule, project_path)
+        if not removed and rule != raw_rule:
+            removed = _remove_rule(scope, remove_rule_type, raw_rule, project_path)
+            if removed:
+                rule = raw_rule
+        if removed:
             ui.console.print(
                 Panel(
                     f"Removed [{'green' if remove_rule_type == 'allow' else 'red'}]{remove_rule_type}[/] rule from {scope}:\n{escape(rule)}",

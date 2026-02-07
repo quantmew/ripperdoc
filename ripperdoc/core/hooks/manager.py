@@ -72,7 +72,7 @@ class HookResult:
         for output in self.outputs:
             if output.decision in (HookDecision.DENY, HookDecision.BLOCK):
                 return False
-            if output.decision in (HookDecision.ALLOW, HookDecision.APPROVE):
+            if output.decision == HookDecision.ALLOW:
                 has_allow = True
         return has_allow
 

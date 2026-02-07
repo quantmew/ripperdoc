@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -25,6 +24,7 @@ from ripperdoc.core.config import (
     save_project_config,
     save_project_local_config,
 )
+from ripperdoc.utils.permissions.rule_syntax import normalize_permission_rule
 
 
 ScopeType = str
@@ -74,7 +74,10 @@ class AddRuleScreen(ModalScreen[Optional[str]]):
                 "Permission rules are a tool name, optionally followed by a specifier in parentheses.",
                 id="add_hint",
             )
-            yield Static("e.g., WebFetch or Bash(ls:*)", id="add_example")
+            yield Static(
+                "e.g., Bash, Bash(ls *), Bash(ls:*), Read(./.env), WebFetch(domain:example.com)",
+                id="add_example",
+            )
             yield Static("", id="add_error")
             with VerticalScroll(id="add_fields"):
                 yield Input(placeholder="Enter permission rule...", id="rule_input")
@@ -377,28 +380,12 @@ class PermissionsApp(App[None]):
         return "Local"
 
     @staticmethod
-    def _parse_tool_rule(rule: str) -> tuple[Optional[str], Optional[str]]:
-        match = re.match(r"\s*([A-Za-z0-9_-]+)\s*\((.*)\)\s*$", rule)
-        if not match:
-            return None, None
-        return match.group(1), match.group(2)
-
-    @staticmethod
     def _normalize_rule_input(rule: str) -> str:
-        rule = rule.strip()
-        tool, inner = PermissionsApp._parse_tool_rule(rule)
-        if tool and inner is not None:
-            if tool.lower() == "bash":
-                return inner.strip()
-            return rule
-        return rule
+        return normalize_permission_rule(rule).strip()
 
     @staticmethod
     def _format_rule_display(rule: str) -> str:
-        tool, _ = PermissionsApp._parse_tool_rule(rule)
-        if tool:
-            return rule
-        return f"Bash({rule})"
+        return normalize_permission_rule(rule).strip()
 
     def _get_rules_for_scope(self, scope: ScopeType) -> tuple[list[str], list[str], list[str]]:
         if scope == "user":

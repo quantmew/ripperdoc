@@ -76,11 +76,6 @@ def amber_choice_style() -> Style:
     )
 
 
-def _choice_style() -> Style:
-    """Backward-compatible alias for the default choice style."""
-    return neutral_choice_style()
-
-
 def onboarding_style() -> Style:
     """Create the style for onboarding prompts.
 
@@ -623,8 +618,6 @@ async def prompt_checkbox_async(
     title: Optional[str] = None,
     description: Optional[str] = None,
     warning: Optional[str] = None,
-    ok_text: str = "Confirm",
-    cancel_text: str = "Cancel",
     style: Optional[Style] = None,
     style_variant: str = "neutral",
     custom_input_label: Optional[str] = None,
@@ -647,6 +640,8 @@ async def prompt_checkbox_async(
             choice_options.append(ChoiceOption(value, label))
 
     prompt_html = ""
+    if title:
+        prompt_html += f"<title>{html.escape(title)}</title>\n"
     if description:
         prompt_html += f"<description>{html.escape(description)}</description>\n"
     prompt_html += message

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, cast
 from uuid import uuid4
 
@@ -39,30 +40,33 @@ def _classify_openai_error(exc: Exception) -> tuple[str, str]:
     exc_type = type(exc).__name__
     exc_msg = str(exc)
 
-    if isinstance(exc, openai.AuthenticationError):
-        return "authentication_error", f"Authentication failed: {exc_msg}"
     if isinstance(exc, openai.PermissionDeniedError):
-        # Check for common permission denied reasons
-        if "balance" in exc_msg.lower() or "insufficient" in exc_msg.lower():
+        lowered = exc_msg.lower()
+        if "balance" in lowered or "insufficient" in lowered:
             return "insufficient_balance", f"Insufficient balance: {exc_msg}"
         return "permission_denied", f"Permission denied: {exc_msg}"
-    if isinstance(exc, openai.NotFoundError):
-        return "model_not_found", f"Model not found: {exc_msg}"
+
     if isinstance(exc, openai.BadRequestError):
-        # Check for context length errors
-        if "context" in exc_msg.lower() or "token" in exc_msg.lower():
+        lowered = exc_msg.lower()
+        if "context" in lowered or "token" in lowered:
             return "context_length_exceeded", f"Context length exceeded: {exc_msg}"
-        if "content" in exc_msg.lower() and "policy" in exc_msg.lower():
+        if "content" in lowered and "policy" in lowered:
             return "content_policy_violation", f"Content policy violation: {exc_msg}"
         return "bad_request", f"Invalid request: {exc_msg}"
-    if isinstance(exc, openai.RateLimitError):
-        return "rate_limit", f"Rate limit exceeded: {exc_msg}"
-    if isinstance(exc, openai.APIConnectionError):
-        return "connection_error", f"Connection error: {exc_msg}"
+
+    static_mappings: List[tuple[type[Exception], str, str]] = [
+        (openai.AuthenticationError, "authentication_error", "Authentication failed"),
+        (openai.NotFoundError, "model_not_found", "Model not found"),
+        (openai.RateLimitError, "rate_limit", "Rate limit exceeded"),
+        (openai.APIConnectionError, "connection_error", "Connection error"),
+        (asyncio.TimeoutError, "timeout", "Request timed out"),
+    ]
+    for error_type, code, label in static_mappings:
+        if isinstance(exc, error_type):
+            return code, f"{label}: {exc_msg}"
+
     if isinstance(exc, openai.APIStatusError):
         return "api_error", f"API error ({exc.status_code}): {exc_msg}"
-    if isinstance(exc, asyncio.TimeoutError):
-        return "timeout", f"Request timed out: {exc_msg}"
 
     # Generic fallback
     return "unknown_error", f"Unexpected error ({exc_type}): {exc_msg}"
@@ -107,6 +111,64 @@ def _detect_openai_vendor(model_profile: ModelProfile) -> str:
     return "openai"
 
 
+def _apply_deepseek_thinking(
+    extra_body: Dict[str, Any],
+    _top_level: Dict[str, Any],
+    max_thinking_tokens: int,
+    _effort: Optional[str],
+) -> None:
+    if max_thinking_tokens != 0:
+        extra_body["thinking"] = {"type": "enabled"}
+
+
+def _apply_qwen_thinking(
+    extra_body: Dict[str, Any],
+    _top_level: Dict[str, Any],
+    max_thinking_tokens: int,
+    _effort: Optional[str],
+) -> None:
+    # Some qwen-compatible APIs do not support this parameter.
+    if max_thinking_tokens > 0:
+        extra_body["enable_thinking"] = True
+
+
+def _apply_openrouter_thinking(
+    extra_body: Dict[str, Any],
+    _top_level: Dict[str, Any],
+    max_thinking_tokens: int,
+    _effort: Optional[str],
+) -> None:
+    if max_thinking_tokens > 0:
+        extra_body["reasoning"] = {"max_tokens": max_thinking_tokens}
+
+
+def _apply_gemini_openai_thinking(
+    extra_body: Dict[str, Any],
+    top_level: Dict[str, Any],
+    max_thinking_tokens: int,
+    effort: Optional[str],
+) -> None:
+    google_cfg: Dict[str, Any] = {}
+    if max_thinking_tokens > 0:
+        google_cfg["thinking_budget"] = max_thinking_tokens
+        google_cfg["include_thoughts"] = True
+    if google_cfg:
+        extra_body["google"] = {"thinking_config": google_cfg}
+    if effort:
+        top_level["reasoning_effort"] = effort
+        extra_body.setdefault("reasoning", {"effort": effort})
+
+
+def _apply_default_reasoning_thinking(
+    extra_body: Dict[str, Any],
+    _top_level: Dict[str, Any],
+    _max_thinking_tokens: int,
+    effort: Optional[str],
+) -> None:
+    if effort:
+        extra_body["reasoning"] = {"effort": effort}
+
+
 def _build_thinking_kwargs(
     model_profile: ModelProfile, max_thinking_tokens: int
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
@@ -121,36 +183,309 @@ def _build_thinking_kwargs(
 
     effort = _effort_from_tokens(max_thinking_tokens)
 
-    if vendor == "deepseek":
-        if max_thinking_tokens != 0:
-            extra_body["thinking"] = {"type": "enabled"}
-    elif vendor == "qwen":
-        # Only send enable_thinking when explicitly enabling thinking mode
-        # Some qwen-compatible APIs don't support this parameter
-        if max_thinking_tokens > 0:
-            extra_body["enable_thinking"] = True
-    elif vendor == "openrouter":
-        # Only send reasoning when explicitly enabling thinking mode
-        if max_thinking_tokens > 0:
-            extra_body["reasoning"] = {"max_tokens": max_thinking_tokens}
-    elif vendor == "gemini_openai":
-        google_cfg: Dict[str, Any] = {}
-        if max_thinking_tokens > 0:
-            google_cfg["thinking_budget"] = max_thinking_tokens
-            google_cfg["include_thoughts"] = True
-        if google_cfg:
-            extra_body["google"] = {"thinking_config": google_cfg}
-        if effort:
-            top_level["reasoning_effort"] = effort
-            extra_body.setdefault("reasoning", {"effort": effort})
-    elif vendor == "openai":
-        if effort:
-            extra_body["reasoning"] = {"effort": effort}
-    else:
-        if effort:
-            extra_body["reasoning"] = {"effort": effort}
+    handlers: Dict[str, Any] = {
+        "deepseek": _apply_deepseek_thinking,
+        "qwen": _apply_qwen_thinking,
+        "openrouter": _apply_openrouter_thinking,
+        "gemini_openai": _apply_gemini_openai_thinking,
+    }
+    handler = handlers.get(vendor, _apply_default_reasoning_thinking)
+    handler(extra_body, top_level, max_thinking_tokens, effort)
 
     return extra_body, top_level
+
+
+@dataclass
+class _StreamAccumulator:
+    """Accumulate state while consuming a streaming OpenAI response."""
+
+    collected_text: List[str] = field(default_factory=list)
+    streamed_tool_calls: Dict[int, Dict[str, Optional[str]]] = field(default_factory=dict)
+    streamed_tool_text: List[str] = field(default_factory=list)
+    usage_tokens: Dict[str, int] = field(default_factory=dict)
+    reasoning_text: List[str] = field(default_factory=list)
+    reasoning_details: List[Any] = field(default_factory=list)
+    announced_tool_indexes: set[int] = field(default_factory=set)
+
+
+async def _safe_emit_progress(
+    progress_callback: Optional[ProgressCallback],
+    chunk: str,
+) -> None:
+    """Best-effort streaming callback dispatch with guarded error handling."""
+    if not progress_callback or not chunk:
+        return
+    try:
+        await progress_callback(chunk)
+    except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
+        logger.warning(
+            "[openai_client] Stream callback failed: %s: %s",
+            type(cb_exc).__name__,
+            cb_exc,
+        )
+
+
+def _build_openai_request_kwargs(
+    *,
+    model_profile: ModelProfile,
+    openai_messages: List[Dict[str, object]],
+    openai_tools: List[Dict[str, Any]],
+    thinking_top_level: Dict[str, Any],
+    thinking_extra_body: Dict[str, Any],
+    stream: bool,
+) -> Dict[str, Any]:
+    """Build OpenAI chat completion kwargs shared by stream and non-stream calls."""
+    kwargs: Dict[str, Any] = {
+        "model": model_profile.model,
+        "messages": cast(Any, openai_messages),
+        "tools": openai_tools if openai_tools else None,
+        "temperature": model_profile.temperature,
+        "max_tokens": model_profile.max_tokens,
+        **thinking_top_level,
+    }
+    if stream:
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+    if thinking_extra_body:
+        kwargs["extra_body"] = thinking_extra_body
+    return kwargs
+
+
+def _extract_delta_text(delta_content: Any) -> str:
+    """Extract text delta from OpenAI streaming content payload."""
+    text_delta = ""
+    if not delta_content:
+        return text_delta
+    if isinstance(delta_content, list):
+        for part in delta_content:
+            text_val = getattr(part, "text", None) or getattr(part, "content", None)
+            if isinstance(text_val, str):
+                text_delta += text_val
+        return text_delta
+    if isinstance(delta_content, str):
+        return delta_content
+    return text_delta
+
+
+def _collect_reasoning_delta(delta: Any, stream_state: _StreamAccumulator) -> None:
+    """Capture reasoning deltas from a stream chunk."""
+    delta_reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+    if isinstance(delta_reasoning, str):
+        stream_state.reasoning_text.append(delta_reasoning)
+    elif isinstance(delta_reasoning, list):
+        for item in delta_reasoning:
+            if isinstance(item, str):
+                stream_state.reasoning_text.append(item)
+
+    delta_reasoning_details = getattr(delta, "reasoning_details", None)
+    if not delta_reasoning_details:
+        return
+    if isinstance(delta_reasoning_details, list):
+        stream_state.reasoning_details.extend(delta_reasoning_details)
+    else:
+        stream_state.reasoning_details.append(delta_reasoning_details)
+
+
+async def _collect_tool_deltas(
+    delta: Any,
+    stream_state: _StreamAccumulator,
+    progress_callback: Optional[ProgressCallback],
+) -> None:
+    """Capture streamed tool call ids/names/arguments from delta chunks."""
+    for tool_delta in getattr(delta, "tool_calls", []) or []:
+        idx = getattr(tool_delta, "index", 0) or 0
+        state = stream_state.streamed_tool_calls.get(idx, {"id": None, "name": None, "arguments": ""})
+
+        if getattr(tool_delta, "id", None):
+            state["id"] = tool_delta.id
+
+        function_delta = getattr(tool_delta, "function", None)
+        if function_delta:
+            fn_name = getattr(function_delta, "name", None)
+            if fn_name:
+                state["name"] = fn_name
+            args_delta = getattr(function_delta, "arguments", None)
+            if args_delta:
+                state["arguments"] = (state.get("arguments") or "") + args_delta
+                await _safe_emit_progress(progress_callback, args_delta)
+
+        if idx not in stream_state.announced_tool_indexes and state.get("name"):
+            stream_state.announced_tool_indexes.add(idx)
+            await _safe_emit_progress(progress_callback, f"[tool:{state['name']}]")
+
+        stream_state.streamed_tool_calls[idx] = state
+
+
+async def _consume_stream_chunk(
+    chunk: Any,
+    *,
+    stream_state: _StreamAccumulator,
+    can_stream_tools: bool,
+    progress_callback: Optional[ProgressCallback],
+) -> None:
+    """Parse one stream chunk and update accumulators."""
+    if getattr(chunk, "usage", None):
+        stream_state.usage_tokens.update(openai_usage_tokens(chunk.usage))
+
+    choices = getattr(chunk, "choices", None)
+    if not choices or len(choices) == 0:
+        return
+    delta = getattr(choices[0], "delta", None)
+    if not delta:
+        return
+
+    text_delta = _extract_delta_text(getattr(delta, "content", None))
+    _collect_reasoning_delta(delta, stream_state)
+
+    if text_delta:
+        target_collector = stream_state.streamed_tool_text if can_stream_tools else stream_state.collected_text
+        target_collector.append(text_delta)
+        await _safe_emit_progress(progress_callback, text_delta)
+
+    if can_stream_tools:
+        await _collect_tool_deltas(delta, stream_state, progress_callback)
+
+
+def _stream_has_output(stream_state: _StreamAccumulator) -> bool:
+    """Return True when stream accumulators contain any meaningful output."""
+    return bool(
+        stream_state.collected_text
+        or stream_state.streamed_tool_calls
+        or stream_state.streamed_tool_text
+        or stream_state.reasoning_text
+    )
+
+
+def _extract_choice_reasoning_metadata(choice: Any, response_metadata: Dict[str, Any]) -> None:
+    """Populate reasoning-related response metadata from a non-stream choice."""
+    message_obj = getattr(choice, "message", None) or choice
+    reasoning_content = getattr(message_obj, "reasoning_content", None)
+    if reasoning_content:
+        response_metadata["reasoning_content"] = reasoning_content
+    reasoning_field = getattr(message_obj, "reasoning", None)
+    if reasoning_field:
+        response_metadata["reasoning"] = reasoning_field
+        if "reasoning_content" not in response_metadata and isinstance(reasoning_field, str):
+            response_metadata["reasoning_content"] = reasoning_field
+    reasoning_details = getattr(message_obj, "reasoning_details", None)
+    if reasoning_details:
+        response_metadata["reasoning_details"] = reasoning_details
+
+
+def _build_stream_content_blocks(
+    stream_state: _StreamAccumulator,
+    *,
+    can_stream_text: bool,
+    can_stream_tools: bool,
+) -> tuple[List[Dict[str, Any]], str]:
+    """Build normalized content blocks for a successful stream response."""
+    if can_stream_text:
+        return [{"type": "text", "text": "".join(stream_state.collected_text)}], "stream"
+
+    content_blocks: List[Dict[str, Any]] = []
+    if can_stream_tools:
+        if stream_state.streamed_tool_text:
+            content_blocks.append({"type": "text", "text": "".join(stream_state.streamed_tool_text)})
+        for idx in sorted(stream_state.streamed_tool_calls.keys()):
+            call = stream_state.streamed_tool_calls[idx]
+            name = call.get("name")
+            if not name:
+                continue
+            content_blocks.append(
+                {
+                    "type": "tool_use",
+                    "tool_use_id": call.get("id") or str(uuid4()),
+                    "name": name,
+                    "input": normalize_tool_args(call.get("arguments")),
+                }
+            )
+    return content_blocks, "stream"
+
+
+def _build_non_stream_content_blocks(
+    openai_response: Any,
+    *,
+    model: Optional[str],
+    tool_mode: str,
+    response_metadata: Dict[str, Any],
+) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Build normalized content blocks for a non-stream response."""
+    response_choices = getattr(openai_response, "choices", None)
+    if not response_choices or len(response_choices) == 0:
+        logger.warning(
+            "[openai_client] Empty choices in response",
+            extra={"model": model},
+        )
+        return [{"type": "text", "text": ""}], "error"
+
+    choice = response_choices[0]
+    content_blocks = content_blocks_from_openai_choice(choice, tool_mode)
+    finish_reason = cast(Optional[str], getattr(choice, "finish_reason", None))
+    _extract_choice_reasoning_metadata(choice, response_metadata)
+    return content_blocks, finish_reason
+
+
+def _apply_stream_reasoning_metadata(
+    stream_state: _StreamAccumulator,
+    response_metadata: Dict[str, Any],
+) -> None:
+    """Attach collected stream reasoning fields to response metadata."""
+    if stream_state.reasoning_text:
+        joined = "".join(stream_state.reasoning_text)
+        response_metadata["reasoning_content"] = joined
+        response_metadata.setdefault("reasoning", joined)
+    if stream_state.reasoning_details:
+        response_metadata["reasoning_details"] = stream_state.reasoning_details
+
+
+def _build_non_stream_empty_or_error_response(
+    *,
+    openai_response: Any,
+    model: Optional[str],
+    duration_ms: float,
+    usage_tokens: Dict[str, int],
+    cost_usd: float,
+    response_metadata: Dict[str, Any],
+) -> Optional[ProviderResponse]:
+    """Return an error/empty response when non-stream response has no choices."""
+    if openai_response and getattr(openai_response, "choices", None):
+        return None
+
+    error_msg = (
+        getattr(openai_response, "msg", None)
+        or getattr(openai_response, "message", None)
+        or getattr(openai_response, "error", None)
+    )
+    error_status = getattr(openai_response, "status", None)
+    if error_msg or error_status:
+        error_text = f"API Error: {error_msg or 'Unknown error'}"
+        if error_status:
+            error_text = f"API Error ({error_status}): {error_msg or 'Unknown error'}"
+        logger.error(
+            "[openai_client] Non-standard error response from API",
+            extra={
+                "model": model,
+                "error_status": error_status,
+                "error_msg": error_msg,
+            },
+        )
+        return ProviderResponse.create_error(
+            error_code="api_error",
+            error_message=error_text,
+            duration_ms=duration_ms,
+        )
+
+    logger.warning(
+        "[openai_client] No choices returned from OpenAI response",
+        extra={"model": model},
+    )
+    return ProviderResponse(
+        content_blocks=[{"type": "text", "text": "Model returned no content."}],
+        usage_tokens=usage_tokens,
+        cost_usd=cost_usd,
+        duration_ms=duration_ms,
+        metadata=response_metadata,
+    )
 
 
 class OpenAIClient(ProviderClient):
@@ -247,12 +582,7 @@ class OpenAIClient(ProviderClient):
                 "num_messages": len(openai_messages),
             },
         )
-        collected_text: List[str] = []
-        streamed_tool_calls: Dict[int, Dict[str, Optional[str]]] = {}
-        streamed_tool_text: List[str] = []
-        streamed_usage: Dict[str, int] = {}
-        stream_reasoning_text: List[str] = []
-        stream_reasoning_details: List[Any] = []
+        stream_state = _StreamAccumulator()
         response_metadata: Dict[str, Any] = {}
 
         can_stream_text = stream and tool_mode == "text" and not openai_tools
@@ -286,19 +616,14 @@ class OpenAIClient(ProviderClient):
         ) as client:
 
             async def _stream_request() -> Dict[str, Dict[str, int]]:
-                announced_tool_indexes: set[int] = set()
-                stream_kwargs: Dict[str, Any] = {
-                    "model": model_profile.model,
-                    "messages": cast(Any, openai_messages),
-                    "tools": openai_tools if openai_tools else None,
-                    "temperature": model_profile.temperature,
-                    "max_tokens": model_profile.max_tokens,
-                    "stream": True,
-                    "stream_options": {"include_usage": True},
-                    **thinking_top_level,
-                }
-                if thinking_extra_body:
-                    stream_kwargs["extra_body"] = thinking_extra_body
+                stream_kwargs = _build_openai_request_kwargs(
+                    model_profile=model_profile,
+                    openai_messages=openai_messages,
+                    openai_tools=openai_tools,
+                    thinking_top_level=thinking_top_level,
+                    thinking_extra_body=thinking_extra_body,
+                    stream=True,
+                )
                 logger.debug(
                     "[openai_client] Initiating stream request",
                     extra={
@@ -318,117 +643,23 @@ class OpenAIClient(ProviderClient):
                     else await stream_coro
                 )
                 async for chunk in iter_with_timeout(stream_resp, request_timeout):
-                    if getattr(chunk, "usage", None):
-                        streamed_usage.update(openai_usage_tokens(chunk.usage))
-
-                    choices = getattr(chunk, "choices", None)
-                    if not choices or len(choices) == 0:
-                        continue
-                    delta = getattr(choices[0], "delta", None)
-                    if not delta:
-                        continue
-
-                    # Text deltas (rare in native tool mode but supported)
-                    delta_content = getattr(delta, "content", None)
-                    text_delta = ""
-                    if delta_content:
-                        if isinstance(delta_content, list):
-                            for part in delta_content:
-                                text_val = getattr(part, "text", None) or getattr(
-                                    part, "content", None
-                                )
-                                if isinstance(text_val, str):
-                                    text_delta += text_val
-                        elif isinstance(delta_content, str):
-                            text_delta += delta_content
-                    delta_reasoning = getattr(delta, "reasoning_content", None) or getattr(
-                        delta, "reasoning", None
+                    await _consume_stream_chunk(
+                        chunk,
+                        stream_state=stream_state,
+                        can_stream_tools=can_stream_tools,
+                        progress_callback=progress_callback,
                     )
-                    if isinstance(delta_reasoning, str):
-                        stream_reasoning_text.append(delta_reasoning)
-                    elif isinstance(delta_reasoning, list):
-                        for item in delta_reasoning:
-                            if isinstance(item, str):
-                                stream_reasoning_text.append(item)
-                    delta_reasoning_details = getattr(delta, "reasoning_details", None)
-                    if delta_reasoning_details:
-                        if isinstance(delta_reasoning_details, list):
-                            stream_reasoning_details.extend(delta_reasoning_details)
-                        else:
-                            stream_reasoning_details.append(delta_reasoning_details)
-                    if text_delta:
-                        target_collector = (
-                            streamed_tool_text if can_stream_tools else collected_text
-                        )
-                        target_collector.append(text_delta)
-                        if progress_callback:
-                            try:
-                                await progress_callback(text_delta)
-                            except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
-                                logger.warning(
-                                    "[openai_client] Stream callback failed: %s: %s",
-                                    type(cb_exc).__name__,
-                                    cb_exc,
-                                )
-
-                    # Tool call deltas for native tool mode
-                    if not can_stream_tools:
-                        continue
-
-                    for tool_delta in getattr(delta, "tool_calls", []) or []:
-                        idx = getattr(tool_delta, "index", 0) or 0
-                        state = streamed_tool_calls.get(
-                            idx, {"id": None, "name": None, "arguments": ""}
-                        )
-
-                        if getattr(tool_delta, "id", None):
-                            state["id"] = tool_delta.id
-
-                        function_delta = getattr(tool_delta, "function", None)
-                        if function_delta:
-                            fn_name = getattr(function_delta, "name", None)
-                            if fn_name:
-                                state["name"] = fn_name
-                            args_delta = getattr(function_delta, "arguments", None)
-                            if args_delta:
-                                state["arguments"] = (state.get("arguments") or "") + args_delta
-                                if progress_callback:
-                                    try:
-                                        await progress_callback(args_delta)
-                                    except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
-                                        logger.warning(
-                                            "[openai_client] Stream callback failed: %s: %s",
-                                            type(cb_exc).__name__,
-                                            cb_exc,
-                                        )
-
-                        if idx not in announced_tool_indexes and state.get("name"):
-                            announced_tool_indexes.add(idx)
-                            if progress_callback:
-                                try:
-                                    await progress_callback(f"[tool:{state['name']}]")
-                                except (RuntimeError, ValueError, TypeError, OSError) as cb_exc:
-                                    logger.warning(
-                                        "[openai_client] Stream callback failed: %s: %s",
-                                        type(cb_exc).__name__,
-                                        cb_exc,
-                                    )
-
-                        streamed_tool_calls[idx] = state
-
-                return {"usage": streamed_usage}
+                return {"usage": stream_state.usage_tokens}
 
             async def _non_stream_request() -> Any:
-                kwargs: Dict[str, Any] = {
-                    "model": model_profile.model,
-                    "messages": cast(Any, openai_messages),
-                    "tools": openai_tools if openai_tools else None,  # type: ignore[arg-type]
-                    "temperature": model_profile.temperature,
-                    "max_tokens": model_profile.max_tokens,
-                    **thinking_top_level,
-                }
-                if thinking_extra_body:
-                    kwargs["extra_body"] = thinking_extra_body
+                kwargs = _build_openai_request_kwargs(
+                    model_profile=model_profile,
+                    openai_messages=openai_messages,
+                    openai_tools=openai_tools,
+                    thinking_top_level=thinking_top_level,
+                    thinking_extra_body=thinking_extra_body,
+                    stream=False,
+                )
                 return await client.chat.completions.create(  # type: ignore[call-overload]
                     **kwargs
                 )
@@ -442,10 +673,7 @@ class OpenAIClient(ProviderClient):
 
             if (
                 can_stream
-                and not collected_text
-                and not streamed_tool_calls
-                and not streamed_tool_text
-                and not stream_reasoning_text
+                and not _stream_has_output(stream_state)
             ):
                 logger.warning(
                     "[openai_client] Streaming returned no content; retrying without stream",
@@ -460,7 +688,7 @@ class OpenAIClient(ProviderClient):
 
         duration_ms = (time.time() - start_time) * 1000
         usage_tokens = (
-            streamed_usage
+            stream_state.usage_tokens
             if can_stream
             else openai_usage_tokens(getattr(openai_response, "usage", None))
         )
@@ -469,104 +697,36 @@ class OpenAIClient(ProviderClient):
             model_profile.model, duration_ms=duration_ms, cost_usd=cost_usd, **usage_tokens
         )
 
-        if not can_stream and (
-            not openai_response or not getattr(openai_response, "choices", None)
-        ):
-            # Check for non-standard error response (e.g., iflow returns HTTP 200 with error JSON)
-            error_msg = (
-                getattr(openai_response, "msg", None)
-                or getattr(openai_response, "message", None)
-                or getattr(openai_response, "error", None)
-            )
-            error_status = getattr(openai_response, "status", None)
-            if error_msg or error_status:
-                error_text = f"API Error: {error_msg or 'Unknown error'}"
-                if error_status:
-                    error_text = f"API Error ({error_status}): {error_msg or 'Unknown error'}"
-                logger.error(
-                    "[openai_client] Non-standard error response from API",
-                    extra={
-                        "model": model_profile.model,
-                        "error_status": error_status,
-                        "error_msg": error_msg,
-                    },
-                )
-                return ProviderResponse.create_error(
-                    error_code="api_error",
-                    error_message=error_text,
-                    duration_ms=duration_ms,
-                )
-            logger.warning(
-                "[openai_client] No choices returned from OpenAI response",
-                extra={"model": model_profile.model},
-            )
-            empty_text = "Model returned no content."
-            return ProviderResponse(
-                content_blocks=[{"type": "text", "text": empty_text}],
+        if not can_stream:
+            empty_or_error = _build_non_stream_empty_or_error_response(
+                openai_response=openai_response,
+                model=model_profile.model,
+                duration_ms=duration_ms,
                 usage_tokens=usage_tokens,
                 cost_usd=cost_usd,
-                duration_ms=duration_ms,
-                metadata=response_metadata,
+                response_metadata=response_metadata,
             )
+            if empty_or_error is not None:
+                return empty_or_error
 
         content_blocks: List[Dict[str, Any]] = []
         finish_reason: Optional[str] = None
-        if can_stream_text:
-            content_blocks = [{"type": "text", "text": "".join(collected_text)}]
-            finish_reason = "stream"
-        elif can_stream_tools:
-            if streamed_tool_text:
-                content_blocks.append({"type": "text", "text": "".join(streamed_tool_text)})
-            for idx in sorted(streamed_tool_calls.keys()):
-                call = streamed_tool_calls[idx]
-                name = call.get("name")
-                if not name:
-                    continue
-                tool_use_id = call.get("id") or str(uuid4())
-                content_blocks.append(
-                    {
-                        "type": "tool_use",
-                        "tool_use_id": tool_use_id,
-                        "name": name,
-                        "input": normalize_tool_args(call.get("arguments")),
-                    }
-                )
-            finish_reason = "stream"
+        if can_stream:
+            content_blocks, finish_reason = _build_stream_content_blocks(
+                stream_state,
+                can_stream_text=can_stream_text,
+                can_stream_tools=can_stream_tools,
+            )
         else:
-            response_choices = getattr(openai_response, "choices", None)
-            if not response_choices or len(response_choices) == 0:
-                logger.warning(
-                    "[openai_client] Empty choices in response",
-                    extra={"model": model_profile.model},
-                )
-                content_blocks = [{"type": "text", "text": ""}]
-                finish_reason = "error"
-            else:
-                choice = response_choices[0]
-                content_blocks = content_blocks_from_openai_choice(choice, tool_mode)
-                finish_reason = cast(Optional[str], getattr(choice, "finish_reason", None))
-                message_obj = getattr(choice, "message", None) or choice
-                reasoning_content = getattr(message_obj, "reasoning_content", None)
-                if reasoning_content:
-                    response_metadata["reasoning_content"] = reasoning_content
-                reasoning_field = getattr(message_obj, "reasoning", None)
-                if reasoning_field:
-                    response_metadata["reasoning"] = reasoning_field
-                    if "reasoning_content" not in response_metadata and isinstance(
-                        reasoning_field, str
-                    ):
-                        response_metadata["reasoning_content"] = reasoning_field
-                reasoning_details = getattr(message_obj, "reasoning_details", None)
-                if reasoning_details:
-                    response_metadata["reasoning_details"] = reasoning_details
+            content_blocks, finish_reason = _build_non_stream_content_blocks(
+                openai_response,
+                model=model_profile.model,
+                tool_mode=tool_mode,
+                response_metadata=response_metadata,
+            )
 
         if can_stream:
-            if stream_reasoning_text:
-                joined = "".join(stream_reasoning_text)
-                response_metadata["reasoning_content"] = joined
-                response_metadata.setdefault("reasoning", joined)
-            if stream_reasoning_details:
-                response_metadata["reasoning_details"] = stream_reasoning_details
+            _apply_stream_reasoning_metadata(stream_state, response_metadata)
 
         logger.debug(
             "[openai_client] Response content blocks",

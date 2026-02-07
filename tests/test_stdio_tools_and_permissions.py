@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ripperdoc.core.permissions import PermissionPreview, PermissionResult
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.protocol.stdio import handler as handler_module
+from ripperdoc.protocol.stdio import handler_control
 from ripperdoc.protocol.stdio import handler_config, handler_session
 from ripperdoc.tools.task_tool import TaskTool
 
@@ -137,6 +138,45 @@ async def test_stdio_initialize_tool_filters(monkeypatch, tmp_path, options, exp
 
     assert responses["init"]["error"] is None
     assert responses["init"]["response"]["tools"] == expected
+
+
+@pytest.mark.asyncio
+async def test_stdio_initialize_applies_fallback_model_and_thinking_tokens(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    def fake_profile_lookup(model_name: str):
+        if model_name == "backup-model":
+            return object()
+        return None
+
+    monkeypatch.setattr(handler_session, "get_effective_model_profile", fake_profile_lookup)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize(
+        {
+            "options": {
+                "model": "missing-model",
+                "fallback_model": "backup-model",
+                "max_thinking_tokens": "256",
+            }
+        },
+        "init",
+    )
+
+    assert responses["init"]["error"] is None
+    assert handler._query_context is not None
+    assert handler._query_context.model == "backup-model"
+    assert handler._query_context.max_thinking_tokens == 256
 
 
 @pytest.mark.asyncio
@@ -397,3 +437,101 @@ async def test_stdio_initialize_passes_additional_dirs_to_permission_checker(mon
 
     assert "dirs" in captured
     assert str(outside.resolve()) in set(captured["dirs"] or [])
+
+
+@pytest.mark.asyncio
+async def test_stdio_initialize_ignores_legacy_add_dirs_alias(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    captured: dict[str, Any] = {}
+
+    async def allow_checker(_tool, _parsed_input):
+        return PermissionResult(result=True)
+
+    def fake_make_permission_checker(project_path, yolo_mode=False, **kwargs):  # noqa: ARG001
+        captured["dirs"] = kwargs.get("session_additional_working_dirs")
+        return allow_checker
+
+    monkeypatch.setattr(handler_config, "make_permission_checker", fake_make_permission_checker)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    async def capture_control_response(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
+
+    await handler._handle_initialize(
+        {"options": {"add_dirs": [str(outside)]}},
+        "init",
+    )
+
+    assert "dirs" in captured
+    assert str(outside.resolve()) not in set(captured["dirs"] or [])
+
+
+@pytest.mark.asyncio
+async def test_stdio_can_use_tool_requires_snake_case_tool_name(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    async def allow_checker(_tool, _parsed_input):
+        return PermissionResult(result=True)
+
+    monkeypatch.setattr(handler_config, "make_permission_checker", lambda *_args, **_kwargs: allow_checker)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize({"options": {}}, "init")
+
+    await handler._handle_can_use_tool(
+        {"toolName": "Read", "input": {"value": "hello"}},
+        "legacy_tool_name",
+    )
+
+    assert responses["legacy_tool_name"]["error"] == "Missing tool_name"
+
+
+@pytest.mark.asyncio
+async def test_stdio_set_output_style_ignores_legacy_output_style_alias(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    class _Style:
+        def __init__(self, key: str) -> None:
+            self.key = key
+
+    captured_style: dict[str, str] = {}
+
+    def fake_resolve_output_style(name: str, project_path=None):  # noqa: ARG001
+        captured_style["name"] = name
+        return _Style(str(name)), None
+
+    monkeypatch.setattr(handler_control, "resolve_output_style", fake_resolve_output_style)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_set_output_style({"outputStyle": "learning"}, "set_style")
+
+    assert captured_style["name"] == "default"
+    assert responses["set_style"]["response"]["output_style"] == "default"

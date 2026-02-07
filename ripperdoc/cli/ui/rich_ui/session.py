@@ -19,6 +19,7 @@ from rich.markup import escape
 
 from ripperdoc.core.config import (
     get_effective_config,
+    get_effective_model_profile,
     get_project_local_config,
     provider_protocol,
 )
@@ -60,7 +61,10 @@ from ripperdoc.utils.mcp import (
 )
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.tools.background_shell import shutdown_background_shell
-from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
+from ripperdoc.tools.dynamic_mcp_tool import (
+    load_dynamic_mcp_tools_async,
+    merge_tools_with_dynamic,
+)
 from ripperdoc.utils.session_history import SessionHistory
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.messages import (
@@ -109,6 +113,9 @@ class RichUI:
         resume_messages: Optional[List[Any]] = None,
         initial_query: Optional[str] = None,
         additional_working_dirs: Optional[List[str]] = None,
+        max_thinking_tokens: Optional[int] = None,
+        max_turns: Optional[int] = None,
+        permission_mode: str = "default",
     ):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -161,6 +168,13 @@ class RichUI:
         self._query_in_progress = False
         self._active_spinner: Optional[ThinkingSpinner] = None
         self._permission_checker: Any = None
+        self.max_turns = max_turns
+        self.permission_mode = permission_mode
+        self._max_thinking_tokens_override = (
+            max(0, int(max_thinking_tokens))
+            if isinstance(max_thinking_tokens, int)
+            else None
+        )
         normalized_working_dirs, working_dir_errors = normalize_directory_inputs(
             additional_working_dirs or [],
             base_dir=self.project_path,
@@ -235,12 +249,14 @@ class RichUI:
         # Initialize hook manager with project context
         hook_manager.set_project_dir(self.project_path)
         hook_manager.set_session_id(self.session_id)
+        hook_manager.set_permission_mode(self.permission_mode)
         hook_manager.set_llm_callback(build_hook_llm_callback())
         logger.debug(
             "[ui] Initialized hook manager",
             extra={
                 "session_id": self.session_id,
                 "project_path": str(self.project_path),
+                "permission_mode": self.permission_mode,
             },
         )
         self._run_session_start("startup")
@@ -269,7 +285,7 @@ class RichUI:
         from ripperdoc.core.query import infer_thinking_mode
         from ripperdoc.core.config import ProtocolType
 
-        model_profile = get_profile_for_pointer("main")
+        model_profile = get_profile_for_pointer(self.model)
         if not model_profile:
             return False
         # Anthropic natively supports thinking mode
@@ -287,6 +303,8 @@ class RichUI:
 
     def _get_thinking_tokens(self) -> int:
         """Get the thinking tokens budget based on current mode."""
+        if self._max_thinking_tokens_override is not None:
+            return self._max_thinking_tokens_override
         if not self._thinking_mode_enabled:
             return 0
         config = get_effective_config(self.project_path)
@@ -1021,12 +1039,16 @@ class RichUI:
                 yolo_mode=self.yolo_mode,
                 verbose=self.verbose,
                 model=self.model,
+                max_turns=self.max_turns,
+                permission_mode=self.permission_mode,
             )
         else:
             abort_controller = getattr(self.query_context, "abort_controller", None)
             if abort_controller is not None:
                 abort_controller.clear()
             self.query_context.max_thinking_tokens = self._get_thinking_tokens()
+            self.query_context.max_turns = self.max_turns
+            self.query_context.permission_mode = self.permission_mode
         self.query_context.stop_hook_active = False
         return self.query_context
 
@@ -1047,7 +1069,7 @@ class RichUI:
     def _resolve_query_runtime_settings(self) -> tuple[int, bool, str]:
         """Resolve context budget and protocol settings for this query."""
         config = get_effective_config(self.project_path)
-        model_profile = get_profile_for_pointer("main")
+        model_profile = get_profile_for_pointer(self.model)
         max_context_tokens = get_remaining_context_tokens(
             model_profile, config.context_token_limit
         )
@@ -1557,7 +1579,7 @@ class RichUI:
         """Manual compaction: clear bulky tool output and summarize conversation."""
         from rich.markup import escape
 
-        model_profile = get_profile_for_pointer("main")
+        model_profile = get_profile_for_pointer(self.model)
         protocol = provider_protocol(model_profile.protocol) if model_profile else "openai"
 
         if len(self.conversation_messages) < 2:
@@ -1655,6 +1677,9 @@ def main_rich(
     custom_system_prompt: Optional[str] = None,
     append_system_prompt: Optional[str] = None,
     model: Optional[str] = None,
+    max_thinking_tokens: Optional[int] = None,
+    max_turns: Optional[int] = None,
+    permission_mode: str = "default",
     resume_messages: Optional[List[Any]] = None,
     initial_query: Optional[str] = None,
     additional_working_dirs: Optional[List[str]] = None,
@@ -1670,6 +1695,13 @@ def main_rich(
     if not check_onboarding_rich():
         sys.exit(1)
 
+    resolved_model = model or "main"
+    if get_effective_model_profile(resolved_model) is None:
+        logger.warning(
+            "[ui] Requested model pointer not found; relying on runtime fallback behavior",
+            extra={"model_pointer": resolved_model},
+        )
+
     # Run the Rich UI
     ui = RichUI(
         yolo_mode=yolo_mode,
@@ -1680,7 +1712,10 @@ def main_rich(
         allowed_tools=allowed_tools,
         custom_system_prompt=custom_system_prompt,
         append_system_prompt=append_system_prompt,
-        model=model,
+        model=resolved_model,
+        max_thinking_tokens=max_thinking_tokens,
+        max_turns=max_turns,
+        permission_mode=permission_mode,
         resume_messages=resume_messages,
         initial_query=initial_query,
         additional_working_dirs=additional_working_dirs,

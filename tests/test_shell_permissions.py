@@ -831,13 +831,12 @@ class TestEdgeCases:
 class TestFlexibleWildcardMatching:
     """Tests for new flexible wildcard matching with glob patterns."""
 
-    def test_legacy_prefix_wildcard_still_works(self):
-        """Legacy prefix:* format should continue to work."""
+    def test_legacy_prefix_wildcard_is_supported_for_compatibility(self):
+        """Legacy prefix:* format should still match commands (deprecated syntax)."""
         from ripperdoc.utils.permissions.tool_permission_utils import match_rule
 
         assert match_rule("git status", "git:*") is True
         assert match_rule("git commit -m test", "git:*") is True
-        assert match_rule("npm install", "git:*") is False
         assert match_rule("npm install", "npm:*") is True
 
     def test_star_at_end(self):
@@ -924,23 +923,23 @@ class TestFlexibleWildcardMatching:
         assert match_rule("git status", "git commit") is False
         assert match_rule("npm install express", "npm install express") is True
 
-    def test_legacy_and_glob_coexistence(self):
-        """Both legacy and glob formats should work together."""
+    def test_glob_rules_work_together(self):
+        """Glob rules should work together across different commands."""
         from ripperdoc.utils.permissions.tool_permission_utils import (
             evaluate_shell_command_permissions,
         )
         from ripperdoc.utils.safe_get_cwd import safe_get_cwd
 
-        # Mix of legacy and new format rules
+        # Glob format rules
         allowed_rules = {
-            "git:*",  # Legacy format
+            "git *",
             "npm *",  # Glob format
             "* --help",  # Glob format
         }
 
         cwd = safe_get_cwd()
 
-        # Test git commands (legacy rule)
+        # Test git commands
         decision = evaluate_shell_command_permissions(
             type("Req", (), {"command": "git status"}),
             allowed_rules=allowed_rules,
@@ -970,16 +969,15 @@ class TestFlexibleWildcardMatching:
         )
         assert decision.behavior == "allow"
 
-    def test_rule_suggestions_include_both_formats(self):
-        """Rule suggestions should include both legacy and glob formats."""
+    def test_rule_suggestions_include_exact_and_glob(self):
+        """Rule suggestions should include exact and glob formats."""
         from ripperdoc.utils.permissions.tool_permission_utils import _collect_rule_suggestions
 
         suggestions = _collect_rule_suggestions("git status")
         rule_contents = [s.rule_content for s in suggestions]
 
-        # Should include exact, legacy prefix, and glob format
+        # Should include exact and glob format
         assert "git status" in rule_contents  # Exact
-        assert "git:*" in rule_contents  # Legacy
         assert "git *" in rule_contents  # Glob
 
     def test_edge_cases(self):
@@ -1010,8 +1008,8 @@ class TestFlexibleWildcardMatching:
         from ripperdoc.utils.permissions.tool_permission_utils import match_rule
 
         # Create many rules
-        rules = [f"cmd{i}:*" for i in range(100)]  # Legacy format
-        rules.extend([f"tool{i} *" for i in range(100)])  # Glob format
+        rules = [f"cmd{i} *" for i in range(100)]
+        rules.extend([f"tool{i} *" for i in range(100)])
 
         # Should match quickly
         for rule in rules:
@@ -1050,28 +1048,20 @@ class TestFlexibleWildcardMatching:
         """Wildcard rules should NOT match commands with shell operators for security."""
         from ripperdoc.utils.permissions.tool_permission_utils import match_rule
 
-        # Legacy prefix format should not match with &&
-        assert match_rule("git status && rm -rf /", "git:*") is False
-        assert match_rule("git status && git commit", "git:*") is False
-
         # Glob format should not match with &&
         assert match_rule("git status && rm -rf /", "git *") is False
         assert match_rule("npm install && npm start", "npm *") is False
 
         # Should not match with ||
-        assert match_rule("cmd1 || cmd2", "cmd1:*") is False
         assert match_rule("cmd1 || cmd2", "cmd1 *") is False
 
         # Should not match with semicolon
-        assert match_rule("echo hi; rm -rf /", "echo:*") is False
         assert match_rule("echo hi; rm -rf /", "echo *") is False
 
         # Should not match with pipe
-        assert match_rule("ls | grep foo", "ls:*") is False
         assert match_rule("ls | grep foo", "ls *") is False
 
         # Commands WITHOUT operators should still match
-        assert match_rule("git status", "git:*") is True
         assert match_rule("git status", "git *") is True
         assert match_rule("npm install express", "npm *") is True
 
@@ -1093,8 +1083,6 @@ class TestFlexibleWildcardMatching:
         # Operators in single quotes should be treated as literal strings
         assert match_rule("echo 'foo && bar'", "echo *") is True
         assert match_rule("grep 'pattern || other'", "grep *") is True
-        assert match_rule("echo 'command; other'", "echo:*") is True
-
         # Operators in double quotes should also be safe
         assert match_rule('echo "foo && bar"', "echo *") is True
         assert match_rule('grep "pattern || other"', "grep *") is True

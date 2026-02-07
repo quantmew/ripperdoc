@@ -29,8 +29,8 @@ from ripperdoc.tools.mcp_tools import (
     ListMcpResourcesTool,
     ListMcpServersTool,
     ReadMcpResourceTool,
-    load_dynamic_mcp_tools_sync,
 )
+from ripperdoc.tools.dynamic_mcp_tool import load_dynamic_mcp_tools_sync
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

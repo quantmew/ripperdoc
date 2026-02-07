@@ -302,23 +302,6 @@ def _load_disabled_from_state_file(path: Optional[Path]) -> set[str]:
     return _normalize_disabled_skill_names(raw_values)
 
 
-def _load_legacy_project_disabled_skills(project_path: Optional[Path]) -> set[str]:
-    project_dir = (project_path or Path.cwd()).resolve()
-    config_path = project_dir / ".ripperdoc" / "config.local.json"
-    if not config_path.exists():
-        return set()
-    try:
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
-        return set()
-    if not isinstance(raw, dict):
-        return set()
-    raw_values = raw.get("disabled_skills")
-    if not isinstance(raw_values, list):
-        return set()
-    return _normalize_disabled_skill_names(raw_values)
-
-
 def _save_disabled_to_state_file(path: Optional[Path], disabled_skill_names: set[str]) -> list[str]:
     normalized = sorted(_normalize_disabled_skill_names(disabled_skill_names))
     if path is None:
@@ -339,13 +322,6 @@ def get_disabled_skill_names(
     if location is not None:
         state_path = _state_file_for_location(location, project_path=project_path, home=home)
         disabled = _load_disabled_from_state_file(state_path)
-        if disabled:
-            return disabled
-        if location == SkillLocation.PROJECT and (state_path is None or not state_path.exists()):
-            legacy_disabled = _load_legacy_project_disabled_skills(project_path)
-            if legacy_disabled:
-                _save_disabled_to_state_file(state_path, legacy_disabled)
-                return legacy_disabled
         return disabled
 
     disabled: set[str] = set()

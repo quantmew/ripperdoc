@@ -23,6 +23,7 @@ from ripperdoc.core.config import (
 )
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.tools.bash_tool import BashTool, BashToolInput
+from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
 
 
 class DummyInput(BaseModel):
@@ -235,6 +236,81 @@ def test_bash_permissions_apply_ask_rules(tmp_path: Path, isolated_config):
     assert prompt_calls == 1
 
 
+def test_read_rule_with_specifier_can_force_prompt(tmp_path: Path, isolated_config):
+    """Tool(specifier) ask rules should prompt even for read-only tools."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("A=1\n")
+    save_global_config(UserConfig(user_ask_rules=["Read(./.env)"]))
+
+    prompt_calls = 0
+
+    def prompt_fn(_: str) -> str:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "n"
+
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=prompt_fn)
+    result = asyncio.run(checker(FileReadTool(), FileReadToolInput(file_path=str(env_file))))
+
+    assert result.result is False
+    assert prompt_calls == 1
+
+
+def test_read_rule_with_specifier_can_deny(tmp_path: Path, isolated_config):
+    """Tool(specifier) deny rules should block read-only tools."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("A=1\n")
+    save_global_config(UserConfig(user_deny_rules=["Read(./.env)"]))
+
+    checker = make_permission_checker(
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
+    result = asyncio.run(checker(FileReadTool(), FileReadToolInput(file_path=str(env_file))))
+
+    assert result.result is False
+
+
+def test_bash_tool_rule_matches_all_commands(tmp_path: Path, isolated_config):
+    """Bash tool-only rule should allow all Bash commands."""
+    save_global_config(UserConfig(user_allow_rules=["Bash"]))
+
+    checker = make_permission_checker(
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
+    result = asyncio.run(checker(BashTool(), BashToolInput(command="git status && echo done")))
+
+    assert result.result is True
+
+
+def test_bash_legacy_suffix_rule_still_works(tmp_path: Path, isolated_config):
+    """Deprecated Bash :* suffix syntax should remain compatible."""
+    save_global_config(UserConfig(user_allow_rules=["Bash(ls:*)"]))
+
+    checker = make_permission_checker(
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
+    result = asyncio.run(checker(BashTool(), BashToolInput(command="ls -la")))
+
+    assert result.result is True
+
+
+def test_deny_rule_overrides_allow_rule(tmp_path: Path, isolated_config):
+    """Rule priority should be deny > allow."""
+    save_global_config(
+        UserConfig(
+            user_allow_rules=["Bash"],
+            user_deny_rules=["Bash(rm -rf *)"],
+        )
+    )
+
+    checker = make_permission_checker(
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
+    result = asyncio.run(checker(BashTool(), BashToolInput(command="rm -rf /tmp/test")))
+
+    assert result.result is False
+
+
 def test_permission_checker_preview_detects_ask_for_read_only_bash(tmp_path: Path, isolated_config):
     """Preview should require user input when ask-rules match read-only Bash commands."""
     save_global_config(UserConfig(user_ask_rules=["ls"]))
@@ -315,16 +391,16 @@ def test_permission_checker_can_add_session_working_dir_dynamically(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_mixed_format_rules_in_permission_checker(tmp_path: Path):
-    """Test that permission checker handles both legacy and glob format rules."""
+async def test_glob_rules_in_permission_checker(tmp_path: Path):
+    """Permission checker should handle glob-format allow rules."""
     from ripperdoc.core.config import save_project_config, ProjectConfig
     from ripperdoc.core.permissions import make_permission_checker
     from ripperdoc.tools.bash_tool import BashTool, BashToolInput
 
-    # Setup config with mixed rule formats
+    # Setup config with glob rules.
     config = ProjectConfig(
         bash_allow_rules=[
-            "git:*",  # Legacy format
+            "git *",
             "npm *",  # Glob format
             "* --version",  # Glob format
         ]
@@ -339,7 +415,7 @@ async def test_mixed_format_rules_in_permission_checker(tmp_path: Path):
 
     tool = BashTool()
 
-    # Test legacy format rule
+    # Test glob format rule
     result = await can_use_tool(tool, BashToolInput(command="git status"))
     assert result.result is True
 

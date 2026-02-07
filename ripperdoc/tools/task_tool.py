@@ -405,7 +405,224 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             context["Hook:SubagentStart"] = result.additional_context
         return context
 
-    async def call(
+    def _render_tool_result(self, output: TaskToolOutput) -> ToolResult:
+        return ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+
+    async def _wait_for_running_record(self, record: AgentRunRecord) -> None:
+        if not record.task or record.task.done():
+            return
+        try:
+            await record.task
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            record.status = "failed"
+            record.error = str(exc)
+
+    def _build_subagent_start_notices(
+        self,
+        hook_result: HookResult,
+        *,
+        agent_type: str,
+    ) -> List[ToolProgress]:
+        notices: List[ToolProgress] = []
+        if hook_result.should_block or hook_result.should_ask or not hook_result.should_continue:
+            reason = (
+                hook_result.block_reason
+                or hook_result.stop_reason
+                or "SubagentStart hook requested to stop."
+            )
+            notices.append(
+                ToolProgress(
+                    content=create_hook_notice_payload(
+                        text=f"SubagentStart hook warning (ignored): {reason}",
+                        hook_event="SubagentStart",
+                        tool_name=agent_type,
+                        level="warning",
+                    )
+                )
+            )
+        if hook_result.system_message:
+            notices.append(
+                ToolProgress(
+                    content=create_hook_notice_payload(
+                        text=str(hook_result.system_message),
+                        hook_event="SubagentStart",
+                        tool_name=agent_type,
+                    )
+                )
+            )
+        return notices
+
+    def _reset_record_for_resume_prompt(self, record: AgentRunRecord, prompt: str) -> None:
+        record.history.append(create_user_message(prompt))
+        record.start_time = time.time()
+        record.duration_ms = 0.0
+        record.tool_use_count = 0
+        record.status = "running"
+        record.result_text = None
+        record.error = None
+        record.task = None
+
+    def _build_subagent_query_context(
+        self,
+        *,
+        tools: List[Tool[Any, Any]],
+        yolo_mode: bool,
+        verbose: bool,
+        model: str,
+        agent_type: str,
+        hook_scopes: List[HooksConfig],
+    ) -> QueryContext:
+        return QueryContext(
+            tools=tools,
+            yolo_mode=yolo_mode,
+            verbose=verbose,
+            model=model,
+            stop_hook="subagent",
+            subagent_type=agent_type,
+            hook_scopes=hook_scopes,
+        )
+
+    def _finalize_record_from_messages(
+        self,
+        record: AgentRunRecord,
+        *,
+        assistant_messages: List[AssistantMessage],
+        tool_use_count: int,
+    ) -> None:
+        duration_ms = (time.time() - record.start_time) * 1000
+        result_text = (
+            self._extract_text(assistant_messages[-1])
+            if assistant_messages
+            else "Agent returned no response."
+        )
+        record.duration_ms = duration_ms
+        record.tool_use_count = tool_use_count
+        record.result_text = result_text.strip()
+        record.status = "completed"
+
+    async def _run_subagent_foreground(
+        self,
+        *,
+        record: AgentRunRecord,
+        subagent_context: QueryContext,
+        permission_checker: Any,
+        hook_context: Dict[str, str],
+        parent_tool_use_id: str,
+    ) -> AsyncGenerator[ToolProgress, None]:
+        assistant_messages: List[AssistantMessage] = []
+        tool_use_count = 0
+        async for message in query(
+            record.history,  # type: ignore[arg-type]
+            record.system_prompt,
+            hook_context,
+            subagent_context,
+            permission_checker,
+        ):
+            msg_type = getattr(message, "type", "")
+            if msg_type == "progress":
+                continue
+
+            tool_use_count, updates = self._track_subagent_message(
+                message,
+                record.history,
+                assistant_messages,
+                tool_use_count,
+            )
+            for update in updates:
+                yield ToolProgress(content=update)
+
+            if msg_type in ("assistant", "user"):
+                message_with_parent = message.model_copy(
+                    update={"parent_tool_use_id": parent_tool_use_id}
+                )
+                yield ToolProgress(content=message_with_parent, is_subagent_message=True)
+
+        self._finalize_record_from_messages(
+            record,
+            assistant_messages=assistant_messages,
+            tool_use_count=tool_use_count,
+        )
+
+    def _coerce_agent_tools(self, tools: List[object]) -> List[Tool[Any, Any]]:
+        from ripperdoc.core.tool import Tool as ToolBase
+
+        return [tool for tool in tools if isinstance(tool, ToolBase)]
+
+    async def _handle_resume_call(
+        self,
+        input_data: TaskToolInput,
+        context: ToolUseContext,
+    ) -> AsyncGenerator[ToolOutput, None]:
+        if not input_data.resume:
+            return
+
+        record = _get_agent_run(input_data.resume)
+        if not record:
+            raise ValueError(
+                f"Agent id '{input_data.resume}' not found. "
+                "Start a new agent to obtain a valid agent_id."
+            )
+
+        if record.task and not record.task.done():
+            if not input_data.wait:
+                output = self._output_from_record(
+                    record,
+                    status_override="running",
+                    result_text_override="Agent is still running in the background.",
+                    is_background=True,
+                    is_resumed=True,
+                )
+                yield self._render_tool_result(output)
+                return
+            yield ToolProgress(content=f"Waiting for subagent '{record.agent_type}' ({record.agent_id})")
+            await self._wait_for_running_record(record)
+
+        if not input_data.prompt:
+            output = self._output_from_record(
+                record,
+                is_background=bool(record.task),
+                is_resumed=True,
+            )
+            yield self._render_tool_result(output)
+            return
+
+        hook_result = await self._run_subagent_start_hook(
+            context,
+            subagent_type=record.agent_type,
+            prompt=input_data.prompt,
+            resume=input_data.resume,
+            run_in_background=False,
+        )
+        for notice in self._build_subagent_start_notices(hook_result, agent_type=record.agent_type):
+            yield notice
+        hook_context = self._build_subagent_hook_context(hook_result)
+
+        self._reset_record_for_resume_prompt(record, input_data.prompt)
+        subagent_context = self._build_subagent_query_context(
+            tools=record.tools,
+            yolo_mode=context.yolo_mode,
+            verbose=context.verbose,
+            model=record.model_used or "main",
+            agent_type=record.agent_type,
+            hook_scopes=record.hook_scopes,
+        )
+        yield ToolProgress(content=f"Resuming subagent '{record.agent_type}'")
+
+        async for progress in self._run_subagent_foreground(
+            record=record,
+            subagent_context=subagent_context,
+            permission_checker=context.permission_checker,
+            hook_context=hook_context,
+            parent_tool_use_id=context.message_id,
+        ):
+            yield progress
+
+        output = self._output_from_record(record, is_resumed=True)
+        yield self._render_tool_result(output)
+
+    async def _handle_new_call(
         self,
         input_data: TaskToolInput,
         context: ToolUseContext,
@@ -413,161 +630,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         clear_agent_cache()
         agents = load_agent_definitions()
 
-        if input_data.resume:
-            record = _get_agent_run(input_data.resume)
-            if not record:
-                raise ValueError(
-                    f"Agent id '{input_data.resume}' not found. "
-                    "Start a new agent to obtain a valid agent_id."
-                )
-
-            if record.task and not record.task.done():
-                if not input_data.wait:
-                    output = self._output_from_record(
-                        record,
-                        status_override="running",
-                        result_text_override="Agent is still running in the background.",
-                        is_background=True,
-                        is_resumed=True,
-                    )
-                    yield ToolResult(
-                        data=output, result_for_assistant=self.render_result_for_assistant(output)
-                    )
-                    return
-
-                yield ToolProgress(
-                    content=f"Waiting for subagent '{record.agent_type}' ({record.agent_id})"
-                )
-                try:
-                    await record.task
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    record.status = "failed"
-                    record.error = str(exc)
-
-            if not input_data.prompt:
-                output = self._output_from_record(
-                    record,
-                    is_background=bool(record.task),
-                    is_resumed=True,
-                )
-                yield ToolResult(
-                    data=output, result_for_assistant=self.render_result_for_assistant(output)
-                )
-                return
-
-            hook_result = await self._run_subagent_start_hook(
-                context,
-                subagent_type=record.agent_type,
-                prompt=input_data.prompt,
-                resume=input_data.resume,
-                run_in_background=False,
-            )
-            if hook_result.should_block or hook_result.should_ask or not hook_result.should_continue:
-                reason = (
-                    hook_result.block_reason
-                    or hook_result.stop_reason
-                    or "SubagentStart hook requested to stop."
-                )
-                yield ToolProgress(
-                    content=create_hook_notice_payload(
-                        text=f"SubagentStart hook warning (ignored): {reason}",
-                        hook_event="SubagentStart",
-                        tool_name=record.agent_type,
-                        level="warning",
-                    )
-                )
-            if hook_result.system_message:
-                yield ToolProgress(
-                    content=create_hook_notice_payload(
-                        text=str(hook_result.system_message),
-                        hook_event="SubagentStart",
-                        tool_name=record.agent_type,
-                    )
-                )
-            hook_context = self._build_subagent_hook_context(hook_result)
-
-            record.history.append(create_user_message(input_data.prompt))
-            record.start_time = time.time()
-            record.duration_ms = 0.0
-            record.tool_use_count = 0
-            record.status = "running"
-            record.result_text = None
-            record.error = None
-            record.task = None
-
-            subagent_context = QueryContext(
-                tools=record.tools,
-                yolo_mode=context.yolo_mode,
-                verbose=context.verbose,
-                model=record.model_used or "main",
-                stop_hook="subagent",
-                subagent_type=record.agent_type,
-                hook_scopes=record.hook_scopes,
-            )
-
-            yield ToolProgress(content=f"Resuming subagent '{record.agent_type}'")
-
-            # Get the Task tool's tool_use_id to set as parent_tool_use_id for subagent messages
-            parent_tool_use_id = context.message_id
-
-            assistant_messages: List[AssistantMessage] = []
-            tool_use_count = 0
-            async for message in query(
-                record.history,  # type: ignore[arg-type]
-                record.system_prompt,
-                hook_context,
-                subagent_context,
-                context.permission_checker,
-            ):
-                msg_type = getattr(message, "type", "")
-                if msg_type == "progress":
-                    continue
-
-                # Track the message for internal state
-                tool_use_count, updates = self._track_subagent_message(
-                    message,
-                    record.history,
-                    assistant_messages,
-                    tool_use_count,
-                )
-                for update in updates:
-                    yield ToolProgress(content=update)
-
-                # CRITICAL: Also yield subagent messages to SDK for compatibility
-                if msg_type in ("assistant", "user"):
-                    # Set parent_tool_use_id to link subagent messages to the Task tool call
-                    message_with_parent = message.model_copy(update={"parent_tool_use_id": parent_tool_use_id})
-                    yield ToolProgress(content=message_with_parent, is_subagent_message=True)
-
-            duration_ms = (time.time() - record.start_time) * 1000
-            result_text = (
-                self._extract_text(assistant_messages[-1])
-                if assistant_messages
-                else "Agent returned no response."
-            )
-            record.duration_ms = duration_ms
-            record.tool_use_count = tool_use_count
-            record.result_text = result_text.strip()
-            record.status = "completed"
-
-            output = self._output_from_record(
-                record,
-                result_text_override=result_text.strip(),
-                is_resumed=True,
-            )
-            yield ToolResult(
-                data=output, result_for_assistant=self.render_result_for_assistant(output)
-            )
-            return
-
         target_agent = next(
-            (
-                agent
-                for agent in agents.active_agents
-                if agent.agent_type == input_data.subagent_type
-            ),
+            (agent for agent in agents.active_agents if agent.agent_type == input_data.subagent_type),
             None,
         )
         if not target_agent:
@@ -591,37 +655,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             resume=None,
             run_in_background=input_data.run_in_background,
         )
-        if hook_result.should_block or hook_result.should_ask or not hook_result.should_continue:
-            reason = (
-                hook_result.block_reason
-                or hook_result.stop_reason
-                or "SubagentStart hook requested to stop."
-            )
-            yield ToolProgress(
-                content=create_hook_notice_payload(
-                    text=f"SubagentStart hook warning (ignored): {reason}",
-                    hook_event="SubagentStart",
-                    tool_name=target_agent.agent_type,
-                    level="warning",
-                )
-            )
-        if hook_result.system_message:
-            yield ToolProgress(
-                content=create_hook_notice_payload(
-                    text=str(hook_result.system_message),
-                    hook_event="SubagentStart",
-                    tool_name=target_agent.agent_type,
-                )
-            )
+        for notice in self._build_subagent_start_notices(hook_result, agent_type=target_agent.agent_type):
+            yield notice
         hook_context = self._build_subagent_hook_context(hook_result)
 
-        # Type conversion: List[object] -> List[Tool[Any, Any]]
-        from ripperdoc.core.tool import Tool
-
-        typed_agent_tools: List[Tool[Any, Any]] = [
-            tool for tool in agent_tools if isinstance(tool, Tool)
-        ]
-
+        typed_agent_tools = self._coerce_agent_tools(agent_tools)
         agent_system_prompt = self._build_agent_prompt(target_agent, typed_agent_tools)
         parent_history = (
             self._coerce_parent_history(getattr(context, "conversation_messages", None))
@@ -633,12 +671,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             create_user_message(input_data.prompt or ""),
         ]
 
-        agent_id = _new_agent_id()
         agent_hook_scopes: List[HooksConfig] = (
             [target_agent.hooks] if target_agent.hooks and target_agent.hooks.hooks else []
         )
         record = AgentRunRecord(
-            agent_id=agent_id,
+            agent_id=_new_agent_id(),
             agent_type=target_agent.agent_type,
             tools=typed_agent_tools,
             system_prompt=agent_system_prompt,
@@ -651,13 +688,12 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         )
         _register_agent_run(record)
 
-        subagent_context = QueryContext(
+        subagent_context = self._build_subagent_query_context(
             tools=typed_agent_tools,
             yolo_mode=context.yolo_mode,
             verbose=context.verbose,
             model=target_agent.model or "main",
-            stop_hook="subagent",
-            subagent_type=target_agent.agent_type,
+            agent_type=target_agent.agent_type,
             hook_scopes=agent_hook_scopes,
         )
 
@@ -676,62 +712,34 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 result_text_override="Agent started in the background.",
                 is_background=True,
             )
-            yield ToolResult(
-                data=output, result_for_assistant=self.render_result_for_assistant(output)
-            )
+            yield self._render_tool_result(output)
             return
 
         yield ToolProgress(content=f"Launching subagent '{target_agent.agent_type}'")
-
-        # Get the Task tool's tool_use_id to set as parent_tool_use_id for subagent messages
-        parent_tool_use_id = context.message_id
-
-        assistant_messages = []
-        tool_use_count = 0
-        async for message in query(
-            record.history,  # type: ignore[arg-type]
-            agent_system_prompt,
-            hook_context,
-            subagent_context,
-            context.permission_checker,
+        async for progress in self._run_subagent_foreground(
+            record=record,
+            subagent_context=subagent_context,
+            permission_checker=context.permission_checker,
+            hook_context=hook_context,
+            parent_tool_use_id=context.message_id,
         ):
-            msg_type = getattr(message, "type", "")
-            if msg_type == "progress":
-                continue
+            yield progress
 
-            # Track the message for internal state
-            tool_use_count, updates = self._track_subagent_message(
-                message,
-                record.history,
-                assistant_messages,
-                tool_use_count,
-            )
-            for update in updates:
-                yield ToolProgress(content=update)
+        output = self._output_from_record(record)
+        yield self._render_tool_result(output)
 
-            # CRITICAL: Also yield subagent messages to SDK for compatibility
-            # This allows SDK clients to see the full subagent conversation
-            if msg_type in ("assistant", "user"):
-                # Set parent_tool_use_id to link subagent messages to the Task tool call
-                # Use model_copy() to create a new message with the parent_tool_use_id set
-                message_with_parent = message.model_copy(update={"parent_tool_use_id": parent_tool_use_id})
-                yield ToolProgress(content=message_with_parent, is_subagent_message=True)
+    async def call(
+        self,
+        input_data: TaskToolInput,
+        context: ToolUseContext,
+    ) -> AsyncGenerator[ToolOutput, None]:
+        if input_data.resume:
+            async for output in self._handle_resume_call(input_data, context):
+                yield output
+            return
 
-        duration_ms = (time.time() - record.start_time) * 1000
-        result_text = (
-            self._extract_text(assistant_messages[-1])
-            if assistant_messages
-            else "Agent returned no response."
-        )
-
-        record.duration_ms = duration_ms
-        record.tool_use_count = tool_use_count
-        record.result_text = result_text.strip()
-        record.status = "completed"
-
-        output = self._output_from_record(record, result_text_override=result_text.strip())
-
-        yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+        async for output in self._handle_new_call(input_data, context):
+            yield output
 
     def _output_from_record(
         self,

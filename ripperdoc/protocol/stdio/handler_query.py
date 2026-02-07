@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import traceback
@@ -83,6 +84,7 @@ class _PreparedQuery:
 class StdioQueryMixin:
     _session_history: SessionHistory | None
     _session_id: str | None
+    _json_schema: dict[str, Any] | None
 
     async def _handle_query(self, request: dict[str, Any], request_id: str) -> None:
         """Handle query request from SDK with comprehensive timeout and error handling."""
@@ -240,7 +242,7 @@ class StdioQueryMixin:
             total_cost_usd=round(total_cost_usd, 8) if total_cost_usd > 0 else None,
             usage=state.build_usage_info(),
             result=state.final_result_text,
-            structured_output=None,
+            structured_output=self._coerce_structured_output(state.final_result_text),
         )
         await self._send_final_result(state, result_message)
 
@@ -453,6 +455,44 @@ class StdioQueryMixin:
             elif block_type == "tool_use":
                 text_parts.clear()
         return text_parts
+
+    def _coerce_structured_output(self, result_text: Optional[str]) -> Any:
+        """Best-effort JSON structured output when json_schema is configured."""
+        if not self._json_schema or not result_text:
+            return None
+
+        stripped = result_text.strip()
+        if not stripped:
+            return None
+
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+
+        schema_type = self._json_schema.get("type")
+        if isinstance(schema_type, str):
+            if schema_type == "integer" and isinstance(parsed, bool):
+                return None
+            if schema_type == "number" and isinstance(parsed, bool):
+                return None
+            type_checks: dict[str, tuple[type, ...]] = {
+                "object": (dict,),
+                "array": (list,),
+                "string": (str,),
+                "number": (int, float),
+                "boolean": (bool,),
+                "integer": (int,),
+            }
+            expected = type_checks.get(schema_type)
+            if expected and not isinstance(parsed, expected):
+                logger.debug(
+                    "[stdio] Structured output did not match top-level schema type",
+                    extra={"expected_type": schema_type, "actual_type": type(parsed).__name__},
+                )
+                return None
+
+        return parsed
 
     async def _send_final_result(self, state: _QueryRuntimeState, result: ResultMessage) -> None:
         """Send ResultMessage and mark as sent."""

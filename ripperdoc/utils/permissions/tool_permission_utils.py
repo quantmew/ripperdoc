@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import re
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Set
 
@@ -28,49 +29,36 @@ class PermissionDecision:
     rule_suggestions: Optional[List[ToolRule] | List[str]] = None
 
 
-def create_wildcard_rule(rule_name: str, use_glob_style: bool = False) -> str:
-    """Create a wildcard/prefix rule string.
+def create_wildcard_rule(rule_name: str) -> str:
+    """Create a glob wildcard rule string.
 
     Args:
         rule_name: The command prefix (e.g., "git", "npm")
-        use_glob_style: If True, creates "rule_name *" format;
-                       if False, creates "rule_name:*" format (default for compatibility)
 
     Returns:
-        Wildcard rule string in requested format
+        Wildcard rule string in glob format.
 
     Examples:
         >>> create_wildcard_rule("git")
-        "git:*"
-        >>> create_wildcard_rule("git", use_glob_style=True)
         "git *"
     """
-    if use_glob_style:
-        return f"{rule_name} *"
-    return f"{rule_name}:*"
+    return f"{rule_name} *"
 
 
 def create_tool_rule(rule_content: str) -> List[ToolRule]:
     return [ToolRule(tool_name="Bash", rule_content=rule_content)]
 
 
-def create_wildcard_tool_rule(rule_name: str, use_glob_style: bool = False) -> List[ToolRule]:
+def create_wildcard_tool_rule(rule_name: str) -> List[ToolRule]:
     """Create a wildcard tool rule.
 
     Args:
         rule_name: The command prefix
-        use_glob_style: Whether to use glob-style format
 
     Returns:
         List containing a single ToolRule with wildcard pattern
     """
-    return [
-        ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(rule_name, use_glob_style))
-    ]
-
-
-def extract_rule_prefix(rule_string: str) -> Optional[str]:
-    return rule_string[:-2] if rule_string.endswith(":*") else None
+    return [ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(rule_name))]
 
 
 def _has_unquoted_shell_operators(command: str) -> bool:
@@ -113,11 +101,10 @@ def _has_unquoted_shell_operators(command: str) -> bool:
 
 
 def match_rule(command: str, rule: str) -> bool:
-    """Return True if a command matches a rule (exact, prefix wildcard, or glob pattern).
+    """Return True if a command matches a rule (exact or glob pattern).
 
-    Supports three formats:
+    Supports two formats:
     - Exact match: "git status" matches "git status" only
-    - Legacy prefix: "git:*" matches any command starting with "git"
     - Glob patterns: "git * main" matches "git push main", "git pull main", etc.
 
     Glob patterns support:
@@ -126,9 +113,9 @@ def match_rule(command: str, rule: str) -> bool:
     - [seq] (matches any character in seq)
     - [!seq] (matches any character NOT in seq)
 
-    Security: Wildcard rules (both legacy and glob) will NOT match commands
+    Security: Wildcard rules will NOT match commands
     containing shell operators (&&, ||, ;, |) outside of quotes. This prevents
-    a rule like "git:*" from matching "git status && rm -rf /". Exact match
+    a rule like "git *" from matching "git status && rm -rf /". Exact match
     rules still work with operators (user explicitly approved the full command).
 
     Args:
@@ -139,32 +126,26 @@ def match_rule(command: str, rule: str) -> bool:
         True if command matches rule, False otherwise
 
     Examples:
-        >>> match_rule("git status", "git:*")
-        True
         >>> match_rule("npm install", "npm *")
         True
         >>> match_rule("pip install", "* install")
         True
         >>> match_rule("git push main", "git * main")
         True
-        >>> match_rule("git status && rm -rf /", "git:*")
-        False
         >>> match_rule("git status && git commit", "git status && git commit")
         True
     """
     command = command.strip()
     if not command:
         return False
+    rule = rule.strip()
+    if not rule:
+        return False
 
-    # Legacy format: prefix:* (highest priority for backward compatibility)
-    prefix = extract_rule_prefix(rule)
-    if prefix is not None:
-        # For wildcard rules, reject commands with shell operators for security
-        if _has_unquoted_shell_operators(command):
-            return False
-        return command.startswith(prefix)
+    # Backward-compatibility: legacy "cmd:*" means "cmd *".
+    rule = re.sub(r"(?<!/):\*", " *", rule)
 
-    # New format: glob-style patterns with wildcards
+    # Glob-style patterns with wildcards
     if "*" in rule or "?" in rule or "[" in rule:
         # For wildcard rules, reject commands with shell operators for security
         if _has_unquoted_shell_operators(command):
@@ -253,12 +234,9 @@ def _is_command_read_only(
 def _collect_rule_suggestions(command: str) -> List[ToolRule]:
     """Collect rule suggestions for a command.
 
-    Suggests three options:
+    Suggests two options:
     1. Exact command match
-    2. Legacy prefix wildcard (git:*)
-    3. Glob-style wildcard (git *)
-
-    This gives users choice between formats while maintaining backward compatibility.
+    2. Glob-style wildcard (git *)
 
     Args:
         command: The command to generate suggestions for
@@ -273,17 +251,8 @@ def _collect_rule_suggestions(command: str) -> List[ToolRule]:
 
     tokens = parse_and_clean_shell_tokens(command)
     if tokens:
-        # Legacy prefix format
         suggestions.append(
-            ToolRule(
-                tool_name="Bash", rule_content=create_wildcard_rule(tokens[0], use_glob_style=False)
-            )
-        )
-        # New glob-style format
-        suggestions.append(
-            ToolRule(
-                tool_name="Bash", rule_content=create_wildcard_rule(tokens[0], use_glob_style=True)
-            )
+            ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(tokens[0]))
         )
 
     return suggestions
@@ -449,7 +418,6 @@ __all__ = [
     "create_tool_rule",
     "create_wildcard_tool_rule",
     "evaluate_shell_command_permissions",
-    "extract_rule_prefix",
     "match_rule",
     "is_command_read_only",
 ]

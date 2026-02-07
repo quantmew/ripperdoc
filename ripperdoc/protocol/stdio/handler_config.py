@@ -207,31 +207,6 @@ class StdioConfigMixin:
                 return True, preview.result, False
             return True, PermissionResult(result=True), False
 
-        if isinstance(preview, dict):
-            requires_user_input = bool(
-                preview.get("requires_user_input") or preview.get("requiresUserInput")
-            )
-            if requires_user_input:
-                return True, None, True
-
-            result_obj = preview.get("result")
-            if isinstance(result_obj, PermissionResult):
-                return True, result_obj, False
-
-            if isinstance(result_obj, dict) and "result" in result_obj:
-                return (
-                    True,
-                    PermissionResult(
-                        result=bool(result_obj.get("result")),
-                        message=result_obj.get("message"),
-                        updated_input=result_obj.get("updated_input")
-                        or result_obj.get("updatedInput"),
-                    ),
-                    False,
-                )
-
-            return True, PermissionResult(result=True), False
-
         return False, None, False
 
     async def _evaluate_local_can_use_tool(
@@ -259,12 +234,6 @@ class StdioConfigMixin:
 
         if isinstance(result, PermissionResult):
             return result
-        if isinstance(result, dict) and "result" in result:
-            return PermissionResult(
-                result=bool(result.get("result")),
-                message=result.get("message"),
-                updated_input=result.get("updated_input") or result.get("updatedInput"),
-            )
         if isinstance(result, tuple) and len(result) == 2:
             return PermissionResult(result=bool(result[0]), message=result[1])
         return PermissionResult(result=bool(result))
@@ -345,7 +314,7 @@ class StdioConfigMixin:
 
         behavior = str(response.get("behavior") or response.get("decision") or "").lower()
         if behavior == "allow":
-            updated_input = response.get("updatedInput") or response.get("updated_input")
+            updated_input = response.get("updatedInput")
             if updated_input is None:
                 updated_input = tool_input
             return PermissionResult(result=True, updated_input=updated_input)
@@ -354,14 +323,6 @@ class StdioConfigMixin:
             return PermissionResult(
                 result=False,
                 message=response.get("message") or "User denied this action",
-            )
-
-        # Compatibility with legacy payloads.
-        if "result" in response:
-            return PermissionResult(
-                result=bool(response.get("result")),
-                message=response.get("message"),
-                updated_input=response.get("updatedInput") or response.get("updated_input"),
             )
 
         return PermissionResult(

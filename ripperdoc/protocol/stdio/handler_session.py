@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import json
 import time
 import uuid
 from pathlib import Path
@@ -31,7 +32,10 @@ from ripperdoc.protocol.models import (
     SystemStreamMessage,
     model_to_dict,
 )
-from ripperdoc.tools.mcp_tools import load_dynamic_mcp_tools_async, merge_tools_with_dynamic
+from ripperdoc.tools.dynamic_mcp_tool import (
+    load_dynamic_mcp_tools_async,
+    merge_tools_with_dynamic,
+)
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
 from ripperdoc.utils.session_history import SessionHistory
@@ -51,6 +55,9 @@ class StdioSessionMixin:
     _session_start_time: float | None
     _session_history: SessionHistory | None
     _session_additional_working_dirs: set[str]
+    _fallback_model: str | None
+    _max_budget_usd: float | None
+    _json_schema: dict[str, Any] | None
 
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
@@ -70,7 +77,9 @@ class StdioSessionMixin:
             self._session_id = options.get("session_id") or str(uuid.uuid4())
             self._custom_system_prompt = options.get("system_prompt")
             raw_max_turns = options.get("max_turns")
+            raw_max_thinking_tokens = options.get("max_thinking_tokens")
             max_turns: int | None = None
+            max_thinking_tokens = 0
             if raw_max_turns is not None:
                 try:
                     max_turns = int(raw_max_turns)
@@ -79,6 +88,67 @@ class StdioSessionMixin:
                         "[stdio] Invalid max_turns %r; ignoring",
                         raw_max_turns,
                     )
+            if raw_max_thinking_tokens is not None:
+                try:
+                    max_thinking_tokens = max(0, int(raw_max_thinking_tokens))
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "[stdio] Invalid max_thinking_tokens %r; defaulting to 0",
+                        raw_max_thinking_tokens,
+                    )
+
+            fallback_model = options.get("fallback_model")
+            self._fallback_model = (
+                str(fallback_model).strip()
+                if isinstance(fallback_model, str) and fallback_model.strip()
+                else None
+            )
+
+            raw_max_budget = options.get("max_budget_usd")
+            self._max_budget_usd = None
+            if raw_max_budget is not None:
+                try:
+                    parsed_budget = float(raw_max_budget)
+                    if parsed_budget > 0:
+                        self._max_budget_usd = parsed_budget
+                except (TypeError, ValueError):
+                    logger.warning("[stdio] Invalid max_budget_usd %r; ignoring", raw_max_budget)
+
+            raw_json_schema = options.get("json_schema")
+            self._json_schema = None
+            if isinstance(raw_json_schema, dict):
+                self._json_schema = raw_json_schema
+            elif isinstance(raw_json_schema, str) and raw_json_schema.strip():
+                try:
+                    parsed_schema = json.loads(raw_json_schema)
+                except json.JSONDecodeError:
+                    logger.warning("[stdio] Invalid json_schema payload; expected valid JSON object")
+                else:
+                    if isinstance(parsed_schema, dict):
+                        self._json_schema = parsed_schema
+                    else:
+                        logger.warning("[stdio] json_schema must be a JSON object; ignoring")
+
+            ignored_option_keys = [
+                "mcp_config",
+                "permission_prompt_tool",
+                "include_partial_messages",
+                "fork_session",
+                "agents",
+                "setting_sources",
+                "plugin_dirs",
+                "betas",
+            ]
+            ignored_in_use = [
+                key
+                for key in ignored_option_keys
+                if options.get(key) not in (None, "", [], (), False)
+            ]
+            if ignored_in_use:
+                logger.info(
+                    "[stdio] Accepted compatibility options without runtime effect: %s",
+                    ", ".join(sorted(ignored_in_use)),
+                )
 
             # Setup working directory
             cwd = options.get("cwd")
@@ -88,8 +158,6 @@ class StdioSessionMixin:
                 self._project_path = Path.cwd()
 
             raw_additional_dirs = options.get("additional_directories")
-            if raw_additional_dirs is None:
-                raw_additional_dirs = options.get("add_dirs")
             additional_dirs = coerce_directory_list(raw_additional_dirs)
             normalized_dirs, dir_errors = normalize_directory_inputs(
                 additional_dirs,
@@ -111,7 +179,6 @@ class StdioSessionMixin:
             )
             requested_output_style = (
                 options.get("output_style")
-                or options.get("outputStyle")
                 or configured_output_style
             )
             resolved_output_style, _ = resolve_output_style(
@@ -149,6 +216,16 @@ class StdioSessionMixin:
 
             # 验证模型配置是否有效
             model_profile = get_effective_model_profile(model)
+            if model_profile is None and self._fallback_model:
+                fallback_profile = get_effective_model_profile(self._fallback_model)
+                if fallback_profile is not None:
+                    logger.warning(
+                        "[stdio] Falling back to configured fallback_model '%s' (requested: '%s')",
+                        self._fallback_model,
+                        model,
+                    )
+                    model = self._fallback_model
+                    model_profile = fallback_profile
             if model_profile is None:
                 error_msg = (
                     f"No valid model configuration found for '{model}'. "
@@ -165,6 +242,7 @@ class StdioSessionMixin:
                 yolo_mode=yolo_mode,
                 verbose=options.get("verbose", False),
                 model=model,
+                max_thinking_tokens=max_thinking_tokens,
                 max_turns=max_turns,
                 permission_mode=permission_mode,
             )

@@ -212,7 +212,7 @@ class HookExecutor:
 
         Expected response format (JSON):
         {
-            "decision": "approve|block",
+            "decision": "allow|deny|ask|block",
             "reason": "explanation",
             "continue": false,           // optional
             "stopReason": "message",      // optional
@@ -255,9 +255,9 @@ class HookExecutor:
                     "Do not modify files. Do not ask the user questions. "
                     "When you are done, respond with a single JSON object and nothing else.\n\n"
                     "Response schema:\n"
-                    '- {"ok": true}\n'
-                    '- {"ok": false, "reason": "..."}\n\n'
-                    "If you are unsure, return ok=false with a clear reason."
+                    '- {"decision": "allow"}\n'
+                    '- {"decision": "deny", "reason": "..."}\n\n'
+                    "If you are unsure, return decision=deny with a clear reason."
                 ),
                 f"Allowed tools: {tool_names}",
                 build_environment_prompt(),

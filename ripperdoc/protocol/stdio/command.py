@@ -121,14 +121,19 @@ async def run_stdio(
     if print_mode and prompt:
         # This is a single-shot query mode
         # Initialize with defaults and run query
+        request_options: dict[str, Any] = dict(default_options or {})
+        if model is not None:
+            request_options["model"] = model
+        if permission_mode is not None:
+            request_options["permission_mode"] = permission_mode
+        if max_turns is not None:
+            request_options["max_turns"] = max_turns
+        if system_prompt is not None:
+            request_options["system_prompt"] = system_prompt
+        request_options["sdk_can_use_tool"] = False
+
         request = {
-            "options": {
-                "model": model,
-                "permission_mode": permission_mode,
-                "max_turns": max_turns,
-                "system_prompt": system_prompt,
-                "sdk_can_use_tool": False,
-            },
+            "options": request_options,
             "prompt": prompt,
         }
 

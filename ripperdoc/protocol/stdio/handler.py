@@ -91,6 +91,9 @@ class StdioProtocolHandler(
         self._disallowed_tools: list[str] | None = None
         self._tools_list: list[str] | None = None
         self._session_additional_working_dirs: set[str] = set()
+        self._fallback_model: str | None = None
+        self._max_budget_usd: float | None = None
+        self._json_schema: dict[str, Any] | None = None
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []

@@ -58,9 +58,6 @@ class HookDecision(str, Enum):
     ASK = "ask"
     BLOCK = "block"
 
-    # Legacy aliases (deprecated but supported)
-    APPROVE = "approve"  # Use 'allow' instead
-
 
 class HookInput(BaseModel):
     """Base class for hook input data.
@@ -368,7 +365,7 @@ class HookOutput(BaseModel):
     suppress_output: bool = Field(default=False, alias="suppressOutput")
     system_message: Optional[str] = Field(default=None, alias="systemMessage")
 
-    # Decision control (for backwards compatibility)
+    # Decision control
     decision: Optional[HookDecision] = None
     reason: Optional[str] = None
 
@@ -457,25 +454,15 @@ class HookOutput(BaseModel):
         output.suppress_output = data.get("suppressOutput", False)
         output.system_message = data.get("systemMessage")
 
-        # Legacy decision field (backwards compatibility)
+        # Decision field
         if "decision" in data:
             decision_str = str(data["decision"]).lower()
-            # Handle legacy aliases
-            if decision_str == "approve":
-                decision_str = "allow"
             try:
                 output.decision = HookDecision(decision_str)
             except ValueError:
                 pass
 
         output.reason = data.get("reason")
-
-        # Claude-style ok field (for prompt/agent hooks)
-        ok_value = data.get("ok")
-        if isinstance(ok_value, bool) and output.decision is None:
-            output.decision = HookDecision.ALLOW if ok_value else HookDecision.DENY
-            if output.reason is None:
-                output.reason = data.get("reason") or data.get("message")
 
         # Parse hook-specific output
         if "hookSpecificOutput" in data:
@@ -497,8 +484,6 @@ class HookOutput(BaseModel):
                     perm_decision = hso.get("permissionDecision")
                     if perm_decision:
                         perm_decision = perm_decision.lower()
-                        if perm_decision == "approve":
-                            perm_decision = "allow"
                         try:
                             output.decision = HookDecision(perm_decision)
                         except ValueError:
@@ -577,7 +562,7 @@ class HookOutput(BaseModel):
     @property
     def should_allow(self) -> bool:
         """Check if hook requests allowing."""
-        return self.decision in (HookDecision.ALLOW, HookDecision.APPROVE)
+        return self.decision == HookDecision.ALLOW
 
     @property
     def should_ask(self) -> bool:

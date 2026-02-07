@@ -365,8 +365,6 @@ async def prompt_multi_choice_with_ui(
                 message=message,
                 options=options,
                 title=title,
-                ok_text="Submit",
-                cancel_text="Cancel",
                 style_variant="ask_user_question",
                 custom_input_label="Other",
                 back_value=BACK_VALUE if allow_back else None,

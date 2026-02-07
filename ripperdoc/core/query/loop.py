@@ -384,6 +384,23 @@ class _PreparedToolCalls:
     permission_denied: bool = False
 
 
+@dataclass
+class _IterationPlan:
+    """Resolved model/prompt state for one query iteration."""
+
+    model_profile: ModelProfile
+    full_system_prompt: str
+    tools_for_model: List[Tool[Any, Any]]
+
+
+@dataclass
+class _AssistantWaitState:
+    """Mutable state produced while waiting for query_llm to finish."""
+
+    assistant_message: Optional[AssistantMessage] = None
+    aborted: bool = False
+
+
 def _normalize_tool_input_payload(raw_input: Any) -> Dict[str, Any]:
     """Normalize tool input payload to a plain dictionary."""
     if raw_input and hasattr(raw_input, "model_dump"):
@@ -397,6 +414,237 @@ def _normalize_tool_input_payload(raw_input: Any) -> Dict[str, Any]:
     else:
         normalized = {}
     return cast(Dict[str, Any], normalized)
+
+
+def _append_changed_file_notice_if_needed(
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    query_context: QueryContext,
+) -> None:
+    """Inject a user-visible changed-file notice at iteration start when needed."""
+    change_notices = detect_changed_files(query_context.file_state_cache)
+    if change_notices:
+        messages.append(create_user_message(_format_changed_file_notice(change_notices)))
+
+
+def _build_iteration_plan(
+    *,
+    system_prompt: str,
+    context: Dict[str, str],
+    query_context: QueryContext,
+) -> _IterationPlan:
+    """Resolve model/tool mode and build the full system prompt for one iteration."""
+    model_profile = resolve_model_profile(query_context.model)
+    tool_mode = determine_tool_mode(model_profile)
+    tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else query_context.all_tools()
+    full_system_prompt = build_full_system_prompt(
+        system_prompt, context, tool_mode, query_context.all_tools()
+    )
+    logger.debug(
+        "[query] Built system prompt",
+        extra={
+            "prompt_chars": len(full_system_prompt),
+            "context_entries": len(context),
+            "tool_count": len(tools_for_model),
+        },
+    )
+    return _IterationPlan(
+        model_profile=model_profile,
+        full_system_prompt=full_system_prompt,
+        tools_for_model=tools_for_model,
+    )
+
+
+async def _enqueue_stream_progress(
+    progress_queue: asyncio.Queue[Optional[ProgressMessage]],
+    chunk: str,
+) -> None:
+    """Convert streamed text chunks to progress messages and enqueue them."""
+    if not chunk:
+        return
+    try:
+        msg = create_progress_message(
+            tool_use_id="stream",
+            sibling_tool_use_ids=set(),
+            content=chunk,
+        )
+        try:
+            progress_queue.put_nowait(msg)
+        except asyncio.QueueFull:
+            try:
+                await asyncio.wait_for(progress_queue.put(msg), timeout=0.5)
+            except asyncio.TimeoutError:
+                logger.warning("[query] Progress queue full after timeout, dropping chunk")
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("[query] Failed to enqueue stream progress chunk: %s", exc)
+
+
+def _resolve_query_llm_callable() -> Callable[..., Awaitable[AssistantMessage]]:
+    """Resolve query_llm from package namespace for monkeypatch compatibility in tests."""
+    query_module = sys.modules.get("ripperdoc.core.query")
+    if query_module:
+        resolved = getattr(query_module, "query_llm", query_llm)
+        return cast(Callable[..., Awaitable[AssistantMessage]], resolved)
+    return query_llm
+
+
+async def _cancel_assistant_task(assistant_task: asyncio.Task[AssistantMessage]) -> None:
+    """Cancel an assistant task and swallow expected cancellation errors."""
+    assistant_task.cancel()
+    try:
+        await assistant_task
+    except CancelledError:
+        pass
+
+
+async def _cancel_pending_waiters(pending: set[asyncio.Task[Any]], assistant_task: asyncio.Task[Any]) -> None:
+    """Cancel helper waiters while leaving the primary assistant task intact."""
+    for task in pending:
+        if task is assistant_task:
+            continue
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+async def _poll_progress_or_completion(
+    *,
+    assistant_task: asyncio.Task[AssistantMessage],
+    progress_queue: asyncio.Queue[Optional[ProgressMessage]],
+    abort_controller: asyncio.Event,
+) -> tuple[Optional[ProgressMessage], Optional[AssistantMessage], bool]:
+    """Poll one progress/assistant/abort event.
+
+    Returns:
+        (progress, assistant_message, should_continue_loop)
+    """
+    try:
+        progress = progress_queue.get_nowait()
+        return progress, None, False
+    except asyncio.QueueEmpty:
+        waiter = asyncio.create_task(progress_queue.get())
+        abort_waiter = asyncio.create_task(abort_controller.wait())
+        done, pending = await asyncio.wait(
+            {assistant_task, waiter, abort_waiter},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        await _cancel_pending_waiters(pending, assistant_task)
+        if abort_waiter in done:
+            return None, None, True
+        if assistant_task in done:
+            return None, await assistant_task, False
+        return waiter.result(), None, False
+
+
+def _drain_progress_queue(
+    progress_queue: asyncio.Queue[Optional[ProgressMessage]],
+) -> List[ProgressMessage]:
+    """Drain any residual progress chunks left in queue order."""
+    residuals: List[ProgressMessage] = []
+    while not progress_queue.empty():
+        residual = progress_queue.get_nowait()
+        if residual:
+            residuals.append(residual)
+    return residuals
+
+
+async def _wait_for_assistant_with_progress(
+    *,
+    assistant_task: asyncio.Task[AssistantMessage],
+    progress_queue: asyncio.Queue[Optional[ProgressMessage]],
+    query_context: QueryContext,
+    model_name: Optional[str],
+    out: _AssistantWaitState,
+) -> AsyncGenerator[Union[ProgressMessage, AssistantMessage], None]:
+    """Yield progress while waiting for query_llm, then emit final assistant (or interrupt)."""
+    while True:
+        if query_context.abort_controller.is_set():
+            await _cancel_assistant_task(assistant_task)
+            out.aborted = True
+            yield create_assistant_message(INTERRUPT_MESSAGE, model=model_name)
+            return
+
+        if assistant_task.done():
+            out.assistant_message = await assistant_task
+            break
+
+        progress, completed_message, should_continue = await _poll_progress_or_completion(
+            assistant_task=assistant_task,
+            progress_queue=progress_queue,
+            abort_controller=query_context.abort_controller,
+        )
+        if should_continue:
+            continue
+        if completed_message is not None:
+            out.assistant_message = completed_message
+            break
+        if progress:
+            yield progress
+
+    for residual in _drain_progress_queue(progress_queue):
+        yield residual
+
+    if out.assistant_message is not None:
+        yield out.assistant_message
+
+
+async def _process_iteration_assistant_message(
+    *,
+    assistant_message: AssistantMessage,
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    context: Dict[str, str],
+    query_context: QueryContext,
+    can_use_tool_fn: Optional[ToolPermissionCallable],
+    result: IterationResult,
+    model_name: Optional[str],
+) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
+    """Process assistant tool calls, including hooks, permissions, and tool execution."""
+    tool_use_blocks: List[MessageContent] = extract_tool_use_blocks(assistant_message)
+    text_blocks = (
+        len(assistant_message.message.content)
+        if isinstance(assistant_message.message.content, list)
+        else 1
+    )
+    logger.debug(
+        f"[query] Assistant message received: text_blocks={text_blocks}, "
+        f"tool_use_blocks={len(tool_use_blocks)}"
+    )
+
+    if not tool_use_blocks:
+        async for msg in _handle_iteration_stop_hook(context, query_context, result):
+            yield msg
+        return
+
+    prepared = _PreparedToolCalls()
+    async for msg in _prepare_iteration_tool_calls(
+        tool_use_blocks=tool_use_blocks,
+        messages=messages,
+        context=context,
+        query_context=query_context,
+        can_use_tool_fn=can_use_tool_fn,
+        out=prepared,
+    ):
+        yield msg
+
+    if prepared.permission_denied:
+        result.tool_results = prepared.tool_results
+        result.should_stop = True
+        return
+
+    if prepared.prepared_calls:
+        async for message in _run_tools_concurrently(prepared.prepared_calls, prepared.tool_results):
+            yield message
+
+    _apply_skill_context_updates(prepared.tool_results, query_context)
+
+    if query_context.abort_controller.is_set():
+        yield create_assistant_message(INTERRUPT_MESSAGE_FOR_TOOL_USE, model=model_name)
+        result.tool_results = prepared.tool_results
+        result.should_stop = True
+        return
+
+    result.tool_results = prepared.tool_results
 
 
 async def _handle_iteration_stop_hook(
@@ -459,30 +707,193 @@ async def _prepare_iteration_tool_calls(
     )
 
     for tool_use in tool_use_blocks:
-        tool_name = tool_use.name
-        if not tool_name:
+        if not tool_use.name:
             continue
-        tool_use_id = getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
-        tool_input = _normalize_tool_input_payload(getattr(tool_use, "input", {}) or {})
+        async for msg in _prepare_single_iteration_tool_call(
+            tool_use=tool_use,
+            sibling_ids=sibling_ids,
+            messages=messages,
+            context=context,
+            query_context=query_context,
+            can_use_tool_fn=can_use_tool_fn,
+            out=out,
+        ):
+            yield msg
 
-        tool, missing_msg = _resolve_tool(query_context.tool_registry, tool_name, tool_use_id)
-        if missing_msg:
-            logger.warning(f"[query] Tool '{tool_name}' not found for tool_use_id={tool_use_id}")
-            out.tool_results.append(missing_msg)
-            yield missing_msg
-            continue
-        if tool is None:
-            raise RuntimeError(f"Tool '{tool_name}' resolved to None unexpectedly")
+        if out.permission_denied:
+            break
 
-        try:
-            parsed_input = tool.input_schema(**tool_input)
-            logger.debug(
-                f"[query] tool_use_id={tool_use_id} name={tool_name} parsed_input="
-                f"{str(parsed_input)[:500]}"
+
+async def _prepare_single_iteration_tool_call(
+    *,
+    tool_use: MessageContent,
+    sibling_ids: set[str],
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    context: Dict[str, str],
+    query_context: QueryContext,
+    can_use_tool_fn: Optional[ToolPermissionCallable],
+    out: _PreparedToolCalls,
+) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+    """Prepare one tool_use block for execution (resolve, validate, hook, permissions)."""
+    tool_name = cast(str, tool_use.name)
+    tool_use_id = getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
+    tool_input = _normalize_tool_input_payload(getattr(tool_use, "input", {}) or {})
+
+    tool, resolution_error = _resolve_tool_for_iteration_call(
+        query_context=query_context,
+        tool_name=tool_name,
+        tool_use_id=tool_use_id,
+    )
+    if resolution_error is not None:
+        out.tool_results.append(resolution_error)
+        yield resolution_error
+        return
+    tool = cast(Tool[Any, Any], tool)
+
+    try:
+        parsed_input, tool_context, tool_input_dict, validation_error = (
+            await _parse_and_validate_tool_input_for_call(
+                tool=tool,
+                tool_name=tool_name,
+                tool_use_id=tool_use_id,
+                tool_input=tool_input,
+                query_context=query_context,
+                can_use_tool_fn=can_use_tool_fn,
+                messages=messages,
             )
+        )
+        if validation_error is not None:
+            out.tool_results.append(validation_error)
+            yield validation_error
+            return
 
-            tool_context = ToolUseContext(
-                message_id=tool_use_id,  # Set message_id for parent_tool_use_id tracking
+        pre_result, pre_progress = await _run_pre_tool_use_hook_with_progress(
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            tool_input_dict=tool_input_dict,
+            sibling_ids=sibling_ids,
+        )
+        for message in pre_progress:
+            yield message
+        if pre_result.should_block or not pre_result.should_continue:
+            reason = pre_result.block_reason or pre_result.stop_reason or f"Blocked by hook: {tool_name}"
+            result_msg = tool_result_message(tool_use_id, f"Hook blocked: {reason}", is_error=True)
+            out.tool_results.append(result_msg)
+            yield result_msg
+            return
+
+        parsed_input, tool_input_dict, hook_input_error = await _apply_pre_hook_input_update(
+            pre_result=pre_result,
+            tool=tool,
+            parsed_input=parsed_input,
+            tool_context=tool_context,
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            tool_input_dict=tool_input_dict,
+        )
+        if hook_input_error is not None:
+            out.tool_results.append(hook_input_error)
+            yield hook_input_error
+            return
+
+        for notice in _collect_pre_tool_hook_notices(
+            pre_result=pre_result,
+            context=context,
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            sibling_ids=sibling_ids,
+        ):
+            yield notice
+
+        parsed_input, permission_denied, permission_error = await _apply_permission_updates(
+            tool=tool,
+            parsed_input=parsed_input,
+            query_context=query_context,
+            can_use_tool_fn=can_use_tool_fn,
+            pre_result=pre_result,
+            tool_context=tool_context,
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+        )
+        if permission_error is not None:
+            out.tool_results.append(permission_error)
+            out.permission_denied = out.permission_denied or permission_denied
+            yield permission_error
+            return
+
+        out.prepared_calls.append(
+            {
+                "tool_name": tool_name,
+                "is_concurrency_safe": tool.is_concurrency_safe(),
+                "generator": _run_tool_use_generator(
+                    tool,
+                    tool_use_id,
+                    tool_name,
+                    parsed_input,
+                    sibling_ids,
+                    tool_context,
+                    context,
+                ),
+            }
+        )
+    except CancelledError:
+        raise
+    except (
+        RuntimeError,
+        ValueError,
+        TypeError,
+        OSError,
+        IOError,
+        AttributeError,
+        KeyError,
+    ) as e:
+        logger.warning(
+            "Error executing tool '%s': %s: %s",
+            tool_name,
+            type(e).__name__,
+            e,
+            extra={"tool": tool_name, "tool_use_id": tool_use_id},
+        )
+        error_msg = tool_result_message(tool_use_id, f"Error executing tool: {str(e)}", is_error=True)
+        out.tool_results.append(error_msg)
+        yield error_msg
+
+
+def _resolve_tool_for_iteration_call(
+    *,
+    query_context: QueryContext,
+    tool_name: str,
+    tool_use_id: str,
+) -> tuple[Optional[Tool[Any, Any]], Optional[UserMessage]]:
+    """Resolve tool instance for one tool_use call and return user-facing error if missing."""
+    tool, missing_msg = _resolve_tool(query_context.tool_registry, tool_name, tool_use_id)
+    if missing_msg:
+        logger.warning(f"[query] Tool '{tool_name}' not found for tool_use_id={tool_use_id}")
+        return None, missing_msg
+    if tool is None:
+        raise RuntimeError(f"Tool '{tool_name}' resolved to None unexpectedly")
+    return tool, None
+
+
+async def _parse_and_validate_tool_input_for_call(
+    *,
+    tool: Tool[Any, Any],
+    tool_name: str,
+    tool_use_id: str,
+    tool_input: Dict[str, Any],
+    query_context: QueryContext,
+    can_use_tool_fn: Optional[ToolPermissionCallable],
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+) -> tuple[Any, ToolUseContext, Dict[str, Any], Optional[UserMessage]]:
+    """Parse tool input and run the first validation pass."""
+    try:
+        parsed_input = tool.input_schema(**tool_input)
+    except ValidationError as ve:
+        detail_text = format_pydantic_errors(ve)
+        return (
+            {},
+            ToolUseContext(
+                message_id=tool_use_id,
                 yolo_mode=query_context.yolo_mode,
                 verbose=query_context.verbose,
                 permission_checker=can_use_tool_fn,
@@ -493,209 +904,226 @@ async def _prepare_iteration_tool_calls(
                 pause_ui=query_context.pause_ui,
                 resume_ui=query_context.resume_ui,
                 pending_message_queue=query_context.pending_message_queue,
-            )
-
-            validation = await tool.validate_input(parsed_input, tool_context)
-            if not validation.result:
-                logger.debug(
-                    f"[query] Validation failed for tool_use_id={tool_use_id}: {validation.message}"
-                )
-                result_msg = tool_result_message(
-                    tool_use_id,
-                    validation.message or "Tool input validation failed.",
-                    is_error=True,
-                )
-                out.tool_results.append(result_msg)
-                yield result_msg
-                continue
-
-            tool_input_dict = (
-                parsed_input.model_dump()
-                if hasattr(parsed_input, "model_dump")
-                else dict(parsed_input)
-                if isinstance(parsed_input, dict)
-                else {}
-            )
-
-            # Run PreToolUse hooks before permission checks.
-            pre_result: Optional[HookResult] = None
-            async for item in _run_hook_call_with_status(
-                hook_manager.run_pre_tool_use_async(
-                    tool_name, tool_input_dict, tool_use_id=tool_use_id
-                ),
-                tool_use_id,
-                sibling_ids,
-            ):
-                if isinstance(item, ProgressMessage):
-                    yield item
-                else:
-                    pre_result = item
-            if pre_result is None:
-                pre_result = HookResult([])
-            if pre_result.should_block or not pre_result.should_continue:
-                reason = (
-                    pre_result.block_reason
-                    or pre_result.stop_reason
-                    or f"Blocked by hook: {tool_name}"
-                )
-                result_msg = tool_result_message(tool_use_id, f"Hook blocked: {reason}", is_error=True)
-                out.tool_results.append(result_msg)
-                yield result_msg
-                continue
-
-            if pre_result.updated_input:
-                logger.debug(
-                    f"[query] PreToolUse hook modified input for {tool_name}",
-                    extra={"tool_use_id": tool_use_id},
-                )
-                try:
-                    normalized_input = _normalize_tool_input_payload(pre_result.updated_input)
-                    parsed_input = tool.input_schema(**normalized_input)
-                    tool_input_dict = normalized_input
-                except ValidationError as ve:
-                    detail_text = format_pydantic_errors(ve)
-                    error_msg = tool_result_message(
-                        tool_use_id,
-                        f"Invalid PreToolUse-updated input for tool '{tool_name}': {detail_text}",
-                        is_error=True,
-                    )
-                    out.tool_results.append(error_msg)
-                    yield error_msg
-                    continue
-                except (TypeError, ValueError) as exc:
-                    logger.warning(
-                        "[query] Failed to apply updated input from PreToolUse hook: %s",
-                        exc,
-                        extra={"tool_use_id": tool_use_id},
-                    )
-                    error_msg = tool_result_message(
-                        tool_use_id,
-                        f"Invalid PreToolUse-updated input for tool '{tool_name}'.",
-                        is_error=True,
-                    )
-                    out.tool_results.append(error_msg)
-                    yield error_msg
-                    continue
-                validation = await tool.validate_input(parsed_input, tool_context)
-                if not validation.result:
-                    error_msg = tool_result_message(
-                        tool_use_id,
-                        validation.message or "Tool input validation failed.",
-                        is_error=True,
-                    )
-                    out.tool_results.append(error_msg)
-                    yield error_msg
-                    continue
-
-            if pre_result.additional_context:
-                _append_hook_context(context, f"PreToolUse:{tool_name}", pre_result.additional_context)
-            if pre_result.system_message:
-                yield create_hook_notice_message(
-                    str(pre_result.system_message),
-                    hook_event="PreToolUse",
-                    tool_name=tool_name,
-                    tool_use_id=tool_use_id,
-                    sibling_tool_use_ids=sibling_ids,
-                )
-
-            force_permission_prompt = pre_result.should_ask
-            bypass_permissions = pre_result.should_allow and not force_permission_prompt
-
-            if not bypass_permissions and (
-                not query_context.yolo_mode or can_use_tool_fn is not None or force_permission_prompt
-            ):
-                allowed, denial_message, updated_input = await _check_tool_permissions(
-                    tool,
-                    parsed_input,
-                    query_context,
-                    can_use_tool_fn,
-                    force_prompt=force_permission_prompt,
-                )
-                if not allowed:
-                    logger.debug(
-                        f"[query] Permission denied for tool_use_id={tool_use_id}: {denial_message}"
-                    )
-                    denial_text = denial_message or f"User aborted the tool invocation: {tool_name}"
-                    denial_msg = tool_result_message(tool_use_id, denial_text, is_error=True)
-                    out.tool_results.append(denial_msg)
-                    yield denial_msg
-                    out.permission_denied = True
-                    break
-                if updated_input:
-                    try:
-                        normalized_input = _normalize_tool_input_payload(updated_input)
-                        parsed_input = tool.input_schema(**normalized_input)
-                    except ValidationError as ve:
-                        detail_text = format_pydantic_errors(ve)
-                        error_msg = tool_result_message(
-                            tool_use_id,
-                            f"Invalid permission-updated input for tool '{tool_name}': {detail_text}",
-                            is_error=True,
-                        )
-                        out.tool_results.append(error_msg)
-                        yield error_msg
-                        continue
-                    validation = await tool.validate_input(parsed_input, tool_context)
-                    if not validation.result:
-                        error_msg = tool_result_message(
-                            tool_use_id,
-                            validation.message or "Tool input validation failed.",
-                            is_error=True,
-                        )
-                        out.tool_results.append(error_msg)
-                        yield error_msg
-                        continue
-
-            out.prepared_calls.append(
-                {
-                    "tool_name": tool_name,
-                    "is_concurrency_safe": tool.is_concurrency_safe(),
-                    "generator": _run_tool_use_generator(
-                        tool,
-                        tool_use_id,
-                        tool_name,
-                        parsed_input,
-                        sibling_ids,
-                        tool_context,
-                        context,
-                    ),
-                }
-            )
-
-        except ValidationError as ve:
-            detail_text = format_pydantic_errors(ve)
-            error_msg = tool_result_message(
+            ),
+            {},
+            tool_result_message(
                 tool_use_id,
                 f"Invalid input for tool '{tool_name}': {detail_text}",
                 is_error=True,
-            )
-            out.tool_results.append(error_msg)
-            yield error_msg
-            continue
-        except CancelledError:
-            raise  # Don't suppress task cancellation
-        except (
-            RuntimeError,
-            ValueError,
-            TypeError,
-            OSError,
-            IOError,
-            AttributeError,
-            KeyError,
-        ) as e:
-            logger.warning(
-                "Error executing tool '%s': %s: %s",
-                tool_name,
-                type(e).__name__,
-                e,
-                extra={"tool": tool_name, "tool_use_id": tool_use_id},
-            )
-            error_msg = tool_result_message(tool_use_id, f"Error executing tool: {str(e)}", is_error=True)
-            out.tool_results.append(error_msg)
-            yield error_msg
+            ),
+        )
+    logger.debug(
+        f"[query] tool_use_id={tool_use_id} name={tool_name} parsed_input="
+        f"{str(parsed_input)[:500]}"
+    )
+    tool_context = ToolUseContext(
+        message_id=tool_use_id,
+        yolo_mode=query_context.yolo_mode,
+        verbose=query_context.verbose,
+        permission_checker=can_use_tool_fn,
+        tool_registry=query_context.tool_registry,
+        file_state_cache=query_context.file_state_cache,
+        conversation_messages=messages,
+        abort_signal=query_context.abort_controller,
+        pause_ui=query_context.pause_ui,
+        resume_ui=query_context.resume_ui,
+        pending_message_queue=query_context.pending_message_queue,
+    )
+    validation = await tool.validate_input(parsed_input, tool_context)
+    if not validation.result:
+        logger.debug(f"[query] Validation failed for tool_use_id={tool_use_id}: {validation.message}")
+        return (
+            parsed_input,
+            tool_context,
+            {},
+            tool_result_message(
+                tool_use_id,
+                validation.message or "Tool input validation failed.",
+                is_error=True,
+            ),
+        )
+    tool_input_dict = (
+        parsed_input.model_dump()
+        if hasattr(parsed_input, "model_dump")
+        else dict(parsed_input)
+        if isinstance(parsed_input, dict)
+        else {}
+    )
+    return parsed_input, tool_context, tool_input_dict, None
 
-        if out.permission_denied:
-            break
+
+def _collect_pre_tool_hook_notices(
+    *,
+    pre_result: HookResult,
+    context: Dict[str, str],
+    tool_name: str,
+    tool_use_id: str,
+    sibling_ids: set[str],
+) -> List[Union[UserMessage, ProgressMessage]]:
+    """Apply pre-hook context updates and build any user-visible notices."""
+    notices: List[Union[UserMessage, ProgressMessage]] = []
+    if pre_result.additional_context:
+        _append_hook_context(context, f"PreToolUse:{tool_name}", pre_result.additional_context)
+    if pre_result.system_message:
+        notices.append(
+            create_hook_notice_message(
+                str(pre_result.system_message),
+                hook_event="PreToolUse",
+                tool_name=tool_name,
+                tool_use_id=tool_use_id,
+                sibling_tool_use_ids=sibling_ids,
+            )
+        )
+    return notices
+
+
+async def _run_pre_tool_use_hook_with_progress(
+    *,
+    tool_name: str,
+    tool_use_id: str,
+    tool_input_dict: Dict[str, Any],
+    sibling_ids: set[str],
+) -> tuple[HookResult, List[ProgressMessage]]:
+    """Run PreToolUse hook and collect emitted progress messages."""
+    progress_messages: List[ProgressMessage] = []
+    pre_result: Optional[HookResult] = None
+    async for item in _run_hook_call_with_status(
+        hook_manager.run_pre_tool_use_async(tool_name, tool_input_dict, tool_use_id=tool_use_id),
+        tool_use_id,
+        sibling_ids,
+    ):
+        if isinstance(item, ProgressMessage):
+            progress_messages.append(item)
+        else:
+            pre_result = item
+    return pre_result or HookResult([]), progress_messages
+
+
+async def _apply_pre_hook_input_update(
+    *,
+    pre_result: HookResult,
+    tool: Tool[Any, Any],
+    parsed_input: Any,
+    tool_context: ToolUseContext,
+    tool_name: str,
+    tool_use_id: str,
+    tool_input_dict: Dict[str, Any],
+) -> tuple[Any, Dict[str, Any], Optional[UserMessage]]:
+    """Apply PreToolUse updated_input (if any) and re-validate."""
+    if not pre_result.updated_input:
+        return parsed_input, tool_input_dict, None
+
+    logger.debug(
+        f"[query] PreToolUse hook modified input for {tool_name}",
+        extra={"tool_use_id": tool_use_id},
+    )
+    try:
+        normalized_input = _normalize_tool_input_payload(pre_result.updated_input)
+        parsed_input = tool.input_schema(**normalized_input)
+        tool_input_dict = normalized_input
+    except ValidationError as ve:
+        detail_text = format_pydantic_errors(ve)
+        return (
+            parsed_input,
+            tool_input_dict,
+            tool_result_message(
+                tool_use_id,
+                f"Invalid PreToolUse-updated input for tool '{tool_name}': {detail_text}",
+                is_error=True,
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "[query] Failed to apply updated input from PreToolUse hook: %s",
+            exc,
+            extra={"tool_use_id": tool_use_id},
+        )
+        return (
+            parsed_input,
+            tool_input_dict,
+            tool_result_message(
+                tool_use_id,
+                f"Invalid PreToolUse-updated input for tool '{tool_name}'.",
+                is_error=True,
+            ),
+        )
+
+    validation = await tool.validate_input(parsed_input, tool_context)
+    if not validation.result:
+        return (
+            parsed_input,
+            tool_input_dict,
+            tool_result_message(
+                tool_use_id,
+                validation.message or "Tool input validation failed.",
+                is_error=True,
+            ),
+        )
+    return parsed_input, tool_input_dict, None
+
+
+async def _apply_permission_updates(
+    *,
+    tool: Tool[Any, Any],
+    parsed_input: Any,
+    query_context: QueryContext,
+    can_use_tool_fn: Optional[ToolPermissionCallable],
+    pre_result: HookResult,
+    tool_context: ToolUseContext,
+    tool_name: str,
+    tool_use_id: str,
+) -> tuple[Any, bool, Optional[UserMessage]]:
+    """Run permission gate and apply permission-updated input when provided."""
+    force_permission_prompt = pre_result.should_ask
+    bypass_permissions = pre_result.should_allow and not force_permission_prompt
+    should_check_permissions = not bypass_permissions and (
+        not query_context.yolo_mode or can_use_tool_fn is not None or force_permission_prompt
+    )
+    if not should_check_permissions:
+        return parsed_input, False, None
+
+    allowed, denial_message, updated_input = await _check_tool_permissions(
+        tool,
+        parsed_input,
+        query_context,
+        can_use_tool_fn,
+        force_prompt=force_permission_prompt,
+    )
+    if not allowed:
+        logger.debug(f"[query] Permission denied for tool_use_id={tool_use_id}: {denial_message}")
+        denial_text = denial_message or f"User aborted the tool invocation: {tool_name}"
+        return parsed_input, True, tool_result_message(tool_use_id, denial_text, is_error=True)
+
+    if not updated_input:
+        return parsed_input, False, None
+
+    try:
+        normalized_input = _normalize_tool_input_payload(updated_input)
+        parsed_input = tool.input_schema(**normalized_input)
+    except ValidationError as ve:
+        detail_text = format_pydantic_errors(ve)
+        return (
+            parsed_input,
+            False,
+            tool_result_message(
+                tool_use_id,
+                f"Invalid permission-updated input for tool '{tool_name}': {detail_text}",
+                is_error=True,
+            ),
+        )
+
+    validation = await tool.validate_input(parsed_input, tool_context)
+    if not validation.result:
+        return (
+            parsed_input,
+            False,
+            tool_result_message(
+                tool_use_id,
+                validation.message or "Tool input validation failed.",
+                is_error=True,
+            ),
+        )
+    return parsed_input, False, None
 
 
 async def _run_query_iteration(
@@ -728,62 +1156,25 @@ async def _run_query_iteration(
     """
     logger.info(f"[query] Starting iteration {iteration}/{MAX_QUERY_ITERATIONS}")
 
-    # Check for file changes at the start of each iteration
-    change_notices = detect_changed_files(query_context.file_state_cache)
-    if change_notices:
-        messages.append(create_user_message(_format_changed_file_notice(change_notices)))
-
-    model_profile = resolve_model_profile(query_context.model)
-    tool_mode = determine_tool_mode(model_profile)
-    tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else query_context.all_tools()
-
-    full_system_prompt = build_full_system_prompt(
-        system_prompt, context, tool_mode, query_context.all_tools()
-    )
-    logger.debug(
-        "[query] Built system prompt",
-        extra={
-            "prompt_chars": len(full_system_prompt),
-            "context_entries": len(context),
-            "tool_count": len(tools_for_model),
-        },
+    _append_changed_file_notice_if_needed(messages, query_context)
+    plan = _build_iteration_plan(
+        system_prompt=system_prompt,
+        context=context,
+        query_context=query_context,
     )
 
-    # Stream LLM response
     progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue(maxsize=1000)
-
-    async def _stream_progress(chunk: str) -> None:
-        if not chunk:
-            return
-        try:
-            msg = create_progress_message(
-                tool_use_id="stream",
-                sibling_tool_use_ids=set(),
-                content=chunk,
-            )
-            try:
-                progress_queue.put_nowait(msg)
-            except asyncio.QueueFull:
-                # Queue full - wait with timeout instead of dropping immediately
-                try:
-                    await asyncio.wait_for(progress_queue.put(msg), timeout=0.5)
-                except asyncio.TimeoutError:
-                    logger.warning("[query] Progress queue full after timeout, dropping chunk")
-        except (RuntimeError, ValueError) as exc:
-            logger.warning("[query] Failed to enqueue stream progress chunk: %s", exc)
-
-    query_module = sys.modules.get("ripperdoc.core.query")
-    query_llm_fn = getattr(query_module, "query_llm", query_llm) if query_module else query_llm
+    query_llm_fn = _resolve_query_llm_callable()
 
     assistant_task = asyncio.create_task(
         query_llm_fn(
             messages,
-            full_system_prompt,
-            tools_for_model,
+            plan.full_system_prompt,
+            plan.tools_for_model,
             query_context.max_thinking_tokens,
             query_context.model,
             query_context.abort_controller,
-            progress_callback=_stream_progress,
+            progress_callback=lambda chunk: _enqueue_stream_progress(progress_queue, chunk),
             request_timeout=DEFAULT_REQUEST_TIMEOUT_SEC,
             max_retries=MAX_LLM_RETRIES,
             stream=True,
@@ -791,116 +1182,40 @@ async def _run_query_iteration(
     )
 
     logger.debug("[query] Created query_llm task, waiting for response...")
-
-    assistant_message: Optional[AssistantMessage] = None
-
-    # Wait for LLM response while yielding progress
-    while True:
-        if query_context.abort_controller.is_set():
-            assistant_task.cancel()
-            try:
-                await assistant_task
-            except CancelledError:
-                pass
-            yield create_assistant_message(INTERRUPT_MESSAGE, model=model_profile.model)
+    wait_state = _AssistantWaitState()
+    async for item in _wait_for_assistant_with_progress(
+        assistant_task=assistant_task,
+        progress_queue=progress_queue,
+        query_context=query_context,
+        model_name=plan.model_profile.model,
+        out=wait_state,
+    ):
+        if getattr(item, "type", None) == "progress":
+            yield item
+            continue
+        if wait_state.aborted:
+            yield item
             result.should_stop = True
             return
-        if assistant_task.done():
-            assistant_message = await assistant_task
-            break
-        try:
-            progress = progress_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            waiter = asyncio.create_task(progress_queue.get())
-            abort_waiter = asyncio.create_task(query_context.abort_controller.wait())
-            done, pending = await asyncio.wait(
-                {assistant_task, waiter, abort_waiter},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                # Don't cancel assistant_task here - it should only be cancelled
-                # through abort_controller in the main loop
-                if task is not assistant_task:
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-            if abort_waiter in done:
-                continue
-            if assistant_task in done:
-                assistant_message = await assistant_task
-                break
-            progress = waiter.result()
-        if progress:
-            yield progress
+        wait_state.assistant_message = cast(AssistantMessage, item)
 
-    # Drain remaining progress messages
-    while not progress_queue.empty():
-        residual = progress_queue.get_nowait()
-        if residual:
-            yield residual
-
+    assistant_message = wait_state.assistant_message
     if assistant_message is None:
         raise RuntimeError("assistant_message was unexpectedly None after LLM query")
+
     result.assistant_message = assistant_message
-
-    # Check for abort
-    if query_context.abort_controller.is_set():
-        yield create_assistant_message(INTERRUPT_MESSAGE, model=model_profile.model)
-        result.should_stop = True
-        return
-
     yield assistant_message
 
-    # Extract and process tool calls
-    tool_use_blocks: List[MessageContent] = extract_tool_use_blocks(assistant_message)
-    text_blocks = (
-        len(assistant_message.message.content)
-        if isinstance(assistant_message.message.content, list)
-        else 1
-    )
-    logger.debug(
-        f"[query] Assistant message received: text_blocks={text_blocks}, "
-        f"tool_use_blocks={len(tool_use_blocks)}"
-    )
-
-    if not tool_use_blocks:
-        async for msg in _handle_iteration_stop_hook(context, query_context, result):
-            yield msg
-        return
-
-    prepared = _PreparedToolCalls()
-    async for msg in _prepare_iteration_tool_calls(
-        tool_use_blocks=tool_use_blocks,
+    async for item in _process_iteration_assistant_message(
+        assistant_message=assistant_message,
         messages=messages,
         context=context,
         query_context=query_context,
         can_use_tool_fn=can_use_tool_fn,
-        out=prepared,
+        result=result,
+        model_name=plan.model_profile.model,
     ):
-        yield msg
-
-    if prepared.permission_denied:
-        result.tool_results = prepared.tool_results
-        result.should_stop = True
-        return
-
-    if prepared.prepared_calls:
-        async for message in _run_tools_concurrently(prepared.prepared_calls, prepared.tool_results):
-            yield message
-
-    _apply_skill_context_updates(prepared.tool_results, query_context)
-
-    # Check for abort after tools
-    if query_context.abort_controller.is_set():
-        yield create_assistant_message(INTERRUPT_MESSAGE_FOR_TOOL_USE, model=model_profile.model)
-        result.tool_results = prepared.tool_results
-        result.should_stop = True
-        return
-
-    result.tool_results = prepared.tool_results
-    # should_stop remains False, indicating the loop should continue
+        yield item
 
 
 async def query(
@@ -930,24 +1245,6 @@ async def query(
     """
     # Resolve model once for use in messages (e.g., max iterations, errors)
     model_profile = resolve_model_profile(query_context.model)
-    """Execute a query with tool support.
-
-    This is the main query loop that:
-    1. Sends messages to the AI
-    2. Handles tool use responses
-    3. Executes tools
-    4. Continues the conversation in a loop until no more tool calls
-
-    Args:
-        messages: Conversation history
-        system_prompt: Base system prompt
-        context: Additional context dictionary
-        query_context: Query configuration
-        can_use_tool_fn: Optional function to check tool permissions
-
-    Yields:
-        Messages (user, assistant, progress) as they are generated
-    """
     with bind_pending_message_queue(query_context.pending_message_queue), bind_hook_scopes(
         query_context.hook_scopes
     ):

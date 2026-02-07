@@ -10,7 +10,6 @@ from .tool_permission_utils import (
     PermissionDecision,
     ToolRule,
     evaluate_shell_command_permissions,
-    extract_rule_prefix,
     match_rule,
 )
 
@@ -19,7 +18,6 @@ __all__ = [
     "ToolRule",
     "ValidationResult",
     "evaluate_shell_command_permissions",
-    "extract_rule_prefix",
     "is_complex_unsafe_shell_command",
     "match_rule",
     "validate_shell_command_paths",

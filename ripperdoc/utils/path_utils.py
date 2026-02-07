@@ -27,20 +27,11 @@ def sanitize_project_path(project_path: Path) -> str:
 
 
 def project_storage_dir(base_dir: Path, project_path: Path, ensure: bool = False) -> Path:
-    """Return a storage directory path for a project, with legacy fallback.
-
-    Prefers a hashed, collision-safe name but will reuse an existing legacy
-    directory (pre-hash) to avoid stranding older data.
-    """
+    """Return the hashed storage directory path for a project."""
     hashed_name = sanitize_project_path(project_path)
-    legacy_name = _legacy_sanitize_project_path(project_path)
-
     hashed_dir = base_dir / hashed_name
-    legacy_dir = base_dir / legacy_name
-
-    chosen = hashed_dir if hashed_dir.exists() or not legacy_dir.exists() else legacy_dir
 
     if ensure:
-        chosen.mkdir(parents=True, exist_ok=True)
+        hashed_dir.mkdir(parents=True, exist_ok=True)
 
-    return chosen
+    return hashed_dir

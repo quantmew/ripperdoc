@@ -395,7 +395,6 @@ async def _run_concurrent_tool_uses(
     if not generators:
         logger.debug("[query] _run_concurrent_tool_uses: no generators, returning")
         return
-        yield  # Make this a proper async generator that yields nothing (unreachable but required)
 
     queue: asyncio.Queue[Optional[Union[UserMessage, ProgressMessage]]] = asyncio.Queue()
 

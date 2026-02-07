@@ -99,7 +99,6 @@ class StdioControlMixin:
         requested_style = (
             request.get("style")
             or request.get("output_style")
-            or request.get("outputStyle")
             or "default"
         )
         resolved_style, _ = resolve_output_style(
@@ -146,10 +145,8 @@ class StdioControlMixin:
             request: The can_use_tool request data.
             request_id: The request ID.
         """
-        tool_name = request.get("tool_name") or request.get("toolName") or ""
+        tool_name = request.get("tool_name") or ""
         tool_input = request.get("input")
-        if tool_input is None:
-            tool_input = request.get("tool_input", {})
         if tool_input is None:
             tool_input = {}
 
@@ -209,10 +206,6 @@ class StdioControlMixin:
                     allowed = bool(result.result)
                     message = result.message
                     updated_input = result.updated_input
-                elif isinstance(result, dict) and "result" in result:
-                    allowed = bool(result.get("result"))
-                    message = result.get("message")
-                    updated_input = result.get("updated_input") or result.get("updatedInput")
                 elif isinstance(result, tuple) and len(result) == 2:
                     allowed = bool(result[0])
                     message = result[1]

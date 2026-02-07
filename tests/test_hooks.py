@@ -96,20 +96,6 @@ class TestHookOutputParsing:
         assert output.decision == HookDecision.BLOCK
         assert output.reason == "Operation blocked"
 
-    def test_json_approve_legacy_alias(self):
-        """JSON with 'approve' (legacy) should map to ALLOW."""
-        json_output = json.dumps({"decision": "approve", "reason": "Legacy approval"})
-        output = HookOutput.from_raw(json_output, "", 0)
-        assert output.decision == HookDecision.ALLOW
-
-    def test_json_ok_boolean(self):
-        """JSON with ok=true/false should map to allow/deny."""
-        output = HookOutput.from_raw(json.dumps({"ok": True}), "", 0)
-        assert output.decision == HookDecision.ALLOW
-        output = HookOutput.from_raw(json.dumps({"ok": False, "reason": "Nope"}), "", 0)
-        assert output.decision == HookDecision.DENY
-        assert output.reason == "Nope"
-
     def test_exit_code_2_blocking_error(self):
         """Exit code 2 should treat stderr as blocking error."""
         output = HookOutput.from_raw("", "Dangerous operation detected", 2)
@@ -192,7 +178,7 @@ class TestHookOutputParsing:
                         "message": "Auto-allowed for temp directory",
                     },
                     "updatedPermissions": [
-                        {"toolName": "Bash", "rule": "ls:*", "behavior": "allow"}
+                        {"tool_name": "Bash", "rule": "ls *", "behavior": "allow"}
                     ],
                 }
             }
@@ -228,13 +214,11 @@ class TestHookOutputParsing:
         assert allow_output.should_block is False
 
     def test_should_allow_property(self):
-        """should_allow property should return True for ALLOW and APPROVE."""
+        """should_allow property should return True for ALLOW only."""
         allow_output = HookOutput(decision=HookDecision.ALLOW)
-        approve_output = HookOutput(decision=HookDecision.APPROVE)
         deny_output = HookOutput(decision=HookDecision.DENY)
 
         assert allow_output.should_allow is True
-        assert approve_output.should_allow is True
         assert deny_output.should_allow is False
 
     def test_should_ask_property(self):

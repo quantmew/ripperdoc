@@ -157,10 +157,10 @@ def test_project_config():
     assert isinstance(config.working_directories, list)
 
 
-def test_project_local_config_accepts_output_style_alias():
-    """ProjectLocalConfig should accept outputStyle alias."""
+def test_project_local_config_ignores_output_style_alias():
+    """ProjectLocalConfig should ignore legacy outputStyle alias."""
     config = ProjectLocalConfig(**{"outputStyle": "learning"})
-    assert config.output_style == "learning"
+    assert config.output_style == "default"
 
 
 def test_known_providers_use_model_profile_objects():

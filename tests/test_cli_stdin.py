@@ -19,6 +19,9 @@ def test_cli_consumes_piped_stdin_as_initial_query(monkeypatch, tmp_path):
         custom_system_prompt=None,
         append_system_prompt=None,
         model=None,
+        max_thinking_tokens=None,
+        max_turns=None,
+        permission_mode="default",
         resume_messages=None,
         initial_query=None,
         additional_working_dirs=None,
@@ -27,6 +30,8 @@ def test_cli_consumes_piped_stdin_as_initial_query(monkeypatch, tmp_path):
         recorded["initial_query"] = initial_query
         recorded["yolo_mode"] = yolo_mode
         recorded["session_id"] = session_id
+        recorded["max_turns"] = max_turns
+        recorded["permission_mode"] = permission_mode
 
     # Import the ui module to mock main_rich
     from ripperdoc.cli.ui import rich_ui
