@@ -181,6 +181,29 @@ class _InstallScopeScreen(ModalScreen[Optional[str]]):
         self.dismiss(None)
 
 
+class _ConfirmActionScreen(ModalScreen[bool]):
+    def __init__(self, title: str, body: str, *, confirm_label: str, cancel_label: str) -> None:
+        super().__init__()
+        self._title = title
+        self._body = body
+        self._confirm_label = confirm_label
+        self._cancel_label = cancel_label
+
+    def compose(self) -> ComposeResult:
+        with Container(id="details_dialog"):
+            yield Static(self._title, id="details_title")
+            yield Static(self._body, id="details_body")
+            with Horizontal(id="details_buttons"):
+                yield Button(self._confirm_label, id="confirm_yes", variant="warning")
+                yield Button(self._cancel_label, id="confirm_no", variant="default")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm_yes":
+            self.dismiss(True)
+            return
+        self.dismiss(False)
+
+
 class PluginsApp(App[None]):
     CSS = """
     Screen {
@@ -726,10 +749,7 @@ class PluginsApp(App[None]):
             (item for item in self._installed_plugins if item.name == entry.name), None
         )
         if installed is not None:
-            ok, message = self._uninstall_from_known_scopes(installed.path)
-            self.notify(message, severity="information" if ok else "warning")
-            self._reload_all_data(force_discover=False)
-            self._refresh_view()
+            self._confirm_uninstall(installed.path, installed.name)
             return
 
         self._show_install_scope(entry)
@@ -780,10 +800,7 @@ class PluginsApp(App[None]):
         selected = self._selected_installed_plugin()
         if not selected:
             return
-        ok, message = self._uninstall_from_known_scopes(selected.path)
-        self.notify(message, severity="information" if ok else "warning")
-        self._reload_all_data(force_discover=False)
-        self._refresh_view()
+        self._confirm_uninstall(selected.path, selected.name)
 
     def _show_discover_details(self, idx: int) -> None:
         filtered = self._filter_discover()
@@ -865,20 +882,14 @@ class PluginsApp(App[None]):
             if not installed:
                 self.notify(f"Plugin '{entry.name}' is not installed.", severity="warning")
                 return
-            ok, message = self._uninstall_from_known_scopes(installed.path)
-            self.notify(message, severity="information" if ok else "warning")
-            self._reload_all_data(force_discover=False)
-            self._refresh_view()
+            self._confirm_uninstall(installed.path, installed.name)
 
     def _handle_installed_details_action(
         self, item: _InstalledPlugin, action: Optional[str]
     ) -> None:
         if action != "uninstall":
             return
-        ok, message = self._uninstall_from_known_scopes(item.path)
-        self.notify(message, severity="information" if ok else "warning")
-        self._reload_all_data(force_discover=False)
-        self._refresh_view()
+        self._confirm_uninstall(item.path, item.name)
 
     def _handle_marketplace_details_action(
         self, marketplace: MarketplaceSource, action: Optional[str]
@@ -927,6 +938,30 @@ class PluginsApp(App[None]):
                 return ok, message
             errors.append(message)
         return False, errors[-1] if errors else f"Failed to uninstall plugin {plugin_path}"
+
+    def _confirm_uninstall(self, plugin_path: Path, plugin_name: str) -> None:
+        body = (
+            f"Plugin: {plugin_name}\n"
+            f"Path: {plugin_path}\n\n"
+            "Are you sure you want to uninstall this plugin?"
+        )
+        self.push_screen(
+            _ConfirmActionScreen(
+                "Confirm uninstall",
+                body,
+                confirm_label="Uninstall",
+                cancel_label="Cancel",
+            ),
+            lambda confirmed: self._handle_confirm_uninstall(confirmed, plugin_path),
+        )
+
+    def _handle_confirm_uninstall(self, confirmed: bool, plugin_path: Path) -> None:
+        if not confirmed:
+            return
+        ok, message = self._uninstall_from_known_scopes(plugin_path)
+        self.notify(message, severity="information" if ok else "warning")
+        self._reload_all_data(force_discover=False)
+        self._refresh_view()
 
 
 def run_plugins_tui(project_path: Optional[Path]) -> bool:
