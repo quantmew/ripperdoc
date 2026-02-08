@@ -1,6 +1,12 @@
 """Tests for context window heuristics."""
 
-from ripperdoc.utils.message_compaction import get_model_context_limit
+import pytest
+
+from ripperdoc.utils.message_compaction import (
+    ContextBudgetConfigurationError,
+    get_model_context_limit,
+    get_remaining_context_tokens,
+)
 from ripperdoc.core.config import ModelProfile, ProtocolType
 
 
@@ -32,3 +38,62 @@ def test_openai_and_deepseek_defaults():
     assert get_model_context_limit(profile_gpt4o) == 128_000
     assert get_model_context_limit(profile_gpt4) == 32_000
     assert get_model_context_limit(profile_deepseek) >= 128_000
+
+
+def test_remaining_tokens_uses_split_input_budget_without_double_subtract():
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="zai/glm-4.7",
+        max_input_tokens=200_000,
+        max_output_tokens=128_000,
+        max_tokens=128_000,
+    )
+
+    assert get_remaining_context_tokens(profile) == 200_000
+
+
+def test_remaining_tokens_subtracts_output_for_total_window_profiles():
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="example-total-window-model",
+        context_window=128_000,
+        max_tokens=8_192,
+    )
+
+    assert get_remaining_context_tokens(profile) == 119_808
+
+
+def test_remaining_tokens_raises_on_output_parse_error():
+    class BrokenProfile:
+        model = "broken-model"
+        context_window = 128_000
+        max_input_tokens = None
+        max_output_tokens = {"invalid": True}
+        max_tokens = {"invalid": True}
+
+    with pytest.raises(ContextBudgetConfigurationError):
+        get_remaining_context_tokens(BrokenProfile())
+
+
+def test_remaining_tokens_raises_on_zero_max_input_tokens():
+    class BrokenProfile:
+        model = "broken-input-model"
+        context_window = 128_000
+        max_input_tokens = 0
+        max_output_tokens = 16_384
+        max_tokens = 16_384
+
+    with pytest.raises(ContextBudgetConfigurationError):
+        get_remaining_context_tokens(BrokenProfile())
+
+
+def test_remaining_tokens_raises_on_zero_max_output_tokens():
+    class BrokenProfile:
+        model = "broken-output-model"
+        context_window = 128_000
+        max_input_tokens = None
+        max_output_tokens = 0
+        max_tokens = 16_384
+
+    with pytest.raises(ContextBudgetConfigurationError):
+        get_remaining_context_tokens(BrokenProfile())

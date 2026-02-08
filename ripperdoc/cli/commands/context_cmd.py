@@ -1,5 +1,6 @@
 import json
 from typing import List, Any
+from rich.markup import escape
 
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.cli.ui.context_display import format_tokens
@@ -9,6 +10,7 @@ from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.message_compaction import (
+    ContextBudgetConfigurationError,
     get_remaining_context_tokens,
     resolve_auto_compact_enabled,
     summarize_context_usage,
@@ -33,7 +35,11 @@ def _handle(ui: Any, _: str) -> bool:
     )
     config = get_global_config()
     model_profile = get_profile_for_pointer("main")
-    max_context_tokens = get_remaining_context_tokens(model_profile, config.context_token_limit)
+    try:
+        max_context_tokens = get_remaining_context_tokens(model_profile, config.context_token_limit)
+    except ContextBudgetConfigurationError as exc:
+        ui.console.print(f"[red]Context token budget error:[/red] {escape(str(exc))}")
+        return True
     auto_compact_enabled = resolve_auto_compact_enabled(config)
     protocol = provider_protocol(model_profile.protocol) if model_profile else "openai"
 

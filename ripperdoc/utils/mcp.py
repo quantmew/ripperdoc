@@ -292,7 +292,19 @@ class McpRuntime:
             return self.servers
 
         for config in configs.values():
-            self.servers.append(await self._connect_server(config))
+            try:
+                server_info = await self._connect_server(config)
+            except Exception as exc:  # noqa: BLE001 - isolate single-server failures
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                logger.warning(
+                    "[mcp] Unexpected MCP server connect error: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={"server": config.name},
+                )
+                server_info = replace(config, status="failed", error=str(exc))
+            self.servers.append(server_info)
         logger.debug(
             "[mcp] MCP connection summary",
             extra={

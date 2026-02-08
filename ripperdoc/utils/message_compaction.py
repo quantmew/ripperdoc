@@ -146,6 +146,10 @@ class MicroCompactionResult:
     was_compacted: bool
 
 
+class ContextBudgetConfigurationError(ValueError):
+    """Raised when model context/output token configuration is invalid."""
+
+
 def _parse_truthy_env_value(value: Optional[str]) -> bool:
     if value is None:
         return False
@@ -289,12 +293,56 @@ def get_remaining_context_tokens(
 ) -> int:
     """Context window minus configured output tokens."""
     context_limit = max(get_model_context_limit(model_profile, explicit_limit), MIN_CONTEXT_TOKENS)
-    try:
-        max_output_tokens = (
-            int(getattr(model_profile, "max_tokens", 0) or 0) if model_profile else 0
-        )
-    except (TypeError, ValueError):
-        max_output_tokens = 0
+    model_name = str(getattr(model_profile, "model", "<unknown>")) if model_profile else "<unknown>"
+
+    max_input_tokens_raw = getattr(model_profile, "max_input_tokens", None) if model_profile else None
+    if max_input_tokens_raw is None:
+        max_input_tokens = 0
+    else:
+        try:
+            max_input_tokens = int(max_input_tokens_raw)
+        except (TypeError, ValueError) as exc:
+            raise ContextBudgetConfigurationError(
+                f"Invalid max_input_tokens for model '{model_name}': {max_input_tokens_raw!r}"
+            ) from exc
+        if max_input_tokens <= 0:
+            raise ContextBudgetConfigurationError(
+                f"Invalid max_input_tokens for model '{model_name}': {max_input_tokens} (must be > 0)"
+            )
+
+    # For models that expose split budgets, max_input_tokens already represents input capacity.
+    if max_input_tokens > 0:
+        split_limit = max_input_tokens
+        if explicit_limit and explicit_limit > 0:
+            split_limit = min(split_limit, explicit_limit)
+        return max(MIN_CONTEXT_TOKENS, split_limit)
+
+    max_output_tokens_raw = (
+        getattr(model_profile, "max_output_tokens", None) if model_profile else None
+    )
+    if max_output_tokens_raw is not None:
+        try:
+            max_output_tokens = int(max_output_tokens_raw)
+        except (TypeError, ValueError) as exc:
+            raise ContextBudgetConfigurationError(
+                f"Invalid max_output_tokens for model '{model_name}': {max_output_tokens_raw!r}"
+            ) from exc
+        if max_output_tokens <= 0:
+            raise ContextBudgetConfigurationError(
+                f"Invalid max_output_tokens for model '{model_name}': {max_output_tokens} (must be > 0)"
+            )
+    else:
+        try:
+            max_output_tokens = int(getattr(model_profile, "max_tokens", 0) or 0) if model_profile else 0
+        except (TypeError, ValueError) as exc:
+            raise ContextBudgetConfigurationError(
+                f"Invalid max_tokens for model '{model_name}': {getattr(model_profile, 'max_tokens', None)!r}"
+            ) from exc
+        if max_output_tokens <= 0:
+            raise ContextBudgetConfigurationError(
+                f"Invalid output token budget for model '{model_name}': max_tokens={max_output_tokens} (must be > 0)"
+            )
+
     return max(MIN_CONTEXT_TOKENS, context_limit - max(0, max_output_tokens))
 
 
