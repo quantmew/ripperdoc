@@ -79,8 +79,8 @@ def test_task_graph_renderer_renders_panel_from_task_list_payload() -> None:
     output = console.export_text()
     assert rendered is True
     assert "Tasks updated (total 2; 1 pending, 1 in progress, 0 completed)." in output
-    assert "○ Fix parser error @alice [id:1]" in output
-    assert "◐ Add regression tests (blocked by 1) [id:2]" in output
+    assert "○ Fix parser error @alice [1]" in output
+    assert "◐ Add regression tests (blocked by 1) [2]" in output
 
 
 def test_task_graph_renderer_loads_board_from_storage_for_task_update(
@@ -113,4 +113,4 @@ def test_task_graph_renderer_loads_board_from_storage_for_task_update(
     output = console.export_text()
     assert rendered is True
     assert "Tasks updated (total 1; 1 pending, 0 in progress, 0 completed)." in output
-    assert "○ Investigate failing hook [id:1]" in output
+    assert "○ Investigate failing hook [1]" in output
