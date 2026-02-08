@@ -141,11 +141,35 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     id="api_base_input",
                 )
 
-                max_tokens_default = self._existing_profile.max_tokens if self._existing_profile else 4096
+                max_input_tokens_default = (
+                    self._existing_profile.max_input_tokens
+                    if self._existing_profile and self._existing_profile.max_input_tokens is not None
+                    else ""
+                )
+                yield Static("Max input tokens", classes="field_label")
+                yield Input(
+                    value=str(max_input_tokens_default),
+                    placeholder="Max input tokens (optional)",
+                    id="max_input_tokens_input",
+                )
+
+                max_output_tokens_default = (
+                    self._existing_profile.max_output_tokens
+                    if self._existing_profile and self._existing_profile.max_output_tokens is not None
+                    else ""
+                )
                 yield Static("Max output tokens", classes="field_label")
                 yield Input(
+                    value=str(max_output_tokens_default),
+                    placeholder="Max output tokens (optional)",
+                    id="max_output_tokens_input",
+                )
+
+                max_tokens_default = self._existing_profile.max_tokens if self._existing_profile else 4096
+                yield Static("Max tokens", classes="field_label")
+                yield Input(
                     value=str(max_tokens_default),
-                    placeholder="Max output tokens",
+                    placeholder="Max tokens",
                     id="max_tokens_input",
                 )
 
@@ -229,6 +253,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         api_key_input = self.query_one("#api_key_input", Input)
         auth_token_input = self.query_one("#auth_token_input", Input)
         api_base_input = self.query_one("#api_base_input", Input)
+        max_input_tokens_input = self.query_one("#max_input_tokens_input", Input)
+        max_output_tokens_input = self.query_one("#max_output_tokens_input", Input)
         max_tokens_input = self.query_one("#max_tokens_input", Input)
         temperature_input = self.query_one("#temperature_input", Input)
         input_price_input = self.query_one("#input_price_input", Input)
@@ -286,15 +312,40 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
 
         api_base = (api_base_input.value or "").strip() or None
 
+        max_input_tokens_default = (
+            self._existing_profile.max_input_tokens
+            if self._existing_profile
+            else inferred_profile.max_input_tokens
+        )
+        max_input_tokens = self._parse_int(
+            max_input_tokens_input.value,
+            "Max input tokens",
+            default_value=max_input_tokens_default,
+        )
+
+        max_output_tokens_default = (
+            self._existing_profile.max_output_tokens
+            if self._existing_profile
+            else inferred_profile.max_output_tokens
+        )
+        max_output_tokens = self._parse_int(
+            max_output_tokens_input.value,
+            "Max output tokens",
+            default_value=max_output_tokens_default,
+        )
+
         max_tokens_default = (
             self._existing_profile.max_tokens if self._existing_profile else inferred_profile.max_tokens
         )
         max_tokens = self._parse_int(
             max_tokens_input.value,
-            "Max output tokens",
+            "Max tokens",
             default_value=max_tokens_default,
         )
         if max_tokens is None:
+            return
+        if max_output_tokens is not None and max_tokens > max_output_tokens:
+            self._set_error("Max tokens must be less than or equal to max output tokens.")
             return
 
         temperature = self._parse_float(temperature_input.value, "Temperature")
@@ -352,6 +403,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             api_key=api_key,
             auth_token=auth_token,
             api_base=api_base,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
             max_tokens=max_tokens,
             temperature=temperature,
             supports_vision=supports_vision,
@@ -378,9 +431,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         if not raw:
             if default_value is not None:
                 return default_value
-            if self._existing_profile and label == "Max output tokens":
-                return self._existing_profile.max_tokens
-            if label == "Max output tokens":
+            if label == "Max tokens":
                 return 4096
             return None
         try:

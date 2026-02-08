@@ -150,17 +150,41 @@ def _collect_add_profile_input(
         or None
     )
 
+    max_input_default = (
+        existing_profile.max_input_tokens if existing_profile else inferred_profile.max_input_tokens
+    )
+    max_input_label = str(max_input_default) if max_input_default is not None else "auto"
+    max_input_tokens = _parse_int(
+        console,
+        f"Max input tokens [{max_input_label}]: ",
+        max_input_default,
+    )
+
+    max_output_default = (
+        existing_profile.max_output_tokens if existing_profile else inferred_profile.max_output_tokens
+    )
+    max_output_label = str(max_output_default) if max_output_default is not None else "auto"
+    max_output_tokens = _parse_int(
+        console,
+        f"Max output tokens [{max_output_label}]: ",
+        max_output_default,
+    )
+
     max_tokens_default = (
         existing_profile.max_tokens if existing_profile else inferred_profile.max_tokens
     )
-    max_tokens = (
-        _parse_int(
-            console,
-            f"Max output tokens [{max_tokens_default}]: ",
-            max_tokens_default,
-        )
-        or max_tokens_default
+    max_tokens_input = _parse_int(
+        console,
+        f"Max tokens [{max_tokens_default}]: ",
+        max_tokens_default,
     )
+    max_tokens = max_tokens_input if max_tokens_input is not None else max_tokens_default
+    if max_output_tokens is not None and max_tokens > max_output_tokens:
+        console.print(
+            f"[yellow]Max tokens {max_tokens} exceeds max_output_tokens {max_output_tokens}; "
+            "clamping to max_output_tokens.[/yellow]"
+        )
+        max_tokens = max_output_tokens
 
     temp_default = existing_profile.temperature if existing_profile else 1.0
     temperature = _parse_float(
@@ -213,6 +237,8 @@ def _collect_add_profile_input(
         model=model_name,
         api_key=api_key,
         api_base=api_base,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
         max_tokens=max_tokens,
         temperature=temperature,
         auth_token=auth_token,
@@ -267,14 +293,42 @@ def _collect_edit_profile_input(
     if api_base == "":
         api_base = None
 
-    max_tokens = (
-        _parse_int(
-            console,
-            f"Max output tokens [{existing_profile.max_tokens}]: ",
-            existing_profile.max_tokens,
-        )
-        or existing_profile.max_tokens
+    max_input_label = (
+        str(existing_profile.max_input_tokens)
+        if existing_profile.max_input_tokens is not None
+        else "auto"
     )
+    max_input_tokens = _parse_int(
+        console,
+        f"Max input tokens [{max_input_label}]: ",
+        existing_profile.max_input_tokens,
+    )
+
+    max_output_label = (
+        str(existing_profile.max_output_tokens)
+        if existing_profile.max_output_tokens is not None
+        else "auto"
+    )
+    max_output_tokens = _parse_int(
+        console,
+        f"Max output tokens [{max_output_label}]: ",
+        existing_profile.max_output_tokens,
+    )
+
+    max_tokens_input = _parse_int(
+        console,
+        f"Max tokens [{existing_profile.max_tokens}]: ",
+        existing_profile.max_tokens,
+    )
+    max_tokens = (
+        max_tokens_input if max_tokens_input is not None else existing_profile.max_tokens
+    )
+    if max_output_tokens is not None and max_tokens > max_output_tokens:
+        console.print(
+            f"[yellow]Max tokens {max_tokens} exceeds max_output_tokens {max_output_tokens}; "
+            "clamping to max_output_tokens.[/yellow]"
+        )
+        max_tokens = max_output_tokens
 
     temperature = _parse_float(
         console,
@@ -305,6 +359,8 @@ def _collect_edit_profile_input(
         model=model_name,
         api_key=api_key,
         api_base=api_base,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
         max_tokens=max_tokens,
         temperature=temperature,
         auth_token=auth_token,
