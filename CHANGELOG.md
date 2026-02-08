@@ -5,6 +5,25 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-02-08
+
+### Added
+- **Plugin system with marketplace support** - Comprehensive plugin architecture enabling users to extend Ripperdoc with custom commands, skills, agents, hooks, and MCP/LSP servers
+- **Plugin marketplace operations** - Support for discovering, installing, and managing plugins from online marketplaces
+- **Plugin scope management** - User, project, and local scopes for flexible plugin installation and usage
+- **Plugin registry system** - Centralized registry for tracking installed plugins across different scopes
+- **Plugin Textual TUI** - Interactive terminal UI for comprehensive plugin management
+
+### Fixed
+- **Context budget validation** - Add ContextBudgetConfigurationError for invalid model token configurations
+- **MCP server resilience** - Isolate MCP server connection failures to prevent cascade errors
+- **Token budget calculation** - Support split input/output token budgets without double subtraction
+- **Task ID display formatting** - Simplify task ID display format for cleaner output
+
+### Changed
+- **Plugin system enhancements** - Improved marketplace operations with better error handling and feedback
+- **Task rendering optimization** - Streamlined task ID display format
+
 ## [0.4.0] - 2026-02-08
 
 ### ⚠️ BREAKING CHANGES - Configuration File Format Incompatible
@@ -337,6 +356,7 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.4.1]: https://github.com/quantmew/Ripperdoc/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/quantmew/Ripperdoc/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/quantmew/Ripperdoc/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/quantmew/Ripperdoc/compare/v0.3.1...v0.3.2
