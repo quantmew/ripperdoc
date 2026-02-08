@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import time
+import webbrowser
 from typing import List, Optional
 
 from textual.app import App, ComposeResult
@@ -21,8 +22,10 @@ from ripperdoc.core.plugin_marketplaces import (
     install_marketplace_plugin,
     load_marketplaces,
     remove_marketplace,
+    resolve_marketplace_entry,
+    update_marketplace,
 )
-from ripperdoc.core.plugins import PluginSettingsScope, discover_plugins
+from ripperdoc.core.plugins import PluginSettingsScope, discover_plugins, plugin_scopes_for_path
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,7 @@ class _InstalledPlugin:
     path: Path
     description: str
     version: Optional[str]
+    scopes: List[str]
 
 
 class _PluginDetailsScreen(ModalScreen[Optional[str]]):
@@ -125,6 +129,58 @@ class _AddMarketplaceScreen(ModalScreen[Optional[str]]):
             self.dismiss(raw or None)
 
 
+class _InstallScopeScreen(ModalScreen[Optional[str]]):
+    def __init__(self, plugin_name: str, source_label: str) -> None:
+        super().__init__()
+        self._plugin_name = plugin_name
+        self._source_label = source_label
+
+    def compose(self) -> ComposeResult:
+        with Container(id="details_dialog"):
+            yield Static("Plugin details", id="details_title")
+            yield Static(
+                (
+                    f"{self._plugin_name}\n"
+                    f"from {self._source_label}\n\n"
+                    "Install target:\n"
+                    "Choose where this plugin should be installed."
+                ),
+                id="details_body",
+            )
+            with Container(id="install_scope_buttons"):
+                yield Button(
+                    "Install for you (user scope)",
+                    id="install_scope_user",
+                    variant="primary",
+                )
+                yield Button(
+                    "Install for all collaborators on this repository (project scope)",
+                    id="install_scope_project",
+                )
+                yield Button(
+                    "Install for you, in this repo only (local scope)",
+                    id="install_scope_local",
+                )
+                yield Button("Open homepage", id="install_open_homepage", variant="default")
+                yield Button("Back to plugin list", id="install_cancel", variant="default")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if button_id == "install_scope_user":
+            self.dismiss("user")
+            return
+        if button_id == "install_scope_project":
+            self.dismiss("project")
+            return
+        if button_id == "install_scope_local":
+            self.dismiss("local")
+            return
+        if button_id == "install_open_homepage":
+            self.dismiss("homepage")
+            return
+        self.dismiss(None)
+
+
 class PluginsApp(App[None]):
     CSS = """
     Screen {
@@ -202,6 +258,18 @@ class PluginsApp(App[None]):
         align: right middle;
         padding-top: 1;
     }
+
+    #install_scope_buttons {
+        layout: vertical;
+        align: left top;
+        padding-top: 1;
+        width: 1fr;
+    }
+
+    #install_scope_buttons Button {
+        width: 1fr;
+        margin-bottom: 1;
+    }
     """
 
     BINDINGS = [
@@ -247,7 +315,7 @@ class PluginsApp(App[None]):
         yield Static("", id="subtitle")
         yield Input(placeholder="Search...", id="search")
         with Horizontal(id="content_row"):
-            yield OptionList(id="plugin_list", markup=False)
+            yield OptionList(id="plugin_list", markup=True)
             yield Static("", id="details_panel")
         yield Static("", id="hint")
         yield Footer()
@@ -319,7 +387,9 @@ class PluginsApp(App[None]):
         if not selected:
             self.notify("No marketplace selected.", severity="warning")
             return
-        removed, _ = remove_marketplace(selected.marketplace_id)
+        removed, _ = remove_marketplace(
+            selected.marketplace_id,
+        )
         if removed:
             self.notify(f"Removed marketplace: {selected.marketplace_id}", severity="information")
             self._reload_all_data(force_discover=False)
@@ -337,9 +407,10 @@ class PluginsApp(App[None]):
         if not selected:
             self.notify("No marketplace selected.", severity="warning")
             return
+        ok, message, _ = update_marketplace(selected.marketplace_id)
+        self.notify(message, severity="information" if ok else "error")
         self._reload_all_data(force_discover=True, target_marketplace_id=selected.marketplace_id)
         self._refresh_view()
-        self.notify(f"Updated marketplace: {selected.marketplace_id}", severity="information")
 
     def action_toggle_selected(self) -> None:
         if self._tab == "discover":
@@ -382,7 +453,10 @@ class PluginsApp(App[None]):
             force_refresh=force_discover,
         )
         if target_marketplace_id is not None:
-            baseline = discover_marketplace_plugins(self._marketplaces, force_refresh=False)
+            baseline = discover_marketplace_plugins(
+                self._marketplaces,
+                force_refresh=False,
+            )
             refreshed_keys = {
                 (entry.marketplace_id, entry.name) for entry in discover_result.entries
             }
@@ -407,6 +481,13 @@ class PluginsApp(App[None]):
                 path=item.root,
                 description=item.description,
                 version=item.version,
+                scopes=[
+                    scope.value
+                    for scope in plugin_scopes_for_path(
+                        item.root,
+                        project_path=self._project_path,
+                    )
+                ],
             )
             for item in plugin_result.plugins
         ]
@@ -444,7 +525,7 @@ class PluginsApp(App[None]):
 
     def _hint_text(self) -> str:
         if self._tab == "discover":
-            return "←/→ or Tab switch tabs · type to search · Space install/remove · double-click/double-Enter details"
+            return "←/→ or Tab switch tabs · type to search · Space install/remove · double-click/double-Enter install/details"
         if self._tab == "installed":
             return "←/→ or Tab switch tabs · type to search · Space disable · double-click/double-Enter details"
         return "←/→ or Tab switch tabs · a add · u update · r remove · double-click/double-Enter details"
@@ -468,7 +549,7 @@ class PluginsApp(App[None]):
                 community = " [Community Managed]" if entry.community_managed else ""
                 installs = f" · {entry.installs} installs" if entry.installs else ""
                 line = (
-                    f"{marker} {entry.name} · {entry.source_label}{community}{installs}\n"
+                    f"{marker} [bold blue]{entry.name}[/bold blue] · {entry.source_label}{community}{installs}\n"
                     f"    {entry.description or '(no description)'}"
                 )
                 option_id = f"discover:{idx}"
@@ -483,7 +564,8 @@ class PluginsApp(App[None]):
                 return
             for idx, item in enumerate(entries):
                 version = f" · v{item.version}" if item.version else ""
-                line = f"● {item.name}{version}\n    {item.path}"
+                scope_text = f" · scope: {', '.join(item.scopes)}" if item.scopes else ""
+                line = f"● {item.name}{version}{scope_text}\n    {item.path}"
                 option_id = f"installed:{idx}"
                 self._visible_ids.append(option_id)
                 option_list.add_option(Option(line, id=option_id))
@@ -551,6 +633,7 @@ class PluginsApp(App[None]):
             return (
                 f"Name: {item.name}\n"
                 f"Version: {item.version or 'Unknown'}\n"
+                f"Scopes: {', '.join(item.scopes) if item.scopes else 'Unknown'}\n"
                 f"Path: {item.path}\n\n"
                 f"{item.description or '(no description)'}"
             )
@@ -643,22 +726,51 @@ class PluginsApp(App[None]):
             (item for item in self._installed_plugins if item.name == entry.name), None
         )
         if installed is not None:
-            from ripperdoc.core.plugin_marketplaces import uninstall_plugin_by_path
-
-            ok, message = uninstall_plugin_by_path(
-                installed.path,
-                project_path=self._project_path,
-                scope=PluginSettingsScope.PROJECT,
-            )
+            ok, message = self._uninstall_from_known_scopes(installed.path)
             self.notify(message, severity="information" if ok else "warning")
             self._reload_all_data(force_discover=False)
             self._refresh_view()
             return
 
+        self._show_install_scope(entry)
+
+    def _show_install_scope(self, entry: PluginCatalogEntry) -> None:
+        self.push_screen(
+            _InstallScopeScreen(entry.name, entry.source_label),
+            lambda selected_scope: self._handle_install_scope(entry, selected_scope),
+        )
+
+    def _handle_install_scope(self, entry: PluginCatalogEntry, selected_scope: Optional[str]) -> None:
+        if selected_scope is None:
+            return
+        if selected_scope == "homepage":
+            url = entry.plugin_source
+            if not url and entry.github_repo:
+                url = f"https://github.com/{entry.github_repo}"
+            if url:
+                webbrowser.open(url)
+            else:
+                self.notify("No homepage URL available for this plugin.", severity="warning")
+            return
+        scope_map = {
+            "user": PluginSettingsScope.USER,
+            "project": PluginSettingsScope.PROJECT,
+            "local": PluginSettingsScope.LOCAL,
+        }
+        scope = scope_map.get(selected_scope)
+        if scope is None:
+            return
+        ok, message, resolved = resolve_marketplace_entry(
+            entry.marketplace_id,
+            entry.name,
+        )
+        if not ok or resolved is None:
+            self.notify(message, severity="error")
+            return
         ok, message, _ = install_marketplace_plugin(
-            entry,
+            resolved,
             project_path=self._project_path,
-            scope=PluginSettingsScope.PROJECT,
+            scope=scope,
         )
         self.notify(message, severity="information" if ok else "error")
         self._reload_all_data(force_discover=False)
@@ -668,13 +780,7 @@ class PluginsApp(App[None]):
         selected = self._selected_installed_plugin()
         if not selected:
             return
-        from ripperdoc.core.plugin_marketplaces import uninstall_plugin_by_path
-
-        ok, message = uninstall_plugin_by_path(
-            selected.path,
-            project_path=self._project_path,
-            scope=PluginSettingsScope.PROJECT,
-        )
+        ok, message = self._uninstall_from_known_scopes(selected.path)
         self.notify(message, severity="information" if ok else "warning")
         self._reload_all_data(force_discover=False)
         self._refresh_view()
@@ -685,6 +791,9 @@ class PluginsApp(App[None]):
             return
         entry = filtered[idx]
         installed = any(item.name == entry.name for item in self._installed_plugins)
+        if not installed:
+            self._show_install_scope(entry)
+            return
         body = (
             f"Name: {entry.name}\n"
             f"Marketplace: {entry.marketplace_id}\n"
@@ -746,14 +855,7 @@ class PluginsApp(App[None]):
         self, entry: PluginCatalogEntry, action: Optional[str]
     ) -> None:
         if action == "install":
-            ok, message, _ = install_marketplace_plugin(
-                entry,
-                project_path=self._project_path,
-                scope=PluginSettingsScope.PROJECT,
-            )
-            self.notify(message, severity="information" if ok else "error")
-            self._reload_all_data(force_discover=False)
-            self._refresh_view()
+            self._show_install_scope(entry)
             return
         if action == "uninstall":
             installed = next(
@@ -763,13 +865,7 @@ class PluginsApp(App[None]):
             if not installed:
                 self.notify(f"Plugin '{entry.name}' is not installed.", severity="warning")
                 return
-            from ripperdoc.core.plugin_marketplaces import uninstall_plugin_by_path
-
-            ok, message = uninstall_plugin_by_path(
-                installed.path,
-                project_path=self._project_path,
-                scope=PluginSettingsScope.PROJECT,
-            )
+            ok, message = self._uninstall_from_known_scopes(installed.path)
             self.notify(message, severity="information" if ok else "warning")
             self._reload_all_data(force_discover=False)
             self._refresh_view()
@@ -779,13 +875,7 @@ class PluginsApp(App[None]):
     ) -> None:
         if action != "uninstall":
             return
-        from ripperdoc.core.plugin_marketplaces import uninstall_plugin_by_path
-
-        ok, message = uninstall_plugin_by_path(
-            item.path,
-            project_path=self._project_path,
-            scope=PluginSettingsScope.PROJECT,
-        )
+        ok, message = self._uninstall_from_known_scopes(item.path)
         self.notify(message, severity="information" if ok else "warning")
         self._reload_all_data(force_discover=False)
         self._refresh_view()
@@ -794,18 +884,18 @@ class PluginsApp(App[None]):
         self, marketplace: MarketplaceSource, action: Optional[str]
     ) -> None:
         if action == "update":
+            ok, message, _ = update_marketplace(marketplace.marketplace_id)
+            self.notify(message, severity="information" if ok else "error")
             self._reload_all_data(
                 force_discover=True,
                 target_marketplace_id=marketplace.marketplace_id,
             )
             self._refresh_view()
-            self.notify(
-                f"Updated marketplace: {marketplace.marketplace_id}",
-                severity="information",
-            )
             return
         if action == "remove":
-            removed, _ = remove_marketplace(marketplace.marketplace_id)
+            removed, _ = remove_marketplace(
+                marketplace.marketplace_id,
+            )
             if removed:
                 self.notify(
                     f"Removed marketplace: {marketplace.marketplace_id}",
@@ -818,6 +908,25 @@ class PluginsApp(App[None]):
                     f"Marketplace '{marketplace.marketplace_id}' cannot be removed.",
                     severity="warning",
                 )
+
+    def _uninstall_from_known_scopes(self, plugin_path: Path) -> tuple[bool, str]:
+        from ripperdoc.core.plugin_marketplaces import uninstall_plugin_by_path
+
+        errors: List[str] = []
+        for scope in (
+            PluginSettingsScope.LOCAL,
+            PluginSettingsScope.PROJECT,
+            PluginSettingsScope.USER,
+        ):
+            ok, message = uninstall_plugin_by_path(
+                plugin_path,
+                project_path=self._project_path,
+                scope=scope,
+            )
+            if ok:
+                return ok, message
+            errors.append(message)
+        return False, errors[-1] if errors else f"Failed to uninstall plugin {plugin_path}"
 
 
 def run_plugins_tui(project_path: Optional[Path]) -> bool:

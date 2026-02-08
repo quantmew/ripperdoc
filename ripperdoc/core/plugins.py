@@ -12,6 +12,9 @@ Plugins can be enabled via:
   - ~/.ripperdoc/plugins.json
   - .ripperdoc/plugins.json
   - .ripperdoc/plugins.local.json
+  - scope plugin roots:
+    - ~/.ripperdoc/plugins/installed_plugins.json
+    - .ripperdoc/plugins/installed_plugins.json
 """
 
 from __future__ import annotations
@@ -35,6 +38,8 @@ PLUGIN_MANIFEST_CANDIDATES: tuple[tuple[str, str], ...] = (
 )
 PLUGIN_SETTINGS_FILE = "plugins.json"
 PLUGIN_SETTINGS_LOCAL_FILE = "plugins.local.json"
+PLUGIN_STORAGE_DIR = "plugins"
+INSTALLED_PLUGINS_FILE = "installed_plugins.json"
 PLUGIN_ROOT_ENV_VAR = "RIPPERDOC_PLUGIN_ROOT"
 PLUGIN_ROOT_ENV_COMPAT_VAR = "CLAUDE_PLUGIN_ROOT"
 PLUGIN_DIRS_ENV_VAR = "RIPPERDOC_PLUGIN_DIR"
@@ -90,6 +95,33 @@ def _settings_paths(
         PluginSettingsScope.PROJECT: project_dir / ".ripperdoc" / PLUGIN_SETTINGS_FILE,
         PluginSettingsScope.LOCAL: project_dir / ".ripperdoc" / PLUGIN_SETTINGS_LOCAL_FILE,
     }
+
+
+def get_plugin_storage_root(
+    scope: PluginSettingsScope,
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+) -> Path:
+    """Return the plugin storage root for a scope.
+
+    Scope roots:
+    - user: ~/.ripperdoc/plugins
+    - project/local: <project>/.ripperdoc/plugins
+    """
+    home_dir = (home or Path.home()).expanduser()
+    project_dir = (project_path or Path.cwd()).resolve()
+    if scope == PluginSettingsScope.USER:
+        return home_dir / ".ripperdoc" / PLUGIN_STORAGE_DIR
+    return project_dir / ".ripperdoc" / PLUGIN_STORAGE_DIR
+
+
+def get_installed_plugins_path(
+    scope: PluginSettingsScope,
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+) -> Path:
+    """Return installed-plugins registry path for a scope."""
+    return get_plugin_storage_root(scope, project_path=project_path, home=home) / INSTALLED_PLUGINS_FILE
 
 
 def _entry_base_dir_for_scope(scope: PluginSettingsScope, settings_path: Path) -> Path:
@@ -235,6 +267,53 @@ def _configured_plugin_dirs(project_path: Optional[Path], home: Optional[Path]) 
 
     enabled: List[Path] = []
     disabled: set[Path] = set()
+
+    def _coerce_installed_entries(raw: Any) -> List[Dict[str, Any]]:
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            values = raw
+        elif isinstance(raw, dict):
+            values = raw.get("installedPlugins") or raw.get("installed_plugins") or []
+            if not isinstance(values, list):
+                values = []
+        else:
+            values = []
+
+        entries: List[Dict[str, Any]] = []
+        for item in values:
+            if isinstance(item, str):
+                entries.append({"path": item})
+                continue
+            if not isinstance(item, dict):
+                continue
+            candidate = item.get("path") or item.get("source") or item.get("dir")
+            if not isinstance(candidate, str):
+                continue
+            row = dict(item)
+            row["path"] = candidate
+            entries.append(row)
+        return entries
+
+    def _load_installed_entries(scope: PluginSettingsScope) -> List[Path]:
+        registry_path = get_installed_plugins_path(scope, project_path=project_path, home=home)
+        if not registry_path.exists():
+            return []
+        try:
+            payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError):
+            return []
+        base_dir = get_plugin_storage_root(scope, project_path=project_path, home=home)
+        resolved_paths: List[Path] = []
+        for item in _coerce_installed_entries(payload):
+            item_scope = str(item.get("scope") or "").strip().lower()
+            if item_scope and item_scope != scope.value:
+                continue
+            resolved = _resolve_plugin_path(str(item["path"]), base_dir)
+            if resolved is not None:
+                resolved_paths.append(resolved)
+        return resolved_paths
+
     for scope in ordered_scopes:
         settings_path = paths[scope]
         entries, disabled_entries = _load_settings_file(settings_path)
@@ -248,6 +327,7 @@ def _configured_plugin_dirs(project_path: Optional[Path], home: Optional[Path]) 
             resolved = _resolve_plugin_path(raw, base_dir)
             if resolved is not None:
                 disabled.add(resolved)
+        enabled.extend(_load_installed_entries(scope))
 
     filtered = [path for path in enabled if path not in disabled]
     return list(dict.fromkeys(filtered))
@@ -550,6 +630,59 @@ def list_enabled_plugin_entries_for_scope(
     return enabled
 
 
+def plugin_scopes_for_path(
+    plugin_dir: Path,
+    project_path: Optional[Path] = None,
+    home: Optional[Path] = None,
+) -> List[PluginSettingsScope]:
+    """Return scopes that currently reference a plugin path."""
+    target = plugin_dir.resolve()
+    matched: List[PluginSettingsScope] = []
+    settings_paths = _settings_paths(project_path, home)
+
+    for scope in (PluginSettingsScope.USER, PluginSettingsScope.PROJECT, PluginSettingsScope.LOCAL):
+        settings_path = settings_paths[scope]
+        enabled_entries, _ = _load_settings_file(settings_path)
+        base_dir = _entry_base_dir_for_scope(scope, settings_path)
+        in_settings = any(
+            (_resolve_plugin_path(raw, base_dir) == target) for raw in enabled_entries
+        )
+        if in_settings:
+            matched.append(scope)
+            continue
+
+        registry_path = get_installed_plugins_path(scope, project_path=project_path, home=home)
+        payload = _plugin_settings_payload(registry_path)
+        installed_entries = (
+            payload.get("installedPlugins")
+            or payload.get("installed_plugins")
+            or []
+        )
+        if not isinstance(installed_entries, list):
+            continue
+        registry_base = get_plugin_storage_root(scope, project_path=project_path, home=home)
+        found = False
+        for item in installed_entries:
+            if isinstance(item, str):
+                item_path = item
+                item_scope = ""
+            elif isinstance(item, dict):
+                item_path = str(item.get("path") or item.get("source") or item.get("dir") or "")
+                item_scope = str(item.get("scope") or "").strip().lower()
+            else:
+                continue
+            if item_scope and item_scope != scope.value:
+                continue
+            resolved = _resolve_plugin_path(item_path, registry_base)
+            if resolved == target:
+                found = True
+                break
+        if found:
+            matched.append(scope)
+
+    return matched
+
+
 def add_enabled_plugin_for_scope(
     plugin_dir: Path,
     scope: PluginSettingsScope = PluginSettingsScope.PROJECT,
@@ -575,6 +708,47 @@ def add_enabled_plugin_for_scope(
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    installed_path = get_installed_plugins_path(scope, project_path=project_path, home=home)
+    installed_payload = _plugin_settings_payload(installed_path)
+    installed_entries_raw = (
+        installed_payload.get("installedPlugins")
+        or installed_payload.get("installed_plugins")
+        or []
+    )
+    installed_entries: List[Dict[str, Any]] = []
+    if isinstance(installed_entries_raw, list):
+        for item in installed_entries_raw:
+            if isinstance(item, str):
+                installed_entries.append({"path": item})
+            elif isinstance(item, dict):
+                candidate = item.get("path") or item.get("source") or item.get("dir")
+                if isinstance(candidate, str):
+                    row = dict(item)
+                    row["path"] = candidate
+                    installed_entries.append(row)
+
+    plugin_storage_root = get_plugin_storage_root(scope, project_path=project_path, home=home)
+    installed_serialized = _serialize_plugin_path(plugin_dir.resolve(), plugin_storage_root)
+    exists = any(
+        str(item.get("path") or "").strip() == installed_serialized
+        and str(item.get("scope") or "").strip().lower() == scope.value
+        for item in installed_entries
+    )
+    if not exists:
+        installed_entries.append(
+            {
+                "name": _safe_plugin_name(plugin_dir.resolve().name),
+                "path": installed_serialized,
+                "scope": scope.value,
+            }
+        )
+    installed_payload["installedPlugins"] = installed_entries
+    installed_path.parent.mkdir(parents=True, exist_ok=True)
+    installed_path.write_text(
+        json.dumps(installed_payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     return settings_path
@@ -615,6 +789,39 @@ def remove_enabled_plugin_for_scope(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+    installed_path = get_installed_plugins_path(scope, project_path=project_path, home=home)
+    installed_payload = _plugin_settings_payload(installed_path)
+    installed_entries_raw = (
+        installed_payload.get("installedPlugins")
+        or installed_payload.get("installed_plugins")
+        or []
+    )
+    plugin_storage_root = get_plugin_storage_root(scope, project_path=project_path, home=home)
+    target_serialized = _serialize_plugin_path(target, plugin_storage_root)
+    if isinstance(installed_entries_raw, list):
+        remaining: List[Dict[str, Any]] = []
+        for item in installed_entries_raw:
+            if isinstance(item, str):
+                item_path = item
+                item_scope = ""
+            elif isinstance(item, dict):
+                item_path = str(item.get("path") or item.get("source") or item.get("dir") or "")
+                item_scope = str(item.get("scope") or "").strip().lower()
+            else:
+                continue
+            if item_path == target_serialized and (not item_scope or item_scope == scope.value):
+                continue
+            if isinstance(item, dict):
+                remaining.append(item)
+            else:
+                remaining.append({"path": item_path})
+        installed_payload["installedPlugins"] = remaining
+        installed_path.parent.mkdir(parents=True, exist_ok=True)
+        installed_path.write_text(
+            json.dumps(installed_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     return settings_path, removed
 
 
@@ -626,7 +833,11 @@ __all__ = [
     "PluginLoadError",
     "PluginDefinition",
     "PluginLoadResult",
+    "PLUGIN_STORAGE_DIR",
+    "INSTALLED_PLUGINS_FILE",
     "get_plugin_settings_path",
+    "get_plugin_storage_root",
+    "get_installed_plugins_path",
     "set_runtime_plugin_dirs",
     "get_runtime_plugin_dirs",
     "clear_runtime_plugin_dirs",
@@ -635,6 +846,7 @@ __all__ = [
     "resolve_enabled_plugin_dirs",
     "discover_plugins",
     "list_enabled_plugin_entries_for_scope",
+    "plugin_scopes_for_path",
     "add_enabled_plugin_for_scope",
     "remove_enabled_plugin_for_scope",
 ]
