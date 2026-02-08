@@ -188,7 +188,7 @@ class TaskGraphResultRenderer(ToolResultRenderer):
                 if blocker_text:
                     line += f" (blocked by {blocker_text})"
             if task_id:
-                line += f" [id-{task_id}]"
+                line += f" [id:{task_id}]"
             lines.append(line)
         summary = self._summary(entries)
         return "\n".join([summary, *lines]) if lines else summary
