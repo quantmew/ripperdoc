@@ -57,6 +57,15 @@ def _classify_anthropic_error(exc: Exception) -> tuple[str, str]:
         return "connection_error", f"Connection error: {exc_msg}"
     if isinstance(exc, anthropic.APIStatusError):
         status = getattr(exc, "status_code", "unknown")
+        lowered = exc_msg.lower()
+        if (
+            "context" in lowered
+            or "token" in lowered
+            or "prompt is too long" in lowered
+            or "input is too long" in lowered
+            or "exceeds the model's maximum context length" in lowered
+        ):
+            return "context_length_exceeded", f"Context length exceeded: {exc_msg}"
         return "api_error", f"API error ({status}): {exc_msg}"
     if isinstance(exc, asyncio.TimeoutError):
         return "timeout", f"Request timed out: {exc_msg}"

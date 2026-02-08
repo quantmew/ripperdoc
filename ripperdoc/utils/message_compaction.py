@@ -251,15 +251,6 @@ def get_model_context_limit(
         return explicit_limit
 
     try:
-        configured_context = (
-            int(getattr(model_profile, "context_window", 0) or 0) if model_profile else 0
-        )
-    except (TypeError, ValueError):
-        configured_context = 0
-    if configured_context > 0:
-        return configured_context
-
-    try:
         model = getattr(model_profile, "model", None) or ""
     except Exception:
         model = ""

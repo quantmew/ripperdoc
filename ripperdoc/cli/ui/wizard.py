@@ -164,16 +164,12 @@ def run_onboarding_wizard(config: UserConfig) -> bool:
     # Get model name with provider-specific suggestions
     model, api_base = get_model_name_with_suggestions(provider_option, api_base_override)
 
-    # Get context window
-    context_window = get_context_window()
-
     # Create model profile
     config.model_profiles["default"] = ModelProfile(
         protocol=provider_option.protocol,
         model=model,
         api_key=api_key,
         api_base=api_base,
-        context_window=context_window,
     )
 
     config.has_completed_onboarding = True
@@ -266,22 +262,6 @@ def _guess_provider_website(api_base: Optional[str]) -> str:
         if len(parts) >= 3:
             return f"{parts[0]}//{parts[2]}"
     return "https://localhost"
-
-
-def get_context_window() -> Optional[int]:
-    """Get context window size from user."""
-    context_window_input = click.prompt(
-        "Context window in tokens (optional, press Enter to skip)",
-        default="",
-        show_default=False,
-    )
-    context_window = None
-    if context_window_input.strip():
-        try:
-            context_window = int(context_window_input.strip())
-        except ValueError:
-            console.print("[yellow]Invalid context window, using auto-detected defaults.[/yellow]")
-    return context_window
 
 
 def get_version() -> str:

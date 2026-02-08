@@ -152,25 +152,19 @@ def format_summary_response(raw_summary_text: str) -> str:
     """
     formatted_text = raw_summary_text
 
-    # Extract and format analysis section
-    analysis_match = re.search(r"<analysis>([\s\S]*?)</analysis>", formatted_text)
-    if analysis_match:
-        extracted_content = analysis_match.group(1) or ""
-        formatted_text = re.sub(
-            r"<analysis>[\s\S]*?</analysis>",
-            f"Analysis:\n{extracted_content.strip()}",
-            formatted_text,
-        )
+    # Use function replacements so model text is treated literally; replacement
+    # templates interpret backslashes (e.g. \u, \1) and can raise re.error.
+    formatted_text = re.sub(
+        r"<analysis>([\s\S]*?)</analysis>",
+        lambda match: f"Analysis:\n{(match.group(1) or '').strip()}",
+        formatted_text,
+    )
 
-    # Extract and format summary section
-    summary_match = re.search(r"<summary>([\s\S]*?)</summary>", formatted_text)
-    if summary_match:
-        summary_content = summary_match.group(1) or ""
-        formatted_text = re.sub(
-            r"<summary>[\s\S]*?</summary>",
-            f"Summary:\n{summary_content.strip()}",
-            formatted_text,
-        )
+    formatted_text = re.sub(
+        r"<summary>([\s\S]*?)</summary>",
+        lambda match: f"Summary:\n{(match.group(1) or '').strip()}",
+        formatted_text,
+    )
 
     # Clean up excessive newlines
     formatted_text = re.sub(r"\n\n+", "\n\n", formatted_text)

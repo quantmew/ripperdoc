@@ -56,17 +56,15 @@ def test_remaining_tokens_subtracts_output_for_total_window_profiles():
     profile = ModelProfile(
         protocol=ProtocolType.OPENAI_COMPATIBLE,
         model="example-total-window-model",
-        context_window=128_000,
         max_tokens=8_192,
     )
 
-    assert get_remaining_context_tokens(profile) == 119_808
+    assert get_remaining_context_tokens(profile, explicit_limit=128_000) == 119_808
 
 
 def test_remaining_tokens_raises_on_output_parse_error():
     class BrokenProfile:
         model = "broken-model"
-        context_window = 128_000
         max_input_tokens = None
         max_output_tokens = {"invalid": True}
         max_tokens = {"invalid": True}
@@ -78,7 +76,6 @@ def test_remaining_tokens_raises_on_output_parse_error():
 def test_remaining_tokens_raises_on_zero_max_input_tokens():
     class BrokenProfile:
         model = "broken-input-model"
-        context_window = 128_000
         max_input_tokens = 0
         max_output_tokens = 16_384
         max_tokens = 16_384
@@ -90,7 +87,6 @@ def test_remaining_tokens_raises_on_zero_max_input_tokens():
 def test_remaining_tokens_raises_on_zero_max_output_tokens():
     class BrokenProfile:
         model = "broken-output-model"
-        context_window = 128_000
         max_input_tokens = None
         max_output_tokens = 0
         max_tokens = 16_384

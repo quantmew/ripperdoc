@@ -169,17 +169,6 @@ def _collect_add_profile_input(
         temp_default,
     )
 
-    context_window_default = (
-        existing_profile.context_window
-        if existing_profile
-        else inferred_profile.max_input_tokens
-    )
-    context_prompt = "Context window tokens (optional"
-    if context_window_default:
-        context_prompt += f", current {context_window_default}"
-    context_prompt += "): "
-    context_window = _parse_int(console, context_prompt, context_window_default)
-
     supports_vision_default = (
         existing_profile.supports_vision if existing_profile else inferred_profile.supports_vision
     )
@@ -226,7 +215,6 @@ def _collect_add_profile_input(
         api_base=api_base,
         max_tokens=max_tokens,
         temperature=temperature,
-        context_window=context_window,
         auth_token=auth_token,
         supports_vision=supports_vision,
         price={"input": input_price, "output": output_price},
@@ -294,12 +282,6 @@ def _collect_edit_profile_input(
         existing_profile.temperature,
     )
 
-    context_window = _parse_int(
-        console,
-        f"Context window tokens [{existing_profile.context_window or 'unset'}]: ",
-        existing_profile.context_window,
-    )
-
     supports_vision = _prompt_supports_vision_edit(console, existing_profile.supports_vision)
 
     currency = (
@@ -325,7 +307,6 @@ def _collect_edit_profile_input(
         api_base=api_base,
         max_tokens=max_tokens,
         temperature=temperature,
-        context_window=context_window,
         auth_token=auth_token,
         supports_vision=supports_vision,
         price={"input": input_price, "output": output_price},
@@ -362,8 +343,10 @@ def _render_models_plain(console: Any, config: Any) -> None:
         console.print(f"      model: {profile.model}", markup=False)
         if profile.api_base:
             console.print(f"      api_base: {profile.api_base}", markup=False)
-        if profile.context_window:
-            console.print(f"      context: {profile.context_window} tokens", markup=False)
+        if profile.max_input_tokens:
+            console.print(f"      max_input_tokens: {profile.max_input_tokens}", markup=False)
+        if profile.max_output_tokens:
+            console.print(f"      max_output_tokens: {profile.max_output_tokens}", markup=False)
         console.print(
             f"      max_tokens: {profile.max_tokens}, temperature: {profile.temperature}",
             markup=False,
@@ -400,7 +383,7 @@ def _render_models_table(console: Any, config: Any) -> None:
     table.add_column("Ptr", style="magenta", no_wrap=True)
     table.add_column("Protocol", style="green", no_wrap=True)
     table.add_column("Model", style="white", overflow="fold")
-    table.add_column("Ctx", style="dim", justify="right", no_wrap=True)
+    table.add_column("In", style="dim", justify="right", no_wrap=True)
     table.add_column("Max", style="dim", justify="right", no_wrap=True)
     table.add_column("Temp", style="dim", justify="right", no_wrap=True)
     table.add_column("Vision", style="yellow", no_wrap=True)
@@ -410,7 +393,7 @@ def _render_models_table(console: Any, config: Any) -> None:
     for name, profile in config.model_profiles.items():
         markers = _pointer_markers(pointer_map, name)
         pointer_label = ",".join(markers) if markers else "-"
-        context_display = str(profile.context_window) if profile.context_window else "-"
+        context_display = str(profile.max_input_tokens) if profile.max_input_tokens else "-"
         vision_display = _vision_labels(profile)[0]
         api_base = profile.api_base or "-"
         if profile.api_base:
@@ -450,7 +433,14 @@ def _build_model_details_panel(
     details.add_row("Protocol", escape(profile.protocol.value))
     details.add_row("Model", escape(profile.model))
     details.add_row("API base", escape(profile.api_base or "-"))
-    details.add_row("Context", escape(str(profile.context_window) if profile.context_window else "auto"))
+    details.add_row(
+        "Max input tokens",
+        escape(str(profile.max_input_tokens) if profile.max_input_tokens else "auto"),
+    )
+    details.add_row(
+        "Max output tokens",
+        escape(str(profile.max_output_tokens) if profile.max_output_tokens else "auto"),
+    )
     details.add_row("Max tokens", escape(str(profile.max_tokens)))
     details.add_row("Temperature", escape(str(profile.temperature)))
     details.add_row(

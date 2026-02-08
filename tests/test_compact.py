@@ -2,6 +2,7 @@
 
 from ripperdoc.utils.conversation_compaction import (
     extract_tool_ids_from_message,
+    format_summary_response,
     get_complete_tool_pairs_tail,
 )
 from ripperdoc.utils.messages import create_user_message, create_assistant_message
@@ -153,3 +154,21 @@ def test_get_complete_tool_pairs_tail_zero_count():
     messages = [create_user_message("Hello")]
     tail = get_complete_tool_pairs_tail(messages, 0)
     assert tail == []
+
+
+def test_format_summary_response_handles_backslash_u_sequences():
+    """Formatting should not crash on literal '\\u' sequences in model output."""
+    raw = "<summary>Unicode literal: \\u4f60\\u597d</summary>"
+
+    formatted = format_summary_response(raw)
+
+    assert formatted == "Summary:\nUnicode literal: \\u4f60\\u597d"
+
+
+def test_format_summary_response_handles_backreference_like_sequences():
+    """Formatting should keep backslash sequences like '\\1' as literal text."""
+    raw = "<analysis>Regex-like: \\1 and path C:\\\\tmp</analysis>"
+
+    formatted = format_summary_response(raw)
+
+    assert formatted == "Analysis:\nRegex-like: \\1 and path C:\\\\tmp"

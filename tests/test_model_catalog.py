@@ -27,7 +27,8 @@ def test_model_profile_uses_catalog_defaults():
 
     assert profile.max_input_tokens is not None and profile.max_input_tokens >= 128_000
     assert profile.max_output_tokens is not None and profile.max_output_tokens >= 4_096
-    assert profile.max_tokens >= profile.max_output_tokens
+    assert profile.max_tokens <= profile.max_output_tokens
+    assert profile.max_tokens <= 8_192
     assert profile.mode in {"chat", "completion", "responses"}
     assert profile.supports_vision is True
     assert profile.price.input > 0
@@ -54,4 +55,3 @@ def test_explicit_values_are_not_overridden():
     assert profile.price.input == 9.0
     assert profile.price.output == 10.0
     assert profile.currency == "CNY"
-

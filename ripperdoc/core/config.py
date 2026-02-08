@@ -78,8 +78,6 @@ class ModelProfile(BaseModel):
     api_base: Optional[str] = None
     max_tokens: int = 4096
     temperature: float = 0.7
-    # Total context window in tokens (if known). Falls back to heuristics when unset.
-    context_window: Optional[int] = None
     # Optional split limits if provider reports separate input/output budgets.
     max_input_tokens: Optional[int] = None
     max_output_tokens: Optional[int] = None
@@ -118,11 +116,10 @@ class ModelProfile(BaseModel):
         if self.supports_vision is None and metadata.supports_vision is not None:
             self.supports_vision = metadata.supports_vision
 
-        inferred_max_tokens = (
-            metadata.max_tokens or metadata.max_output_tokens or metadata.max_input_tokens
-        )
-        if inferred_max_tokens is not None and "max_tokens" not in fields_set:
-            self.max_tokens = inferred_max_tokens
+        if "max_tokens" not in fields_set and self.max_output_tokens is not None:
+            self.max_tokens = min(self.max_output_tokens, 8192)
+        if self.max_output_tokens is not None:
+            self.max_tokens = min(self.max_tokens, self.max_output_tokens)
 
         if (
             "price" not in fields_set

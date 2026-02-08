@@ -157,18 +157,6 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     id="temperature_input",
                 )
 
-                context_default = (
-                    str(self._existing_profile.context_window)
-                    if self._existing_profile and self._existing_profile.context_window
-                    else ""
-                )
-                yield Static("Context window tokens", classes="field_label")
-                yield Input(
-                    value=context_default,
-                    placeholder="Context window tokens (optional)",
-                    id="context_window_input",
-                )
-
                 input_price_default = (
                     self._existing_profile.price.input if self._existing_profile else 0.0
                 )
@@ -243,7 +231,6 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         api_base_input = self.query_one("#api_base_input", Input)
         max_tokens_input = self.query_one("#max_tokens_input", Input)
         temperature_input = self.query_one("#temperature_input", Input)
-        context_window_input = self.query_one("#context_window_input", Input)
         input_price_input = self.query_one("#input_price_input", Input)
         output_price_input = self.query_one("#output_price_input", Input)
         currency_input = self.query_one("#currency_input", Input)
@@ -314,17 +301,6 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         if temperature is None:
             return
 
-        context_window = None
-        context_raw = (context_window_input.value or "").strip()
-        if context_raw:
-            context_window = self._parse_int(context_raw, "Context window tokens")
-            if context_window is None:
-                return
-        elif self._existing_profile:
-            context_window = self._existing_profile.context_window
-        else:
-            context_window = inferred_profile.max_input_tokens
-
         input_price_default = (
             self._existing_profile.price.input if self._existing_profile else inferred_profile.price.input
         )
@@ -378,7 +354,6 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             api_base=api_base,
             max_tokens=max_tokens,
             temperature=temperature,
-            context_window=context_window,
             supports_vision=supports_vision,
             price={"input": input_price, "output": output_price},
             currency=currency,
@@ -405,8 +380,6 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 return default_value
             if self._existing_profile and label == "Max output tokens":
                 return self._existing_profile.max_tokens
-            if self._existing_profile and label == "Context window tokens":
-                return self._existing_profile.context_window
             if label == "Max output tokens":
                 return 4096
             return None
@@ -740,8 +713,12 @@ class ModelsApp(App[None]):
         table.add_row("Model", profile.model)
         table.add_row("API base", profile.api_base or "-")
         table.add_row(
-            "Context",
-            str(profile.context_window) if profile.context_window else "auto",
+            "Max input tokens",
+            str(profile.max_input_tokens) if profile.max_input_tokens else "auto",
+        )
+        table.add_row(
+            "Max output tokens",
+            str(profile.max_output_tokens) if profile.max_output_tokens else "auto",
         )
         table.add_row("Max tokens", str(profile.max_tokens))
         table.add_row("Temperature", str(profile.temperature))

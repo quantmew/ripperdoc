@@ -66,7 +66,6 @@ Model profiles now support additional optional fields that auto-populate from th
   "api_key": "sk-ant-...",
   "max_tokens": 4096,
   "temperature": 1.0,
-  "context_window": 200000,
   "max_input_tokens": 200000,
   "max_output_tokens": 8192,
   "mode": "chat",
