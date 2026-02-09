@@ -561,13 +561,13 @@ class PluginsApp(App[None]):
 
         if self._tab == "discover":
             installed_names = {item.name for item in self._installed_plugins}
-            entries = self._filter_discover()
-            if not entries:
+            discover_entries = self._filter_discover()
+            if not discover_entries:
                 option_list.add_option(Option("No plugins match current filters.", id="empty"))
                 option_list.highlighted = 0
                 self._highlighted_id = None
                 return
-            for idx, entry in enumerate(entries):
+            for idx, entry in enumerate(discover_entries):
                 marker = "●" if entry.name in installed_names else "◯"
                 community = " [Community Managed]" if entry.community_managed else ""
                 installs = f" · {entry.installs} installs" if entry.installs else ""
@@ -579,13 +579,13 @@ class PluginsApp(App[None]):
                 self._visible_ids.append(option_id)
                 option_list.add_option(Option(line, id=option_id))
         elif self._tab == "installed":
-            entries = self._filter_installed()
-            if not entries:
+            installed_entries = self._filter_installed()
+            if not installed_entries:
                 option_list.add_option(Option("No installed plugins.", id="empty"))
                 option_list.highlighted = 0
                 self._highlighted_id = None
                 return
-            for idx, item in enumerate(entries):
+            for idx, item in enumerate(installed_entries):
                 version = f" · v{item.version}" if item.version else ""
                 scope_text = f" · scope: {', '.join(item.scopes)}" if item.scopes else ""
                 line = f"● {item.name}{version}{scope_text}\n    {item.path}"

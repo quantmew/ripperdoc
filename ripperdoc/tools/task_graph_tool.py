@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import Any, AsyncGenerator, Literal, Optional
+from typing import Any, AsyncGenerator, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -370,8 +370,12 @@ class TaskListOutput(BaseModel):
     tasks: list[TaskListEntry] = Field(default_factory=list)
 
 
-class _BaseTaskGraphTool(Tool[BaseModel, BaseModel]):
-    def needs_permissions(self, _input_data: Optional[BaseModel] = None) -> bool:
+TaskGraphInputT = TypeVar("TaskGraphInputT", bound=BaseModel)
+TaskGraphOutputT = TypeVar("TaskGraphOutputT", bound=BaseModel)
+
+
+class _BaseTaskGraphTool(Tool[TaskGraphInputT, TaskGraphOutputT]):
+    def needs_permissions(self, _input_data: Optional[TaskGraphInputT] = None) -> bool:
         return False
 
 
@@ -407,7 +411,7 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
-class TaskCreateTool(_BaseTaskGraphTool):
+class TaskCreateTool(_BaseTaskGraphTool[TaskCreateInput, TaskCreateOutput]):
     @property
     def name(self) -> str:
         return "TaskCreate"
@@ -488,7 +492,7 @@ class TaskCreateTool(_BaseTaskGraphTool):
             yield ToolResult(data=output, result_for_assistant=f"TaskCreate failed: {exc}")
 
 
-class TaskGetTool(_BaseTaskGraphTool):
+class TaskGetTool(_BaseTaskGraphTool[TaskGetInput, TaskGetOutput]):
     @property
     def name(self) -> str:
         return "TaskGet"
@@ -544,7 +548,7 @@ class TaskGetTool(_BaseTaskGraphTool):
         yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
 
 
-class TaskUpdateTool(_BaseTaskGraphTool):
+class TaskUpdateTool(_BaseTaskGraphTool[TaskUpdateInput, TaskUpdateOutput]):
     @property
     def name(self) -> str:
         return "TaskUpdate"
@@ -759,7 +763,7 @@ class TaskUpdateTool(_BaseTaskGraphTool):
             yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
 
 
-class TaskListTool(_BaseTaskGraphTool):
+class TaskListTool(_BaseTaskGraphTool[TaskListInput, TaskListOutput]):
     @property
     def name(self) -> str:
         return "TaskList"

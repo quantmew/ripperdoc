@@ -23,6 +23,7 @@ logger = get_logger()
 
 TodoStatus = Literal["pending", "in_progress", "completed"]
 TodoPriority = Literal["high", "medium", "low"]
+_TODO_PRIORITIES: dict[str, TodoPriority] = {"high": "high", "medium": "medium", "low": "low"}
 
 
 class TodoItem(BaseModel):
@@ -43,6 +44,11 @@ class TodoItem(BaseModel):
 
 
 MAX_TODOS = 200
+
+
+def _normalize_todo_priority(value: object) -> TodoPriority:
+    raw = str(value or "medium").strip().lower()
+    return _TODO_PRIORITIES.get(raw, "medium")
 
 
 def _storage_path(project_root: Optional[Path], ensure_dir: bool) -> Path:
@@ -84,13 +90,8 @@ def load_todos(project_root: Optional[Path] = None) -> List[TodoItem]:
             todos_from_tasks: List[TodoItem] = []
             for task in task_items:
                 metadata = task.metadata if isinstance(task.metadata, dict) else {}
-                raw_priority = str(
-                    metadata.get("priority") or metadata.get("todo_priority") or "medium"
-                ).lower()
-                priority: TodoPriority = (
-                    raw_priority
-                    if raw_priority in ("high", "medium", "low")
-                    else "medium"
+                priority = _normalize_todo_priority(
+                    metadata.get("priority") or metadata.get("todo_priority")
                 )
                 todos_from_tasks.append(
                     TodoItem(

@@ -505,6 +505,8 @@ _runtime_var: contextvars.ContextVar[Optional[McpRuntime]] = contextvars.Context
 # Fallback for synchronous contexts (e.g., run_until_complete) where contextvars
 # don't propagate values back to the caller.
 _global_runtime: Optional[McpRuntime] = None
+_runtime_init_task: Optional[asyncio.Task[McpRuntime]] = None
+_runtime_init_project: Optional[Path] = None
 
 
 def _get_runtime() -> Optional[McpRuntime]:
@@ -520,6 +522,7 @@ def get_existing_mcp_runtime() -> Optional[McpRuntime]:
 
 
 async def ensure_mcp_runtime(project_path: Optional[Path] = None) -> McpRuntime:
+    global _runtime_init_task, _runtime_init_project
     runtime = _get_runtime()
     project_path = project_path or Path.cwd()
     if runtime and not runtime._closed and runtime.project_path == project_path:
@@ -533,47 +536,86 @@ async def ensure_mcp_runtime(project_path: Optional[Path] = None) -> McpRuntime:
         )
         return runtime
 
-    if runtime:
-        await runtime.aclose()
+    # If an initialization task is already in flight for this project and loop, await it.
+    if _runtime_init_task is not None and not _runtime_init_task.done():
+        if _runtime_init_project == project_path and _runtime_init_task.get_loop() is asyncio.get_running_loop():
+            runtime = await _runtime_init_task
+            _runtime_var.set(runtime)
+            return runtime
 
-    runtime = McpRuntime(project_path)
-    logger.debug(
-        "[mcp] Creating MCP runtime",
-        extra={"project_path": str(project_path)},
-    )
-    configs = _load_server_configs(project_path)
-    await runtime.connect(configs)
-    _runtime_var.set(runtime)
-    # Keep a module-level reference so sync callers that hop event loops can reuse it.
-    global _global_runtime
-    _global_runtime = runtime
+    async def _initialize_runtime() -> McpRuntime:
+        existing = _get_runtime()
+        if existing and not existing._closed:
+            await existing.aclose()
 
-    # Install custom exception handler to suppress MCP asyncgen cleanup errors.
-    # These errors occur due to anyio cancel scope issues when stdio_client async
-    # generators are finalized by Python's asyncgen hooks. The errors are harmless
-    # but noisy, so we suppress them here.
-    loop = asyncio.get_running_loop()
-    original_handler = loop.get_exception_handler()
+        initialized_runtime = McpRuntime(project_path)
+        try:
+            logger.debug(
+                "[mcp] Creating MCP runtime",
+                extra={"project_path": str(project_path)},
+            )
+            configs = _load_server_configs(project_path)
+            await initialized_runtime.connect(configs)
+            _runtime_var.set(initialized_runtime)
+            # Keep a module-level reference so sync callers that hop event loops can reuse it.
+            global _global_runtime
+            _global_runtime = initialized_runtime
 
-    def mcp_exception_handler(loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
-        asyncgen = context.get("asyncgen")
-        # Suppress MCP stdio_client asyncgen cleanup errors
-        if asyncgen and "stdio_client" in str(asyncgen):
-            logger.debug("[mcp] Suppressed asyncgen cleanup error for stdio_client")
-            return
-        # Call original handler for other errors
-        if original_handler:
-            original_handler(loop, context)
-        else:
-            loop.default_exception_handler(context)
+            # Install custom exception handler to suppress MCP asyncgen cleanup errors.
+            # These errors occur due to anyio cancel scope issues when stdio_client async
+            # generators are finalized by Python's asyncgen hooks. The errors are harmless
+            # but noisy, so we suppress them here.
+            loop = asyncio.get_running_loop()
+            original_handler = loop.get_exception_handler()
 
-    loop.set_exception_handler(mcp_exception_handler)
-    logger.debug("[mcp] Installed custom exception handler for asyncgen cleanup")
+            def mcp_exception_handler(loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
+                asyncgen = context.get("asyncgen")
+                # Suppress MCP stdio_client asyncgen cleanup errors
+                if asyncgen and "stdio_client" in str(asyncgen):
+                    logger.debug("[mcp] Suppressed asyncgen cleanup error for stdio_client")
+                    return
+                # Call original handler for other errors
+                if original_handler:
+                    original_handler(loop, context)
+                else:
+                    loop.default_exception_handler(context)
 
-    return runtime
+            loop.set_exception_handler(mcp_exception_handler)
+            logger.debug("[mcp] Installed custom exception handler for asyncgen cleanup")
+            return initialized_runtime
+        except BaseException:
+            # Ensure partially connected runtimes are cleaned up when initialization is cancelled/failed.
+            try:
+                await initialized_runtime.aclose()
+            except BaseException:
+                pass
+            raise
+
+    init_task = asyncio.create_task(_initialize_runtime())
+    _runtime_init_task = init_task
+    _runtime_init_project = project_path
+    try:
+        runtime = await init_task
+        _runtime_var.set(runtime)
+        return runtime
+    finally:
+        if _runtime_init_task is init_task:
+            _runtime_init_task = None
+            _runtime_init_project = None
 
 
 async def shutdown_mcp_runtime() -> None:
+    global _runtime_init_task, _runtime_init_project
+    if _runtime_init_task is not None and not _runtime_init_task.done():
+        if _runtime_init_task.get_loop() is asyncio.get_running_loop():
+            _runtime_init_task.cancel()
+            try:
+                await _runtime_init_task
+            except (asyncio.CancelledError, RuntimeError, OSError, ConnectionError, ValueError):
+                pass
+        _runtime_init_task = None
+        _runtime_init_project = None
+
     runtime = _get_runtime()
     if not runtime:
         return

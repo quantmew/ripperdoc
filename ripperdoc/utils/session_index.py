@@ -101,7 +101,13 @@ def _coerce_int(value: object) -> int:
             return int(value)
         if value is None:
             return 0
-        return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, (str, bytes, bytearray)):
+            return int(value)
+        return 0
     except (TypeError, ValueError):
         return 0
 
@@ -112,7 +118,11 @@ def _coerce_float(value: object) -> float:
             return float(int(value))
         if value is None:
             return 0.0
-        return float(value)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, (str, bytes, bytearray)):
+            return float(value)
+        return 0.0
     except (TypeError, ValueError):
         return 0.0
 

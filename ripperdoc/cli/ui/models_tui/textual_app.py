@@ -430,6 +430,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         supports_value = (
             vision_raw.strip().lower() if isinstance(vision_raw, str) and vision_raw else "auto"
         )
+        supports_vision: bool | None
         if supports_value == "yes":
             supports_vision = True
         elif supports_value == "no":

@@ -66,7 +66,7 @@ command = SlashCommand(
     name="output-language",
     description="Set preferred response language for system prompt",
     handler=_handle,
-    aliases=["language"],
+    aliases=("language",),
 )
 
 

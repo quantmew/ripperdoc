@@ -626,7 +626,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         subagent_context: QueryContext,
         permission_checker: Any,
         hook_context: Dict[str, str],
-        parent_tool_use_id: str,
+        parent_tool_use_id: Optional[str],
     ) -> AsyncGenerator[ToolProgress, None]:
         assistant_messages: List[AssistantMessage] = []
         tool_use_count = 0
@@ -651,8 +651,10 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 yield ToolProgress(content=update)
 
             if msg_type in ("assistant", "user"):
-                message_with_parent = message.model_copy(
-                    update={"parent_tool_use_id": parent_tool_use_id}
+                message_with_parent = (
+                    message.model_copy(update={"parent_tool_use_id": parent_tool_use_id})
+                    if parent_tool_use_id
+                    else message
                 )
                 yield ToolProgress(content=message_with_parent, is_subagent_message=True)
 

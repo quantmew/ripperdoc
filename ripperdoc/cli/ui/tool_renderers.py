@@ -36,6 +36,16 @@ class ToolResultRenderer:
 
 
 TaskRenderStatus = Literal["pending", "in_progress", "completed"]
+_TASK_RENDER_STATUSES: dict[str, TaskRenderStatus] = {
+    "pending": "pending",
+    "in_progress": "in_progress",
+    "completed": "completed",
+}
+
+
+def _normalize_task_render_status(value: object) -> TaskRenderStatus:
+    raw = str(value or "pending").strip().lower()
+    return _TASK_RENDER_STATUSES.get(raw, "pending")
 
 
 class TaskRenderEntry(TypedDict):
@@ -102,10 +112,7 @@ class TaskGraphResultRenderer(ToolResultRenderer):
 
             task_id = str(raw.get("id", "")).strip()
             subject = str(raw.get("subject", "")).strip()
-            raw_status = str(raw.get("status", "pending")).strip() or "pending"
-            status: TaskRenderStatus = (
-                raw_status if raw_status in {"pending", "in_progress", "completed"} else "pending"
-            )
+            status = _normalize_task_render_status(raw.get("status"))
             owner = raw.get("owner")
             blocked_by = raw.get("blockedBy")
             if not isinstance(blocked_by, list):

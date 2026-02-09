@@ -216,74 +216,95 @@ def _save_known_marketplaces(payload: Dict[str, Dict[str, Any]], home: Optional[
     return path
 
 
+def _marketplace_from_known_record(
+    marketplace_id: str, record: dict[str, Any]
+) -> Optional[MarketplaceSource]:
+    source = _normalize_source_record(record.get("source")) or ""
+    if not source:
+        return None
+    local_path_raw = str(record.get("installLocation") or "").strip()
+    local_path = Path(local_path_raw).expanduser().resolve() if local_path_raw else None
+    return MarketplaceSource(
+        marketplace_id=str(marketplace_id),
+        source=source,
+        enabled=True,
+        title=None,
+        updated_at=str(record.get("lastUpdated") or "").strip() or None,
+        local_path=local_path,
+    )
+
+
+def _load_marketplaces_from_known(home: Optional[Path] = None) -> List[MarketplaceSource]:
+    marketplaces: List[MarketplaceSource] = []
+    for marketplace_id, record in _load_known_marketplaces(home).items():
+        if not isinstance(record, dict):
+            continue
+        parsed = _marketplace_from_known_record(str(marketplace_id), record)
+        if parsed is not None:
+            marketplaces.append(parsed)
+    return marketplaces
+
+
+def _marketplace_from_legacy_record(record: dict[str, Any]) -> Optional[MarketplaceSource]:
+    source = str(record.get("source") or "").strip()
+    if not source:
+        return None
+    marketplace_id = str(record.get("id") or "").strip() or _canonical_marketplace_id(source)
+    local_path_raw = str(record.get("local_path") or "").strip()
+    local_path = Path(local_path_raw).expanduser().resolve() if local_path_raw else None
+    return MarketplaceSource(
+        marketplace_id=marketplace_id,
+        source=source,
+        enabled=bool(record.get("enabled", True)),
+        title=str(record.get("title") or "").strip() or None,
+        updated_at=str(record.get("updated_at") or "").strip() or None,
+        local_path=local_path,
+    )
+
+
+def _load_marketplaces_from_legacy(home: Optional[Path] = None) -> List[MarketplaceSource]:
+    legacy = _legacy_marketplace_config_path(home)
+    if not legacy.exists():
+        return []
+    try:
+        legacy_raw: Any = json.loads(legacy.read_text(encoding="utf-8"))
+    except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(legacy_raw, dict):
+        return []
+    raw_items = legacy_raw.get("marketplaces")
+    if not isinstance(raw_items, list):
+        return []
+    marketplaces: List[MarketplaceSource] = []
+    for record in raw_items:
+        if not isinstance(record, dict):
+            continue
+        parsed = _marketplace_from_legacy_record(record)
+        if parsed is not None:
+            marketplaces.append(parsed)
+    return marketplaces
+
+
+def _dedupe_marketplaces(marketplaces: Iterable[MarketplaceSource]) -> List[MarketplaceSource]:
+    deduped: List[MarketplaceSource] = []
+    seen: set[str] = set()
+    for marketplace in marketplaces:
+        key = marketplace.marketplace_id.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(marketplace)
+    return deduped
+
+
 def load_marketplaces(home: Optional[Path] = None) -> List[MarketplaceSource]:
     path = _known_marketplaces_path(home=home)
-    marketplaces: List[MarketplaceSource] = []
-    if path.exists():
-        raw = _load_known_marketplaces(home)
-        for marketplace_id, item in raw.items():
-            if not isinstance(item, dict):
-                continue
-            source = _normalize_source_record(item.get("source")) or ""
-            if not source:
-                continue
-            local_path = str(item.get("installLocation") or "").strip() or None
-            marketplaces.append(
-                MarketplaceSource(
-                    marketplace_id=str(marketplace_id),
-                    source=source,
-                    enabled=True,
-                    title=None,
-                    updated_at=str(item.get("lastUpdated") or "").strip() or None,
-                    local_path=Path(local_path).expanduser().resolve() if local_path else None,
-                )
-            )
-    else:
-        legacy = _legacy_marketplace_config_path(home)
-        if legacy.exists():
-            try:
-                raw = json.loads(legacy.read_text(encoding="utf-8"))
-            except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError):
-                raw = {}
-            if isinstance(raw, dict):
-                raw_items = raw.get("marketplaces", [])
-                if isinstance(raw_items, list):
-                    for item in raw_items:
-                        if not isinstance(item, dict):
-                            continue
-                        source = str(item.get("source") or "").strip()
-                        if not source:
-                            continue
-                        marketplace_id = str(item.get("id") or "").strip() or _canonical_marketplace_id(
-                            source
-                        )
-                        marketplaces.append(
-                            MarketplaceSource(
-                                marketplace_id=marketplace_id,
-                                source=source,
-                                enabled=bool(item.get("enabled", True)),
-                                title=str(item.get("title") or "").strip() or None,
-                                updated_at=str(item.get("updated_at") or "").strip() or None,
-                                local_path=(
-                                    Path(str(item.get("local_path"))).expanduser().resolve()
-                                    if item.get("local_path")
-                                    else None
-                                ),
-                            )
-                        )
+    marketplaces = _load_marketplaces_from_known(home) if path.exists() else _load_marketplaces_from_legacy(home)
 
     if not any(item.marketplace_id == DEFAULT_MARKETPLACE_ID for item in marketplaces):
         marketplaces.insert(0, _default_marketplace())
 
-    deduped: List[MarketplaceSource] = []
-    seen: set[str] = set()
-    for item in marketplaces:
-        key = item.marketplace_id.strip().lower()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped
+    return _dedupe_marketplaces(marketplaces)
 
 
 def save_marketplaces(
@@ -715,9 +736,9 @@ def _path_entries(marketplace: MarketplaceSource) -> List[PluginCatalogEntry]:
     if marketplace_manifest is not None:
         payload = _read_manifest(marketplace_manifest)
         if payload:
-            entries = _parse_plugin_entries_from_json(payload, marketplace)
+            manifest_entries = _parse_plugin_entries_from_json(payload, marketplace)
             resolved_entries: List[PluginCatalogEntry] = []
-            for item in entries:
+            for item in manifest_entries:
                 raw_source = item.plugin_source.strip()
                 local_path: Optional[Path] = None
                 if raw_source:

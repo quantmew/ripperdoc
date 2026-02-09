@@ -416,6 +416,6 @@ def normalize_messages_for_api_impl(
     )
 
     if thinking_mode == "deepseek":
-        normalized = apply_deepseek_reasoning_content(normalized, is_new_turn=False)
+        normalized = apply_deepseek_reasoning_content(normalized, False)
 
     return normalized

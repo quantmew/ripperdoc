@@ -397,8 +397,8 @@ def get_disabled_skill_names(
     """Return disabled skill names from state files under skills directories."""
     if location is not None:
         state_path = _state_file_for_location(location, project_path=project_path, home=home)
-        disabled = _load_disabled_from_state_file(state_path)
-        return disabled
+        disabled_for_location = _load_disabled_from_state_file(state_path)
+        return disabled_for_location
 
     disabled: set[str] = set()
     for _, loc in skill_directories(project_path=project_path, home=home):

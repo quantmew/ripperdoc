@@ -7,7 +7,7 @@ including API keys, model settings, and user preferences.
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Literal, cast
+from typing import Any, Dict, Optional, Literal, TYPE_CHECKING, cast
 from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
@@ -18,6 +18,9 @@ logger = get_logger()
 
 USER_CONFIG_DIR_NAME = ".ripperdoc"
 USER_CONFIG_FILE_NAME = "config.json"
+
+if TYPE_CHECKING:
+    from ripperdoc.core.model_catalog import ModelCatalogEntry
 
 
 class ProtocolType(str, Enum):
@@ -50,7 +53,9 @@ def _default_model_for_protocol(protocol: ProtocolType) -> str:
     return "gpt-4o-mini"
 
 
-def _lookup_model_metadata_safely(model_name: str, protocol: Optional[ProtocolType] = None) -> Any:
+def _lookup_model_metadata_safely(
+    model_name: str, protocol: Optional[ProtocolType] = None
+) -> Optional["ModelCatalogEntry"]:
     """Best-effort model catalog lookup without importing model_catalog at module import time."""
     try:
         from ripperdoc.core.model_catalog import lookup_model_metadata
@@ -153,7 +158,7 @@ def model_supports_vision(model_profile: ModelProfile) -> bool:
         return model_profile.supports_vision
 
     metadata = _lookup_model_metadata_safely(model_profile.model, model_profile.protocol)
-    if metadata and metadata.supports_vision is not None:
+    if metadata is not None and metadata.supports_vision is not None:
         return metadata.supports_vision
     return False
 

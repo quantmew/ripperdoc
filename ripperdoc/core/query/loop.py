@@ -6,7 +6,19 @@ import sys
 import time
 from asyncio import CancelledError
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Union, cast
+from typing import (
+    Any,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Union,
+    cast,
+)
 
 from pydantic import ValidationError
 
@@ -56,6 +68,7 @@ logger = get_logger()
 
 DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_API_TIMEOUT", "120"))
 MAX_LLM_RETRIES = int(os.getenv("RIPPERDOC_MAX_RETRIES", "10"))
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
 
 def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
@@ -401,6 +414,23 @@ class _AssistantWaitState:
     aborted: bool = False
 
 
+def _compose_next_iteration_messages(
+    base_messages: Sequence[ConversationMessage],
+    *,
+    assistant_message: Optional[AssistantMessage],
+    tool_results: Sequence[UserMessage],
+    extra_messages: Optional[Sequence[ConversationMessage]] = None,
+) -> list[ConversationMessage]:
+    """Build next-iteration history in a type-safe way."""
+    next_messages: list[ConversationMessage] = list(base_messages)
+    if assistant_message is not None:
+        next_messages.append(assistant_message)
+    next_messages.extend(tool_results)
+    if extra_messages:
+        next_messages.extend(extra_messages)
+    return next_messages
+
+
 def _normalize_tool_input_payload(raw_input: Any) -> Dict[str, Any]:
     """Normalize tool input payload to a plain dictionary."""
     if raw_input and hasattr(raw_input, "model_dump"):
@@ -478,12 +508,12 @@ async def _enqueue_stream_progress(
         logger.warning("[query] Failed to enqueue stream progress chunk: %s", exc)
 
 
-def _resolve_query_llm_callable() -> Callable[..., Awaitable[AssistantMessage]]:
+def _resolve_query_llm_callable() -> Callable[..., Coroutine[Any, Any, AssistantMessage]]:
     """Resolve query_llm from package namespace for monkeypatch compatibility in tests."""
     query_module = sys.modules.get("ripperdoc.core.query")
     if query_module:
         resolved = getattr(query_module, "query_llm", query_llm)
-        return cast(Callable[..., Awaitable[AssistantMessage]], resolved)
+        return cast(Callable[..., Coroutine[Any, Any, AssistantMessage]], resolved)
     return query_llm
 
 
@@ -1166,7 +1196,7 @@ async def _run_query_iteration(
     progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue(maxsize=1000)
     query_llm_fn = _resolve_query_llm_callable()
 
-    assistant_task = asyncio.create_task(
+    assistant_task: asyncio.Task[AssistantMessage] = asyncio.create_task(
         query_llm_fn(
             messages,
             plan.full_system_prompt,
@@ -1206,7 +1236,7 @@ async def _run_query_iteration(
     result.assistant_message = assistant_message
     yield assistant_message
 
-    async for item in _process_iteration_assistant_message(
+    async for msg in _process_iteration_assistant_message(
         assistant_message=assistant_message,
         messages=messages,
         context=context,
@@ -1215,11 +1245,11 @@ async def _run_query_iteration(
         result=result,
         model_name=plan.model_profile.model,
     ):
-        yield item
+        yield msg
 
 
 async def query(
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
     system_prompt: str,
     context: Dict[str, str],
     query_context: QueryContext,
@@ -1292,13 +1322,12 @@ async def query(
                 # Before stopping, check if new pending messages arrived during this iteration.
                 trailing_pending = query_context.drain_pending_messages()
                 if trailing_pending:
-                    # type: ignore[operator,list-item]
-                    next_messages = (
-                        messages + [result.assistant_message] + result.tool_results
-                        if result.assistant_message is not None
-                        else messages + result.tool_results  # type: ignore[operator]
-                    )  # type: ignore[operator]
-                    next_messages = next_messages + trailing_pending  # type: ignore[operator,list-item]
+                    next_messages = _compose_next_iteration_messages(
+                        messages,
+                        assistant_message=result.assistant_message,
+                        tool_results=result.tool_results,
+                        extra_messages=trailing_pending,
+                    )
                     for pending in trailing_pending:
                         yield pending
                     messages = next_messages
@@ -1306,10 +1335,11 @@ async def query(
                 return
 
             # Update messages for next iteration
-            if result.assistant_message is not None:
-                messages = messages + [result.assistant_message] + result.tool_results  # type: ignore[operator]
-            else:
-                messages = messages + result.tool_results  # type: ignore[operator]
+            messages = _compose_next_iteration_messages(
+                messages,
+                assistant_message=result.assistant_message,
+                tool_results=result.tool_results,
+            )
 
             logger.debug(
                 f"[query] Continuing loop with {len(messages)} messages after tools; "

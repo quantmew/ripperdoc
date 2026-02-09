@@ -4,9 +4,11 @@ This module provides a clean, minimal terminal UI using Rich for the Ripperdoc a
 """
 
 import asyncio
+import concurrent.futures
 import html
 import json
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -54,6 +56,7 @@ from ripperdoc.utils.message_compaction import (
     resolve_auto_compact_enabled,
 )
 from ripperdoc.utils.mcp import (
+    McpRuntime,
     ensure_mcp_runtime,
     format_mcp_instructions,
     load_mcp_servers_async,
@@ -119,7 +122,13 @@ class RichUI:
         permission_mode: str = "default",
     ):
         self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
+        self._loop_thread = threading.Thread(
+            target=self._run_event_loop,
+            name=f"ripperdoc-ui-loop-{uuid.uuid4().hex[:8]}",
+            daemon=True,
+        )
+        self._loop_thread.start()
+        self._mcp_warmup_future: Optional[concurrent.futures.Future[McpRuntime]] = None
         self.console = console
         self.yolo_mode = yolo_mode
         self.verbose = verbose
@@ -238,16 +247,8 @@ class RichUI:
         # Initialize component handlers
         self._message_display = MessageDisplay(self.console, self.verbose, self.show_full_thinking)
 
-        # Keep MCP runtime alive for the whole UI session. Create it on the UI loop up front.
-        try:
-            self._run_async(ensure_mcp_runtime(self.project_path))
-        except (OSError, RuntimeError, ConnectionError) as exc:
-            logger.warning(
-                "[ui] Failed to initialize MCP runtime at startup: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"session_id": self.session_id},
-            )
+        # Start MCP warmup in background so UI becomes interactive immediately.
+        self._start_mcp_runtime_warmup()
 
         # Initialize hook manager with project context
         hook_manager.set_project_dir(self.project_path)
@@ -1349,11 +1350,13 @@ class RichUI:
         self._interrupt_listener.resume()
 
     def _run_async(self, coro: Any) -> Any:
-        """Run a coroutine on the persistent event loop."""
+        """Run a coroutine on the persistent event loop thread."""
         if self._loop.is_closed():
-            self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
-        return self._loop.run_until_complete(coro)
+            raise RuntimeError("UI event loop is closed")
+        if threading.current_thread() is self._loop_thread:
+            raise RuntimeError("_run_async cannot be called from the UI event loop thread")
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result()
 
     def run_async(self, coro: Any) -> Any:
         """Public wrapper for running coroutines on the UI event loop."""
@@ -1563,30 +1566,7 @@ class RichUI:
                         extra={"session_id": self.session_id},
                     )
             finally:
-                if not self._loop.is_closed():
-                    # Cancel all pending tasks
-                    pending = asyncio.all_tasks(self._loop)
-                    for task in pending:
-                        task.cancel()
-
-                    # Allow cancelled tasks to clean up
-                    if pending:
-                        try:
-                            self._loop.run_until_complete(
-                                asyncio.gather(*pending, return_exceptions=True)
-                            )
-                        except (RuntimeError, asyncio.CancelledError):
-                            pass  # Ignore errors during task cancellation
-
-                    # Shutdown async generators (suppress expected errors)
-                    try:
-                        self._loop.run_until_complete(self._loop.shutdown_asyncgens())
-                    except (RuntimeError, asyncio.CancelledError):
-                        # Expected during forced shutdown - async generators may already be running
-                        pass
-
-                    self._loop.close()
-                asyncio.set_event_loop(None)
+                self._shutdown_event_loop_thread()
                 sys.unraisablehook = original_hook
 
     async def _run_manual_compact(self, custom_instructions: str) -> None:
@@ -1666,6 +1646,66 @@ class RichUI:
     def _print_shortcuts(self) -> None:
         """Show common keyboard shortcuts and prefixes."""
         print_shortcuts(self.console)
+
+    def _run_event_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
+    def _start_mcp_runtime_warmup(self) -> None:
+        if self._loop.is_closed():
+            return
+        if self._mcp_warmup_future is not None and not self._mcp_warmup_future.done():
+            return
+
+        async def _warmup() -> McpRuntime:
+            start = time.time()
+            try:
+                runtime = await ensure_mcp_runtime(self.project_path)
+                duration_ms = max((time.time() - start) * 1000, 0.0)
+                logger.info(
+                    "[ui] MCP background warmup completed",
+                    extra={
+                        "session_id": self.session_id,
+                        "project_path": str(self.project_path),
+                        "server_count": len(runtime.servers),
+                        "duration_ms": round(duration_ms, 2),
+                    },
+                )
+                return runtime
+            except (OSError, RuntimeError, ConnectionError, ValueError) as exc:
+                logger.warning(
+                    "[ui] MCP background warmup failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={"session_id": self.session_id, "project_path": str(self.project_path)},
+                )
+                raise
+
+        logger.debug(
+            "[ui] Scheduling MCP background warmup",
+            extra={"session_id": self.session_id, "project_path": str(self.project_path)},
+        )
+        self._mcp_warmup_future = asyncio.run_coroutine_threadsafe(_warmup(), self._loop)
+
+    def _shutdown_event_loop_thread(self) -> None:
+        if self._loop.is_closed():
+            return
+
+        async def _shutdown_asyncgens_only() -> None:
+            await asyncio.get_running_loop().shutdown_asyncgens()
+
+        try:
+            self._run_async(_shutdown_asyncgens_only())
+        except (RuntimeError, asyncio.CancelledError, concurrent.futures.TimeoutError):
+            pass
+
+        try:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            if self._loop_thread.is_alive():
+                self._loop_thread.join(timeout=2.0)
+        finally:
+            if not self._loop.is_closed():
+                self._loop.close()
 
 
 def check_onboarding_rich() -> bool:
