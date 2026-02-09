@@ -5,6 +5,30 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-02-10
+
+### Added
+- **Hide completed tasks** - Completed tasks are now hidden from UI output by default for cleaner display
+- **Display completed tasks option** - New opt-in option to show completed tasks when needed
+- **MCP stderr log inspection** - New `/mcp logs` command for inspecting MCP server stderr logs
+- **Thinking mode configuration** - Support for thinking mode configuration in model profiles
+- **Enhanced model configuration** - Separate max input/output tokens configuration for models
+
+### Fixed
+- **Flaky async hook test** - Fixed flaky async hook test by increasing wait time
+- **Anthropic extended thinking signatures** - Properly handle Anthropic extended thinking signatures in streaming and message replay
+- **Token management** - Remove redundant context_window field and simplify token management
+
+### Changed
+- **MCP runtime initialization** - Improved type safety and optimized MCP runtime initialization
+- **Plugin uninstall confirmation** - Added confirmation dialog for plugin uninstall operations
+- **Documentation sync** - Synced Chinese README with English version
+- **CLI alias removal** - Removed `rd` CLI alias for consistency
+
+### Refactored
+- **Task ID display** - Removed "id:" prefix from task ID display for cleaner output
+- **Task ID separator** - Changed task ID separator from hyphen to colon for better display consistency
+
 ## [0.4.1] - 2026-02-08
 
 ### Added
@@ -356,6 +380,7 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.4.2]: https://github.com/quantmew/Ripperdoc/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/quantmew/Ripperdoc/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/quantmew/Ripperdoc/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/quantmew/Ripperdoc/compare/v0.3.2...v0.3.3
