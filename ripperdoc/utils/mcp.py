@@ -5,18 +5,25 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import os
+import re
 import shlex
+import subprocess
+import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TextIO
 
 from ripperdoc import __version__
 from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.path_utils import sanitize_project_path
 from ripperdoc.utils.token_estimation import estimate_tokens
 
 logger = get_logger()
+_MCP_STDERR_MODE_ENV = "RIPPERDOC_MCP_STDERR_MODE"
+_MCP_STDERR_MODE_DEFAULT = "log"
 
 
 try:
@@ -252,6 +259,36 @@ def _load_server_configs(project_path: Optional[Path]) -> Dict[str, McpServerInf
     return merged
 
 
+def _mcp_stderr_mode() -> str:
+    raw = os.getenv(_MCP_STDERR_MODE_ENV, _MCP_STDERR_MODE_DEFAULT)
+    mode = str(raw or _MCP_STDERR_MODE_DEFAULT).strip().lower()
+    if mode in {"inherit", "stderr", "log", "silent", "off", "devnull"}:
+        return mode
+    return _MCP_STDERR_MODE_DEFAULT
+
+
+def _sanitize_server_filename(server_name: str) -> str:
+    value = re.sub(r"[^a-zA-Z0-9._-]+", "_", server_name.strip())
+    return value or "unknown-server"
+
+
+def _mcp_stderr_log_path(project_path: Path, server_name: str) -> Path:
+    safe_project = sanitize_project_path(project_path)
+    base_dir = Path.home() / ".ripperdoc" / "logs" / "mcp_stderr" / safe_project
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir / f"{_sanitize_server_filename(server_name)}.log"
+
+
+def get_mcp_stderr_mode() -> str:
+    """Return effective MCP stdio stderr routing mode."""
+    return _mcp_stderr_mode()
+
+
+def get_mcp_stderr_log_path(project_path: Path, server_name: str) -> Path:
+    """Return log file path used for a server's stdio stderr stream."""
+    return _mcp_stderr_log_path(project_path, server_name)
+
+
 class McpRuntime:
     """Manages live MCP connections for the current event loop."""
 
@@ -269,6 +306,8 @@ class McpRuntime:
         # These need to be explicitly closed after exit stack cleanup to prevent
         # shutdown_asyncgens() from trying to close them in a different task
         self._raw_async_generators: List[Any] = []
+        # Keep opened stderr log handles for stdio MCP servers.
+        self._mcp_stderr_logs: List[TextIO] = []
 
     async def connect(self, configs: Dict[str, McpServerInfo]) -> List[McpServerInfo]:
         logger.info(
@@ -322,6 +361,31 @@ class McpRuntime:
             roots=[mcp_types.Root(uri=Path(self.project_path).resolve().as_uri())]  # type: ignore[arg-type]
         )
 
+    def _stdio_errlog_target(self, server_name: str) -> Any:
+        mode = _mcp_stderr_mode()
+        if mode in {"inherit", "stderr"}:
+            return sys.stderr
+        if mode in {"silent", "off", "devnull"}:
+            return subprocess.DEVNULL
+
+        path = _mcp_stderr_log_path(self.project_path, server_name)
+        try:
+            handle = path.open("a", encoding="utf-8", buffering=1)
+        except (OSError, IOError, RuntimeError) as exc:
+            logger.warning(
+                "[mcp] Failed to open stderr log; falling back to /dev/null: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"server": server_name, "path": str(path)},
+            )
+            return subprocess.DEVNULL
+        self._mcp_stderr_logs.append(handle)
+        logger.debug(
+            "[mcp] Redirecting stdio server stderr to log file",
+            extra={"server": server_name, "path": str(path)},
+        )
+        return handle
+
     async def _connect_server(self, config: McpServerInfo) -> McpServerInfo:
         info = replace(config, tools=[], resources=[])
         if not MCP_AVAILABLE or not mcp_types:
@@ -372,7 +436,7 @@ class McpRuntime:
                     env=config.env or None,
                     cwd=self.project_path,
                 )
-                cm = stdio_client(stdio_params)
+                cm = stdio_client(stdio_params, errlog=self._stdio_errlog_target(config.name))
                 # Track the underlying async generator for explicit cleanup
                 if hasattr(cm, "gen"):
                     self._raw_async_generators.append(cm.gen)
@@ -485,6 +549,13 @@ class McpRuntime:
             except BaseException:  # pragma: no cover
                 pass
         self._raw_async_generators.clear()
+
+        for errlog in self._mcp_stderr_logs:
+            try:
+                errlog.close()
+            except BaseException:  # pragma: no cover
+                pass
+        self._mcp_stderr_logs.clear()
 
         # Now close the exit stack
         try:
@@ -724,4 +795,6 @@ __all__ = [
     "find_mcp_resource",
     "format_mcp_instructions",
     "estimate_mcp_tokens",
+    "get_mcp_stderr_mode",
+    "get_mcp_stderr_log_path",
 ]

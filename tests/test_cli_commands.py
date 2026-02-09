@@ -5,11 +5,13 @@ from rich.console import Console
 from ripperdoc.cli.commands.add_dir_cmd import command as add_dir_command
 from ripperdoc.cli.commands import get_slash_command
 from ripperdoc.cli.commands.memory_cmd import command as memory_command
+from ripperdoc.cli.commands.mcp_cmd import command as mcp_command
 from ripperdoc.cli.commands.plugins_cmd import command as plugins_command
 from ripperdoc.cli.commands.tasks_cmd import command as tasks_command
 from ripperdoc.cli.commands.todos_cmd import command as todos_command
 from ripperdoc.core.plugins import clear_runtime_plugin_dirs
 from ripperdoc.tools import background_shell
+from ripperdoc.utils.mcp import McpServerInfo
 from ripperdoc.utils.working_directories import normalize_directory_inputs
 from ripperdoc.utils.todo import TodoItem, set_todos
 from ripperdoc.utils.tasks import create_task
@@ -239,3 +241,77 @@ def test_plugins_command_defaults_to_tui_and_supports_plugin_alias(tmp_path, mon
 
     assert called["count"] == 1
     assert get_slash_command("plugin") == plugins_command
+
+
+def test_mcp_logs_lists_targets(tmp_path, monkeypatch):
+    """MCP logs command should list configured log targets."""
+
+    async def _fake_load(_project_path):
+        return [
+            McpServerInfo(name="context7", status="connected"),
+            McpServerInfo(name="agent-browser", status="connected"),
+        ]
+
+    log_a = tmp_path / "context7.log"
+    log_a.write_text("one\n", encoding="utf-8")
+    log_b = tmp_path / "agent-browser.log"
+
+    def _fake_log_path(_project_path, server_name):
+        return log_a if server_name == "context7" else log_b
+
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_mode", lambda: "log")
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_log_path", _fake_log_path)
+
+    ui = _DummyUI(Console(record=True, width=160), tmp_path)
+    mcp_command.handler(ui, "logs")
+
+    output = ui.console.export_text()
+    assert "MCP stderr logs" in output
+    assert "context7" in output
+    assert "agent-browser" in output
+    assert "ready" in output
+    assert "missing" in output
+
+
+def test_mcp_logs_show_last_lines_for_server(tmp_path, monkeypatch):
+    """MCP logs command should show tail output for a specific server."""
+
+    async def _fake_load(_project_path):
+        return [McpServerInfo(name="context7", status="connected")]
+
+    log_path = tmp_path / "context7.log"
+    log_path.write_text("line-1\nline-2\nline-3\n", encoding="utf-8")
+
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_log_path", lambda *_: log_path)
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    mcp_command.handler(ui, "logs context7 --lines 2")
+
+    output = ui.console.export_text()
+    assert "MCP stderr" in output
+    assert "line-2" in output
+    assert "line-3" in output
+    assert "line-1" not in output
+
+
+def test_mcp_logs_reports_unknown_server(tmp_path, monkeypatch):
+    """MCP logs command should report unknown server names."""
+
+    async def _fake_load(_project_path):
+        return [McpServerInfo(name="context7", status="connected")]
+
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_mode", lambda: "log")
+    monkeypatch.setattr(
+        "ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_log_path",
+        lambda project_path, server_name: project_path / f"{server_name}.log",
+    )
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    mcp_command.handler(ui, "logs unknown-server")
+
+    output = ui.console.export_text()
+    assert "Unknown MCP server" in output
+    assert "context7" in output
