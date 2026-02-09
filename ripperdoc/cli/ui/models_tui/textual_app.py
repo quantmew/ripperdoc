@@ -34,6 +34,17 @@ from ripperdoc.core.config import (
 )
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 
+_KNOWN_THINKING_MODES = {
+    "deepseek",
+    "openrouter",
+    "qwen",
+    "gemini_openai",
+    "openai",
+    "off",
+    "disabled",
+}
+_THINKING_MODE_CUSTOM = "__custom__"
+
 
 @dataclass
 class ModelFormResult:
@@ -181,6 +192,31 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     id="temperature_input",
                 )
 
+                thinking_mode_default = (
+                    self._existing_profile.thinking_mode if self._existing_profile else ""
+                )
+                select_default, custom_default = self._thinking_mode_form_defaults(
+                    thinking_mode_default
+                )
+                yield Static("Thinking mode override", classes="field_label")
+                thinking_options = [
+                    ("auto (detect)", "auto"),
+                    ("deepseek", "deepseek"),
+                    ("openrouter", "openrouter"),
+                    ("qwen", "qwen"),
+                    ("gemini_openai", "gemini_openai"),
+                    ("openai", "openai"),
+                    ("off", "off"),
+                    ("disabled", "disabled"),
+                    ("custom", _THINKING_MODE_CUSTOM),
+                ]
+                yield Select(thinking_options, value=select_default, id="thinking_mode_select")
+                yield Input(
+                    value=custom_default,
+                    placeholder="Custom thinking mode (only used when 'custom' is selected)",
+                    id="thinking_mode_custom_input",
+                )
+
                 input_price_default = (
                     self._existing_profile.price.input if self._existing_profile else 0.0
                 )
@@ -257,6 +293,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         max_output_tokens_input = self.query_one("#max_output_tokens_input", Input)
         max_tokens_input = self.query_one("#max_tokens_input", Input)
         temperature_input = self.query_one("#temperature_input", Input)
+        thinking_mode_select = self.query_one("#thinking_mode_select", Select)
+        thinking_mode_custom_input = self.query_one("#thinking_mode_custom_input", Input)
         input_price_input = self.query_one("#input_price_input", Input)
         output_price_input = self.query_one("#output_price_input", Input)
         currency_input = self.query_one("#currency_input", Input)
@@ -352,6 +390,15 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         if temperature is None:
             return
 
+        select_raw = thinking_mode_select.value
+        select_value = select_raw.strip().lower() if isinstance(select_raw, str) else "auto"
+        thinking_mode = self._resolve_thinking_mode(
+            selected_value=select_value,
+            custom_value=thinking_mode_custom_input.value,
+        )
+        if thinking_mode is None and select_value == _THINKING_MODE_CUSTOM:
+            return
+
         input_price_default = (
             self._existing_profile.price.input if self._existing_profile else inferred_profile.price.input
         )
@@ -407,6 +454,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             max_output_tokens=max_output_tokens,
             max_tokens=max_tokens,
             temperature=temperature,
+            thinking_mode=thinking_mode,
             supports_vision=supports_vision,
             price={"input": input_price, "output": output_price},
             currency=currency,
@@ -461,6 +509,31 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         except ValueError:
             self._set_error(f"Invalid number for {label}.")
             return None
+
+    def _thinking_mode_form_defaults(self, thinking_mode: Optional[str]) -> tuple[str, str]:
+        if not thinking_mode:
+            return "auto", ""
+        lowered = thinking_mode.strip().lower()
+        if lowered in _KNOWN_THINKING_MODES:
+            return lowered, ""
+        return _THINKING_MODE_CUSTOM, lowered
+
+    def _resolve_thinking_mode(
+        self,
+        *,
+        selected_value: str,
+        custom_value: str,
+    ) -> Optional[str]:
+        lowered = (selected_value or "auto").strip().lower()
+        if lowered == "auto":
+            return None
+        if lowered == _THINKING_MODE_CUSTOM:
+            custom = (custom_value or "").strip().lower()
+            if not custom:
+                self._set_error("Custom thinking mode cannot be empty.")
+                return None
+            return custom
+        return lowered
 
 
 class ModelsApp(App[None]):

@@ -26,6 +26,78 @@ from .base import SlashCommand
 
 logger = get_logger()
 
+_KNOWN_THINKING_MODES = {
+    "deepseek",
+    "openrouter",
+    "qwen",
+    "gemini_openai",
+    "openai",
+    "off",
+    "disabled",
+}
+
+
+def _resolve_thinking_mode_input(
+    *,
+    raw_input: str,
+    current_value: Optional[str],
+    allow_clear: bool,
+) -> Optional[str]:
+    """Parse a thinking-mode override from interactive input.
+
+    Rules:
+    - Empty input keeps the current value.
+    - "auto" always means no explicit override (None).
+    - When allow_clear=True, "-", "clear", and "none" also clear the override.
+    - Other values are normalized to lowercase for consistency.
+    """
+    value = (raw_input or "").strip()
+    if not value:
+        return current_value
+
+    lowered = value.lower()
+    if lowered == "auto":
+        return None
+    if allow_clear and lowered in {"-", "clear", "none"}:
+        return None
+    return lowered
+
+
+def _prompt_thinking_mode_add(console: Any, default_value: Optional[str]) -> Optional[str]:
+    default_display = default_value or "auto"
+    raw = console.input(
+        "Thinking mode override "
+        f"[{default_display}] (auto/deepseek/openrouter/qwen/gemini_openai/openai/off): "
+    )
+    thinking_mode = _resolve_thinking_mode_input(
+        raw_input=raw,
+        current_value=default_value,
+        allow_clear=False,
+    )
+    if thinking_mode and thinking_mode not in _KNOWN_THINKING_MODES:
+        console.print(
+            f"[yellow]Using custom thinking_mode '{escape(thinking_mode)}'.[/yellow]"
+        )
+    return thinking_mode
+
+
+def _prompt_thinking_mode_edit(console: Any, current_value: Optional[str]) -> Optional[str]:
+    default_display = current_value or "auto"
+    raw = console.input(
+        "Thinking mode override "
+        f"[{default_display}] (Enter=keep, auto=unset, '-'=clear): "
+    )
+    thinking_mode = _resolve_thinking_mode_input(
+        raw_input=raw,
+        current_value=current_value,
+        allow_clear=True,
+    )
+    if thinking_mode and thinking_mode not in _KNOWN_THINKING_MODES:
+        console.print(
+            f"[yellow]Using custom thinking_mode '{escape(thinking_mode)}'.[/yellow]"
+        )
+    return thinking_mode
+
 
 def _parse_int(console: Any, prompt_text: str, default_value: Optional[int]) -> Optional[int]:
     raw = console.input(prompt_text).strip()
@@ -192,6 +264,10 @@ def _collect_add_profile_input(
         f"Temperature [{temp_default}]: ",
         temp_default,
     )
+    thinking_mode_default = (
+        existing_profile.thinking_mode if existing_profile else inferred_profile.thinking_mode
+    )
+    thinking_mode = _prompt_thinking_mode_add(console, thinking_mode_default)
 
     supports_vision_default = (
         existing_profile.supports_vision if existing_profile else inferred_profile.supports_vision
@@ -241,6 +317,7 @@ def _collect_add_profile_input(
         max_output_tokens=max_output_tokens,
         max_tokens=max_tokens,
         temperature=temperature,
+        thinking_mode=thinking_mode,
         auth_token=auth_token,
         supports_vision=supports_vision,
         price={"input": input_price, "output": output_price},
@@ -335,6 +412,7 @@ def _collect_edit_profile_input(
         f"Temperature [{existing_profile.temperature}]: ",
         existing_profile.temperature,
     )
+    thinking_mode = _prompt_thinking_mode_edit(console, existing_profile.thinking_mode)
 
     supports_vision = _prompt_supports_vision_edit(console, existing_profile.supports_vision)
 
@@ -363,6 +441,7 @@ def _collect_edit_profile_input(
         max_output_tokens=max_output_tokens,
         max_tokens=max_tokens,
         temperature=temperature,
+        thinking_mode=thinking_mode,
         auth_token=auth_token,
         supports_vision=supports_vision,
         price={"input": input_price, "output": output_price},
@@ -442,6 +521,7 @@ def _render_models_table(console: Any, config: Any) -> None:
     table.add_column("In", style="dim", justify="right", no_wrap=True)
     table.add_column("Max", style="dim", justify="right", no_wrap=True)
     table.add_column("Temp", style="dim", justify="right", no_wrap=True)
+    table.add_column("Think", style="blue", no_wrap=True)
     table.add_column("Vision", style="yellow", no_wrap=True)
     table.add_column("Key", style="dim", no_wrap=True)
     table.add_column("API Base", style="dim", overflow="fold", max_width=28)
@@ -451,6 +531,7 @@ def _render_models_table(console: Any, config: Any) -> None:
         pointer_label = ",".join(markers) if markers else "-"
         context_display = str(profile.max_input_tokens) if profile.max_input_tokens else "-"
         vision_display = _vision_labels(profile)[0]
+        thinking_display = profile.thinking_mode or "auto"
         api_base = profile.api_base or "-"
         if profile.api_base:
             api_base = textwrap.shorten(profile.api_base, width=28, placeholder="...")
@@ -463,6 +544,7 @@ def _render_models_table(console: Any, config: Any) -> None:
             context_display,
             str(profile.max_tokens),
             f"{profile.temperature:.2f}",
+            thinking_display,
             vision_display,
             key_display,
             escape(api_base),
@@ -547,6 +629,7 @@ def _build_models_list_panel(
     table.add_column("Sel", width=2, no_wrap=True)
     table.add_column("Name", no_wrap=True)
     table.add_column("Ptr", style="magenta", no_wrap=True)
+    table.add_column("Think", style="blue", no_wrap=True)
     table.add_column("Model", style="dim")
 
     for idx, (name, profile) in enumerate(config.model_profiles.items(), start=1):
@@ -557,15 +640,17 @@ def _build_models_list_panel(
         markers = _pointer_markers(pointer_map, name)
         pointer_label = ",".join(markers) if markers else "-"
         pointer_text = Text(pointer_label, style="magenta" if markers else "dim")
+        thinking_text = Text(profile.thinking_mode or "auto", style="blue")
         model_label = f"{profile.protocol.value} • {profile.model}"
         model_text = Text(model_label, style="dim")
-        table.add_row(index_text, marker_text, name_text, pointer_text, model_text)
+        table.add_row(index_text, marker_text, name_text, pointer_text, thinking_text, model_text)
 
     if not config.model_profiles:
         table.add_row(
             Text(" ", style="dim"),
             Text(" ", style="dim"),
             Text("No models configured", style="dim"),
+            "",
             "",
             "",
         )
