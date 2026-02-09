@@ -40,8 +40,12 @@ class MessageDisplay:
             return []
 
         args_parts: List[str] = []
+        file_path_tools = {"Read", "Write", "Edit", "MultiEdit"}
 
         def _format_arg(arg_key: str, arg_value: Any) -> str:
+            if tool_name in file_path_tools and arg_key == "file_path":
+                # Keep full path for file operations and drop the "file_path:" prefix.
+                return str(arg_value)
             if arg_key == "todos" and isinstance(arg_value, list):
                 counts = {"pending": 0, "in_progress": 0, "completed": 0}
                 for item in arg_value:
