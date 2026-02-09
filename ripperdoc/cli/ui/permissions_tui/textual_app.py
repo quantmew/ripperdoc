@@ -206,7 +206,7 @@ class PermissionsApp(App[None]):
         yield Input(placeholder="Search...", id="search_input")
         yield OptionList(id="rules_list")
         yield Static(
-            "Press ↑↓ to navigate · Enter to select · Type to search · Esc to clear search",
+            "Press ↑↓ to navigate · Enter to select · Type to search · Esc to clear/quit",
             id="hint_bar",
         )
         yield Footer()
@@ -231,7 +231,9 @@ class PermissionsApp(App[None]):
         if event.key == "escape":
             if self._search_query:
                 self._update_search("")
-                event.stop()
+            else:
+                self.exit()
+            event.stop()
             return
         if event.key == "backspace":
             if self._search_query:
