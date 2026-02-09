@@ -2363,7 +2363,7 @@ class TestHookManagerAsyncMethods:
 
         with bind_pending_message_queue(queue):
             await manager.run_post_tool_use_async("Bash", {}, "output")
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
 
         messages = queue.drain()
         assert any(
