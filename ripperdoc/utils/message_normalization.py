@@ -306,6 +306,7 @@ def _normalize_default_messages(
     *,
     messages: Sequence[Any],
     to_api: Callable[[Any], Dict[str, Any]],
+    protocol: str,
 ) -> tuple[list[dict[str, Any]], _NormalizationStats]:
     normalized: list[dict[str, Any]] = []
     stats = _NormalizationStats()
@@ -322,8 +323,18 @@ def _normalize_default_messages(
                 for block in content:
                     if _block_type(block) == "tool_result":
                         stats.tool_results_seen += 1
-                    api_blocks.append(to_api(block))
-                normalized.append({"role": "user", "content": api_blocks})
+                    if protocol == "anthropic" and _block_type(block) in (
+                        "thinking",
+                        "redacted_thinking",
+                    ):
+                        signature = _block_value(block, "signature")
+                        if not isinstance(signature, str) or not signature:
+                            continue
+                    mapped = to_api(block)
+                    if mapped:
+                        api_blocks.append(mapped)
+                if api_blocks:
+                    normalized.append({"role": "user", "content": api_blocks})
             else:
                 normalized.append({"role": "user", "content": content})
             continue
@@ -334,8 +345,18 @@ def _normalize_default_messages(
                 for block in content:
                     if _block_type(block) == "tool_use":
                         stats.tool_uses_seen += 1
-                    api_blocks.append(to_api(block))
-                normalized.append({"role": "assistant", "content": api_blocks})
+                    if protocol == "anthropic" and _block_type(block) in (
+                        "thinking",
+                        "redacted_thinking",
+                    ):
+                        signature = _block_value(block, "signature")
+                        if not isinstance(signature, str) or not signature:
+                            continue
+                    mapped = to_api(block)
+                    if mapped:
+                        api_blocks.append(mapped)
+                if api_blocks:
+                    normalized.append({"role": "assistant", "content": api_blocks})
             else:
                 normalized.append({"role": "assistant", "content": content})
 
@@ -366,7 +387,11 @@ def normalize_messages_for_api_impl(
             logger=logger,
         )
     else:
-        normalized, stats = _normalize_default_messages(messages=messages, to_api=to_api)
+        normalized, stats = _normalize_default_messages(
+            messages=messages,
+            to_api=to_api,
+            protocol=protocol,
+        )
         tool_result_positions = {}
         tool_use_positions = {}
 

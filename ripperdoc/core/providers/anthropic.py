@@ -77,18 +77,20 @@ def _content_blocks_from_stream_state(
     collected_text: List[str],
     collected_thinking: List[str],
     collected_tool_calls: Dict[int, Dict[str, Any]],
+    thinking_signature: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Build content blocks from accumulated stream state."""
     blocks: List[Dict[str, Any]] = []
 
     # Add thinking block if present
     if collected_thinking:
-        blocks.append(
-            {
-                "type": "thinking",
-                "thinking": "".join(collected_thinking),
-            }
-        )
+        thinking_block: Dict[str, Any] = {
+            "type": "thinking",
+            "thinking": "".join(collected_thinking),
+        }
+        if thinking_signature:
+            thinking_block["signature"] = thinking_signature
+        blocks.append(thinking_block)
 
     # Add text block if present
     if collected_text:
@@ -408,6 +410,7 @@ class AnthropicClient(ProviderClient):
         collected_thinking: List[str] = []
         collected_tool_calls: Dict[int, Dict[str, Any]] = {}
         usage_tokens: Dict[str, int] = {}
+        thinking_signature_ref: List[Optional[str]] = [None]
 
         # Use mutable containers to track state across event handling
         current_block_index_ref: List[int] = [-1]
@@ -449,6 +452,7 @@ class AnthropicClient(ProviderClient):
                         collected_tool_calls=collected_tool_calls,
                         usage_tokens=usage_tokens,
                         progress_callback=progress_callback,
+                        thinking_signature_ref=thinking_signature_ref,
                         current_block_index_ref=current_block_index_ref,
                         current_block_type_ref=current_block_type_ref,
                     )
@@ -483,6 +487,7 @@ class AnthropicClient(ProviderClient):
                 collected_thinking.clear()
                 collected_tool_calls.clear()
                 usage_tokens.clear()
+                thinking_signature_ref[0] = None
                 current_block_index_ref[0] = -1
                 current_block_type_ref[0] = None
 
@@ -535,7 +540,10 @@ class AnthropicClient(ProviderClient):
             response_metadata["reasoning_content"] = "".join(collected_thinking)
 
         content_blocks = _content_blocks_from_stream_state(
-            collected_text, collected_thinking, collected_tool_calls
+            collected_text,
+            collected_thinking,
+            collected_tool_calls,
+            thinking_signature=thinking_signature_ref[0],
         )
 
         return content_blocks, usage_tokens
@@ -549,6 +557,7 @@ class AnthropicClient(ProviderClient):
         collected_tool_calls: Dict[int, Dict[str, Any]],
         usage_tokens: Dict[str, int],
         progress_callback: Optional[ProgressCallback],
+        thinking_signature_ref: List[Optional[str]],
         current_block_index_ref: List[int],
         current_block_type_ref: List[Optional[str]],
     ) -> None:
@@ -650,6 +659,11 @@ class AnthropicClient(ProviderClient):
                             await progress_callback(partial_json)
                         except (RuntimeError, ValueError, TypeError, OSError):
                             pass
+            elif delta_type == "signature_delta":
+                # Thinking signature delta
+                signature = getattr(delta, "signature", None) or getattr(delta, "text", None)
+                if isinstance(signature, str) and signature:
+                    thinking_signature_ref[0] = signature
 
         # ===== Non-standard events from aiping.cn and similar proxies =====
         # NOTE: aiping.cn sends BOTH standard (content_block_delta) and non-standard
@@ -669,7 +683,13 @@ class AnthropicClient(ProviderClient):
 
         elif event_type == "signature":
             # Thinking signature (non-standard, aiping.cn style)
-            pass
+            signature = (
+                getattr(event, "signature", None)
+                or getattr(event, "text", None)
+                or getattr(event, "data", None)
+            )
+            if isinstance(signature, str) and signature:
+                thinking_signature_ref[0] = signature
 
         # ===== Standard events continued =====
 

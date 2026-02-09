@@ -319,7 +319,7 @@ def test_normalize_messages_preserves_thinking_block():
     assistant = create_assistant_message(
         [
             {"type": "thinking", "thinking": "step 1", "signature": "sig"},
-            {"type": "redacted_thinking", "data": "encrypted"},
+            {"type": "redacted_thinking", "data": "encrypted", "signature": "sig_redacted"},
             {"type": "text", "text": "answer"},
         ]
     )
@@ -328,6 +328,36 @@ def test_normalize_messages_preserves_thinking_block():
     assert normalized and normalized[0].get("content")
     kinds = [blk.get("type") for blk in normalized[0]["content"]]
     assert kinds[:2] == ["thinking", "redacted_thinking"]
+
+
+def test_normalize_messages_filters_unsigned_thinking_for_anthropic():
+    """Anthropic replay should drop historical thinking blocks without signatures."""
+    assistant = create_assistant_message(
+        [
+            {"type": "thinking", "thinking": "step 1", "signature": None},
+            {"type": "redacted_thinking", "data": "encrypted", "signature": None},
+            {"type": "text", "text": "answer"},
+        ]
+    )
+
+    normalized = normalize_messages_for_api([assistant], protocol="anthropic")
+    assert normalized and normalized[0].get("content")
+    content = normalized[0]["content"]
+    assert len(content) == 1
+    assert content[0] == {"type": "text", "text": "answer"}
+
+
+def test_normalize_messages_drops_empty_unsigned_thinking_message():
+    """Anthropic replay should skip assistant turns that become empty after filtering."""
+    assistant = create_assistant_message(
+        [
+            {"type": "thinking", "thinking": "step 1", "signature": None},
+            {"type": "redacted_thinking", "data": "encrypted", "signature": None},
+        ]
+    )
+
+    normalized = normalize_messages_for_api([assistant], protocol="anthropic")
+    assert normalized == []
 
 
 def test_normalize_messages_openai_skips_orphan_tool_results():
