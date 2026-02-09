@@ -112,8 +112,6 @@ ruff ripperdoc
 ### Launch Interactive Session
 ```bash
 ripperdoc
-# or use the short alias
-rd
 ```
 
 ### Command-Line Options
