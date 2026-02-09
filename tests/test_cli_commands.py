@@ -121,7 +121,6 @@ def test_todos_command_hides_completed_by_default(tmp_path, monkeypatch):
     assert "active work" in output
     assert "done work" not in output
     assert "1 completed" in output
-    assert "hidden (use /todos all to show)" in output
 
 
 def test_todos_command_all_shows_completed(tmp_path, monkeypatch):

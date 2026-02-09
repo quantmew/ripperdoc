@@ -45,16 +45,9 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         return True
 
     visible_todos = todos if show_completed else [todo for todo in todos if todo.status != "completed"]
-    hidden_completed = max(len(todos) - len(visible_todos), 0)
 
     summary = escape(format_todo_summary(todos))
     lines = [escape(line) for line in format_todo_lines(visible_todos)]
-    if hidden_completed:
-        lines.append(
-            escape(
-                f"● {hidden_completed} completed task(s) hidden (use /todos all to show)"
-            )
-        )
     body = "\n".join(lines)
     panel = Panel(
         body or "No todos currently tracked",
