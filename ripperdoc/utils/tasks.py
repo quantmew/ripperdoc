@@ -104,6 +104,16 @@ def is_task_system_enabled() -> bool:
     return parse_boolish(os.getenv("RIPPERDOC_ENABLE_TASKS"), default=True)
 
 
+def should_show_completed_tasks_in_ui() -> bool:
+    """Whether UI task/todo panels should display completed entries.
+
+    Defaults to False so active work stays focused. Set
+    `RIPPERDOC_UI_SHOW_COMPLETED_TASKS=true` to include completed rows.
+    """
+
+    return parse_boolish(os.getenv("RIPPERDOC_UI_SHOW_COMPLETED_TASKS"), default=False)
+
+
 def _config_root() -> Path:
     raw = os.getenv("RIPPERDOC_CONFIG_DIR")
     if raw and raw.strip():
@@ -669,6 +679,7 @@ __all__ = [
     "resolve_task_list_id",
     "sanitize_identifier",
     "set_runtime_task_scope",
+    "should_show_completed_tasks_in_ui",
     "summarize_tasks",
     "task_list_dir",
     "unresolved_blockers",

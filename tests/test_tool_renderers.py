@@ -114,3 +114,40 @@ def test_task_graph_renderer_loads_board_from_storage_for_task_update(
     assert rendered is True
     assert "Tasks updated (total 1; 1 pending, 0 in progress, 0 completed)." in output
     assert "○ Investigate failing hook [1]" in output
+
+
+def test_task_graph_renderer_hides_completed_rows_by_default(monkeypatch) -> None:
+    """Completed tasks stay in summary but are hidden in row listing by default."""
+    monkeypatch.delenv("RIPPERDOC_UI_SHOW_COMPLETED_TASKS", raising=False)
+    console = Console(record=True, width=140)
+    registry = ToolResultRendererRegistry(console, verbose=False)
+
+    rendered = registry.render(
+        "TaskList",
+        "",
+        {
+            "tasks": [
+                {
+                    "id": "1",
+                    "subject": "Fix parser error",
+                    "status": "completed",
+                    "owner": "alice",
+                    "blockedBy": [],
+                },
+                {
+                    "id": "2",
+                    "subject": "Add regression tests",
+                    "status": "in_progress",
+                    "owner": None,
+                    "blockedBy": [],
+                },
+            ]
+        },
+    )
+
+    output = console.export_text()
+    assert rendered is True
+    assert "Tasks updated (total 2; 0 pending, 1 in progress, 1 completed)." in output
+    assert "◐ Add regression tests [2]" in output
+    assert "Fix parser error" not in output
+    assert "● 1 completed task(s) hidden" in output

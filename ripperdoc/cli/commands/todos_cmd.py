@@ -10,6 +10,7 @@ from ripperdoc.utils.todo import (
     get_next_actionable,
     load_todos,
 )
+from ripperdoc.utils.tasks import should_show_completed_tasks_in_ui
 
 from typing import Any
 from .base import SlashCommand
@@ -18,7 +19,12 @@ from .base import SlashCommand
 def _handle(ui: Any, trimmed_arg: str) -> bool:
     console = ui.console
     todos = load_todos(ui.project_path)
-    next_only = trimmed_arg.strip().lower() in ("next", "-n", "--next")
+    raw_arg = trimmed_arg.strip().lower()
+    tokens = set(raw_arg.split()) if raw_arg else set()
+    next_only = raw_arg in ("next", "-n", "--next")
+    show_completed = should_show_completed_tasks_in_ui() or bool(
+        {"all", "--all", "completed", "--completed"} & tokens
+    )
 
     if not todos:
         console.print("  ⎿  [dim]No todos currently tracked[/]")
@@ -38,8 +44,17 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         )
         return True
 
+    visible_todos = todos if show_completed else [todo for todo in todos if todo.status != "completed"]
+    hidden_completed = max(len(todos) - len(visible_todos), 0)
+
     summary = escape(format_todo_summary(todos))
-    lines = [escape(line) for line in format_todo_lines(todos)]
+    lines = [escape(line) for line in format_todo_lines(visible_todos)]
+    if hidden_completed:
+        lines.append(
+            escape(
+                f"● {hidden_completed} completed task(s) hidden (use /todos all to show)"
+            )
+        )
     body = "\n".join(lines)
     panel = Panel(
         body or "No todos currently tracked",

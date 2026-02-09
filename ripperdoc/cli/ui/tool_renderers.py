@@ -9,7 +9,11 @@ from typing import Any, Callable, List, Literal, Optional, TypedDict
 from rich.console import Console
 from rich.markup import escape
 
-from ripperdoc.utils.tasks import list_tasks, resolve_task_list_id
+from ripperdoc.utils.tasks import (
+    list_tasks,
+    resolve_task_list_id,
+    should_show_completed_tasks_in_ui,
+)
 from ripperdoc.utils.teams import get_active_team_name, get_team
 
 
@@ -177,9 +181,22 @@ class TaskGraphResultRenderer(ToolResultRenderer):
             f"{pending} pending, {in_progress} in progress, {completed} completed)."
         )
 
-    def _render_task_list_text(self, entries: list[TaskRenderEntry]) -> str:
+    def _filter_completed(
+        self, entries: list[TaskRenderEntry]
+    ) -> tuple[list[TaskRenderEntry], int]:
+        if should_show_completed_tasks_in_ui():
+            return entries, 0
+        visible = [entry for entry in entries if entry["status"] != "completed"]
+        return visible, len(entries) - len(visible)
+
+    def _render_task_list_text(
+        self,
+        visible_entries: list[TaskRenderEntry],
+        all_entries: list[TaskRenderEntry],
+        hidden_completed_count: int,
+    ) -> str:
         lines: list[str] = []
-        for entry in entries:
+        for entry in visible_entries:
             marker = self._STATUS_MARKER.get(entry["status"], "○")
             task_id = entry["id"]
             subject = entry["subject"]
@@ -197,7 +214,11 @@ class TaskGraphResultRenderer(ToolResultRenderer):
             if task_id:
                 line += f" [{task_id}]"
             lines.append(line)
-        summary = self._summary(entries)
+        if hidden_completed_count:
+            lines.append(
+                f"● {hidden_completed_count} completed task(s) hidden (set RIPPERDOC_UI_SHOW_COMPLETED_TASKS=true to show)"
+            )
+        summary = self._summary(all_entries)
         return "\n".join([summary, *lines]) if lines else summary
 
     def render(self, content: str, tool_data: Any) -> None:
@@ -206,7 +227,8 @@ class TaskGraphResultRenderer(ToolResultRenderer):
             entries = self._entries_from_storage()
 
         if entries:
-            text = self._render_task_list_text(entries)
+            visible_entries, hidden_completed = self._filter_completed(entries)
+            text = self._render_task_list_text(visible_entries, entries, hidden_completed)
             TodoResultRenderer._render_text(self.console, text, "Task update")
             return
 

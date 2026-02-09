@@ -100,6 +100,52 @@ def test_todos_command_reads_task_graph_when_enabled(tmp_path, monkeypatch):
     assert "add tests" in output
 
 
+def test_todos_command_hides_completed_by_default(tmp_path, monkeypatch):
+    """Todos command should hide completed rows by default while keeping summary counts."""
+    monkeypatch.delenv("RIPPERDOC_UI_SHOW_COMPLETED_TASKS", raising=False)
+    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    set_todos(
+        [
+            TodoItem(id="t1", content="active work", status="in_progress", priority="high"),
+            TodoItem(id="t2", content="done work", status="completed", priority="medium"),
+        ],
+        project_root=tmp_path,
+    )
+
+    ui = _DummyUI(Console(record=True, width=140), tmp_path)
+    todos_command.handler(ui, "")
+
+    output = ui.console.export_text()
+    assert "active work" in output
+    assert "done work" not in output
+    assert "1 completed" in output
+    assert "hidden (use /todos all to show)" in output
+
+
+def test_todos_command_all_shows_completed(tmp_path, monkeypatch):
+    """`/todos all` should include completed rows."""
+    monkeypatch.delenv("RIPPERDOC_UI_SHOW_COMPLETED_TASKS", raising=False)
+    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    set_todos(
+        [
+            TodoItem(id="t1", content="active work", status="in_progress", priority="high"),
+            TodoItem(id="t2", content="done work", status="completed", priority="medium"),
+        ],
+        project_root=tmp_path,
+    )
+
+    ui = _DummyUI(Console(record=True, width=140), tmp_path)
+    todos_command.handler(ui, "all")
+
+    output = ui.console.export_text()
+    assert "active work" in output
+    assert "done work" in output
+
+
 def test_tasks_command_no_tasks(tmp_path, monkeypatch):
     """Tasks command should render an empty state when nothing is running."""
     # Clear all tasks
