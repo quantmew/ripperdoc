@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 from uuid import uuid4
 
+import httpx
 import openai
 from openai import AsyncOpenAI
 
@@ -52,6 +53,13 @@ logger = get_logger()
 def _map_openai_exception(exc: Exception) -> Exception:
     """Normalize OpenAI SDK exceptions into shared provider error types."""
     exc_msg = str(exc)
+
+    if isinstance(exc, httpx.TimeoutException):
+        return map_connection_error(exc_msg)
+    if isinstance(exc, httpx.RemoteProtocolError):
+        return map_connection_error(exc_msg, retryable=True)
+    if isinstance(exc, httpx.TransportError):
+        return map_connection_error(exc_msg)
 
     if isinstance(exc, openai.APIConnectionError):
         return map_connection_error(exc_msg)
@@ -105,6 +113,7 @@ def _classify_openai_error(exc: Exception) -> tuple[str, str]:
         (openai.NotFoundError, "model_not_found", "Model not found"),
         (openai.RateLimitError, "rate_limit", "Rate limit exceeded"),
         (openai.APIConnectionError, "connection_error", "Connection error"),
+        (httpx.TransportError, "connection_error", "Connection error"),
         (asyncio.TimeoutError, "timeout", "Request timed out"),
     ]
     for error_type, code, label in static_mappings:

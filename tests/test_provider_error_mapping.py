@@ -31,6 +31,16 @@ def test_map_connection_error_distinguishes_timeout() -> None:
     assert conn_err.error_code == "connection_error"
 
 
+def test_map_connection_error_marks_chunked_read_as_retryable() -> None:
+    conn_err = map_connection_error(
+        "peer closed connection without sending complete message body (incomplete chunked read)"
+    )
+
+    assert isinstance(conn_err, ProviderConnectionError)
+    assert conn_err.error_code == "connection_error"
+    assert conn_err.retryable is True
+
+
 def test_map_bad_request_error_variants() -> None:
     context_err = map_bad_request_error("context window exceeded")
     policy_err = map_bad_request_error("content policy violation")

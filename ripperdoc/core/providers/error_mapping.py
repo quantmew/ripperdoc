@@ -17,6 +17,14 @@ from ripperdoc.core.providers.errors import (
 )
 
 _TIMEOUT_HINTS = ("timed out", "timeout")
+_RETRYABLE_CONNECTION_HINTS = (
+    "incomplete chunked read",
+    "peer closed connection",
+    "connection reset",
+    "connection aborted",
+    "broken pipe",
+    "server disconnected",
+)
 _CONTEXT_HINTS = (
     "context",
     "token",
@@ -32,11 +40,14 @@ def is_timeout_message(message: str) -> bool:
     return any(hint in lowered for hint in _TIMEOUT_HINTS)
 
 
-def map_connection_error(message: str) -> ProviderMappedError:
+def map_connection_error(message: str, *, retryable: Optional[bool] = None) -> ProviderMappedError:
     """Map a provider connection error message to a normalized error."""
     if is_timeout_message(message):
         return ProviderTimeoutError(f"Request timed out: {message}")
-    return ProviderConnectionError(f"Connection error: {message}")
+    if retryable is None:
+        lowered = message.lower()
+        retryable = any(hint in lowered for hint in _RETRYABLE_CONNECTION_HINTS)
+    return ProviderConnectionError(f"Connection error: {message}", retryable=retryable)
 
 
 def map_permission_denied_error(message: str) -> ProviderMappedError:

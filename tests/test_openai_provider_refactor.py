@@ -193,3 +193,30 @@ async def test_timeout_exhaustion_surfaces_as_provider_timeout(monkeypatch) -> N
 
     assert exc_info.value.error_code == "timeout"
     assert attempts["count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_remote_protocol_error_is_mapped_and_retried(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+
+    async def flaky_request() -> str:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise httpx.RemoteProtocolError(
+                "peer closed connection without sending complete message body (incomplete chunked read)"
+            )
+        return "ok"
+
+    result = await call_with_timeout_and_retries(
+        lambda: _run_with_provider_error_mapping(flaky_request),
+        request_timeout=None,
+        max_retries=5,
+    )
+
+    assert result == "ok"
+    assert attempts["count"] == 3
