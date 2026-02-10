@@ -126,11 +126,17 @@ def _handle(ui: Any, arg: str) -> bool:
     ui.conversation_messages = messages
     ui._saved_conversation = None
     ui._set_session(summary.session_id)
+    if hasattr(ui, "_rebuild_session_usage_from_messages"):
+        try:
+            ui._rebuild_session_usage_from_messages(messages)
+        except (TypeError, ValueError, RuntimeError, AttributeError):
+            pass
     try:
         ui._run_session_start("resume")
     except (AttributeError, RuntimeError, ValueError):
         pass
-    ui.replay_conversation(messages)
+    replay_limit = getattr(ui, "_resume_replay_max_messages", None)
+    ui.replay_conversation(messages, max_messages=replay_limit)
     ui.console.print(
         f"[green]✓ Resumed session {escape(summary.session_id)} "
         f"with {len(messages)} messages.[/green]"

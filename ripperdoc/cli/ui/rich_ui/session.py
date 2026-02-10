@@ -7,6 +7,7 @@ import asyncio
 import concurrent.futures
 import html
 import json
+import os
 import sys
 import threading
 import time
@@ -81,6 +82,7 @@ from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.tips import get_random_tip
 from ripperdoc.utils.message_formatting import stringify_message_content
 from ripperdoc.utils.tasks import set_runtime_task_scope
+from ripperdoc.utils.session_usage import rebuild_session_usage
 from ripperdoc.utils.working_directories import normalize_directory_inputs
 
 from ripperdoc.cli.ui.rich_ui.commands import handle_slash_command as _handle_slash_command
@@ -98,6 +100,43 @@ ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 
 console = Console()
 logger = get_logger()
+_RESUME_REPLAY_LIMIT_ENV = "RIPPERDOC_RESUME_REPLAY_MAX_MESSAGES"
+_DEFAULT_RESUME_REPLAY_LIMIT = 120
+
+
+def _resolve_resume_replay_limit() -> Optional[int]:
+    """Resolve how many messages to replay when resuming history.
+
+    Environment variable:
+    - RIPPERDOC_RESUME_REPLAY_MAX_MESSAGES=-1 : replay all
+    - RIPPERDOC_RESUME_REPLAY_MAX_MESSAGES=0  : skip replay
+    - RIPPERDOC_RESUME_REPLAY_MAX_MESSAGES=N  : replay last N messages
+    """
+    raw = os.getenv(_RESUME_REPLAY_LIMIT_ENV)
+    if raw is None or not raw.strip():
+        return _DEFAULT_RESUME_REPLAY_LIMIT
+    try:
+        limit = int(raw.strip())
+    except ValueError:
+        logger.warning(
+            "[ui] Invalid %s=%r; falling back to default %d",
+            _RESUME_REPLAY_LIMIT_ENV,
+            raw,
+            _DEFAULT_RESUME_REPLAY_LIMIT,
+        )
+        return _DEFAULT_RESUME_REPLAY_LIMIT
+
+    if limit == -1:
+        return None
+    if limit < -1:
+        logger.warning(
+            "[ui] Invalid %s=%d; falling back to default %d",
+            _RESUME_REPLAY_LIMIT_ENV,
+            limit,
+            _DEFAULT_RESUME_REPLAY_LIMIT,
+        )
+        return _DEFAULT_RESUME_REPLAY_LIMIT
+    return limit
 
 
 class RichUI:
@@ -138,6 +177,8 @@ class RichUI:
         self.model = model or "main"
         self.conversation_messages: List[ConversationMessage] = []
         self._saved_conversation: Optional[List[ConversationMessage]] = None
+        self._resumed_from_history = bool(resume_messages)
+        self._resume_replay_max_messages = _resolve_resume_replay_limit()
         self.query_context: Optional[QueryContext] = None
         self._current_tool: Optional[str] = None
         self._should_exit: bool = False
@@ -268,6 +309,7 @@ class RichUI:
         # Handle resume_messages if provided (for --continue)
         if resume_messages:
             self.conversation_messages = list(resume_messages)
+            self._rebuild_session_usage_from_messages(self.conversation_messages)
             logger.info(
                 "[ui] Resumed conversation with messages",
                 extra={
@@ -355,6 +397,12 @@ class RichUI:
         self._session_history = SessionHistory(self.project_path, session_id)
         hook_manager.set_session_id(self.session_id)
         hook_manager.set_transcript_path(str(self._session_history.path))
+
+    def _rebuild_session_usage_from_messages(
+        self, messages: Optional[List[ConversationMessage]] = None
+    ) -> None:
+        """Rebuild /cost counters from persisted assistant messages."""
+        rebuild_session_usage(messages if messages is not None else self.conversation_messages)
 
     def list_additional_working_directories(self) -> list[str]:
         """Return current session-scoped additional working directories."""
@@ -665,6 +713,7 @@ class RichUI:
             self.console.clear()
         except (OSError, RuntimeError, ValueError):
             pass
+        self._rebuild_session_usage_from_messages(self.conversation_messages)
         self.replay_conversation(self.conversation_messages)
         self.console.print(
             f"[green]✓ Rolled back to {role} message #{target_index + 1} "
@@ -733,15 +782,38 @@ class RichUI:
         self._rollback_to_index(target_index)
         return True
 
-    def replay_conversation(self, messages: List[ConversationMessage]) -> None:
+    def replay_conversation(
+        self, messages: List[ConversationMessage], *, max_messages: Optional[int] = None
+    ) -> None:
         """Render a conversation history in the console and seed prompt history."""
         if not messages:
             return
-        self.console.print("\n[dim]Restored conversation:[/dim]")
+        replay_messages = list(messages)
+        total_messages = len(replay_messages)
+
+        if isinstance(max_messages, int):
+            if max_messages == 0:
+                self.console.print(
+                    f"\n[dim]Restored session with {total_messages} messages "
+                    "(history replay skipped).[/dim]"
+                )
+                return
+            if max_messages > 0 and total_messages > max_messages:
+                replay_messages = replay_messages[-max_messages:]
+                shown = len(replay_messages)
+                skipped = total_messages - shown
+                self.console.print(
+                    f"\n[dim]Restored recent conversation ({shown}/{total_messages} messages; "
+                    f"skipped {skipped}).[/dim]"
+                )
+            else:
+                self.console.print("\n[dim]Restored conversation:[/dim]")
+        else:
+            self.console.print("\n[dim]Restored conversation:[/dim]")
         tool_registry: Dict[str, Dict[str, Any]] = {}
         last_tool_name: Optional[str] = None
 
-        for msg in messages:
+        for msg in replay_messages:
             msg_type = getattr(msg, "type", "")
             message_payload = getattr(msg, "message", None) or getattr(msg, "content", None)
             content = getattr(message_payload, "content", None) if message_payload else None
@@ -1391,7 +1463,11 @@ class RichUI:
         console.print(f"[dim italic]💡 {random_tip}[/dim italic]\n")
 
         if self.conversation_messages:
-            self.replay_conversation(self.conversation_messages)
+            replay_limit = (
+                self._resume_replay_max_messages if self._resumed_from_history else None
+            )
+            self.replay_conversation(self.conversation_messages, max_messages=replay_limit)
+            self._resumed_from_history = False
             console.print()
 
         session = self.get_prompt_session()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 
 @dataclass
@@ -108,10 +108,56 @@ def reset_session_usage() -> None:
     _SESSION_USAGE = SessionUsage()
 
 
+def rebuild_session_usage(messages: Iterable[Any]) -> SessionUsage:
+    """Rebuild in-memory usage counters from persisted conversation messages.
+
+    This is used when resuming a session: usage is tracked in-memory at runtime,
+    so a fresh process must reconstruct counters from stored assistant messages.
+    """
+    reset_session_usage()
+    for msg in messages:
+        if getattr(msg, "type", None) != "assistant":
+            continue
+
+        model = getattr(msg, "model", None) or "unknown"
+        input_tokens = _as_int(getattr(msg, "input_tokens", 0))
+        output_tokens = _as_int(getattr(msg, "output_tokens", 0))
+        cache_read_tokens = _as_int(getattr(msg, "cache_read_tokens", 0))
+        cache_creation_tokens = _as_int(getattr(msg, "cache_creation_tokens", 0))
+        duration_ms = float(getattr(msg, "duration_ms", 0.0) or 0.0)
+        cost_usd = float(getattr(msg, "cost_usd", 0.0) or 0.0)
+
+        has_usage = any(
+            [
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                duration_ms > 0,
+                cost_usd > 0,
+                bool(getattr(msg, "model", None)),
+            ]
+        )
+        if not has_usage:
+            continue
+
+        record_usage(
+            str(model),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_input_tokens=cache_read_tokens,
+            cache_creation_input_tokens=cache_creation_tokens,
+            duration_ms=duration_ms,
+            cost_usd=cost_usd,
+        )
+    return get_session_usage()
+
+
 __all__ = [
     "ModelUsage",
     "SessionUsage",
     "get_session_usage",
+    "rebuild_session_usage",
     "record_usage",
     "reset_session_usage",
 ]
