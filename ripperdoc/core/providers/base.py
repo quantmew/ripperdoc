@@ -19,6 +19,7 @@ from typing import (
 )
 
 from ripperdoc.core.config import ModelProfile
+from ripperdoc.core.providers.errors import ProviderMappedError, ProviderTimeoutError
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 
@@ -278,7 +279,7 @@ async def call_with_timeout_and_retries(
             if request_timeout and request_timeout > 0:
                 return await asyncio.wait_for(coro_factory(), timeout=request_timeout)
             return await coro_factory()
-        except asyncio.TimeoutError as exc:
+        except (asyncio.TimeoutError, ProviderTimeoutError) as exc:
             last_error = exc
             if attempt == attempts:
                 break
@@ -292,11 +293,32 @@ async def call_with_timeout_and_retries(
                 },
             )
             await asyncio.sleep(delay_seconds)
+        except ProviderMappedError as exc:
+            if not exc.retryable:
+                raise
+            last_error = exc
+            if attempt == attempts:
+                break
+            delay_seconds = _retry_delay_seconds(attempt)
+            logger.warning(
+                "[provider_clients] Retriable provider error; retrying",
+                extra={
+                    "attempt": attempt,
+                    "max_retries": attempts - 1,
+                    "delay_seconds": round(delay_seconds, 3),
+                    "error_code": exc.error_code,
+                },
+            )
+            await asyncio.sleep(delay_seconds)
         except asyncio.CancelledError:
             raise  # Don't suppress task cancellation
         except (RuntimeError, ValueError, TypeError, OSError, ConnectionError) as exc:
             # Non-timeout errors are not retried; surface immediately.
             raise exc
     if last_error:
+        if isinstance(last_error, ProviderMappedError):
+            raise last_error
+        if isinstance(last_error, asyncio.TimeoutError):
+            raise ProviderTimeoutError(f"Request timed out after {attempts} attempts") from last_error
         raise RuntimeError(f"Request timed out after {attempts} attempts") from last_error
     raise RuntimeError("Unexpected error executing request with retries")

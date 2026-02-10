@@ -8,8 +8,10 @@ import pytest
 
 from ripperdoc.core.providers.anthropic import (
     AnthropicClient,
+    _classify_anthropic_error,
     _content_blocks_from_stream_state,
 )
+from ripperdoc.core.providers.errors import ProviderMappedError, ProviderTimeoutError
 
 
 def test_content_blocks_from_stream_state_includes_signature_when_available() -> None:
@@ -69,3 +71,15 @@ async def test_handle_stream_event_captures_signature_deltas() -> None:
         current_block_type_ref=[None],
     )
     assert thinking_signature_ref[0] == "sig_event"
+
+
+def test_classify_anthropic_error_accepts_provider_mapped_errors() -> None:
+    code, message = _classify_anthropic_error(ProviderTimeoutError("Request timed out: x"))
+    assert code == "timeout"
+    assert "timed out" in message
+
+    code, message = _classify_anthropic_error(
+        ProviderMappedError("rate_limit", "Rate limit exceeded: x")
+    )
+    assert code == "rate_limit"
+    assert "Rate limit exceeded" in message

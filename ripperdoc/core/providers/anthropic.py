@@ -20,6 +20,22 @@ from ripperdoc.core.providers.base import (
     call_with_timeout_and_retries,
     sanitize_tool_history,
 )
+from ripperdoc.core.providers.errors import (
+    ProviderAuthenticationError,
+    ProviderMappedError,
+    ProviderModelNotFoundError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+)
+from ripperdoc.core.providers.error_mapping import (
+    classify_mapped_error,
+    is_timeout_message,
+    map_api_status_error,
+    map_bad_request_error,
+    map_connection_error,
+    map_permission_denied_error,
+    run_with_exception_mapper,
+)
 from ripperdoc.core.message_utils import (
     anthropic_usage_tokens,
     build_anthropic_tool_schemas,
@@ -32,8 +48,40 @@ from ripperdoc.utils.session_usage import record_usage
 logger = get_logger()
 
 
+def _map_anthropic_exception(exc: Exception) -> Exception:
+    """Normalize Anthropic SDK exceptions into shared provider error types."""
+    exc_msg = str(exc)
+
+    if isinstance(exc, anthropic.APIConnectionError):
+        return map_connection_error(exc_msg)
+    if isinstance(exc, anthropic.RateLimitError):
+        return ProviderRateLimitError(f"Rate limit exceeded: {exc_msg}")
+    if isinstance(exc, anthropic.AuthenticationError):
+        return ProviderAuthenticationError(f"Authentication failed: {exc_msg}")
+    if isinstance(exc, anthropic.NotFoundError):
+        return ProviderModelNotFoundError(f"Model not found: {exc_msg}")
+    if isinstance(exc, anthropic.PermissionDeniedError):
+        return map_permission_denied_error(exc_msg)
+    if isinstance(exc, anthropic.BadRequestError):
+        return map_bad_request_error(exc_msg)
+    if isinstance(exc, anthropic.APIStatusError):
+        status = getattr(exc, "status_code", "unknown")
+        return map_api_status_error(exc_msg, status)
+
+    return exc
+
+
+async def _run_with_provider_error_mapping(request_fn: Callable[[], Awaitable[Any]]) -> Any:
+    """Map Anthropic exceptions to shared provider errors before outer handling/retries."""
+    return await run_with_exception_mapper(request_fn, _map_anthropic_exception)
+
+
 def _classify_anthropic_error(exc: Exception) -> tuple[str, str]:
     """Classify an Anthropic exception into error code and user-friendly message."""
+    mapped = classify_mapped_error(exc)
+    if mapped is not None:
+        return mapped
+
     exc_type = type(exc).__name__
     exc_msg = str(exc)
 
@@ -507,6 +555,28 @@ class AnthropicClient(ProviderClient):
                     },
                 )
                 await asyncio.sleep(delay)
+            except anthropic.APIConnectionError as exc:
+                mapped_exc = _map_anthropic_exception(exc)
+                last_error = mapped_exc if isinstance(mapped_exc, Exception) else exc
+                if attempt == attempts:
+                    if mapped_exc is exc:
+                        raise
+                    raise mapped_exc from exc
+                delay = 0.5 * (2 ** (attempt - 1))
+                log_label = (
+                    "Stream timed out; retrying"
+                    if isinstance(mapped_exc, ProviderTimeoutError)
+                    or is_timeout_message(str(mapped_exc))
+                    else "Connection error; retrying"
+                )
+                logger.warning(
+                    f"[anthropic_client] {log_label}",
+                    extra={
+                        "attempt": attempt,
+                        "error": str(mapped_exc),
+                    },
+                )
+                await asyncio.sleep(delay)
             except asyncio.CancelledError:
                 raise
             except (RuntimeError, ValueError, TypeError, OSError, ConnectionError) as exc:
@@ -751,7 +821,7 @@ class AnthropicClient(ProviderClient):
             return await client.messages.create(**request_kwargs)
 
         response = await call_with_timeout_and_retries(
-            _do_request,
+            lambda: _run_with_provider_error_mapping(_do_request),
             request_timeout,
             max_retries,
         )

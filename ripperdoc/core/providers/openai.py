@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 from uuid import uuid4
 
 import openai
@@ -20,6 +20,20 @@ from ripperdoc.core.providers.base import (
     call_with_timeout_and_retries,
     iter_with_timeout,
     sanitize_tool_history,
+)
+from ripperdoc.core.providers.errors import (
+    ProviderAuthenticationError,
+    ProviderMappedError,
+    ProviderModelNotFoundError,
+    ProviderRateLimitError,
+)
+from ripperdoc.core.providers.error_mapping import (
+    classify_mapped_error,
+    map_api_status_error,
+    map_bad_request_error,
+    map_connection_error,
+    map_permission_denied_error,
+    run_with_exception_mapper,
 )
 from ripperdoc.core.message_utils import (
     build_openai_tool_schemas,
@@ -35,8 +49,40 @@ from ripperdoc.utils.session_usage import record_usage
 logger = get_logger()
 
 
+def _map_openai_exception(exc: Exception) -> Exception:
+    """Normalize OpenAI SDK exceptions into shared provider error types."""
+    exc_msg = str(exc)
+
+    if isinstance(exc, openai.APIConnectionError):
+        return map_connection_error(exc_msg)
+    if isinstance(exc, openai.RateLimitError):
+        return ProviderRateLimitError(f"Rate limit exceeded: {exc_msg}")
+    if isinstance(exc, openai.AuthenticationError):
+        return ProviderAuthenticationError(f"Authentication failed: {exc_msg}")
+    if isinstance(exc, openai.NotFoundError):
+        return ProviderModelNotFoundError(f"Model not found: {exc_msg}")
+    if isinstance(exc, openai.BadRequestError):
+        return map_bad_request_error(exc_msg)
+    if isinstance(exc, openai.PermissionDeniedError):
+        return map_permission_denied_error(exc_msg)
+    if isinstance(exc, openai.APIStatusError):
+        status = getattr(exc, "status_code", "unknown")
+        return map_api_status_error(exc_msg, status)
+
+    return exc
+
+
+async def _run_with_provider_error_mapping(request_fn: Callable[[], Awaitable[Any]]) -> Any:
+    """Map OpenAI exceptions to shared provider errors before outer handling/retries."""
+    return await run_with_exception_mapper(request_fn, _map_openai_exception)
+
+
 def _classify_openai_error(exc: Exception) -> tuple[str, str]:
     """Classify an OpenAI exception into error code and user-friendly message."""
+    mapped = classify_mapped_error(exc)
+    if mapped is not None:
+        return mapped
+
     exc_type = type(exc).__name__
     exc_msg = str(exc)
 
@@ -666,7 +712,9 @@ class OpenAIClient(ProviderClient):
 
             timeout_for_call = None if can_stream else request_timeout
             openai_response: Any = await call_with_timeout_and_retries(
-                _stream_request if can_stream else _non_stream_request,
+                lambda: _run_with_provider_error_mapping(
+                    _stream_request if can_stream else _non_stream_request
+                ),
                 timeout_for_call,
                 max_retries,
             )
@@ -683,7 +731,9 @@ class OpenAIClient(ProviderClient):
                 can_stream_text = False
                 can_stream_tools = False
                 openai_response = await call_with_timeout_and_retries(
-                    _non_stream_request, request_timeout, max_retries
+                    lambda: _run_with_provider_error_mapping(_non_stream_request),
+                    request_timeout,
+                    max_retries,
                 )
 
         duration_ms = (time.time() - start_time) * 1000

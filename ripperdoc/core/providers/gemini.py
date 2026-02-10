@@ -18,6 +18,22 @@ from ripperdoc.core.providers.base import (
     call_with_timeout_and_retries,
     iter_with_timeout,
 )
+from ripperdoc.core.providers.errors import (
+    ProviderApiError,
+    ProviderAuthenticationError,
+    ProviderMappedError,
+    ProviderModelNotFoundError,
+    ProviderPermissionDeniedError,
+    ProviderRateLimitError,
+    ProviderServiceUnavailableError,
+    ProviderTimeoutError,
+)
+from ripperdoc.core.providers.error_mapping import (
+    classify_mapped_error,
+    map_bad_request_error,
+    map_connection_error,
+    run_with_exception_mapper,
+)
 from ripperdoc.core.message_utils import normalize_tool_args, build_tool_description
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
@@ -34,8 +50,52 @@ GEMINI_MODELS_ENDPOINT_ERROR = "Gemini client is missing 'models' endpoint"
 GEMINI_GENERATE_CONTENT_ERROR = "Gemini client is missing generate_content() method"
 
 
+def _map_gemini_exception(exc: Exception) -> Exception:
+    """Normalize Gemini/Google exceptions into shared provider error types."""
+    exc_msg = str(exc)
+
+    # Try Google API exception taxonomy when available.
+    try:
+        from google.api_core import exceptions as google_exceptions  # type: ignore
+
+        if isinstance(exc, google_exceptions.DeadlineExceeded):
+            return ProviderTimeoutError(f"Request timed out: {exc_msg}")
+        if isinstance(exc, google_exceptions.Unauthenticated):
+            return ProviderAuthenticationError(f"Authentication failed: {exc_msg}")
+        if isinstance(exc, google_exceptions.PermissionDenied):
+            return ProviderPermissionDeniedError(f"Permission denied: {exc_msg}")
+        if isinstance(exc, google_exceptions.NotFound):
+            return ProviderModelNotFoundError(f"Model not found: {exc_msg}")
+        if isinstance(exc, google_exceptions.InvalidArgument):
+            return map_bad_request_error(exc_msg)
+        if isinstance(exc, google_exceptions.ResourceExhausted):
+            return ProviderRateLimitError(f"Rate limit exceeded: {exc_msg}")
+        if isinstance(exc, google_exceptions.ServiceUnavailable):
+            return ProviderServiceUnavailableError(f"Service unavailable: {exc_msg}")
+        if isinstance(exc, google_exceptions.GoogleAPICallError):
+            return ProviderApiError(f"API error: {exc_msg}")
+    except ImportError:
+        pass
+
+    if isinstance(exc, asyncio.TimeoutError):
+        return ProviderTimeoutError(f"Request timed out: {exc_msg}")
+    if isinstance(exc, ConnectionError):
+        return map_connection_error(exc_msg)
+
+    return exc
+
+
+async def _run_with_provider_error_mapping(request_fn: Any) -> Any:
+    """Map Gemini exceptions to shared provider errors before outer handling/retries."""
+    return await run_with_exception_mapper(request_fn, _map_gemini_exception)
+
+
 def _classify_gemini_error(exc: Exception) -> tuple[str, str]:
     """Classify a Gemini exception into error code and user-friendly message."""
+    mapped = classify_mapped_error(exc)
+    if mapped is not None:
+        return mapped
+
     exc_type = type(exc).__name__
     exc_msg = str(exc)
 
@@ -576,7 +636,9 @@ class GeminiClient(ProviderClient):
             else:
                 # Use retry logic for non-streaming calls
                 response = await call_with_timeout_and_retries(
-                    lambda: _call_generate(streaming=False),
+                    lambda: _run_with_provider_error_mapping(
+                        lambda: _call_generate(streaming=False)
+                    ),
                     request_timeout,
                     max_retries,
                 )
@@ -593,14 +655,15 @@ class GeminiClient(ProviderClient):
         except asyncio.CancelledError:
             raise  # Don't suppress task cancellation
         except Exception as exc:
+            mapped_exc = _map_gemini_exception(exc)
             duration_ms = (time.time() - start_time) * 1000
-            error_code, error_message = _classify_gemini_error(exc)
+            error_code, error_message = _classify_gemini_error(mapped_exc)
             logger.debug(
                 "[gemini_client] Exception details",
                 extra={
                     "model": model_profile.model,
-                    "exception_type": type(exc).__name__,
-                    "exception_str": str(exc),
+                    "exception_type": type(mapped_exc).__name__,
+                    "exception_str": str(mapped_exc),
                     "error_code": error_code,
                 },
             )

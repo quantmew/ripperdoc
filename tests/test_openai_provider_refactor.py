@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
+import openai
 import pytest
 
+from ripperdoc.core.providers.base import call_with_timeout_and_retries
+from ripperdoc.core.providers.errors import ProviderMappedError
 from ripperdoc.core.providers.openai import (
     _StreamAccumulator,
     _build_non_stream_empty_or_error_response,
     _build_stream_content_blocks,
     _consume_stream_chunk,
+    _run_with_provider_error_mapping,
 )
 
 
@@ -91,3 +96,100 @@ def test_non_stream_empty_or_error_response_handles_error_payload() -> None:
     assert result.is_error is True
     assert result.error_code == "api_error"
     assert "429" in (result.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_timeout_connection_error_reuses_shared_retry_logic(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+
+    async def flaky_request() -> str:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise openai.APIConnectionError(
+                message="Request timed out.",
+                request=httpx.Request("POST", "https://example.com/v1/chat/completions"),
+            )
+        return "ok"
+
+    result = await call_with_timeout_and_retries(
+        lambda: _run_with_provider_error_mapping(flaky_request),
+        request_timeout=None,
+        max_retries=5,
+    )
+
+    assert result == "ok"
+    assert attempts["count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_non_timeout_connection_error_does_not_retry(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+
+    async def bad_request() -> str:
+        attempts["count"] += 1
+        raise openai.APIConnectionError(
+            message="Connection error.",
+            request=httpx.Request("POST", "https://example.com/v1/chat/completions"),
+        )
+
+    with pytest.raises(ProviderMappedError) as exc_info:
+        await call_with_timeout_and_retries(
+            lambda: _run_with_provider_error_mapping(bad_request),
+            request_timeout=None,
+            max_retries=5,
+        )
+
+    assert attempts["count"] == 1
+    assert exc_info.value.error_code == "connection_error"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_is_mapped_to_provider_error() -> None:
+    request = httpx.Request("POST", "https://example.com/v1/chat/completions")
+    response = httpx.Response(status_code=429, request=request)
+    err = openai.RateLimitError("Too many requests", response=response, body={})
+
+    async def bad_request() -> str:
+        raise err
+
+    with pytest.raises(ProviderMappedError) as exc_info:
+        await _run_with_provider_error_mapping(bad_request)
+
+    assert exc_info.value.error_code == "rate_limit"
+
+
+@pytest.mark.asyncio
+async def test_timeout_exhaustion_surfaces_as_provider_timeout(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+
+    async def always_timeout() -> str:
+        attempts["count"] += 1
+        raise openai.APIConnectionError(
+            message="Request timed out.",
+            request=httpx.Request("POST", "https://example.com/v1/chat/completions"),
+        )
+
+    with pytest.raises(ProviderMappedError) as exc_info:
+        await call_with_timeout_and_retries(
+            lambda: _run_with_provider_error_mapping(always_timeout),
+            request_timeout=None,
+            max_retries=2,
+        )
+
+    assert exc_info.value.error_code == "timeout"
+    assert attempts["count"] == 3
