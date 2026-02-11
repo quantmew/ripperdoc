@@ -10,13 +10,9 @@
 
 import argparse
 import os
-import platform
 import shutil
 import subprocess
 import sys
-import tarfile
-import urllib.request
-import zipfile
 from pathlib import Path
 
 
@@ -25,90 +21,6 @@ def run_command(cmd: list[str], cwd: Path | None = None) -> int:
     print(f"运行: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd)
     return result.returncode
-
-
-def check_upx() -> bool:
-    """检查 UPX 是否可用"""
-    try:
-        result = subprocess.run(["upx", "--version"], capture_output=True, text=True)
-        if result.returncode == 0:
-            version = result.stdout.split('\n')[0]
-            print(f"UPX 已安装: {version}")
-            return True
-    except FileNotFoundError:
-        pass
-    return False
-
-
-def download_upx(tools_dir: Path) -> Path | None:
-    """下载 UPX 压缩工具"""
-    system = platform.system().lower()
-    machine = platform.machine().lower()
-
-    # 确定 UPX 下载链接
-    if system == "linux" and machine == "x86_64":
-        url = "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz"
-        extract_dir = "upx-4.2.4-amd64_linux"
-        exe_name = "upx"
-    elif system == "linux" and machine == "arm64":
-        url = "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-arm64_linux.tar.xz"
-        extract_dir = "upx-4.2.4-arm64_linux"
-        exe_name = "upx"
-    elif system == "darwin":
-        url = "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-darwin_amd64.tar.xz"
-        extract_dir = "upx-4.2.4-darwin_amd64"
-        exe_name = "upx"
-    elif system == "windows":
-        url = "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-win64.zip"
-        extract_dir = "upx-4.2.4-win64"
-        exe_name = "upx.exe"
-    else:
-        print(f"不支持的系统: {system} {machine}")
-        return None
-
-    tools_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = tools_dir / url.split("/")[-1]
-    upx_exe = tools_dir / exe_name
-
-    if upx_exe.exists():
-        print(f"UPX 已存在: {upx_exe}")
-        return upx_exe
-
-    print(f"下载 UPX: {url}")
-    try:
-        urllib.request.urlretrieve(url, archive_path)
-        print(f"解压到: {tools_dir}")
-
-        if url.endswith(".tar.xz"):
-            import lzma
-            with tarfile.open(archive_path, "r:xz") as tar:
-                tar.extractall(tools_dir)
-            # 移动到工具目录
-            extracted_exe = tools_dir / extract_dir / exe_name
-            if extracted_exe.exists():
-                shutil.move(str(extracted_exe), str(upx_exe))
-                # 清理解压目录
-                shutil.rmtree(tools_dir / extract_dir)
-        elif url.endswith(".zip"):
-            with zipfile.ZipFile(archive_path, "r") as zf:
-                zf.extractall(tools_dir)
-            extracted_exe = tools_dir / extract_dir / exe_name
-            if extracted_exe.exists():
-                shutil.move(str(extracted_exe), str(upx_exe))
-                shutil.rmtree(tools_dir / extract_dir)
-
-        # 清理压缩包
-        archive_path.unlink()
-
-        # 设置执行权限
-        if system != "windows":
-            os.chmod(upx_exe, 0o755)
-
-        print(f"UPX 下载完成: {upx_exe}")
-        return upx_exe
-    except Exception as e:
-        print(f"下载 UPX 失败: {e}")
-        return None
 
 
 def clean_build_dirs(root_dir: Path) -> None:
@@ -194,7 +106,6 @@ def main() -> int:
 
     root_dir = Path(__file__).parent.parent
     spec_file = root_dir / "ripperdoc.spec"
-    tools_dir = root_dir / "tools"
 
     # 检查 spec 文件
     if not spec_file.exists():
@@ -213,18 +124,7 @@ def main() -> int:
     # 设置构建模式环境变量
     os.environ["RIPPERDOC_BUILD_MODE"] = build_mode
 
-    # 检查/下载 UPX
     print(f"\n=== 构建模式: {build_mode} ===")
-    print("\n=== 检查 UPX ===")
-    upx_path = None
-    if not check_upx():
-        print("UPX 未安装，正在下载...")
-        upx_path = download_upx(tools_dir)
-        if upx_path:
-            # 将 UPX 路径添加到 PATH
-            os.environ["PATH"] = str(tools_dir) + os.pathsep + os.environ.get("PATH", "")
-    else:
-        upx_path = "upx"  # 使用系统已安装的
 
     # 清理旧的构建
     print("\n=== 清理旧的构建目录 ===")
@@ -262,8 +162,6 @@ def main() -> int:
         print(f"输出目录: {output_dir}")
         print(f"可执行文件: {exe_file}")
         print(f"目录大小: {size_mb:.1f} MB")
-        if upx_path:
-            print(f"UPX 压缩: 已启用")
         print(f"\n可以运行: {exe_file} --help")
         print(f"或进入目录: cd {output_dir}")
     else:
@@ -277,8 +175,6 @@ def main() -> int:
         print(f"\n=== 构建成功 ===")
         print(f"可执行文件: {exe_file}")
         print(f"文件大小: {size_mb:.1f} MB")
-        if upx_path:
-            print(f"UPX 压缩: 已启用")
         print(f"\n可以运行: {exe_file} --help")
 
     return 0
