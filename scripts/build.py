@@ -122,12 +122,25 @@ def clean_build_dirs(root_dir: Path) -> None:
 
 
 def copy_data_files(root_dir: Path, dist_dir: Path) -> None:
-    """复制数据文件到输出目录 (用于目录模式)"""
+    """复制数据文件到输出目录 (用于目录模式)
+
+    PyInstaller onedir 模式的目录结构:
+        dist/ripperdoc/
+        ├── ripperdoc          # 可执行文件
+        └── _internal/         # 依赖文件和数据
+            └── ripperdoc/
+                └── data/
+    """
     src_data_dir = root_dir / "ripperdoc" / "data"
-    dst_data_dir = dist_dir / "ripperdoc" / "data"
+    # 数据文件应放在 _internal 目录中，因为 ripperdoc 是可执行文件而非目录
+    dst_data_dir = dist_dir / "_internal" / "ripperdoc" / "data"
 
     if not src_data_dir.exists():
         return
+
+    # 如果目标路径是文件而不是目录，先删除它
+    if dst_data_dir.exists() and dst_data_dir.is_file():
+        dst_data_dir.unlink()
 
     dst_data_dir.mkdir(parents=True, exist_ok=True)
 
