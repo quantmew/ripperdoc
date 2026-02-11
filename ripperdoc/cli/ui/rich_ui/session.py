@@ -922,8 +922,10 @@ class RichUI:
             Tuple of (system_prompt, context_dict)
         """
         context: Dict[str, str] = {}
-        servers = await load_mcp_servers_async(self.project_path)
-        dynamic_tools = await load_dynamic_mcp_tools_async(self.project_path)
+        servers, dynamic_tools = await asyncio.gather(
+            load_mcp_servers_async(self.project_path),
+            load_dynamic_mcp_tools_async(self.project_path),
+        )
 
         if dynamic_tools and self.query_context:
             merged_tools = merge_tools_with_dynamic(self.query_context.tools, dynamic_tools)
@@ -1736,7 +1738,10 @@ class RichUI:
         async def _warmup() -> McpRuntime:
             start = time.time()
             try:
-                runtime = await ensure_mcp_runtime(self.project_path)
+                runtime = await ensure_mcp_runtime(
+                    self.project_path,
+                    wait_for_connections=True,
+                )
                 duration_ms = max((time.time() - start) * 1000, 0.0)
                 logger.info(
                     "[ui] MCP background warmup completed",

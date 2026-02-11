@@ -74,7 +74,9 @@ def _show_server_overview(ui: Any, servers: list[McpServerInfo]) -> bool:
             if len(snippet) > 160:
                 snippet = snippet[:157] + "..."
             ui.console.print(f"    Instructions: {snippet}", markup=False)
-        if server.tools:
+        if status == "connecting":
+            ui.console.print("    Tools: discovering...")
+        elif server.tools:
             ui.console.print("    Tools:")
             for tool in server.tools:
                 desc = f" — {tool.description}" if tool.description else ""

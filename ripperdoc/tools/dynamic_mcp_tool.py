@@ -248,6 +248,21 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
         runtime = await ensure_mcp_runtime(self.project_path)
         session = runtime.sessions.get(self.server_name) if runtime else None
         if not session:
+            server_status = None
+            server_error = None
+            if runtime:
+                match = next((srv for srv in runtime.servers if srv.name == self.server_name), None)
+                if match is not None:
+                    server_status = getattr(match, "status", None)
+                    server_error = getattr(match, "error", None)
+            if server_status == "connecting":
+                assistant_text = f"MCP server '{self.server_name}' is still connecting."
+            elif server_status == "failed" and server_error:
+                assistant_text = (
+                    f"MCP server '{self.server_name}' is unavailable: {server_error}"
+                )
+            else:
+                assistant_text = f"MCP server '{self.server_name}' is not connected."
             result = McpToolCallOutput(
                 server=self.server_name,
                 tool=self.tool_info.name,
@@ -259,7 +274,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
             )
             yield ToolResult(
                 data=result,
-                result_for_assistant=f"MCP server '{self.server_name}' is not connected.",
+                result_for_assistant=assistant_text,
             )
             return
 
@@ -370,7 +385,12 @@ def _build_dynamic_mcp_tools(runtime: Optional[Any]) -> List[DynamicMcpTool]:
     return tools
 
 
-def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[DynamicMcpTool]:
+def load_dynamic_mcp_tools_sync(
+    project_path: Optional[Path] = None,
+    *,
+    wait_for_connections: bool = False,
+    wait_timeout: Optional[float] = None,
+) -> List[DynamicMcpTool]:
     """Best-effort synchronous loader for MCP tools."""
     runtime = get_existing_mcp_runtime()
     if runtime and not getattr(runtime, "_closed", False):
@@ -384,7 +404,11 @@ def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[Dyn
         pass
 
     async def _load_and_keep() -> List[DynamicMcpTool]:
-        runtime = await ensure_mcp_runtime(project_path)
+        runtime = await ensure_mcp_runtime(
+            project_path,
+            wait_for_connections=wait_for_connections,
+            wait_timeout=wait_timeout,
+        )
         return _build_dynamic_mcp_tools(runtime)
 
     try:
@@ -403,10 +427,19 @@ def load_dynamic_mcp_tools_sync(project_path: Optional[Path] = None) -> List[Dyn
         return []
 
 
-async def load_dynamic_mcp_tools_async(project_path: Optional[Path] = None) -> List[DynamicMcpTool]:
+async def load_dynamic_mcp_tools_async(
+    project_path: Optional[Path] = None,
+    *,
+    wait_for_connections: bool = False,
+    wait_timeout: Optional[float] = None,
+) -> List[DynamicMcpTool]:
     """Async loader for MCP tools when already in an event loop."""
     try:
-        runtime = await ensure_mcp_runtime(project_path)
+        runtime = await ensure_mcp_runtime(
+            project_path,
+            wait_for_connections=wait_for_connections,
+            wait_timeout=wait_timeout,
+        )
     except (
         OSError,
         RuntimeError,

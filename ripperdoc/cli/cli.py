@@ -276,8 +276,10 @@ async def _prepare_prompt_runtime_assets(
     allowed_tools: Optional[List[str]],
     query_context: QueryContext,
 ) -> tuple[list, str, List[str]]:
-    servers = await load_mcp_servers_async(project_path)
-    dynamic_tools = await load_dynamic_mcp_tools_async(project_path)
+    servers, dynamic_tools = await asyncio.gather(
+        load_mcp_servers_async(project_path),
+        load_dynamic_mcp_tools_async(project_path),
+    )
     if dynamic_tools:
         tools = merge_tools_with_dynamic(tools, dynamic_tools)
         if allowed_tools is not None:

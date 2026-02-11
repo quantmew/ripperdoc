@@ -309,8 +309,10 @@ class StdioSessionMixin:
                     self._session_end_sent = False
 
             # Load MCP servers and dynamic tools
-            servers = await load_mcp_servers_async(self._project_path)
-            dynamic_tools = await load_dynamic_mcp_tools_async(self._project_path)
+            servers, dynamic_tools = await asyncio.gather(
+                load_mcp_servers_async(self._project_path),
+                load_dynamic_mcp_tools_async(self._project_path),
+            )
             if dynamic_tools:
                 tools = merge_tools_with_dynamic(tools, dynamic_tools)
                 tools = self._apply_tool_filters(
