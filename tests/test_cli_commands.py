@@ -319,6 +319,71 @@ def test_mcp_logs_lists_targets(tmp_path, monkeypatch):
     assert "missing" in output
 
 
+def test_mcp_default_subcommand_uses_textual_ui(tmp_path, monkeypatch):
+    called = {"count": 0}
+
+    def _fake_run_mcp_tui(project_path):
+        called["count"] += 1
+        assert project_path == tmp_path
+        return True
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("ripperdoc.cli.ui.mcp_tui.run_mcp_tui", _fake_run_mcp_tui)
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    mcp_command.handler(ui, "")
+
+    assert called["count"] == 1
+
+
+def test_mcp_tui_subcommand_uses_textual_ui(tmp_path, monkeypatch):
+    called = {"count": 0}
+
+    def _fake_run_mcp_tui(project_path):
+        called["count"] += 1
+        assert project_path == tmp_path
+        return True
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("ripperdoc.cli.ui.mcp_tui.run_mcp_tui", _fake_run_mcp_tui)
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    mcp_command.handler(ui, "tui")
+
+    assert called["count"] == 1
+
+
+def test_mcp_tui_falls_back_to_plain_overview_without_tty(tmp_path, monkeypatch):
+    async def _fake_load(_project_path):
+        return [McpServerInfo(name="context7", status="connected")]
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    mcp_command.handler(ui, "tui")
+
+    output = ui.console.export_text()
+    assert "Interactive UI requires a TTY" in output
+    assert "MCP servers" in output
+    assert "context7" in output
+
+
+def test_mcp_list_subcommand_shows_plain_overview(tmp_path, monkeypatch):
+    async def _fake_load(_project_path):
+        return [McpServerInfo(name="context7", status="connected", command="npx")]
+
+    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
+
+    ui = _DummyUI(Console(record=True, width=120), tmp_path)
+    mcp_command.handler(ui, "list")
+
+    output = ui.console.export_text()
+    assert "MCP servers" in output
+    assert "context7" in output
+    assert "Command: npx" in output
+
+
 def test_mcp_logs_show_last_lines_for_server(tmp_path, monkeypatch):
     """MCP logs command should show tail output for a specific server."""
 

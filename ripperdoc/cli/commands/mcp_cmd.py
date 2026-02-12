@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import sys
 import time
 from collections import deque
 from pathlib import Path
@@ -39,6 +40,8 @@ def _run_in_ui(ui: Any, coro: Any) -> Any:
 def _print_usage(ui: Any) -> None:
     ui.console.print("[dim]Usage:[/dim]")
     ui.console.print("[dim]  /mcp[/dim]")
+    ui.console.print("[dim]  /mcp tui[/dim]")
+    ui.console.print("[dim]  /mcp list[/dim]")
     ui.console.print("[dim]  /mcp logs[/dim]")
     ui.console.print("[dim]  /mcp logs <server> [-n|--lines <count>] [-f|--follow][/dim]")
 
@@ -92,6 +95,28 @@ def _show_server_overview(ui: Any, servers: list[McpServerInfo]) -> bool:
         elif not server.tools:
             ui.console.print("    Resources: none")
     return True
+
+
+def _handle_tui(ui: Any) -> bool:
+    if not sys.stdin.isatty():
+        ui.console.print("[yellow]Interactive UI requires a TTY. Showing plain overview.[/yellow]")
+        servers = _load_servers(ui)
+        return _show_server_overview(ui, servers)
+    try:
+        from ripperdoc.cli.ui.mcp_tui import run_mcp_tui
+    except (ImportError, ModuleNotFoundError) as exc:
+        ui.console.print(
+            f"[yellow]Textual UI not available ({escape(str(exc))}). Showing plain overview.[/yellow]"
+        )
+        servers = _load_servers(ui)
+        return _show_server_overview(ui, servers)
+
+    try:
+        return bool(run_mcp_tui(getattr(ui, "project_path", None)))
+    except Exception as exc:  # noqa: BLE001 - fail safe in interactive UI
+        ui.console.print(f"[red]Textual UI failed: {escape(str(exc))}[/red]")
+        servers = _load_servers(ui)
+        return _show_server_overview(ui, servers)
 
 
 def _tail_text(path: Path, line_count: int) -> str:
@@ -328,8 +353,7 @@ def _handle_logs(ui: Any, raw_args: str) -> bool:
 def _handle(ui: Any, arg: str) -> bool:
     trimmed = arg.strip()
     if not trimmed:
-        servers = _load_servers(ui)
-        return _show_server_overview(ui, servers)
+        return _handle_tui(ui)
 
     parts = trimmed.split(maxsplit=1)
     subcommand = parts[0].lower()
@@ -337,13 +361,18 @@ def _handle(ui: Any, arg: str) -> bool:
 
     if subcommand in {"log", "logs"}:
         return _handle_logs(ui, sub_args)
+    if subcommand in {"tui", "ui"}:
+        return _handle_tui(ui)
+    if subcommand in {"list", "ls"}:
+        servers = _load_servers(ui)
+        return _show_server_overview(ui, servers)
 
     if subcommand in {"help", "-h", "--help"}:
         _print_usage(ui)
         return True
 
     ui.console.print(
-        "[red]Unknown subcommand. Use /mcp, /mcp logs, or /mcp logs <server> -f.[/red]"
+        "[red]Unknown subcommand. Use /mcp, /mcp tui, /mcp logs, or /mcp logs <server> -f.[/red]"
     )
     return True
 
