@@ -11,6 +11,8 @@ Nuitka 将 Python 编译为 C 代码再编译为机器码，
     python scripts/build_nuitka.py              # 目录模式构建 (默认)
     python scripts/build_nuitka.py --onefile    # 单文件构建
     python scripts/build_nuitka.py --lto        # 启用 LTO 优化 (需要 gcc)
+    python scripts/build_nuitka.py --no-clang   # 关闭 clang，改用 gcc
+    python scripts/build_nuitka.py --jobs 4     # 限制并行编译数，降低内存峰值
     python scripts/build_nuitka.py --providers anthropic,openai,gemini  # 按需打包 provider
     python scripts/build_nuitka.py --min-size   # 体积优先（速度可能更慢）
 """
@@ -110,7 +112,10 @@ def strip_elf_binaries(target_files: list[Path]) -> None:
 def main() -> int:
     raw_args = sys.argv[1:]
     parser = argparse.ArgumentParser(description="使用 Nuitka 构建 Ripperdoc")
+    parser.add_argument("--clang", dest="clang", action="store_true", default=True, help="使用 clang 编译 (默认)")
+    parser.add_argument("--no-clang", dest="clang", action="store_false", help="禁用 clang，使用 gcc")
     parser.add_argument("--lto", action="store_true", help="启用链接时优化 (需要 gcc)")
+    parser.add_argument("--jobs", type=int, default=None, help="并行编译任务数（建议内存紧张时设为 2~8）")
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--onefile", action="store_true", help="使用单文件模式（默认: 目录模式）")
     # 向后兼容旧参数，保持可用但不在 help 中展示
@@ -143,7 +148,7 @@ def main() -> int:
         default="anthropic,openai,gemini",
         help=(
             "要包含的 provider 客户端（逗号分隔）：anthropic,openai,gemini。"
-            "默认 anthropic,openai（更快）；需要 Gemini 时再加 gemini。"
+            "默认 anthropic,openai,gemini"
         ),
     )
     parser.add_argument(
@@ -209,6 +214,12 @@ def main() -> int:
         "--include-package-data=tiktoken_ext",
     ]
 
+    if args.clang:
+        if shutil.which("clang"):
+            cmd.append("--clang")
+        else:
+            print("警告: 未找到 clang，自动回退到 gcc。可安装 clang 或使用 --no-clang 关闭提示。")
+
     # rich 在运行时会动态 import rich._unicode_data.unicode*-*-*。
     # 这些模块名带 '-'，Nuitka 无法通过静态分析自动发现，必须显式 include-module。
     try:
@@ -260,6 +271,13 @@ def main() -> int:
     # LTO 优化
     if args.lto:
         cmd.append("--lto=yes")
+        if args.jobs and args.jobs > 8:
+            print("提示: LTO + 高并发会显著增加内存占用，建议 --jobs 2~8。")
+
+    if args.jobs is not None:
+        if args.jobs <= 0:
+            parser.error("--jobs 必须是正整数")
+        cmd.append(f"--jobs={args.jobs}")
 
     nofollow_imports = set(args.exclude_module)
     if args.slim:
