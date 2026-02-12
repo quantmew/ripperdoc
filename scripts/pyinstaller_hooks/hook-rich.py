@@ -2,8 +2,8 @@
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-# 收集 rich 的所有子模块（包括 _unicode_data 下动态加载的模块）
+# Collect all rich submodules, including dynamically loaded modules under _unicode_data.
 hiddenimports = collect_submodules("rich")
 
-# 收集数据文件
+# Collect data files.
 datas = collect_data_files("rich")

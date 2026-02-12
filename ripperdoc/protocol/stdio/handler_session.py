@@ -237,7 +237,7 @@ class StdioSessionMixin:
             # Setup model
             model = options.get("model") or "main"
 
-            # 验证模型配置是否有效
+            # Validate whether the model configuration is valid.
             model_profile = get_effective_model_profile(model)
             if model_profile is None and self._fallback_model:
                 fallback_profile = get_effective_model_profile(self._fallback_model)

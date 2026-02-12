@@ -19,7 +19,7 @@ def _extract_image_paths(text: str) -> List[str]:
 
     Handles cases like:
     - "@image.png describe this" (space after)
-    - "@image.png描述这个" (no space after, Chinese text)
+    - "@image.pngdescribe this" (no space after, non-space text)
     - "@image.png.whatIsThis" (no space, ASCII text)
 
     Args:

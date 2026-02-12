@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Ripperdoc 构建脚本
+"""Ripperdoc build script.
 
-使用 PyInstaller 将 Ripperdoc 打包为独立的可执行文件。
+Package Ripperdoc into a standalone executable with PyInstaller.
 
-支持两种构建模式:
-    --onefile    单文件模式 (默认): 所有内容打包成一个可执行文件
-    --dir, -d    目录模式 (推荐): 可执行文件 + 依赖文件在同一目录，支持外部数据文件
+Supports two build modes:
+    --onefile    One-file mode (default): package everything into a single executable
+    --dir, -d    Directory mode (recommended): executable + dependencies in one directory
 """
 
 import argparse
@@ -17,14 +17,14 @@ from pathlib import Path
 
 
 def run_command(cmd: list[str], cwd: Path | None = None) -> int:
-    """运行命令并返回退出码"""
+    """Run a command and return its exit code."""
     print(f"运行: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd)
     return result.returncode
 
 
 def clean_build_dirs(root_dir: Path) -> None:
-    """清理构建目录"""
+    """Clean build directories."""
     dirs_to_clean = ["build", "dist", "spec"]
     for dir_name in dirs_to_clean:
         dir_path = root_dir / dir_name
@@ -34,23 +34,23 @@ def clean_build_dirs(root_dir: Path) -> None:
 
 
 def copy_data_files(root_dir: Path, dist_dir: Path) -> None:
-    """复制数据文件到输出目录 (用于目录模式)
+    """Copy data files to the output directory (for directory mode).
 
-    PyInstaller onedir 模式的目录结构:
+    PyInstaller onedir layout:
         dist/ripperdoc/
-        ├── ripperdoc          # 可执行文件
-        └── _internal/         # 依赖文件和数据
+        ├── ripperdoc          # executable
+        └── _internal/         # dependencies and data
             └── ripperdoc/
                 └── data/
     """
     src_data_dir = root_dir / "ripperdoc" / "data"
-    # 数据文件应放在 _internal 目录中，因为 ripperdoc 是可执行文件而非目录
+    # Data files should be placed under _internal because ripperdoc is an executable.
     dst_data_dir = dist_dir / "_internal" / "ripperdoc" / "data"
 
     if not src_data_dir.exists():
         return
 
-    # 如果目标路径是文件而不是目录，先删除它
+    # If the destination exists as a file, remove it first.
     if dst_data_dir.exists() and dst_data_dir.is_file():
         dst_data_dir.unlink()
 
@@ -63,7 +63,7 @@ def copy_data_files(root_dir: Path, dist_dir: Path) -> None:
 
 
 def get_dir_size(path: Path) -> int:
-    """获取目录总大小"""
+    """Get total size of a directory."""
     total = 0
     for item in path.rglob("*"):
         if item.is_file():
@@ -72,15 +72,15 @@ def get_dir_size(path: Path) -> int:
 
 
 def main() -> int:
-    """主构建流程"""
+    """Main build flow."""
     parser = argparse.ArgumentParser(
         description="构建 Ripperdoc 可执行文件",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-示例:
-    python scripts/build.py           # 单文件模式 (默认)
-    python scripts/build.py --dir     # 目录模式 (推荐)
-    python scripts/build.py --onefile # 单文件模式
+Examples:
+    python scripts/build.py           # one-file mode (default)
+    python scripts/build.py --dir     # directory mode (recommended)
+    python scripts/build.py --onefile # one-file mode
         """
     )
     mode_group = parser.add_mutually_exclusive_group()
@@ -96,23 +96,23 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # 确定构建模式
+    # Determine build mode.
     if args.dir:
         build_mode = "onedir"
     elif args.onefile:
         build_mode = "onefile"
     else:
-        build_mode = "onedir"  # 默认使用目录模式
+        build_mode = "onedir"  # Default to directory mode.
 
     root_dir = Path(__file__).parent.parent
     spec_file = root_dir / "ripperdoc.spec"
 
-    # 检查 spec 文件
+    # Check spec file.
     if not spec_file.exists():
         print(f"错误: 找不到 spec 文件: {spec_file}")
         return 1
 
-    # 检查 PyInstaller
+    # Check PyInstaller.
     try:
         import PyInstaller
         print(f"使用 PyInstaller 版本: {PyInstaller.__version__}")
@@ -121,16 +121,16 @@ def main() -> int:
         print("请运行: pip install pyinstaller")
         return 1
 
-    # 设置构建模式环境变量
+    # Set build mode environment variable.
     os.environ["RIPPERDOC_BUILD_MODE"] = build_mode
 
     print(f"\n=== 构建模式: {build_mode} ===")
 
-    # 清理旧的构建
+    # Clean previous build.
     print("\n=== 清理旧的构建目录 ===")
     clean_build_dirs(root_dir)
 
-    # 运行 PyInstaller
+    # Run PyInstaller.
     print("\n=== 开始构建 ===")
     cmd = [sys.executable, "-m", "PyInstaller", str(spec_file), "--clean"]
     exit_code = run_command(cmd, cwd=root_dir)
@@ -139,7 +139,7 @@ def main() -> int:
         print(f"\n错误: 构建失败 (退出码: {exit_code})")
         return exit_code
 
-    # 显示结果
+    # Show build result.
     dist_dir = root_dir / "dist"
 
     if build_mode == "onedir":
@@ -150,11 +150,11 @@ def main() -> int:
             print(f"\n错误: 构建完成但找不到输出目录: {output_dir}")
             return 1
 
-        # 复制数据文件
+        # Copy data files.
         print("\n=== 复制数据文件 ===")
         copy_data_files(root_dir, output_dir)
 
-        # 计算目录大小
+        # Compute directory size.
         dir_size = get_dir_size(output_dir)
         size_mb = dir_size / (1024 * 1024)
 

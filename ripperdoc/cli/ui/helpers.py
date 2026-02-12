@@ -109,7 +109,7 @@ def get_random_thinking_word() -> str:
 def get_profile_for_pointer(pointer: str = "main") -> Optional[ModelProfile]:
     """Return the configured ModelProfile for a logical pointer or default.
 
-    此函数现在尊重 RIPPERDOC_* 环境变量的覆盖。
+    This function now respects RIPPERDOC_* environment variable overrides.
     """
     profile = get_effective_model_profile(pointer)
     if profile:

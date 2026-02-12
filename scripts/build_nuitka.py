@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""使用 Nuitka 构建 Ripperdoc
+"""Build Ripperdoc with Nuitka.
 
-Nuitka 将 Python 编译为 C 代码再编译为机器码，
-通常比 PyInstaller 生成更小更快的可执行文件。
+Nuitka compiles Python to C and then to machine code.
+It often produces smaller and faster binaries than PyInstaller.
 
-安装依赖:
+Install dependency:
     pip install nuitka
 
-使用:
-    python scripts/build_nuitka.py              # 目录模式构建 (默认)
-    python scripts/build_nuitka.py --onefile    # 单文件构建
-    python scripts/build_nuitka.py --lto        # 启用 LTO 优化 (需要 gcc)
-    python scripts/build_nuitka.py --clang      # 使用 clang 编译（默认使用 gcc）
-    python scripts/build_nuitka.py --strip-binaries  # 构建后瘦身二进制（跨平台 best-effort）
-    python scripts/build_nuitka.py --jobs 4     # 限制并行编译数，降低内存峰值
-    python scripts/build_nuitka.py --providers anthropic,openai,gemini  # 按需打包 provider
-    python scripts/build_nuitka.py --min-size   # 体积优先（速度可能更慢）
+Usage:
+    python scripts/build_nuitka.py              # directory mode (default)
+    python scripts/build_nuitka.py --onefile    # one-file mode
+    python scripts/build_nuitka.py --lto        # enable LTO optimization (requires gcc)
+    python scripts/build_nuitka.py --clang      # compile with clang (default is gcc)
+    python scripts/build_nuitka.py --strip-binaries  # strip binaries after build (best effort)
+    python scripts/build_nuitka.py --jobs 4     # limit parallel compile jobs to reduce memory peak
+    python scripts/build_nuitka.py --providers anthropic,openai,gemini  # include providers on demand
+    python scripts/build_nuitka.py --min-size   # prioritize binary size (may be slower)
 """
 
 import argparse
@@ -28,13 +28,13 @@ from pathlib import Path
 
 
 SLIM_NOFOLLOW_IMPORTS = [
-    # Requests 的 pyopenssl 兼容分支会把 cryptography 整套拉入。
-    # 对现代 Linux + 标准 ssl 场景通常非必需。
+    # Requests' pyopenssl compatibility branch can pull in the full cryptography stack.
+    # This is usually unnecessary on modern Linux with standard ssl.
     "requests",
     "urllib3.contrib.pyopenssl",
     "OpenSSL",
     "cryptography",
-    # Google ADC 某些分支会引入 cryptography；API Key 直连通常不需要。
+    # Some Google ADC paths can introduce cryptography; direct API key usage usually does not.
     "google.auth.transport.requests",
     "google.auth._agent_identity_utils",
 ]
@@ -60,7 +60,7 @@ def _append_flag(env: dict[str, str], key: str, flag: str) -> None:
 
 
 def get_current_conda_env() -> str | None:
-    """返回当前 conda 环境名，非 conda 环境则返回 None。"""
+    """Return current conda environment name, or None if not in conda."""
     env_name = os.environ.get("CONDA_DEFAULT_ENV")
     if env_name:
         return env_name
@@ -73,7 +73,7 @@ def get_current_conda_env() -> str | None:
 
 
 def maybe_bootstrap_to_conda(args: argparse.Namespace, raw_args: list[str]) -> int | None:
-    """必要时自动切换到目标 conda 环境运行当前脚本。"""
+    """Re-run this script in the target conda environment when needed."""
     if args.no_conda or args._skip_conda_bootstrap:
         return None
 
@@ -88,7 +88,7 @@ def maybe_bootstrap_to_conda(args: argparse.Namespace, raw_args: list[str]) -> i
         print("提示: 可使用 --no-conda 显式关闭 conda 引导。")
         return None
 
-    # 避免递归引导
+    # Avoid recursive bootstrapping.
     forwarded_args = [arg for arg in raw_args if arg != "--_skip-conda-bootstrap"]
     forwarded_args.append("--_skip-conda-bootstrap")
 
@@ -128,7 +128,7 @@ def strip_binaries(target_files: list[Path]) -> None:
             ["{file}"],
         ]
     else:
-        # macOS / other UNIX: GNU strip 参数未必可用，优先保守参数。
+        # macOS / other UNIX: GNU strip flags may be unavailable, so use safer defaults.
         candidate_templates = [
             ["-x", "{file}"],
             ["-S", "{file}"],
@@ -161,7 +161,7 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=None, help="并行编译任务数（建议内存紧张时设为 2~8）")
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--onefile", action="store_true", help="使用单文件模式（默认: 目录模式）")
-    # 向后兼容旧参数，保持可用但不在 help 中展示
+    # Backward compatibility for legacy flags; keep available but hidden from help.
     mode_group.add_argument("--no-onefile", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--conda-env",
@@ -232,7 +232,7 @@ def main() -> int:
         "--assume-yes-for-downloads",
         "--python-flag=no_docstrings",
 
-        # 排除不需要的模块
+        # Exclude unnecessary modules.
         "--nofollow-import-to=tkinter",
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
@@ -248,10 +248,10 @@ def main() -> int:
         "--nofollow-import-to=PIL",
         "--nofollow-import-to=cv2",
 
-        # 输出
+        # Output.
         "--output-dir=dist",
 
-        # 包含数据文件
+        # Include data files.
         "--include-package-data=ripperdoc",
         "--include-package-data=tiktoken",
         "--include-package-data=tiktoken_ext",
@@ -265,8 +265,8 @@ def main() -> int:
         else:
             print("警告: 未找到 clang，自动回退到 gcc。")
 
-    # rich 在运行时会动态 import rich._unicode_data.unicode*-*-*。
-    # 这些模块名带 '-'，Nuitka 无法通过静态分析自动发现，必须显式 include-module。
+    # rich dynamically imports rich._unicode_data.unicode*-*-* at runtime.
+    # Module names contain '-', so Nuitka cannot discover them via static analysis.
     try:
         from rich._unicode_data._versions import VERSIONS as RICH_UNICODE_VERSIONS
 
@@ -278,8 +278,8 @@ def main() -> int:
     except Exception as exc:
         print(f"警告: 无法解析 rich unicode 版本列表，可能导致运行时缺少字符宽度表: {exc}")
 
-    # provider 客户端通过 importlib 动态导入（ripperdoc.core.providers.__init__）。
-    # Nuitka 无法静态推断动态模块名，需要显式 include-module。
+    # Provider clients are imported dynamically via importlib (ripperdoc.core.providers.__init__).
+    # Nuitka cannot infer dynamic module names statically, so include-module is required.
     provider_module_map = {
         "anthropic": "ripperdoc.core.providers.anthropic",
         "openai": "ripperdoc.core.providers.openai",
@@ -302,19 +302,19 @@ def main() -> int:
         cmd.append(f"--include-module={module_name}")
 
     if os.environ.get("CONDA_PREFIX") and _is_linux():
-        # Linux conda 下禁用 static libpython，避免 setns 等符号链接失败
+        # Disable static libpython on Linux conda to avoid link failures (e.g., setns symbols).
         cmd.append("--static-libpython=no")
 
-    # 单文件/目录模式（默认目录模式）
+    # One-file / directory mode (directory mode by default).
     if args.onefile:
         output_filename = _binary_name("ripperdoc")
         cmd.append("--onefile")
     else:
-        # standalone 目录模式会把可执行文件和包目录放在同级，避免与 ripperdoc/ 目录重名
+        # Standalone directory mode outputs binary and package dir at the same level to avoid name collisions.
         output_filename = _binary_name("ripperdoc_cli")
     cmd.append(f"--output-filename={output_filename}")
 
-    # LTO 优化
+    # LTO optimization.
     if args.lto:
         cmd.append("--lto=yes")
         if args.jobs and args.jobs > 8:
@@ -340,7 +340,7 @@ def main() -> int:
     print("运行 Nuitka 构建...")
     print(shlex.join(cmd))
 
-    # 清理旧的构建
+    # Clean previous build artifacts.
     build_dir = root_dir / "dist" / "cli.build"
     if build_dir.exists():
         print(f"清理旧构建: {build_dir}")
@@ -348,8 +348,8 @@ def main() -> int:
 
     run_env = os.environ.copy()
     if use_clang:
-        # Nuitka 会透传部分 GCC 风格告警抑制参数，clang 会报 unknown-warning-option。
-        # 统一关闭该类告警，避免编译日志被大量重复警告淹没。
+        # Nuitka may forward GCC-style warning flags; clang reports unknown-warning-option.
+        # Silence these warnings to keep build logs readable.
         _append_flag(run_env, "CFLAGS", "-Wno-unknown-warning-option")
         _append_flag(run_env, "CXXFLAGS", "-Wno-unknown-warning-option")
 

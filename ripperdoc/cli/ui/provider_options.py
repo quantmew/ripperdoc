@@ -221,27 +221,30 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ProviderOption(
             key="zhipu",
             protocol=ProtocolType.ANTHROPIC,
-            default_model="glm-4-flash",
+            default_model="glm-5",
             model_suggestions=(
+                "glm-5",
                 "glm-4-plus",
-                "glm-4-flash",
                 "glm-4.7",
                 "glm-4.6",
                 "glm-4.5",
+                "glm-4.5-air",
                 "glm-4-air",
+                "glm-4-flash",
             ),
             default_api_base="https://open.bigmodel.cn/api/anthropic",
         ),
         ProviderOption(
             key="moonshot",
             protocol=ProtocolType.OPENAI_COMPATIBLE,
-            default_model="moonshot-v1-auto",
+            default_model="kimi-k2.5",
             model_suggestions=(
-                "moonshot-v1-auto",
+                "kimi-k2.5",
+                "kimi-k2-0905-preview",
                 "kimi-k2-0711-preview",
                 "kimi-k2-turbo-preview",
                 "kimi-k2-thinking",
-                "kimi-k2-0905-preview",
+                "kimi-k2-thinking-turbo",
             ),
             default_api_base="https://api.moonshot.cn/v1",
         ),
@@ -250,12 +253,12 @@ KNOWN_PROVIDERS = ProviderRegistry(
             protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="doubao-pro-32k",
             model_suggestions=(
-                # Doubao Pro 系列
+                # Doubao Pro series
                 "doubao-pro-32k",
                 "doubao-pro-256k",
                 "doubao-pro-32k-functioncall-241028",
                 "doubao-pro-32k-character-241215",
-                # Doubao 1.5 系列
+                # Doubao 1.5 series
                 "Doubao-1.5-pro",
                 "doubao-1.5-pro-32k",
                 "doubao-1.5-pro-32k-character",
@@ -263,17 +266,17 @@ KNOWN_PROVIDERS = ProviderRegistry(
                 "Doubao-1.5-vision-pro",
                 "doubao-1.5-vision-pro",
                 "Doubao-1.5-lite-32k",
-                # Doubao Lite 系列
+                # Doubao Lite series
                 "Doubao-lite-32k",
                 "Doubao-lite-128k",
                 "Doubao-lite-4k-character-240828",
                 "Doubao-lite-32k-character-241015",
-                # DeepSeek 系列
+                # DeepSeek series
                 "DeepSeek-V3",
                 "DeepSeek-R1",
                 "DeepSeek-R1-Distill-Qwen-32B",
                 "DeepSeek-R1-Distill-Qwen-7B",
-                # Vision 系列
+                # Vision series
                 "Doubao-vision-lite-32k",
             ),
             default_api_base="https://ark.cn-beijing.volces.com/api/v3",
@@ -293,31 +296,35 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ProviderOption(
             key="minimax",
             protocol=ProtocolType.OPENAI_COMPATIBLE,
-            default_model="abab6.5s",
+            default_model="MiniMax-M2.5",
             model_suggestions=(
-                # abab 系列
-                "abab6.5s",
+                # M2 series
+                "MiniMax-M2.5",
+                "MiniMax-M2.1",
+                "MiniMax-M2.1-lightning",
+                "MiniMax-M2",
+                # 01 series
+                "minimax-01",
+                # abab series
                 "abab6.5g",
+                "abab6.5s",
                 "abab6.5t",
                 "abab6",
                 "abab5.5s",
                 "abab5",
-                # 01 系列
-                "minimax-01",
-                # M2 系列
-                "MiniMax-M2",
-                "MiniMax-M2-Stable",
             ),
             default_api_base="https://api.minimax.chat/v1",
         ),
         ProviderOption(
             key="z.ai",
             protocol=ProtocolType.OPENAI_COMPATIBLE,
-            default_model="glm-4-flash",
+            default_model="glm-5",
             model_suggestions=(
-                "glm-4-flash",
+                "glm-5",
                 "glm-4-plus",
                 "glm-4.6",
+                "glm-4.5-air",
+                "glm-4-flash",
             ),
             default_api_base="https://api.z.ai/api/paas/v4",
         ),
@@ -327,17 +334,17 @@ KNOWN_PROVIDERS = ProviderRegistry(
             protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="mistral-large-latest",
             model_suggestions=(
-                # Mistral Chat 系列
+                # Mistral Chat series
                 "mistral-large-latest",
                 "mistral-small-latest",
                 "mistral-nemo",
                 "mistral-mini",
-                # 免费模型
+                # Free models
                 "mistral-7b",
                 "mistral-8b",
-                # Mistral Code 系列
+                # Mistral Code series
                 "codestral-latest",
-                # 多模态
+                # Multimodal
                 "pixtral-large-latest",
             ),
             default_api_base="https://api.mistral.ai/v1",
@@ -347,15 +354,15 @@ KNOWN_PROVIDERS = ProviderRegistry(
             protocol=ProtocolType.OPENAI_COMPATIBLE,
             default_model="llama-3.3-70b-versatile",
             model_suggestions=(
-                # Llama 系列
+                # Llama series
                 "llama-3.3-70b-versatile",
                 "llama-3.1-8b-instant",
                 "llama3-70b-8192",
                 "llama3-8b-8192",
-                # Gemma 系列
+                # Gemma series
                 "gemma2-9b-it",
                 "gemma-7b-it",
-                # Mistral 系列
+                # Mistral series
                 "mistral-saba-24b",
                 "mixtral-8x7b-32768",
             ),
