@@ -16,6 +16,7 @@ from .cost_cmd import command as cost_command
 from .context_cmd import command as context_command
 from .doctor_cmd import command as doctor_command
 from .exit_cmd import command as exit_command
+from .export_cmd import command as export_command
 from .fork_cmd import command as fork_command
 from .help_cmd import command as help_command
 from .hooks_cmd import command as hooks_command
@@ -64,6 +65,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     output_style_command,
     output_language_command,
     exit_command,
+    export_command,
     status_command,
     stats_command,
     doctor_command,
