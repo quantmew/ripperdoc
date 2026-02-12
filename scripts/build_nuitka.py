@@ -11,7 +11,8 @@ Nuitka 将 Python 编译为 C 代码再编译为机器码，
     python scripts/build_nuitka.py              # 目录模式构建 (默认)
     python scripts/build_nuitka.py --onefile    # 单文件构建
     python scripts/build_nuitka.py --lto        # 启用 LTO 优化 (需要 gcc)
-    python scripts/build_nuitka.py --no-clang   # 关闭 clang，改用 gcc
+    python scripts/build_nuitka.py --clang      # 使用 clang 编译（默认使用 gcc）
+    python scripts/build_nuitka.py --strip-binaries  # 构建后瘦身二进制（跨平台 best-effort）
     python scripts/build_nuitka.py --jobs 4     # 限制并行编译数，降低内存峰值
     python scripts/build_nuitka.py --providers anthropic,openai,gemini  # 按需打包 provider
     python scripts/build_nuitka.py --min-size   # 体积优先（速度可能更慢）
@@ -37,6 +38,25 @@ SLIM_NOFOLLOW_IMPORTS = [
     "google.auth.transport.requests",
     "google.auth._agent_identity_utils",
 ]
+
+
+def _is_windows() -> bool:
+    return sys.platform.startswith("win")
+
+
+def _is_linux() -> bool:
+    return sys.platform.startswith("linux")
+
+
+def _binary_name(base_name: str) -> str:
+    return f"{base_name}.exe" if _is_windows() else base_name
+
+
+def _append_flag(env: dict[str, str], key: str, flag: str) -> None:
+    current = env.get(key, "").strip()
+    if flag in current.split():
+        return
+    env[key] = f"{current} {flag}".strip()
 
 
 def get_current_conda_env() -> str | None:
@@ -88,32 +108,55 @@ def maybe_bootstrap_to_conda(args: argparse.Namespace, raw_args: list[str]) -> i
     return result.returncode
 
 
-def strip_elf_binaries(target_files: list[Path]) -> None:
-    """Best-effort strip ELF binaries to reduce output size."""
-    strip_exe = shutil.which("strip")
+def strip_binaries(target_files: list[Path]) -> None:
+    """Best-effort strip binaries to reduce output size across platforms."""
+    strip_exe = shutil.which("strip") or shutil.which("llvm-strip")
     if not strip_exe:
         print("提示: 未找到 strip，跳过二进制瘦身。")
         return
+
+    if _is_windows():
+        candidate_templates = [
+            ["--strip-unneeded", "{file}"],
+            ["-S", "{file}"],
+            ["{file}"],
+        ]
+    elif _is_linux():
+        candidate_templates = [
+            ["--strip-unneeded", "{file}"],
+            ["-s", "{file}"],
+            ["{file}"],
+        ]
+    else:
+        # macOS / other UNIX: GNU strip 参数未必可用，优先保守参数。
+        candidate_templates = [
+            ["-x", "{file}"],
+            ["-S", "{file}"],
+            ["{file}"],
+        ]
 
     stripped = 0
     for file_path in target_files:
         if not file_path.exists() or not file_path.is_file():
             continue
-        result = subprocess.run(
-            [strip_exe, "--strip-unneeded", str(file_path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if result.returncode == 0:
-            stripped += 1
+        for template in candidate_templates:
+            cmd = [strip_exe, *[arg.format(file=str(file_path)) for arg in template]]
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if result.returncode == 0:
+                stripped += 1
+                break
     print(f"strip 已处理文件数: {stripped}")
 
 
 def main() -> int:
     raw_args = sys.argv[1:]
     parser = argparse.ArgumentParser(description="使用 Nuitka 构建 Ripperdoc")
-    parser.add_argument("--clang", dest="clang", action="store_true", default=True, help="使用 clang 编译 (默认)")
-    parser.add_argument("--no-clang", dest="clang", action="store_false", help="禁用 clang，使用 gcc")
+    parser.add_argument("--clang", dest="clang", action="store_true", default=False, help="使用 clang 编译（默认: gcc）")
+    parser.add_argument("--no-clang", dest="clang", action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("--lto", action="store_true", help="启用链接时优化 (需要 gcc)")
     parser.add_argument("--jobs", type=int, default=None, help="并行编译任务数（建议内存紧张时设为 2~8）")
     mode_group = parser.add_mutually_exclusive_group()
@@ -214,11 +257,13 @@ def main() -> int:
         "--include-package-data=tiktoken_ext",
     ]
 
+    use_clang = False
     if args.clang:
         if shutil.which("clang"):
             cmd.append("--clang")
+            use_clang = True
         else:
-            print("警告: 未找到 clang，自动回退到 gcc。可安装 clang 或使用 --no-clang 关闭提示。")
+            print("警告: 未找到 clang，自动回退到 gcc。")
 
     # rich 在运行时会动态 import rich._unicode_data.unicode*-*-*。
     # 这些模块名带 '-'，Nuitka 无法通过静态分析自动发现，必须显式 include-module。
@@ -256,17 +301,18 @@ def main() -> int:
         module_name = provider_module_map[key]
         cmd.append(f"--include-module={module_name}")
 
-    if os.environ.get("CONDA_PREFIX"):
-        # conda 下禁用 static libpython，避免 setns 等符号链接失败
+    if os.environ.get("CONDA_PREFIX") and _is_linux():
+        # Linux conda 下禁用 static libpython，避免 setns 等符号链接失败
         cmd.append("--static-libpython=no")
 
     # 单文件/目录模式（默认目录模式）
     if args.onefile:
-        cmd.append("--output-filename=ripperdoc")
+        output_filename = _binary_name("ripperdoc")
         cmd.append("--onefile")
     else:
         # standalone 目录模式会把可执行文件和包目录放在同级，避免与 ripperdoc/ 目录重名
-        cmd.append("--output-filename=ripperdoc_cli")
+        output_filename = _binary_name("ripperdoc_cli")
+    cmd.append(f"--output-filename={output_filename}")
 
     # LTO 优化
     if args.lto:
@@ -300,19 +346,29 @@ def main() -> int:
         print(f"清理旧构建: {build_dir}")
         shutil.rmtree(build_dir)
 
-    result = subprocess.run(cmd, cwd=root_dir)
+    run_env = os.environ.copy()
+    if use_clang:
+        # Nuitka 会透传部分 GCC 风格告警抑制参数，clang 会报 unknown-warning-option。
+        # 统一关闭该类告警，避免编译日志被大量重复警告淹没。
+        _append_flag(run_env, "CFLAGS", "-Wno-unknown-warning-option")
+        _append_flag(run_env, "CXXFLAGS", "-Wno-unknown-warning-option")
+
+    result = subprocess.run(cmd, cwd=root_dir, env=run_env)
     if result.returncode != 0:
         return result.returncode
 
     if args.strip_binaries:
         target_files: list[Path] = []
         if args.onefile:
-            target_files.append(root_dir / "dist" / "ripperdoc")
+            target_files.append(root_dir / "dist" / _binary_name("ripperdoc"))
         else:
             dist_dir = root_dir / "dist" / "cli.dist"
-            target_files.append(dist_dir / "ripperdoc_cli")
+            target_files.append(dist_dir / _binary_name("ripperdoc_cli"))
             target_files.extend(dist_dir.rglob("*.so"))
-        strip_elf_binaries(target_files)
+            target_files.extend(dist_dir.rglob("*.dylib"))
+            target_files.extend(dist_dir.rglob("*.dll"))
+            target_files.extend(dist_dir.rglob("*.pyd"))
+        strip_binaries(target_files)
 
     return 0
 
