@@ -1,8 +1,11 @@
 """CLI slash command surface tests."""
 
+from uuid import UUID
+
 from rich.console import Console
 
 from ripperdoc.cli.commands.add_dir_cmd import command as add_dir_command
+from ripperdoc.cli.commands.clear_cmd import command as clear_command
 from ripperdoc.cli.commands import get_slash_command
 from ripperdoc.cli.commands.memory_cmd import command as memory_command
 from ripperdoc.cli.commands.mcp_cmd import command as mcp_command
@@ -46,6 +49,78 @@ class _AddDirUI(_DummyUI):
             return False, f"Already added: {resolved}"
         self._dirs.add(resolved)
         return True, f"Added: {resolved}"
+
+
+class _ClearUI(_DummyUI):
+    def __init__(self, console: Console, project_path):
+        super().__init__(console, project_path)
+        self.session_id = "old-session-id"
+        self.conversation_messages = ["u1", "a1"]
+        self._saved_conversation = ["old"]
+        self.end_calls = []
+        self.start_calls = []
+        self.set_session_calls = []
+        self.rebuild_calls = 0
+
+    def _run_session_end(self, reason: str):
+        self.end_calls.append((reason, self.session_id))
+
+    def _set_session(self, session_id: str):
+        self.set_session_calls.append(session_id)
+        self.session_id = session_id
+
+    def _run_session_start(self, source: str):
+        self.start_calls.append((source, self.session_id))
+
+    def _rebuild_session_usage_from_messages(self, messages):
+        self.rebuild_calls += 1
+
+
+class _ClearFallbackUI(_DummyUI):
+    def __init__(self, console: Console, project_path):
+        super().__init__(console, project_path)
+        self.conversation_messages = ["u1", "a1"]
+        self.end_calls = []
+        self.start_calls = []
+
+    def _run_session_end(self, reason: str):
+        self.end_calls.append(reason)
+
+    def _run_session_start(self, source: str):
+        self.start_calls.append(source)
+
+
+def test_clear_command_switches_session_and_resets_messages(tmp_path, monkeypatch):
+    fixed_uuid = UUID("11111111-2222-3333-4444-555555555555")
+    monkeypatch.setattr("ripperdoc.cli.commands.clear_cmd.uuid4", lambda: fixed_uuid)
+
+    ui = _ClearUI(Console(record=True, width=120), tmp_path)
+    clear_command.handler(ui, "")
+
+    output = ui.console.export_text()
+    assert ui.end_calls == [("clear", "old-session-id")]
+    assert ui.set_session_calls == [str(fixed_uuid)]
+    assert ui.start_calls == [("clear", str(fixed_uuid))]
+    assert ui.session_id == str(fixed_uuid)
+    assert ui.conversation_messages == []
+    assert ui._saved_conversation is None
+    assert ui.rebuild_calls == 1
+    assert "Conversation cleared" in output
+
+
+def test_clear_command_without_set_session_still_clears(tmp_path):
+    ui = _ClearFallbackUI(Console(record=True, width=120), tmp_path)
+    clear_command.handler(ui, "")
+
+    output = ui.console.export_text()
+    assert ui.conversation_messages == []
+    assert ui.end_calls == ["clear"]
+    assert ui.start_calls == ["clear"]
+    assert "Conversation cleared" in output
+
+
+def test_new_alias_points_to_clear_command():
+    assert get_slash_command("new") == clear_command
 
 
 def test_todos_command_empty(tmp_path, monkeypatch):
