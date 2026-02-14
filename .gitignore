@@ -31,6 +31,8 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!ripperdoc.spec
+!ripperdoc_onefile.spec
 
 # Installer logs
 pip-log.txt
