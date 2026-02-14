@@ -144,10 +144,15 @@ Examples:
 
     if build_mode == "onedir":
         output_dir = dist_dir / "ripperdoc"
-        exe_file = output_dir / "ripperdoc"
+        
+        # On Windows, executable is ripperdoc.exe; on Linux/mac, it's just ripperdoc
+        exe_name = "ripperdoc.exe" if sys.platform == "win32" else "ripperdoc"
+        exe_file = output_dir / exe_name
 
         if not exe_file.exists():
-            print(f"\n错误: 构建完成但找不到输出目录: {output_dir}")
+            print(f"\n错误: 构建完成但找不到可执行文件: {exe_file}")
+            print(f"提示: 请检查 {output_dir} 目录是否存在")
+            print(f"提示: 实际的输出目录: {output_dir}")
             return 1
 
         # Copy data files.
@@ -165,10 +170,13 @@ Examples:
         print(f"\n可以运行: {exe_file} --help")
         print(f"或进入目录: cd {output_dir}")
     else:
-        exe_file = dist_dir / "ripperdoc"
+        # On Windows, executable is ripperdoc.exe; on Linux/mac, it's just ripperdoc  
+        exe_name = "ripperdoc.exe" if sys.platform == "win32" else "ripperdoc"
+        exe_file = dist_dir / exe_name
 
         if not exe_file.exists():
             print(f"\n错误: 构建完成但找不到可执行文件: {exe_file}")
+            print(f"提示: 请检查 {dist_dir} 目录下的文件")
             return 1
 
         size_mb = exe_file.stat().st_size / (1024 * 1024)
