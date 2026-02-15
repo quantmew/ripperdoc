@@ -5,6 +5,33 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-02-15
+
+### Added
+- **Conversation export command** - New `/export` command to export conversation history to clipboard or file
+- **MCP server management TUI** - Interactive Textual-based UI for managing MCP servers with `/mcp` command
+- **PyInstaller build system** - New build system with PyInstaller support including hooks and UPX compression
+- **PyInstaller spec files** - Added spec files for both onefile and onedir build modes
+- **Non-blocking MCP connections** - MCP server connections now use circuit breaker pattern for better resilience
+- **Session usage tracking rebuild** - Rebuild session usage tracking with configurable replay message limit
+- **Enhanced clear command** - `/clear` now resets session state completely with new `/reset` alias
+
+### Changed
+- **Model catalog performance** - Migrated model catalog from JSON to Python module for faster loading
+- **Build system migration** - Migrated from Nuitka to PyInstaller for better cross-platform binary support
+- **Provider error handling** - Standardized error handling across all providers with unified error types
+- **Permissions TUI** - Improved exit behavior via Escape key in permissions management TUI
+- **File tool display** - Removed `file_path:` prefix from tool argument display for cleaner output
+- **Provider configurations** - Updated provider configurations and cleaned up model data
+
+### Fixed
+- **Windows executable naming** - Handle Windows executable naming correctly in build script
+- **OpenAI error handling** - Enhanced error handling for httpx transport exceptions in OpenAI provider
+- **Build scripts** - Various improvements to PyInstaller and Nuitka build scripts
+
+### Removed
+- **UPX auto-download** - Removed automatic UPX download from build script for security
+
 ## [0.4.2] - 2026-02-10
 
 ### Added
@@ -380,6 +407,7 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.4.3]: https://github.com/quantmew/Ripperdoc/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/quantmew/Ripperdoc/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/quantmew/Ripperdoc/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/quantmew/Ripperdoc/compare/v0.3.3...v0.4.0
