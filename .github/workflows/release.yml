@@ -13,6 +13,9 @@ jobs:
   build_binaries:
     name: Build ${{ matrix.platform }} ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
     strategy:
       fail-fast: false
       matrix:
