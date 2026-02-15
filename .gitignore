@@ -214,6 +214,3 @@ __marimo__/
 *_ripperdoc.log
 
 
-# Nuitka build
-cli.build/
-cli.pyi
