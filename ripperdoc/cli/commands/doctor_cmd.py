@@ -20,6 +20,7 @@ from ripperdoc.core.config import (
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.mcp import load_mcp_servers_async
+from ripperdoc.utils.self_update import get_install_metadata
 from ripperdoc.utils.sandbox_utils import is_sandbox_available
 
 from .base import SlashCommand
@@ -106,6 +107,16 @@ def _sandbox_status() -> Tuple[str, str, str]:
     if available:
         return _status_row("Sandbox", "ok", "'srt' runtime is available")
     return _status_row("Sandbox", "warn", "Sandbox runtime not detected; commands run normally")
+
+
+def _installation_status() -> Tuple[str, str, str]:
+    metadata = get_install_metadata()
+    status = "ok" if metadata.method in ("pip", "binary") else "warn"
+    return (
+        "Installation",
+        status,
+        f"{metadata.method_label} @ {metadata.location}",
+    )
 
 
 def _mcp_status(
@@ -218,6 +229,7 @@ def _handle(ui: Any, _: str) -> bool:
     results: List[Tuple[str, str, str]] = []
 
     results.append(_onboarding_status())
+    results.append(_installation_status())
     results.extend(_model_status(project_path))
 
     # Check RIPPERDOC_* environment variables

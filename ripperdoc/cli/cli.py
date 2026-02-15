@@ -52,6 +52,12 @@ from ripperdoc.tools.dynamic_mcp_tool import (
     merge_tools_with_dynamic,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
+from ripperdoc.utils.self_update import (
+    get_install_metadata,
+    get_latest_version,
+    is_update_available,
+    run_upgrade,
+)
 from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.working_directories import (
     extract_additional_directories,
@@ -1321,12 +1327,14 @@ def cli(
         )
 
         # Ensure onboarding is complete
-        if not check_onboarding():
-            logger.info(
-                "[cli] Onboarding check failed or aborted; exiting.",
-                extra={"session_id": session_id},
-            )
-            sys.exit(1)
+        skip_onboarding = ctx.invoked_subcommand in ("update", "upgrade")
+        if not skip_onboarding:
+            if not check_onboarding():
+                logger.info(
+                    "[cli] Onboarding check failed or aborted; exiting.",
+                    extra={"session_id": session_id},
+                )
+                sys.exit(1)
 
         # Initialize project configuration for the current working directory
         get_project_config(project_path)
@@ -1446,6 +1454,42 @@ def config_cmd() -> None:
             console.print(f"    Model: {profile.model}")
             console.print(f"    API Key: {'***' if profile.api_key else 'Not set'}")
         console.print()
+
+
+@cli.command(name="update")
+def update_cmd() -> None:
+    """Check for updates and install if available."""
+    metadata = get_install_metadata()
+    latest_version = get_latest_version(metadata.method)
+    if latest_version is None:
+        raise click.ClickException(
+            "Unable to check for updates. Check network access and retry."
+        )
+
+    if not is_update_available(__version__, latest_version):
+        console.print(
+            f"[green]You are already on the latest version: {__version__}[/green]"
+        )
+        console.print(
+            f"[dim]Detected install method: {metadata.method_label} ({metadata.location})[/dim]"
+        )
+        return
+
+    console.print(
+        f"[yellow]Update available:[/yellow] "
+        f"{__version__} -> {latest_version}"
+    )
+    success, exit_code, message = run_upgrade()
+    if not success:
+        raise click.ClickException(f"{message} (code: {exit_code})")
+
+    console.print(
+        "[green]Update completed.[/green] "
+        f"{metadata.upgrade_hint}"
+    )
+
+
+cli.add_command(update_cmd, name="upgrade")
 
 
 @cli.command(name="version")
