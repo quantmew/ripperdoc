@@ -11,7 +11,6 @@ import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from distutils.version import LooseVersion
 from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
 
@@ -23,6 +22,21 @@ PYPI_RELEASE_API = "https://pypi.org/pypi/ripperdoc/json"
 GITHUB_RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 GITHUB_INSTALL_SH = f"https://raw.githubusercontent.com/{REPO}/main/install.sh"
 GITHUB_INSTALL_PS1 = f"https://raw.githubusercontent.com/{REPO}/main/install.ps1"
+
+try:
+    from distutils.version import LooseVersion
+except ModuleNotFoundError:  # Python 3.12+
+    try:
+        from setuptools._distutils.version import LooseVersion
+    except ModuleNotFoundError:
+        try:
+            from packaging.version import parse as LooseVersion
+        except ModuleNotFoundError:
+
+            def LooseVersion(version: str) -> str:
+                """Fallback comparator if semantic parsing libraries are unavailable."""
+
+                return version.strip()
 
 INSTALL_METHOD_PIP = "pip"
 INSTALL_METHOD_BINARY = "binary"
