@@ -46,7 +46,7 @@ jobs:
             archive_ext: zip
           - platform: macos
             arch: x86_64
-            runner: macos-13-large
+            runner: macos-15-large
             target: macos-x86_64
             archive_format: gztar
             archive_ext: tar.gz
