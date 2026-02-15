@@ -1,13 +1,43 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 REPO="quantmew/ripperdoc"
 API_URL="https://api.github.com/repos/${REPO}"
 RELEASE_BASE="https://github.com/${REPO}/releases/download"
+FALLBACK_VERSION="v0.4.3"
 DEFAULT_BIN_DIR="${HOME}/.local/bin"
 DATA_DIR="${HOME}/.local/share/ripperdoc"
 VERSIONS_DIR="${DATA_DIR}/versions"
 STATE_FILE="${DATA_DIR}/version"
+declare -a _RIPPERDOC_TMP_DIRS=()
+
+cleanup_tmp_dirs() {
+  local dir
+  for dir in "${_RIPPERDOC_TMP_DIRS[@]}"; do
+    if [[ -n "${dir}" ]] && [[ -d "${dir}" ]]; then
+      rm -rf -- "${dir}"
+    fi
+  done
+}
+
+cleanup_push_tmp_dir() {
+  local dir=$1
+  _RIPPERDOC_TMP_DIRS+=("${dir}")
+}
+
+cleanup_pop_tmp_dir() {
+  local dir=$1
+  local -a remaining=()
+  local item
+  for item in "${_RIPPERDOC_TMP_DIRS[@]}"; do
+    if [[ "${item}" != "${dir}" ]]; then
+      remaining+=("${item}")
+    fi
+  done
+  _RIPPERDOC_TMP_DIRS=("${remaining[@]}")
+}
+
+trap cleanup_tmp_dirs EXIT
 
 usage() {
   cat <<'USAGE'
@@ -56,12 +86,41 @@ download_file() {
 
 get_latest_tag() {
   local payload
-  payload=$(download_text "${API_URL}/releases/latest")
-  if command -v jq >/dev/null 2>&1; then
-    echo "$payload" | jq -r '.tag_name'
+  local tag=""
+  if command -v curl >/dev/null 2>&1; then
+    payload=$(curl -fsSL -H "User-Agent: ripperdoc-install-script" "${API_URL}/releases/latest")
+  elif command -v wget >/dev/null 2>&1; then
+    payload=$(wget -qO- -U "ripperdoc-install-script" "${API_URL}/releases/latest")
   else
-    echo "$payload" | sed -n 's/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\\([^\\"]*\\)\".*/\\1/p' | head -n 1
+    die "curl or wget is required"
   fi
+  if command -v jq >/dev/null 2>&1; then
+    tag=$(echo "$payload" | jq -r '.tag_name // empty')
+    if [[ "$tag" == "null" ]]; then
+      tag=""
+    fi
+  else
+    tag=$(echo "$payload" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\\1/p' | head -n 1)
+  fi
+  if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9._-]+)?$ ]]; then
+    echo "$tag"
+    return 0
+  fi
+
+  # Fallback to tag from release redirect URL
+  local redirected_url
+  if command -v curl >/dev/null 2>&1; then
+    redirected_url=$(curl -fsI -L -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")
+  else
+    redirected_url=$(wget -qO- --max-redirect=2 --server-response "https://github.com/${REPO}/releases/latest" 2>&1 | sed -n 's/^.*Location: //p' | tail -n 1 | tr -d '\r')
+  fi
+  tag=$(echo "$redirected_url" | sed -n 's#.*/releases/tag/\(v[^/?#]*\).*$#\1#p')
+  if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9._-]+)?$ ]]; then
+    echo "$tag"
+    return 0
+  fi
+
+  echo "$FALLBACK_VERSION"
 }
 
 resolve_version() {
@@ -136,7 +195,7 @@ do_install() {
   url="${RELEASE_BASE}/${version}/${archive}"
 
   tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' EXIT
+  cleanup_push_tmp_dir "$tmpdir"
 
   archive_path="${tmpdir}/${archive}"
   echo "Downloading ${url} ..."
@@ -164,6 +223,9 @@ do_install() {
   echo "Installed ripperdoc ${version}"
   echo "Binary: ${version_binary}"
   echo "Command: ${link_path}"
+
+  cleanup_pop_tmp_dir "$tmpdir"
+  rm -rf -- "$tmpdir"
 }
 
 do_uninstall() {
