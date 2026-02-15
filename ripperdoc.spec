@@ -16,7 +16,10 @@ Ripperdoc PyInstaller Spec File
 """
 
 import os
+import sys
 from pathlib import Path
+from importlib.util import find_spec
+from PyInstaller.utils.hooks import collect_submodules
 
 # 构建模式: 'onefile' (单文件) 或 'onedir' (目录)
 # 可以通过 --onedir 参数覆盖，或在此处修改默认值
@@ -49,9 +52,6 @@ hiddenimports = [
     "mcp",
     "json_repair",
     "tiktoken",
-    "tiktoken_ext",
-    "tiktoken_ext.openai_public",
-    "google.generativeai",
     "charset_normalizer",
     
     # Ripperdoc 内部模块
@@ -62,37 +62,38 @@ hiddenimports = [
     "ripperdoc.data",
     
     # LSP 相关
+]
+
+# 仅在环境已安装时才加入，避免在CI里出现假阳性 "Hidden import not found" 警告。
+_optional_hiddenimports = [
+    "google.genai",
+    "tiktoken_ext",
+    "tiktoken_ext.openai_public",
     "pygls.lsp",
     "pygls.protocol",
-
-    # 异步支持
-    "asyncio",
-
-    # rich unicode 数据模块 (动态导入)
-    "rich._unicode_data",
-    "rich._unicode_data._versions",
-    "rich._unicode_data.unicode4-1-0",
-    "rich._unicode_data.unicode5-0-0",
-    "rich._unicode_data.unicode5-1-0",
-    "rich._unicode_data.unicode5-2-0",
-    "rich._unicode_data.unicode6-0-0",
-    "rich._unicode_data.unicode6-1-0",
-    "rich._unicode_data.unicode6-2-0",
-    "rich._unicode_data.unicode6-3-0",
-    "rich._unicode_data.unicode7-0-0",
-    "rich._unicode_data.unicode8-0-0",
-    "rich._unicode_data.unicode9-0-0",
-    "rich._unicode_data.unicode10-0-0",
-    "rich._unicode_data.unicode11-0-0",
-    "rich._unicode_data.unicode12-0-0",
-    "rich._unicode_data.unicode12-1-0",
-    "rich._unicode_data.unicode13-0-0",
-    "rich._unicode_data.unicode14-0-0",
-    "rich._unicode_data.unicode15-0-0",
-    "rich._unicode_data.unicode15-1-0",
-    "rich._unicode_data.unicode16-0-0",
-    "rich._unicode_data.unicode17-0-0",
 ]
+
+def _module_available(module_name: str) -> bool:
+    try:
+        return find_spec(module_name) is not None
+    except ModuleNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+for _module in _optional_hiddenimports:
+    if _module_available(_module):
+        hiddenimports.append(_module)
+
+# 强制收集 rich 的 unicode 数据子模块，避免打包后动态导入缺失。
+hiddenimports.extend(
+    [module for module in collect_submodules("rich._unicode_data") if module not in hiddenimports]
+)
+
+# Windows ARM 下 strip 会频繁触发文件格式警告（不影响产物），这里统一关闭。
+WINDOWS_NO_STRIP = sys.platform == "win32"
+STRIP_BINARIES = not WINDOWS_NO_STRIP
 
 block_cipher = None
 
@@ -183,7 +184,7 @@ if BUILD_MODE == "onedir":
         name="ripperdoc",
         debug=False,
         bootloader_ignore_signals=False,
-        strip=True,
+        strip=STRIP_BINARIES,
         upx=True,
         console=True,
         disable_windowed_traceback=False,
@@ -216,7 +217,7 @@ else:
         name="ripperdoc",
         debug=False,
         bootloader_ignore_signals=False,
-        strip=True,
+        strip=STRIP_BINARIES,
         upx=True,
         upx_exclude=[],
         runtime_tmpdir=None,
