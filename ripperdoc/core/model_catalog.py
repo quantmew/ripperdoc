@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from functools import lru_cache
-from importlib import resources
 from typing import Any, Dict, Iterable, Optional
 
 from pydantic import BaseModel, ConfigDict
@@ -13,10 +11,6 @@ from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
-_MODEL_CATALOG_RESOURCES = (
-    "model_prices_and_context_window.json",
-    "model_catalog.min.json",
-)
 _CHAT_LIKE_MODES = {"chat", "responses", "completion"}
 _OPENAI_LIKE_PROVIDERS = {
     "openai",
@@ -93,27 +87,18 @@ def _query_variants(query: str) -> tuple[str, ...]:
 @lru_cache(maxsize=1)
 def _load_catalog_entries() -> Dict[str, Dict[str, Any]]:
     payload: Any = None
-    loaded_resource: Optional[str] = None
     try:
-        data_root = resources.files("ripperdoc.data")
-        for resource_name in _MODEL_CATALOG_RESOURCES:
-            resource = data_root.joinpath(resource_name)
-            if not resource.is_file():
-                continue
-            with resource.open("r", encoding="utf-8") as fh:
-                payload = json.load(fh)
-            loaded_resource = resource_name
-            break
-    except (ModuleNotFoundError, FileNotFoundError, OSError, ValueError, TypeError) as exc:
+        from ripperdoc.data.model_prices_and_context_window import (
+            MODEL_PRICES_AND_CONTEXT_WINDOW,
+        )
+
+        payload = MODEL_PRICES_AND_CONTEXT_WINDOW
+    except Exception as exc:  # pragma: no cover - import/runtime failure fallback
         logger.warning(
-            "[model_catalog] Failed to load packaged model metadata: %s: %s",
+            "[model_catalog] Failed to load generated model metadata module: %s: %s",
             type(exc).__name__,
             exc,
         )
-        return {}
-
-    if payload is None:
-        logger.warning("[model_catalog] No packaged model metadata resource found")
         return {}
 
     if isinstance(payload, dict):
@@ -121,7 +106,7 @@ def _load_catalog_entries() -> Dict[str, Dict[str, Any]]:
         if isinstance(maybe_entries, dict):
             logger.debug(
                 "[model_catalog] Loaded packaged metadata",
-                extra={"resource": loaded_resource, "entries": len(maybe_entries)},
+                extra={"resource": "model_prices_and_context_window.py", "entries": len(maybe_entries)},
             )
             return {
                 str(key).strip().lower(): value
@@ -130,13 +115,14 @@ def _load_catalog_entries() -> Dict[str, Dict[str, Any]]:
             }
         logger.debug(
             "[model_catalog] Loaded packaged metadata",
-            extra={"resource": loaded_resource, "entries": len(payload)},
+            extra={"resource": "model_prices_and_context_window.py", "entries": len(payload)},
         )
         return {
             str(key).strip().lower(): value
             for key, value in payload.items()
             if isinstance(value, dict) and str(key).strip().lower() != "sample_spec"
         }
+    logger.warning("[model_catalog] Generated model metadata has unsupported type: %s", type(payload).__name__)
     return {}
 
 
