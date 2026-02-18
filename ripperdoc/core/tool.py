@@ -40,6 +40,8 @@ class ToolUseContext(BaseModel):
 
     message_id: Optional[str] = None
     agent_id: Optional[str] = None
+    team_name: Optional[str] = None
+    teammate_name: Optional[str] = None
     yolo_mode: bool = False
     verbose: bool = False
     permission_checker: Optional[Any] = None

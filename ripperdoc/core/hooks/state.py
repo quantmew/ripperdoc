@@ -2,11 +2,14 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Callable, Generator, List, Optional, Sequence
+from typing import Any, Callable, Generator, List, Optional, Sequence
 
 from ripperdoc.core.hooks.config import HooksConfig
 
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.pending_messages import PendingMessageQueue
+
+logger = get_logger()
 
 _hooks_suspended: ContextVar[bool] = ContextVar("ripperdoc_hooks_suspended", default=False)
 _pending_message_queue: ContextVar[Optional[PendingMessageQueue]] = ContextVar(
@@ -20,6 +23,18 @@ _hook_scopes: ContextVar[Optional[Sequence[HooksConfig]]] = ContextVar(
 )
 
 
+def _safe_reset(context_var: ContextVar[Any], token: Any, *, var_name: str) -> None:
+    try:
+        context_var.reset(token)
+    except ValueError as exc:
+        # Async generator shutdown can cross context boundaries. In that case
+        # resetting the original token fails, but cleanup should continue.
+        if "different Context" in str(exc):
+            logger.debug("[hooks.state] Skipping %s reset across contexts: %s", var_name, exc)
+            return
+        raise
+
+
 @contextmanager
 def suspend_hooks() -> Generator[None, None, None]:
     """Temporarily disable hook execution (used for internal subagents)."""
@@ -27,7 +42,7 @@ def suspend_hooks() -> Generator[None, None, None]:
     try:
         yield
     finally:
-        _hooks_suspended.reset(token)
+        _safe_reset(_hooks_suspended, token, var_name="hooks_suspended")
 
 
 def hooks_suspended() -> bool:
@@ -44,7 +59,7 @@ def bind_pending_message_queue(
     try:
         yield
     finally:
-        _pending_message_queue.reset(token)
+        _safe_reset(_pending_message_queue, token, var_name="pending_message_queue")
 
 
 def get_pending_message_queue() -> Optional[PendingMessageQueue]:
@@ -61,7 +76,7 @@ def bind_hook_status_emitter(
     try:
         yield
     finally:
-        _status_emitter.reset(token)
+        _safe_reset(_status_emitter, token, var_name="status_emitter")
 
 
 def get_hook_status_emitter() -> Optional[Callable[[str], None]]:
@@ -78,7 +93,7 @@ def bind_hook_scopes(
     try:
         yield
     finally:
-        _hook_scopes.reset(token)
+        _safe_reset(_hook_scopes, token, var_name="hook_scopes")
 
 
 def get_hook_scopes() -> List[HooksConfig]:

@@ -1,6 +1,7 @@
 """Main query loop and LLM interaction helpers."""
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -39,6 +40,13 @@ from ripperdoc.core.message_utils import (
 from ripperdoc.core.tool import Tool, ToolUseContext
 from ripperdoc.utils.context_length_errors import detect_context_length_error
 from ripperdoc.utils.file_watch import detect_changed_files
+from ripperdoc.utils.teams import (
+    get_active_team_name,
+    list_teams,
+    drain_team_inbox_messages,
+    register_team_message_listener,
+    unregister_team_message_listener,
+)
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
@@ -429,6 +437,171 @@ def _compose_next_iteration_messages(
     if extra_messages:
         next_messages.extend(extra_messages)
     return next_messages
+
+
+def _resolve_query_team_name(query_context: QueryContext) -> Optional[str]:
+    """Resolve the active team name for this query context."""
+    context_team = (query_context.team_name or "").strip() if query_context.team_name else ""
+    if context_team:
+        return context_team
+
+    env_team = os.getenv("RIPPERDOC_TEAM_NAME")
+    if env_team and env_team.strip():
+        return env_team.strip()
+
+    disk_team = get_active_team_name()
+    if disk_team:
+        return disk_team
+
+    teams = list_teams()
+    if len(teams) == 1:
+        return teams[0].name
+
+    return None
+
+
+def _resolve_query_team_listener_participant(query_context: QueryContext) -> str:
+    """Select the listener participant key for this query context."""
+    if query_context.teammate_name:
+        return query_context.teammate_name
+    if query_context.agent_id:
+        return query_context.agent_id
+    return "team-lead"
+
+
+def _inject_team_inbox_messages(
+    team_name: str,
+    participant: str,
+    queue: "PendingMessageQueue",
+) -> int:
+    """Load unread mailbox messages and enqueue them as pending user messages."""
+    clean_team = (team_name or "").strip()
+    clean_participant = (participant or "").strip()
+    if not clean_team or not clean_participant:
+        return 0
+
+    inbox_entries = drain_team_inbox_messages(clean_team, clean_participant)
+    if not inbox_entries:
+        return 0
+
+    # Match teammate polling behavior from the reference implementation:
+    # protocol shutdown requests should preempt normal chatter.
+    shutdown_entries: list[dict[str, Any]] = []
+    normal_entries: list[dict[str, Any]] = []
+    for candidate in inbox_entries:
+        if isinstance(candidate, dict) and str(candidate.get("message_type")) == "shutdown_request":
+            shutdown_entries.append(candidate)
+        else:
+            normal_entries.append(candidate)
+    ordered_entries = shutdown_entries + normal_entries
+
+    def _xml_attr_escape(value: str) -> str:
+        return (
+            value.replace("&", "&amp;")
+            .replace('"', "&quot;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
+    def _wrap_teammate_message(
+        *,
+        sender_name: str,
+        body: str,
+        summary_text: str,
+    ) -> str:
+        teammate_id = _xml_attr_escape(sender_name or "teammate")
+        summary_part = (
+            f' summary="{_xml_attr_escape(summary_text)}"'
+            if summary_text
+            else ""
+        )
+        return (
+            f'<teammate-message teammate_id="{teammate_id}"{summary_part}>\n'
+            + body
+            + "\n</teammate-message>"
+        )
+
+    injected = 0
+    for entry in ordered_entries:
+        if not isinstance(entry, dict):
+            continue
+
+        metadata = entry.get("metadata")
+        metadata_dict = metadata if isinstance(metadata, dict) else {}
+        team_name_value = entry.get("team_name") or clean_team
+        message_type = str(
+            entry.get("message_type")
+            or metadata_dict.get("team_message_type")
+            or "message"
+        ).strip()
+        sender = str(entry.get("sender") or metadata_dict.get("sender") or "").strip()
+        summary = str(metadata_dict.get("summary") or "").strip()
+
+        content = entry.get("content")
+        if content is None:
+            continue
+        if isinstance(content, str):
+            text = content
+        else:
+            try:
+                text = json.dumps(content, ensure_ascii=False)
+            except (TypeError, ValueError):
+                text = str(content)
+
+        if message_type == "shutdown_request":
+            try:
+                parsed_payload = json.loads(text)
+                if isinstance(parsed_payload, dict):
+                    payload_request_id = parsed_payload.get("request_id") or parsed_payload.get(
+                        "requestId"
+                    )
+                    if payload_request_id and not metadata_dict.get("request_id"):
+                        metadata_dict["request_id"] = payload_request_id
+
+                    payload_sender = parsed_payload.get("sender") or parsed_payload.get("from")
+                    if payload_sender and not metadata_dict.get("sender"):
+                        metadata_dict["sender"] = payload_sender
+
+                    payload_reason = parsed_payload.get("content") or parsed_payload.get("reason")
+                    if payload_reason and not metadata_dict.get("content"):
+                        metadata_dict["content"] = payload_reason
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+
+        if not text.lstrip().startswith("<teammate-message"):
+            rendered_sender = sender or str(metadata_dict.get("sender") or "team-lead").strip()
+            text = _wrap_teammate_message(
+                sender_name=rendered_sender or "team-lead",
+                body=text,
+                summary_text=summary,
+            )
+
+        user_message = create_user_message(text)
+        if metadata_dict:
+            user_message.message.metadata.update(metadata_dict)
+        user_message.message.metadata.setdefault(
+            "team",
+            {
+                "team_name": team_name_value,
+                "sender": entry.get("sender"),
+                "recipient": entry.get("recipient"),
+                "message_type": entry.get("message_type"),
+                "message_id": entry.get("id"),
+                "created_at": entry.get("created_at"),
+            },
+        )
+        if "team_message_type" not in user_message.message.metadata:
+            user_message.message.metadata["team_message_type"] = entry.get("message_type")
+        user_message.message.metadata.setdefault("team_name", team_name_value)
+        user_message.message.metadata.setdefault("sender", entry.get("sender"))
+        user_message.message.metadata.setdefault("recipient", entry.get("recipient"))
+        user_message.message.metadata.setdefault("request_id", entry.get("request_id"))
+        user_message.message.metadata.setdefault("approve", entry.get("approve"))
+
+        queue.enqueue(user_message)
+        injected += 1
+
+    return injected
 
 
 def _normalize_tool_input_payload(raw_input: Any) -> Dict[str, Any]:
@@ -924,6 +1097,9 @@ async def _parse_and_validate_tool_input_for_call(
             {},
             ToolUseContext(
                 message_id=tool_use_id,
+                agent_id=query_context.agent_id,
+                team_name=query_context.team_name,
+                teammate_name=query_context.teammate_name,
                 yolo_mode=query_context.yolo_mode,
                 verbose=query_context.verbose,
                 permission_checker=can_use_tool_fn,
@@ -948,6 +1124,9 @@ async def _parse_and_validate_tool_input_for_call(
     )
     tool_context = ToolUseContext(
         message_id=tool_use_id,
+        agent_id=query_context.agent_id,
+        team_name=query_context.team_name,
+        teammate_name=query_context.teammate_name,
         yolo_mode=query_context.yolo_mode,
         verbose=query_context.verbose,
         permission_checker=can_use_tool_fn,
@@ -1273,6 +1452,23 @@ async def query(
     Yields:
         Messages (user, assistant, progress) as they are generated
     """
+    team_name = _resolve_query_team_name(query_context)
+    listener_token: Optional[tuple[str, str, int]] = None
+    listener_participant = _resolve_query_team_listener_participant(query_context)
+    if team_name:
+        try:
+            listener_token = register_team_message_listener(
+                team_name=team_name,
+                participant=listener_participant,
+                queue=query_context.pending_message_queue,
+            )
+        except ValueError as exc:
+            logger.debug(
+                "[query] Team message listener registration skipped: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"team_name": team_name, "participant": listener_participant},
+            )
     # Resolve model once for use in messages (e.g., max iterations, errors)
     model_profile = resolve_model_profile(query_context.model)
     with bind_pending_message_queue(query_context.pending_message_queue), bind_hook_scopes(
@@ -1297,61 +1493,70 @@ async def query(
         if query_context.max_turns and query_context.max_turns > 0:
             max_iterations = min(MAX_QUERY_ITERATIONS, query_context.max_turns)
 
-        for iteration in range(1, max_iterations + 1):
-            # Inject any pending messages queued by background events or user interjections
-            pending_messages = query_context.drain_pending_messages()
-            if pending_messages:
-                messages.extend(pending_messages)
-                for pending in pending_messages:
-                    yield pending
-
-            result = IterationResult()
-
-            async for msg in _run_query_iteration(
-                messages,
-                system_prompt,
-                context,
-                query_context,
-                can_use_tool_fn,
-                iteration,
-                result,
-            ):
-                yield msg
-
-            if result.should_stop:
-                # Before stopping, check if new pending messages arrived during this iteration.
-                trailing_pending = query_context.drain_pending_messages()
-                if trailing_pending:
-                    next_messages = _compose_next_iteration_messages(
-                        messages,
-                        assistant_message=result.assistant_message,
-                        tool_results=result.tool_results,
-                        extra_messages=trailing_pending,
-                    )
-                    for pending in trailing_pending:
+        try:
+            for iteration in range(1, max_iterations + 1):
+                # Inject any pending messages queued by background events or user interjections
+                _inject_team_inbox_messages(team_name, listener_participant, query_context.pending_message_queue)
+                pending_messages = query_context.drain_pending_messages()
+                if pending_messages:
+                    messages.extend(pending_messages)
+                    for pending in pending_messages:
                         yield pending
-                    messages = next_messages
-                    continue
-                return
 
-            # Update messages for next iteration
-            messages = _compose_next_iteration_messages(
-                messages,
-                assistant_message=result.assistant_message,
-                tool_results=result.tool_results,
+                result = IterationResult()
+
+                async for msg in _run_query_iteration(
+                    messages,
+                    system_prompt,
+                    context,
+                    query_context,
+                    can_use_tool_fn,
+                    iteration,
+                    result,
+                ):
+                    yield msg
+
+                if result.should_stop:
+                    # Before stopping, check if new pending messages arrived during this iteration.
+                    trailing_pending = query_context.drain_pending_messages()
+                    if trailing_pending:
+                        next_messages = _compose_next_iteration_messages(
+                            messages,
+                            assistant_message=result.assistant_message,
+                            tool_results=result.tool_results,
+                            extra_messages=trailing_pending,
+                        )
+                        for pending in trailing_pending:
+                            yield pending
+                        messages = next_messages
+                        continue
+                    return
+
+                # Update messages for next iteration
+                messages = _compose_next_iteration_messages(
+                    messages,
+                    assistant_message=result.assistant_message,
+                    tool_results=result.tool_results,
+                )
+
+                logger.debug(
+                    f"[query] Continuing loop with {len(messages)} messages after tools; "
+                    f"tool_results_count={len(result.tool_results)}"
+                )
+
+            # Reached max iterations
+            logger.warning(
+                f"[query] Reached maximum iterations ({max_iterations}), stopping query loop"
             )
-
-            logger.debug(
-                f"[query] Continuing loop with {len(messages)} messages after tools; "
-                f"tool_results_count={len(result.tool_results)}"
+            yield create_assistant_message(
+                f"Reached maximum query iterations ({max_iterations}). "
+                "Please continue the conversation to proceed.",
+                model=model_profile.model,
             )
-
-        # Reached max iterations
-        logger.warning(
-            f"[query] Reached maximum iterations ({max_iterations}), stopping query loop"
-        )
-        yield create_assistant_message(
-            f"Reached maximum query iterations ({max_iterations}). "
-            "Please continue the conversation to proceed.",
-            model=model_profile.model,
-        )
+        finally:
+            if listener_token is not None:
+                unregister_team_message_listener(
+                    team_name=team_name,
+                    participant=listener_participant,
+                    queue=query_context.pending_message_queue,
+                )

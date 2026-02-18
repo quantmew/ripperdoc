@@ -2373,6 +2373,28 @@ class TestHookManagerAsyncMethods:
             for msg in messages
         )
 
+    def test_bind_contextvars_reset_cross_context_is_tolerated(self, monkeypatch):
+        """Cross-context reset failures should not raise during cleanup."""
+        from ripperdoc.core.hooks import state as hook_state
+
+        class _FakeVar:
+            def set(self, _value):
+                return object()
+
+            def reset(self, _token):
+                raise ValueError("Token was created in a different Context")
+
+            def get(self):
+                return None
+
+        monkeypatch.setattr(hook_state, "_pending_message_queue", _FakeVar())
+        monkeypatch.setattr(hook_state, "_hook_scopes", _FakeVar())
+
+        with hook_state.bind_pending_message_queue(None):
+            pass
+        with hook_state.bind_hook_scopes(None):
+            pass
+
     @pytest.mark.asyncio
     async def test_run_user_prompt_submit_async(self, tmp_path, monkeypatch):
         """run_user_prompt_submit_async should execute hooks."""

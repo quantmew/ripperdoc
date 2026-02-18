@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import threading
 import time
@@ -46,6 +47,7 @@ from ripperdoc.utils.teams import (
     TeamMember,
     TeamMessageType,
     get_team,
+    set_team_member_active,
     send_team_message,
     upsert_team_member,
 )
@@ -129,6 +131,24 @@ def list_agent_runs() -> List[str]:
         return list(_AGENT_RUNS.keys())
 
 
+def list_running_team_members(team_name: Optional[str] = None) -> list[str]:
+    """Return teammate names that currently have a running execution state."""
+    target = (team_name or "").strip()
+    with _AGENT_RUNS_LOCK:
+        names: set[str] = set()
+        for record in _AGENT_RUNS.values():
+            if record.status != "running":
+                continue
+            if not record.teammate_name:
+                continue
+            if target and (record.team_name or "").strip() != target:
+                continue
+            if record.task is not None and record.task.done():
+                continue
+            names.add(record.teammate_name)
+        return sorted(names)
+
+
 def get_agent_run_snapshot(agent_id: str) -> Optional[dict]:
     """Return a snapshot of a subagent run by id."""
     record = _get_agent_run(agent_id)
@@ -155,6 +175,30 @@ def prune_agent_runs(max_age_seconds: Optional[float] = None) -> int:
     return removed
 
 
+def _set_team_member_active_state(
+    team_name: Optional[str],
+    teammate_name: Optional[str],
+    active: bool,
+    *,
+    default_agent_type: str = "general-purpose",
+) -> None:
+    if not team_name or not teammate_name:
+        return
+    try:
+        set_team_member_active(
+            team_name=team_name,
+            member_name=teammate_name,
+            active=active,
+            default_agent_type=default_agent_type,
+        )
+    except (ValueError, OSError, RuntimeError, KeyError, TypeError):
+        # Best-effort lifecycle tracking for team members.
+        logger.debug(
+            "[task_tool] Failed to update teammate active state",
+            extra={"team_name": team_name, "teammate_name": teammate_name, "active": active},
+        )
+
+
 async def cancel_agent_run(agent_id: str) -> bool:
     """Cancel a running subagent, if possible."""
     record = _get_agent_run(agent_id)
@@ -166,6 +210,7 @@ async def cancel_agent_run(agent_id: str) -> bool:
     except asyncio.CancelledError:
         pass
     record.status = "cancelled"
+    _set_team_member_active_state(record.team_name, record.teammate_name, False)
     record.error = record.error or "Cancelled by user."
     record.duration_ms = (time.time() - record.start_time) * 1000
     record.task = None
@@ -470,7 +515,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                             name=teammate_name,
                             agent_type=resolved_type,
                             role="worker",
-                            active=True,
+                            active=False,
                         ),
                     )
                 except (ValueError, OSError, RuntimeError, KeyError, TypeError) as exc:
@@ -483,6 +528,108 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
         return fallback_agent_type, team.name, None
 
+    @staticmethod
+    def _extract_team_event_metadata(message: UserMessage) -> Dict[str, Any]:
+        message_payload = getattr(message, "message", None)
+        if not message_payload:
+            return {}
+        metadata = getattr(message_payload, "metadata", None)
+        if isinstance(metadata, dict):
+            return metadata
+        return {}
+
+    @staticmethod
+    def _extract_tool_result_ids(
+        message: UserMessage,
+    ) -> List[str]:
+        payload = getattr(message, "message", None)
+        content = getattr(payload, "content", None) if payload is not None else None
+        if not isinstance(content, list):
+            return []
+
+        tool_result_ids: List[str] = []
+        for block in content:
+            block_type = getattr(block, "type", None) or (
+                block.get("type") if isinstance(block, Dict) else None
+            )
+            if block_type != "tool_result":
+                continue
+            tool_use_id = getattr(block, "tool_use_id", None) or (
+                block.get("tool_use_id") if isinstance(block, Dict) else None
+            )
+            if isinstance(tool_use_id, str) and tool_use_id.strip():
+                tool_result_ids.append(tool_use_id.strip())
+        return tool_result_ids
+
+    @staticmethod
+    def _lookup_tool_use_input_by_id(
+        history: Sequence[MessageType],
+        tool_use_id: str,
+    ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        if not tool_use_id:
+            return None, None
+
+        for item in reversed(history):
+            if getattr(item, "type", "") != "assistant":
+                continue
+
+            payload = getattr(item, "message", None)
+            content = getattr(payload, "content", None) if payload is not None else None
+            if not isinstance(content, list):
+                continue
+
+            for block in content:
+                block_type = getattr(block, "type", None) or (
+                    block.get("type") if isinstance(block, Dict) else None
+                )
+                if block_type != "tool_use":
+                    continue
+
+                block_id = getattr(block, "id", None) or getattr(block, "tool_use_id", None)
+                if block_id is None and isinstance(block, Dict):
+                    block_id = block.get("id") or block.get("tool_use_id")
+                if str(block_id or "").strip() != tool_use_id:
+                    continue
+
+                tool_name = getattr(block, "name", None) or (
+                    block.get("name") if isinstance(block, Dict) else None
+                )
+                raw_input = getattr(block, "input", None)
+                if raw_input is None and isinstance(block, Dict):
+                    raw_input = block.get("input")
+                if hasattr(raw_input, "model_dump"):
+                    parsed_input = raw_input.model_dump()
+                elif hasattr(raw_input, "dict"):
+                    parsed_input = raw_input.dict()
+                elif isinstance(raw_input, dict):
+                    parsed_input = dict(raw_input)
+                else:
+                    parsed_input = {}
+                return (str(tool_name) if tool_name else None), parsed_input
+
+        return None, None
+
+    @staticmethod
+    def _extract_approved_shutdown_response(
+        history: Sequence[MessageType],
+        message: UserMessage,
+    ) -> Optional[Dict[str, str]]:
+        for tool_use_id in TaskTool._extract_tool_result_ids(message):
+            tool_name, tool_input = TaskTool._lookup_tool_use_input_by_id(history, tool_use_id)
+            if tool_name != "SendMessage":
+                continue
+            if str(tool_input.get("type") or "").strip() != "shutdown_response":
+                continue
+            if not bool(tool_input.get("approve")):
+                continue
+            request_id = str(tool_input.get("request_id") or "").strip()
+            reason = str(tool_input.get("content") or "").strip()
+            return {
+                "request_id": request_id,
+                "content": reason,
+            }
+        return None
+
     def _send_team_event(
         self,
         *,
@@ -493,11 +640,12 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
     ) -> None:
         if not record.team_name:
             return
-        recipients = [record.teammate_name] if record.teammate_name else ["*"]
+        recipients = ["team-lead"]
+        sender = record.teammate_name or record.agent_type
         try:
             send_team_message(
                 team_name=record.team_name,
-                sender="system",
+                sender=sender,
                 recipients=recipients,
                 message_type=message_type,
                 content=content,
@@ -575,6 +723,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         verbose: bool,
         model: str,
         agent_type: str,
+        team_name: Optional[str],
+        teammate_name: Optional[str],
+        agent_id: str,
         hook_scopes: List[HooksConfig],
     ) -> QueryContext:
         return QueryContext(
@@ -584,6 +735,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             model=model,
             stop_hook="subagent",
             subagent_type=agent_type,
+            team_name=team_name,
+            teammate_name=teammate_name,
+            agent_id=agent_id,
             hook_scopes=hook_scopes,
         )
 
@@ -593,22 +747,40 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         *,
         assistant_messages: List[AssistantMessage],
         tool_use_count: int,
+        status: str = "completed",
+        error: Optional[str] = None,
+        result_text: Optional[str] = None,
     ) -> None:
         duration_ms = (time.time() - record.start_time) * 1000
-        result_text = (
-            self._extract_text(assistant_messages[-1])
-            if assistant_messages
-            else "Agent returned no response."
-        )
+        if result_text is None:
+            result_text = (
+                self._extract_text(assistant_messages[-1])
+                if assistant_messages
+                else (
+                    f"Subagent '{record.agent_type}' ended with status '{status}'."
+                    if status != "completed"
+                    else "Agent returned no response."
+                )
+            )
         record.duration_ms = duration_ms
         record.tool_use_count = tool_use_count
         record.result_text = result_text.strip()
-        record.status = "completed"
+        record.status = status
+        if status == "completed":
+            record.error = None
+        elif error is not None:
+            record.error = error
+        _set_team_member_active_state(
+            record.team_name,
+            record.teammate_name,
+            False,
+            default_agent_type=record.agent_type,
+        )
         self._send_team_event(
             record=record,
             message_type="status",
             content=(
-                f"Subagent '{record.agent_type}' completed"
+                f"Subagent '{record.agent_type}' {record.status}"
                 + (f" for teammate '{record.teammate_name}'" if record.teammate_name else "")
                 + "."
             ),
@@ -630,39 +802,87 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
     ) -> AsyncGenerator[ToolProgress, None]:
         assistant_messages: List[AssistantMessage] = []
         tool_use_count = 0
-        async for message in query(
-            record.history,  # type: ignore[arg-type]
-            record.system_prompt,
-            hook_context,
-            subagent_context,
-            permission_checker,
-        ):
-            msg_type = getattr(message, "type", "")
-            if msg_type == "progress":
-                continue
+        finalize_status = "running"
+        finalize_error: Optional[str] = None
+        finalize_result_text: Optional[str] = None
+        try:
+            async for message in query(
+                record.history,  # type: ignore[arg-type]
+                record.system_prompt,
+                hook_context,
+                subagent_context,
+                permission_checker,
+            ):
+                msg_type = getattr(message, "type", "")
+                if msg_type == "progress":
+                    continue
 
-            tool_use_count, updates = self._track_subagent_message(
-                message,
-                record.history,
-                assistant_messages,
-                tool_use_count,
-            )
-            for update in updates:
-                yield ToolProgress(content=update)
-
-            if msg_type in ("assistant", "user"):
-                message_with_parent = (
-                    message.model_copy(update={"parent_tool_use_id": parent_tool_use_id})
-                    if parent_tool_use_id
-                    else message
+                tool_use_count, updates = self._track_subagent_message(
+                    message,
+                    record.history,
+                    assistant_messages,
+                    tool_use_count,
                 )
-                yield ToolProgress(content=message_with_parent, is_subagent_message=True)
+                if isinstance(message, UserMessage):
+                    shutdown_approval = self._extract_approved_shutdown_response(
+                        record.history,
+                        message,
+                    )
+                    if shutdown_approval is not None:
+                        finalize_status = "shutdown"
+                        finalize_error = (
+                            shutdown_approval.get("content")
+                            or "Approved shutdown_response sent to team lead."
+                        ).strip()
+                        finalize_result_text = (
+                            "Subagent exited after approved shutdown_response"
+                            + (
+                                f" (request_id={shutdown_approval.get('request_id', '')})."
+                                if shutdown_approval.get("request_id")
+                                else "."
+                            )
+                        )
+                        yield ToolProgress(
+                            content=(
+                                f"Shutdown approved for subagent '{record.agent_id}', "
+                                "exiting run."
+                            )
+                        )
+                        break
+                for update in updates:
+                    yield ToolProgress(content=update)
 
-        self._finalize_record_from_messages(
-            record,
-            assistant_messages=assistant_messages,
-            tool_use_count=tool_use_count,
-        )
+                if msg_type in ("assistant", "user"):
+                    message_with_parent = (
+                        message.model_copy(update={"parent_tool_use_id": parent_tool_use_id})
+                        if parent_tool_use_id
+                        else message
+                    )
+                    yield ToolProgress(content=message_with_parent, is_subagent_message=True)
+        except asyncio.CancelledError:
+            finalize_status = "cancelled"
+            finalize_error = "Subagent run was cancelled."
+            raise
+        except Exception as exc:
+            finalize_status = "failed"
+            finalize_error = str(exc)
+            logger.warning(
+                "[task_tool] Subagent foreground run failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"agent_id": record.agent_id, "team_name": record.team_name},
+            )
+        finally:
+            if finalize_status == "running":
+                finalize_status = "completed"
+            self._finalize_record_from_messages(
+                record,
+                assistant_messages=assistant_messages,
+                tool_use_count=tool_use_count,
+                status=finalize_status,
+                error=finalize_error,
+                result_text=finalize_result_text,
+            )
 
     def _coerce_agent_tools(self, tools: List[object]) -> List[Tool[Any, Any]]:
         from ripperdoc.core.tool import Tool as ToolBase
@@ -682,6 +902,19 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             raise ValueError(
                 f"Agent id '{input_data.resume}' not found. "
                 "Start a new agent to obtain a valid agent_id."
+            )
+        should_activate = bool(record.team_name and record.teammate_name)
+        if record.task and not record.task.done():
+            should_activate = True
+        elif input_data.prompt:
+            should_activate = True
+
+        if should_activate:
+            _set_team_member_active_state(
+                record.team_name,
+                record.teammate_name,
+                True,
+                default_agent_type=record.agent_type,
             )
 
         if record.task and not record.task.done():
@@ -725,6 +958,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             verbose=context.verbose,
             model=record.model_used or "main",
             agent_type=record.agent_type,
+            team_name=record.team_name,
+            teammate_name=record.teammate_name,
+            agent_id=record.agent_id,
             hook_scopes=record.hook_scopes,
         )
         yield ToolProgress(content=f"Resuming subagent '{record.agent_type}'")
@@ -843,18 +1079,46 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             verbose=context.verbose,
             model=target_agent.model or "main",
             agent_type=target_agent.agent_type,
+            team_name=resolved_team_name,
+            teammate_name=resolved_teammate_name,
+            agent_id=record.agent_id,
             hook_scopes=agent_hook_scopes,
         )
 
-        if input_data.run_in_background:
-            record.task = asyncio.create_task(
-                self._run_subagent_background(
-                    record,
-                    subagent_context,
-                    context.permission_checker,
-                    hook_context,
-                )
+        if resolved_team_name and resolved_teammate_name:
+            _set_team_member_active_state(
+                resolved_team_name,
+                resolved_teammate_name,
+                True,
+                default_agent_type=target_agent.agent_type,
             )
+
+        if input_data.run_in_background:
+            try:
+                record.task = asyncio.create_task(
+                    self._run_subagent_background(
+                        record,
+                        subagent_context,
+                        context.permission_checker,
+                        hook_context,
+                    )
+                )
+            except Exception as exc:
+                _set_team_member_active_state(
+                    resolved_team_name,
+                    resolved_teammate_name,
+                    False,
+                    default_agent_type=target_agent.agent_type,
+                )
+                self._finalize_record_from_messages(
+                    record,
+                    assistant_messages=[],
+                    tool_use_count=0,
+                    status="failed",
+                    error=str(exc),
+                    result_text="Failed to start background subagent.",
+                )
+                raise
             output = self._output_from_record(
                 record,
                 status_override="running",
@@ -1000,6 +1264,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
     ) -> None:
         assistant_messages: List[AssistantMessage] = []
         tool_use_count = 0
+        finalize_status = "running"
+        finalize_error: Optional[str] = None
+        finalize_result_text: Optional[str] = None
         try:
             async for message in query(
                 record.history,  # type: ignore[arg-type]
@@ -1010,39 +1277,56 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             ):
                 if getattr(message, "type", "") == "progress":
                     continue
+
                 tool_use_count, _ = self._track_subagent_message(
                     message,
                     record.history,
                     assistant_messages,
                     tool_use_count,
                 )
+                if isinstance(message, UserMessage):
+                    shutdown_approval = self._extract_approved_shutdown_response(
+                        record.history,
+                        message,
+                    )
+                    if shutdown_approval is not None:
+                        finalize_status = "shutdown"
+                        finalize_error = (
+                            shutdown_approval.get("content")
+                            or "Approved shutdown_response sent to team lead."
+                        ).strip()
+                        finalize_result_text = (
+                            "Subagent exited after approved shutdown_response"
+                            + (
+                                f" (request_id={shutdown_approval.get('request_id', '')})."
+                                if shutdown_approval.get("request_id")
+                                else "."
+                            )
+                        )
+                        break
         except asyncio.CancelledError:
+            finalize_status = "cancelled"
+            finalize_error = "Subagent run was cancelled."
             raise
         except Exception as exc:
-            record.status = "failed"
-            record.error = str(exc)
+            finalize_status = "failed"
+            finalize_error = str(exc)
+            logger.warning(
+                "[task_tool] Subagent background run failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"agent_id": record.agent_id, "team_name": record.team_name},
+            )
         finally:
-            record.duration_ms = (time.time() - record.start_time) * 1000
-            record.tool_use_count = tool_use_count
-            if record.status != "failed":
-                result_text = (
-                    self._extract_text(assistant_messages[-1])
-                    if assistant_messages
-                    else "Agent returned no response."
-                )
-                record.result_text = result_text.strip()
-                record.status = "completed"
-            self._send_team_event(
-                record=record,
-                message_type="status",
-                content=(
-                    f"Subagent '{record.agent_type}' finished in background with status '{record.status}'."
-                ),
-                metadata={
-                    "agent_id": record.agent_id,
-                    "status": record.status,
-                    "tool_use_count": record.tool_use_count,
-                },
+            if finalize_status == "running":
+                finalize_status = "completed"
+            self._finalize_record_from_messages(
+                record,
+                assistant_messages=assistant_messages,
+                tool_use_count=tool_use_count,
+                status=finalize_status,
+                error=finalize_error,
+                result_text=finalize_result_text,
             )
             record.task = None
 
@@ -1114,8 +1398,6 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
         if not pieces:
             # Fallback to truncated dict representation
-            import json
-
             try:
                 serialized = json.dumps(inp, ensure_ascii=False)
             except (TypeError, ValueError) as exc:

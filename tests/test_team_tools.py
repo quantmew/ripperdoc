@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+
+import pytest
 
 from ripperdoc.core.tool import ToolUseContext
 from ripperdoc.tools.task_graph_tool import TaskCreateInput, TaskCreateTool, TaskUpdateInput, TaskUpdateTool
@@ -14,7 +17,17 @@ from ripperdoc.tools.team_tool import (
     TeamDeleteInput,
     TeamDeleteTool,
 )
-from ripperdoc.utils.teams import TeamMember, clear_active_team_name, list_team_messages, upsert_team_member
+from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.teams import (
+    TeamMember,
+    clear_active_team_name,
+    create_team,
+    list_team_messages,
+    register_team_message_listener,
+    send_team_message,
+    unregister_team_message_listener,
+    upsert_team_member,
+)
 
 
 def test_team_tools_create_and_send_message(tmp_path, monkeypatch):
@@ -41,6 +54,10 @@ def test_team_tools_create_and_send_message(tmp_path, monkeypatch):
         assert created is not None
         assert created.data.team_name == "alpha"
         assert created.data.lead_agent_id == "team-lead@alpha"
+        upsert_team_member(
+            "alpha",
+            TeamMember(name="dev-a", agent_type="general-purpose", active=True),
+        )
 
         sent = None
         async for output in send_tool.call(
@@ -108,7 +125,7 @@ def test_task_update_owner_emits_assignment_message(tmp_path, monkeypatch):
     assert assignment_messages[-1].recipients == ["dev-a"]
 
 
-def test_send_message_summary_word_count_validation():
+def test_send_message_summary_validation():
     send_tool = SendMessageTool()
 
     async def _run() -> None:
@@ -122,7 +139,7 @@ def test_send_message_summary_word_count_validation():
         )
         assert valid_message.result is True
 
-        invalid_short = await send_tool.validate_input(
+        short_summary_message = await send_tool.validate_input(
             SendMessageInput(
                 type="message",
                 recipient="dev-a",
@@ -130,18 +147,16 @@ def test_send_message_summary_word_count_validation():
                 summary="auth regression fix now",
             )
         )
-        assert invalid_short.result is False
-        assert "5-10 words" in (invalid_short.message or "")
+        assert short_summary_message.result is True
 
-        invalid_long = await send_tool.validate_input(
+        missing_summary = await send_tool.validate_input(
             SendMessageInput(
                 type="broadcast",
                 content="Pause all commits while we fix build.",
-                summary="This summary intentionally contains too many words for strict validation checks today",
             )
         )
-        assert invalid_long.result is False
-        assert "5-10 words" in (invalid_long.message or "")
+        assert missing_summary.result is False
+        assert "summary is required" in (missing_summary.message or "")
 
     asyncio.run(_run())
 
@@ -180,6 +195,10 @@ def test_team_delete_requires_no_active_members(tmp_path, monkeypatch):
     create_tool = TeamCreateTool()
     delete_tool = TeamDeleteTool()
     context = ToolUseContext(agent_id="team-lead")
+    monkeypatch.setattr(
+        "ripperdoc.tools.task_tool.list_running_team_members",
+        lambda _team_name=None: ["dev-a"],
+    )
 
     async def _run() -> None:
         async for _ in create_tool.call(TeamCreateInput(team_name="alpha"), context):
@@ -227,3 +246,127 @@ def test_team_tool_descriptions_and_examples():
         assert len(send_tool.input_examples()) > 0
 
     asyncio.run(_run())
+
+
+def test_send_team_message_live_listener_delivery(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_team(name="alpha")
+    queue = PendingMessageQueue()
+    register_team_message_listener("alpha", "dev-a", queue)
+    try:
+        send_team_message(
+            team_name="alpha",
+            sender="team-lead",
+            recipients=["dev-a"],
+            message_type="message",
+            content="Please pick task 1",
+            metadata={"summary": "Please pick up task one now"},
+        )
+    finally:
+        unregister_team_message_listener("alpha", "dev-a", queue)
+
+    drained = queue.drain()
+    assert drained
+    first = drained[0]
+    assert getattr(first, "type", "") == "user"
+    assert "Please pick task 1" in str(getattr(first.message, "content", ""))
+
+
+def test_send_shutdown_request_writes_structured_payload(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_tool = TeamCreateTool()
+    send_tool = SendMessageTool()
+    context = ToolUseContext(agent_id="team-lead")
+
+    async def _run() -> None:
+        async for _ in create_tool.call(TeamCreateInput(team_name="alpha"), context):
+            pass
+        upsert_team_member(
+            "alpha",
+            TeamMember(name="dev-a", agent_type="general-purpose", active=True),
+        )
+        async for _ in send_tool.call(
+            SendMessageInput(
+                type="shutdown_request",
+                recipient="dev-a",
+                content="Task complete, please shut down",
+            ),
+            context,
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    messages = list_team_messages("alpha", limit=10)
+    assert messages
+    payload = json.loads(messages[-1].content)
+    assert payload.get("type") == "shutdown_request"
+    assert payload.get("request_id")
+    assert payload.get("sender") == "team-lead"
+
+
+def test_send_message_recipient_alias_resolution(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_tool = TeamCreateTool()
+    send_tool = SendMessageTool()
+    context = ToolUseContext(agent_id="team-lead")
+
+    async def _run() -> None:
+        async for _ in create_tool.call(TeamCreateInput(team_name="alpha"), context):
+            pass
+        upsert_team_member(
+            "alpha",
+            TeamMember(name="agent-a", agent_type="general-purpose", active=True),
+        )
+        async for _ in send_tool.call(
+            SendMessageInput(
+                type="message",
+                recipient="AGENT-A@alpha",
+                content="Please pick task 3",
+                summary="Quick check",
+            ),
+            context,
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    messages = list_team_messages("alpha", limit=10)
+    assert messages
+    assert messages[-1].recipients == ["agent-a"]
+
+
+def test_send_message_rejects_unknown_recipient(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_tool = TeamCreateTool()
+    send_tool = SendMessageTool()
+    context = ToolUseContext(agent_id="team-lead")
+
+    async def _run() -> None:
+        async for _ in create_tool.call(TeamCreateInput(team_name="alpha"), context):
+            pass
+        async for _ in send_tool.call(
+            SendMessageInput(
+                type="message",
+                recipient="ghost",
+                content="test",
+                summary="test",
+            ),
+            context,
+        ):
+            pass
+
+    with pytest.raises(ValueError, match="Unknown recipient"):
+        asyncio.run(_run())

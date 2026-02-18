@@ -198,6 +198,9 @@ class QueryContext:
         resume_ui: Optional[Callable[[], None]] = None,
         stop_hook: str = "stop",
         subagent_type: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        team_name: Optional[str] = None,
+        teammate_name: Optional[str] = None,
         file_cache_max_entries: int = 500,
         file_cache_max_memory_mb: float = 50.0,
         pending_message_queue: Optional[PendingMessageQueue] = None,
@@ -210,6 +213,9 @@ class QueryContext:
         self.yolo_mode = yolo_mode
         self.model = model
         self.verbose = verbose
+        self.agent_id = agent_id
+        self.team_name = team_name
+        self.teammate_name = teammate_name
         self.abort_controller = asyncio.Event()
         self.pending_message_queue: PendingMessageQueue = (
             pending_message_queue if pending_message_queue is not None else PendingMessageQueue()

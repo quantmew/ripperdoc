@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
-import re
 import shutil
 from textwrap import dedent
 from typing import Any, AsyncGenerator, Literal, Optional
@@ -31,6 +31,7 @@ from ripperdoc.utils.teams import (
     get_team,
     list_teams,
     send_team_message,
+    set_team_member_active,
     set_active_team_name,
     team_config_path,
 )
@@ -326,6 +327,10 @@ def _remember_active_team(context: ToolUseContext, team_name: str) -> None:
 def _resolve_active_team_name(
     context: ToolUseContext, *, allow_single_team_fallback: bool = True
 ) -> Optional[str]:
+    context_team = (context.team_name or "").strip()
+    if context_team:
+        return context_team
+
     key = _context_key(context)
     if key in _ACTIVE_TEAM_BY_AGENT:
         return _ACTIVE_TEAM_BY_AGENT[key]
@@ -346,19 +351,39 @@ def _resolve_active_team_name(
 
 
 def _sender_name(context: ToolUseContext) -> str:
-    return (context.agent_id or "team-lead").strip() or "team-lead"
+    teammate_name = (context.teammate_name or "").strip()
+    if teammate_name:
+        return teammate_name
+    agent_id = (context.agent_id or "").strip()
+    if agent_id:
+        return agent_id
+    return "team-lead"
+
+
+def _normalize_recipient_name(team: Any, recipient: str) -> tuple[str, bool]:
+    """Resolve recipient aliases to canonical teammate names.
+
+    Returns (resolved_name, found_in_team_roster). Accepts raw names,
+    `name@team`-style ids, and case-insensitive matches.
+    """
+    raw = (recipient or "").strip()
+    if not raw:
+        return raw, False
+
+    candidate = raw.split("@", 1)[0].strip() if "@" in raw else raw
+    if not candidate:
+        return raw, False
+
+    for member in getattr(team, "members", []):
+        name = (getattr(member, "name", "") or "").strip()
+        if name and name.lower() == candidate.lower():
+            return name, True
+    return candidate, False
 
 
 def _color_for(name: str) -> str:
     digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:6]
     return f"#{digest}"
-
-
-_SUMMARY_WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[-_'][A-Za-z0-9]+)?|[\u4e00-\u9fff]+")
-
-
-def _summary_word_count(text: str) -> int:
-    return len(_SUMMARY_WORD_PATTERN.findall(text or ""))
 
 
 class TeamCreateInput(BaseModel):
@@ -557,6 +582,30 @@ class TeamDeleteTool(Tool[TeamDeleteInput, TeamDeleteOutput]):
             return
 
         active_members = [member.name for member in team.members if member.active]
+        try:
+            from ripperdoc.tools.task_tool import list_running_team_members
+
+            running_members = set(list_running_team_members(team_name))
+        except Exception:
+            running_members = None
+
+        if running_members is not None:
+            stale_members = [
+                member.name
+                for member in team.members
+                if member.active and (member.name or "").strip() and member.name not in running_members
+            ]
+            for member_name in stale_members:
+                set_team_member_active(
+                    team_name=team_name,
+                    member_name=member_name,
+                    active=False,
+                    default_agent_type="general-purpose",
+                )
+            if stale_members:
+                team = get_team(team_name) or team
+                active_members = [member.name for member in team.members if member.active]
+
         if active_members:
             output = TeamDeleteOutput(
                 success=False,
@@ -664,24 +713,12 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
                 return ValidationResult(result=False, message="content is required for type=message")
             if not (input_data.summary or "").strip():
                 return ValidationResult(result=False, message="summary is required for type=message")
-            summary_word_count = _summary_word_count(input_data.summary or "")
-            if summary_word_count < 5 or summary_word_count > 10:
-                return ValidationResult(
-                    result=False,
-                    message="summary must contain 5-10 words for type=message",
-                )
 
         if message_type == "broadcast":
             if not (input_data.content or "").strip():
                 return ValidationResult(result=False, message="content is required for type=broadcast")
             if not (input_data.summary or "").strip():
                 return ValidationResult(result=False, message="summary is required for type=broadcast")
-            summary_word_count = _summary_word_count(input_data.summary or "")
-            if summary_word_count < 5 or summary_word_count > 10:
-                return ValidationResult(
-                    result=False,
-                    message="summary must contain 5-10 words for type=broadcast",
-                )
 
         if message_type == "shutdown_request":
             if not (input_data.recipient or "").strip():
@@ -750,7 +787,24 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
 
         message_type = input_data.type
         if message_type == "message":
-            recipient = (input_data.recipient or "").strip()
+            recipient, exists = _normalize_recipient_name(team, input_data.recipient or "")
+            if not exists and recipient != "team-lead":
+                known = sorted(
+                    {
+                        member.name
+                        for member in team.members
+                        if (member.name or "").strip()
+                    }
+                )
+                raise ValueError(
+                    "Unknown recipient "
+                    f"'{recipient}' for team '{team_name}'. "
+                    + (
+                        f"Known teammates: {', '.join(known)}"
+                        if known
+                        else "No teammates are registered in this team yet."
+                    )
+                )
             content = (input_data.content or "").strip()
             summary = (input_data.summary or "").strip()
             send_team_message(
@@ -759,7 +813,7 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
                 recipients=[recipient],
                 message_type="message",
                 content=content,
-                metadata={"summary": summary},
+                metadata={"summary": summary, "recipient": recipient},
             )
             output = SendMessageOutput(
                 success=True,
@@ -779,21 +833,29 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
         if message_type == "broadcast":
             content = (input_data.content or "").strip()
             summary = (input_data.summary or "").strip()
-            recipients = [member.name for member in team.members if member.active]
+            recipients = list(
+                dict.fromkeys(
+                    member.name
+                    for member in team.members
+                    if (member.name or "").strip() and member.name != sender
+                )
+            )
             send_team_message(
                 team_name=team_name,
                 sender=sender,
-                recipients=recipients or ["*"],
+                recipients=recipients,
                 message_type="broadcast",
                 content=content,
                 metadata={"summary": summary},
             )
+            if recipients:
+                message = f"Message broadcast to {len(recipients)} teammate(s): "
+                message += ", ".join(recipients)
+            else:
+                message = "No teammates to broadcast to (you are the only team member)"
             output = SendMessageOutput(
                 success=True,
-                message=(
-                    f"Message broadcast to {len(recipients)} teammate(s): "
-                    + (", ".join(recipients) if recipients else "*")
-                ),
+                message=message,
                 recipients=recipients,
                 routing=SendMessageRouting(
                     sender=sender,
@@ -807,16 +869,44 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
             return
 
         if message_type == "shutdown_request":
-            recipient = (input_data.recipient or "").strip()
+            recipient, exists = _normalize_recipient_name(team, input_data.recipient or "")
+            if not exists and recipient != "team-lead":
+                known = sorted(
+                    {
+                        member.name
+                        for member in team.members
+                        if (member.name or "").strip()
+                    }
+                )
+                raise ValueError(
+                    "Unknown recipient "
+                    f"'{recipient}' for team '{team_name}'. "
+                    + (
+                        f"Known teammates: {', '.join(known)}"
+                        if known
+                        else "No teammates are registered in this team yet."
+                    )
+                )
             content = (input_data.content or "").strip()
             request_id = f"req_{uuid4().hex[:10]}"
+            request_payload = {
+                "type": "shutdown_request",
+                "request_id": request_id,
+                "sender": sender,
+                "content": content or "Shutdown requested.",
+            }
             send_team_message(
                 team_name=team_name,
                 sender=sender,
                 recipients=[recipient],
                 message_type="shutdown_request",
-                content=content or "Shutdown requested.",
-                metadata={"request_id": request_id},
+                content=json.dumps(request_payload, ensure_ascii=False),
+                metadata={
+                    "request_id": request_id,
+                    "recipient": recipient,
+                    "content": content or "Shutdown requested.",
+                    "sender": sender,
+                },
             )
             output = SendMessageOutput(
                 success=True,
@@ -831,13 +921,27 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
             request_id = (input_data.request_id or "").strip()
             approve = bool(input_data.approve)
             content = (input_data.content or "").strip()
+            response_target = "team-lead"
+            response_payload = {
+                "type": "shutdown_response",
+                "request_id": request_id,
+                "approve": approve,
+                "sender": sender,
+                "content": content or ("Approved" if approve else "Rejected"),
+            }
             send_team_message(
                 team_name=team_name,
                 sender=sender,
-                recipients=["*"],
+                recipients=[response_target],
                 message_type="shutdown_response",
-                content=content or ("Approved" if approve else "Rejected"),
-                metadata={"request_id": request_id, "approve": approve},
+                content=json.dumps(response_payload, ensure_ascii=False),
+                metadata={
+                    "request_id": request_id,
+                    "approve": approve,
+                    "recipient": response_target,
+                    "sender": sender,
+                    "content": content or ("Approved" if approve else "Rejected"),
+                },
             )
             output = SendMessageOutput(
                 success=True,
@@ -847,12 +951,32 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
                 ),
                 request_id=request_id,
             )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+            yield ToolResult(
+                data=output,
+                result_for_assistant=self.render_result_for_assistant(output),
+            )
             return
 
         request_id = (input_data.request_id or "").strip()
         approve = bool(input_data.approve)
-        recipient = (input_data.recipient or "").strip()
+        recipient, exists = _normalize_recipient_name(team, input_data.recipient or "")
+        if not exists and recipient != "team-lead":
+            known = sorted(
+                {
+                    member.name
+                    for member in team.members
+                    if (member.name or "").strip()
+                }
+            )
+            raise ValueError(
+                "Unknown recipient "
+                f"'{recipient}' for team '{team_name}'. "
+                + (
+                    f"Known teammates: {', '.join(known)}"
+                    if known
+                    else "No teammates are registered in this team yet."
+                )
+            )
         content = (input_data.content or "").strip()
         send_team_message(
             team_name=team_name,
