@@ -157,15 +157,7 @@ def _collect_sdk_only_option_uses(
     provided: List[str] = []
     for key, option_name in _SDK_ONLY_OPTION_FLAGS:
         value = values.get(key)
-        if isinstance(value, bool):
-            if value:
-                provided.append(option_name)
-            continue
-        if isinstance(value, tuple):
-            if value:
-                provided.append(option_name)
-            continue
-        if value is not None:
+        if value is True or (value and not isinstance(value, bool)):
             provided.append(option_name)
     return provided
 
@@ -803,14 +795,12 @@ def _resolve_setup_trigger(
     setup_init_only: bool,
     setup_maintenance: bool,
 ) -> Optional[str]:
-    setup_flags = [setup_init, setup_init_only, setup_maintenance]
-    if sum(1 for flag in setup_flags if flag) > 1:
+    triggers = [(setup_init, "init"), (setup_init_only, "init"), (setup_maintenance, "maintenance")]
+    active_triggers = [name for active, name in triggers if active]
+
+    if len(active_triggers) > 1:
         raise click.ClickException("Use only one of --init, --init-only, or --maintenance.")
-    if setup_init or setup_init_only:
-        return "init"
-    if setup_maintenance:
-        return "maintenance"
-    return None
+    return active_triggers[0] if active_triggers else None
 
 
 def _run_setup_if_needed(
@@ -841,17 +831,18 @@ def _resolve_root_extra_args(
     print_prompt: Optional[str],
 ) -> Optional[str]:
     """Normalize extra root args or raise a click error for invalid usage."""
-    extra_args = list(ctx.args) if ctx.args else []
-    if ctx.invoked_subcommand is None and extra_args:
-        if print_mode:
-            if print_prompt is None:
-                return " ".join(extra_args).strip()
-            return print_prompt
-        first = extra_args[0]
-        if first.startswith("-"):
-            ctx.fail(f"No such option: {first}")
-        ctx.fail(f"No such command '{first}'")
-    return print_prompt
+    if ctx.invoked_subcommand is not None or not ctx.args:
+        return print_prompt
+
+    extra_args = list(ctx.args)
+
+    if print_mode:
+        return print_prompt or " ".join(extra_args).strip()
+
+    first = extra_args[0]
+    if first.startswith("-"):
+        ctx.fail(f"No such option: {first}")
+    ctx.fail(f"No such command '{first}'")
 
 
 def _change_cwd_if_requested(cwd: Optional[str]) -> Optional[str]:

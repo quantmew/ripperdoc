@@ -47,6 +47,7 @@ from ripperdoc.utils.teams import (
     register_team_message_listener,
     unregister_team_message_listener,
 )
+from ripperdoc.utils.pending_messages import PendingMessageQueue
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
@@ -92,28 +93,24 @@ def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
         Thinking mode string ("deepseek", "qwen", "openrouter", "gemini_openai")
         or None if no thinking mode should be applied.
     """
-    # Use explicit config if set
     explicit_mode = model_profile.thinking_mode
     if explicit_mode:
-        # "none", "disabled", "off" means thinking is explicitly disabled
-        if explicit_mode.lower() in ("disabled", "off"):
-            return None
-        return explicit_mode
+        return None if explicit_mode.lower() in ("disabled", "off") else explicit_mode
 
-    # Auto-detect based on API base and model name
     base = (model_profile.api_base or "").lower()
     name = (model_profile.model or "").lower()
 
-    if "deepseek" in base or name.startswith("deepseek"):
-        return "deepseek"
-    if "dashscope" in base or "qwen" in name:
-        return "qwen"
-    if "openrouter.ai" in base:
-        return "openrouter"
-    if "generativelanguage.googleapis.com" in base or name.startswith("gemini"):
-        return "gemini_openai"
-    if "openai" in base:
-        return "openai"
+    thinking_patterns = [
+        ("deepseek", lambda b, n: "deepseek" in b or n.startswith("deepseek")),
+        ("qwen", lambda b, n: "dashscope" in b or "qwen" in n),
+        ("openrouter", lambda b, n: "openrouter.ai" in b),
+        ("gemini_openai", lambda b, n: "generativelanguage.googleapis.com" in b or n.startswith("gemini")),
+        ("openai", lambda b, n: "openai" in b),
+    ]
+
+    for mode, matcher in thinking_patterns:
+        if matcher(base, name):
+            return mode
 
     return None
 
@@ -469,10 +466,93 @@ def _resolve_query_team_listener_participant(query_context: QueryContext) -> str
     return "team-lead"
 
 
+def _xml_attr_escape(value: str) -> str:
+    """Escape special XML characters in attribute values."""
+    return (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _wrap_teammate_message(
+    *,
+    sender_name: str,
+    body: str,
+    summary_text: str,
+) -> str:
+    """Wrap a teammate message in XML format."""
+    teammate_id = _xml_attr_escape(sender_name or "teammate")
+    summary_part = (
+        f' summary="{_xml_attr_escape(summary_text)}"'
+        if summary_text
+        else ""
+    )
+    return (
+        f'<teammate-message teammate_id="{teammate_id}"{summary_part}>\n'
+        + body
+        + "\n</teammate-message>"
+    )
+
+
+def _extract_shutdown_request_metadata(text: str, metadata_dict: dict) -> None:
+    """Extract and merge shutdown request metadata from JSON payload."""
+    try:
+        parsed_payload = json.loads(text)
+        if not isinstance(parsed_payload, dict):
+            return
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return
+
+    mappings = {
+        "request_id": ("request_id", "requestId"),
+        "sender": ("sender", "from"),
+        "content": ("content", "reason"),
+    }
+
+    for metadata_key, payload_keys in mappings.items():
+        if metadata_dict.get(metadata_key):
+            continue
+        for payload_key in payload_keys:
+            value = parsed_payload.get(payload_key)
+            if value:
+                metadata_dict[metadata_key] = value
+                break
+
+
+def _prioritize_shutdown_entries(
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Prioritize shutdown_request entries at the front of the list."""
+    shutdown_entries: list[dict[str, Any]] = []
+    normal_entries: list[dict[str, Any]] = []
+
+    for candidate in entries:
+        if isinstance(candidate, dict) and str(candidate.get("message_type")) == "shutdown_request":
+            shutdown_entries.append(candidate)
+        else:
+            normal_entries.append(candidate)
+
+    return shutdown_entries + normal_entries
+
+
+def _normalize_entry_content(
+    content: Any,
+) -> str:
+    """Normalize entry content to string."""
+    if isinstance(content, str):
+        return content
+    try:
+        return json.dumps(content, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(content)
+
+
 def _inject_team_inbox_messages(
     team_name: str,
     participant: str,
-    queue: "PendingMessageQueue",
+    queue: PendingMessageQueue,
 ) -> int:
     """Load unread mailbox messages and enqueue them as pending user messages."""
     clean_team = (team_name or "").strip()
@@ -484,42 +564,7 @@ def _inject_team_inbox_messages(
     if not inbox_entries:
         return 0
 
-    # Match teammate polling behavior from the reference implementation:
-    # protocol shutdown requests should preempt normal chatter.
-    shutdown_entries: list[dict[str, Any]] = []
-    normal_entries: list[dict[str, Any]] = []
-    for candidate in inbox_entries:
-        if isinstance(candidate, dict) and str(candidate.get("message_type")) == "shutdown_request":
-            shutdown_entries.append(candidate)
-        else:
-            normal_entries.append(candidate)
-    ordered_entries = shutdown_entries + normal_entries
-
-    def _xml_attr_escape(value: str) -> str:
-        return (
-            value.replace("&", "&amp;")
-            .replace('"', "&quot;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
-
-    def _wrap_teammate_message(
-        *,
-        sender_name: str,
-        body: str,
-        summary_text: str,
-    ) -> str:
-        teammate_id = _xml_attr_escape(sender_name or "teammate")
-        summary_part = (
-            f' summary="{_xml_attr_escape(summary_text)}"'
-            if summary_text
-            else ""
-        )
-        return (
-            f'<teammate-message teammate_id="{teammate_id}"{summary_part}>\n'
-            + body
-            + "\n</teammate-message>"
-        )
+    ordered_entries = _prioritize_shutdown_entries(inbox_entries)
 
     injected = 0
     for entry in ordered_entries:
@@ -540,33 +585,11 @@ def _inject_team_inbox_messages(
         content = entry.get("content")
         if content is None:
             continue
-        if isinstance(content, str):
-            text = content
-        else:
-            try:
-                text = json.dumps(content, ensure_ascii=False)
-            except (TypeError, ValueError):
-                text = str(content)
+
+        text = _normalize_entry_content(content)
 
         if message_type == "shutdown_request":
-            try:
-                parsed_payload = json.loads(text)
-                if isinstance(parsed_payload, dict):
-                    payload_request_id = parsed_payload.get("request_id") or parsed_payload.get(
-                        "requestId"
-                    )
-                    if payload_request_id and not metadata_dict.get("request_id"):
-                        metadata_dict["request_id"] = payload_request_id
-
-                    payload_sender = parsed_payload.get("sender") or parsed_payload.get("from")
-                    if payload_sender and not metadata_dict.get("sender"):
-                        metadata_dict["sender"] = payload_sender
-
-                    payload_reason = parsed_payload.get("content") or parsed_payload.get("reason")
-                    if payload_reason and not metadata_dict.get("content"):
-                        metadata_dict["content"] = payload_reason
-            except (TypeError, ValueError, json.JSONDecodeError):
-                pass
+            _extract_shutdown_request_metadata(text, metadata_dict)
 
         if not text.lstrip().startswith("<teammate-message"):
             rendered_sender = sender or str(metadata_dict.get("sender") or "team-lead").strip()
@@ -590,8 +613,7 @@ def _inject_team_inbox_messages(
                 "created_at": entry.get("created_at"),
             },
         )
-        if "team_message_type" not in user_message.message.metadata:
-            user_message.message.metadata["team_message_type"] = entry.get("message_type")
+        user_message.message.metadata.setdefault("team_message_type", entry.get("message_type"))
         user_message.message.metadata.setdefault("team_name", team_name_value)
         user_message.message.metadata.setdefault("sender", entry.get("sender"))
         user_message.message.metadata.setdefault("recipient", entry.get("recipient"))
@@ -1496,7 +1518,12 @@ async def query(
         try:
             for iteration in range(1, max_iterations + 1):
                 # Inject any pending messages queued by background events or user interjections
-                _inject_team_inbox_messages(team_name, listener_participant, query_context.pending_message_queue)
+                if team_name:
+                    _inject_team_inbox_messages(
+                        team_name,
+                        listener_participant,
+                        query_context.pending_message_queue,
+                    )
                 pending_messages = query_context.drain_pending_messages()
                 if pending_messages:
                     messages.extend(pending_messages)
@@ -1554,7 +1581,7 @@ async def query(
                 model=model_profile.model,
             )
         finally:
-            if listener_token is not None:
+            if listener_token is not None and team_name:
                 unregister_team_message_listener(
                     team_name=team_name,
                     participant=listener_participant,

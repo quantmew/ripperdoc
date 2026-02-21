@@ -476,7 +476,13 @@ class McpRuntime:
         for config in configs.values():
             task = asyncio.create_task(self._connect_single_server(config))
             self._connection_tasks[config.name] = task
-            task.add_done_callback(lambda done_task, server_name=config.name: self._on_connect_done(server_name, done_task))
+            self._attach_connect_done_callback(server_name=config.name, task=task)
+
+    def _attach_connect_done_callback(self, *, server_name: str, task: asyncio.Task[None]) -> None:
+        def _done_callback(done_task: asyncio.Task[None]) -> None:
+            self._on_connect_done(server_name, done_task)
+
+        task.add_done_callback(_done_callback)
 
     def _on_connect_done(self, server_name: str, task: asyncio.Task[None]) -> None:
         self._connection_tasks.pop(server_name, None)

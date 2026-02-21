@@ -174,6 +174,7 @@ def _find_edit_draft(project_path: Path, server_name: str) -> Optional[AddServer
             data, servers_key = _load_mcp_json(candidate)
         except ValueError:
             continue
+        servers_raw: Any
         if servers_key == _TOP_LEVEL_SERVERS_KEY:
             servers_raw = data
         else:
@@ -407,7 +408,8 @@ class AddServerScreen(ModalScreen[Optional[AddServerDraft]]):
             if " " in name:
                 return None, "Name must not contain spaces."
 
-            scope = (self.query_one("#scope_select", Select).value or "").strip().lower()
+            scope_value = self.query_one("#scope_select", Select).value
+            scope = scope_value.strip().lower() if isinstance(scope_value, str) else ""
             if not scope:
                 scope = _PROJECT_SCOPE
             if scope.startswith("proj"):
@@ -419,7 +421,8 @@ class AddServerScreen(ModalScreen[Optional[AddServerDraft]]):
             target_path = None
             original_name = name
 
-        transport = (self.query_one("#transport_select", Select).value or "").strip().lower()
+        transport_value = self.query_one("#transport_select", Select).value
+        transport = transport_value.strip().lower() if isinstance(transport_value, str) else ""
         if not transport:
             transport = "stdio"
         if transport not in _SUPPORTED_TRANSPORTS:

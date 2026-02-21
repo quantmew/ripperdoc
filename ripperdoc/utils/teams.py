@@ -22,7 +22,6 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 from ripperdoc.utils.file_editing import file_lock
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messages import create_user_message
 from ripperdoc.utils.pending_messages import PendingMessageQueue
 from ripperdoc.utils.tasks import ensure_task_list_dir, sanitize_identifier
 
@@ -209,31 +208,31 @@ def _resolve_inbox_recipients(
     if not raw_recipients:
         return []
 
-    if "*" in raw_recipients:
-        names: list[str] = []
-        if team:
-            names.extend(member.name for member in team.members if member.name)
-        else:
-            # Fallback to "all" semantics from stored mailbox perspective.
-            names.append("team-lead")
-        return list(dict.fromkeys(names))
+    if "*" not in raw_recipients:
+        return list(dict.fromkeys(raw_recipients))
 
-    return list(dict.fromkeys(raw_recipients))
+    names: list[str] = []
+    if team:
+        names.extend(member.name for member in team.members if member.name)
+    else:
+        names.append("team-lead")
+    return list(dict.fromkeys(names))
 
 
 def _build_inbox_entry(
     message: TeamMessage,
     recipient: str,
 ) -> Dict[str, Any]:
+    recipient_normalized = _normalize_team_participant(recipient)
     return {
         "id": message.id,
         "team_name": message.team_name,
-        "recipient": _normalize_team_participant(recipient),
+        "recipient": recipient_normalized,
         "sender": message.sender,
         "message_type": message.message_type,
         "content": message.content,
         "created_at": message.created_at,
-        "metadata": _build_queue_notification_payload(message, recipient),
+        "metadata": _build_queue_notification_payload(message, recipient_normalized),
         "read": False,
     }
 
@@ -246,22 +245,19 @@ def drain_team_inbox_messages(team_name: str, participant: str) -> list[dict[str
 
     with _team_lock(clean_team):
         entries = _load_team_inbox_entries(clean_team, clean_participant)
-        unread: list[dict[str, Any]] = [
+        unread = [
             dict(item)
             for item in entries
-            if isinstance(item, dict) and not bool(item.get("read"))
+            if isinstance(item, dict) and not item.get("read")
         ]
         if not unread:
             return []
 
-        changed = False
         for item in entries:
-            if isinstance(item, dict) and not bool(item.get("read")):
+            if isinstance(item, dict) and not item.get("read"):
                 item["read"] = True
-                changed = True
 
-        if changed:
-            _store_team_inbox_entries(clean_team, clean_participant, entries)
+        _store_team_inbox_entries(clean_team, clean_participant, entries)
 
         return unread
 
@@ -321,27 +317,26 @@ def _snapshot_listeners_for_recipients(
         _normalize_team_participant(value)
         for value in recipients
         if isinstance(value, str) and value.strip()
-    ]
-    if not raw_recipients:
-        raw_recipients = ["team-lead"]
+    ] or ["team-lead"]
 
     wildcard = "*" in raw_recipients
     target_names = set(raw_recipients)
+
     with _TEAM_MESSAGE_LISTENER_LOCK:
         participants = _TEAM_MESSAGE_LISTENERS.get(clean_team, {})
         if not participants:
             return {}
 
         snapshots: dict[int, tuple[PendingMessageQueue, str]] = {}
+
         if wildcard or "*" in target_names:
             for participant_name, queues in participants.items():
                 for queue in list(queues):
                     snapshots[id(queue)] = (queue, participant_name)
-            return snapshots
-
-        for participant_name in sorted(target_names):
-            for queue in list(participants.get(participant_name, [])):
-                snapshots[id(queue)] = (queue, participant_name)
+        else:
+            for participant_name in sorted(target_names):
+                for queue in list(participants.get(participant_name, [])):
+                    snapshots[id(queue)] = (queue, participant_name)
 
         return snapshots
 
@@ -374,14 +369,11 @@ def _build_queue_notification_payload(
 
 
 def _coerce_message_recipients(recipients: Optional[Sequence[str]]) -> list[str]:
-    values = []
-    for value in recipients or []:
-        if value is None:
-            continue
-        cleaned = str(value).strip()
-        if not cleaned:
-            continue
-        values.append(cleaned)
+    values = [
+        str(value).strip()
+        for value in recipients or []
+        if value is not None and str(value).strip()
+    ]
     return values or ["*"]
 
 
@@ -410,14 +402,15 @@ def set_team_member_active(
         updated_members: list[TeamMember] = []
         found = False
         changed = False
+
         for existing in team.members:
             if existing.name == clean_member:
                 found = True
-                if existing.active == active:
+                if existing.active != active:
+                    updated_members.append(existing.model_copy(update={"active": active}))
+                    changed = True
+                else:
                     updated_members.append(existing)
-                    continue
-                updated_members.append(existing.model_copy(update={"active": active}))
-                changed = True
             else:
                 updated_members.append(existing)
 
@@ -490,7 +483,7 @@ def _team_lock(team_name: str) -> Iterator[None]:
             yield
 
 
-def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
+def _write_json_atomic(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(payload, indent=2, ensure_ascii=False)
     fd, temp_path = tempfile.mkstemp(dir=str(path.parent), prefix=".team_", suffix=".tmp")

@@ -22,7 +22,6 @@ from ripperdoc.core.providers.base import (
 )
 from ripperdoc.core.providers.errors import (
     ProviderAuthenticationError,
-    ProviderMappedError,
     ProviderModelNotFoundError,
     ProviderRateLimitError,
     ProviderTimeoutError,

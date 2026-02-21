@@ -256,13 +256,13 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
                     server_status = getattr(match, "status", None)
                     server_error = getattr(match, "error", None)
             if server_status == "connecting":
-                assistant_text = f"MCP server '{self.server_name}' is still connecting."
+                status_text = f"MCP server '{self.server_name}' is still connecting."
             elif server_status == "failed" and server_error:
-                assistant_text = (
+                status_text = (
                     f"MCP server '{self.server_name}' is unavailable: {server_error}"
                 )
             else:
-                assistant_text = f"MCP server '{self.server_name}' is not connected."
+                status_text = f"MCP server '{self.server_name}' is not connected."
             result = McpToolCallOutput(
                 server=self.server_name,
                 tool=self.tool_info.name,
@@ -274,7 +274,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
             )
             yield ToolResult(
                 data=result,
-                result_for_assistant=assistant_text,
+                result_for_assistant=status_text,
             )
             return
 
@@ -290,7 +290,7 @@ class DynamicMcpTool(Tool[BaseModel, McpToolCallOutput]):
             structured = (
                 call_result.structuredContent if hasattr(call_result, "structuredContent") else None
             )
-            assistant_text = content_text
+            assistant_text: Optional[str] = content_text
             if structured:
                 assistant_text = (assistant_text + "\n" if assistant_text else "") + json.dumps(
                     structured, indent=2

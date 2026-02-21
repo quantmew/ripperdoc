@@ -8,7 +8,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Union
+from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Union, cast
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -539,6 +539,14 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         return {}
 
     @staticmethod
+    def _get_block_attr(block: Any, attr_name: str, default: Any = None) -> Any:
+        """Get attribute from block, supporting both object and dict access."""
+        value = getattr(block, attr_name, None)
+        if value is None and isinstance(block, dict):
+            return block.get(attr_name, default)
+        return value if value is not None else default
+
+    @staticmethod
     def _extract_tool_result_ids(
         message: UserMessage,
     ) -> List[str]:
@@ -549,17 +557,32 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
         tool_result_ids: List[str] = []
         for block in content:
-            block_type = getattr(block, "type", None) or (
-                block.get("type") if isinstance(block, Dict) else None
-            )
+            block_type = TaskTool._get_block_attr(block, "type") or ""
             if block_type != "tool_result":
                 continue
-            tool_use_id = getattr(block, "tool_use_id", None) or (
-                block.get("tool_use_id") if isinstance(block, Dict) else None
-            )
+            tool_use_id = TaskTool._get_block_attr(block, "tool_use_id") or ""
             if isinstance(tool_use_id, str) and tool_use_id.strip():
                 tool_result_ids.append(tool_use_id.strip())
         return tool_result_ids
+
+    @staticmethod
+    def _normalize_tool_input(raw_input: Any) -> Dict[str, Any]:
+        """Normalize tool input to a plain dictionary."""
+        if hasattr(raw_input, "model_dump"):
+            model_dump = raw_input.model_dump()
+            if isinstance(model_dump, dict):
+                return cast(Dict[str, Any], model_dump)
+            return {}
+        if hasattr(raw_input, "dict"):
+            dict_method = getattr(raw_input, "dict")
+            if callable(dict_method):
+                as_dict = dict_method()
+                if isinstance(as_dict, dict):
+                    return cast(Dict[str, Any], as_dict)
+                return {}
+        if isinstance(raw_input, dict):
+            return dict(raw_input)
+        return {}
 
     @staticmethod
     def _lookup_tool_use_input_by_id(
@@ -579,32 +602,20 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 continue
 
             for block in content:
-                block_type = getattr(block, "type", None) or (
-                    block.get("type") if isinstance(block, Dict) else None
-                )
+                block_type = TaskTool._get_block_attr(block, "type") or ""
                 if block_type != "tool_use":
                     continue
 
-                block_id = getattr(block, "id", None) or getattr(block, "tool_use_id", None)
-                if block_id is None and isinstance(block, Dict):
-                    block_id = block.get("id") or block.get("tool_use_id")
+                block_id = (
+                    TaskTool._get_block_attr(block, "id")
+                    or TaskTool._get_block_attr(block, "tool_use_id")
+                )
                 if str(block_id or "").strip() != tool_use_id:
                     continue
 
-                tool_name = getattr(block, "name", None) or (
-                    block.get("name") if isinstance(block, Dict) else None
-                )
-                raw_input = getattr(block, "input", None)
-                if raw_input is None and isinstance(block, Dict):
-                    raw_input = block.get("input")
-                if hasattr(raw_input, "model_dump"):
-                    parsed_input = raw_input.model_dump()
-                elif hasattr(raw_input, "dict"):
-                    parsed_input = raw_input.dict()
-                elif isinstance(raw_input, dict):
-                    parsed_input = dict(raw_input)
-                else:
-                    parsed_input = {}
+                tool_name = TaskTool._get_block_attr(block, "name")
+                raw_input = TaskTool._get_block_attr(block, "input")
+                parsed_input = TaskTool._normalize_tool_input(raw_input)
                 return (str(tool_name) if tool_name else None), parsed_input
 
         return None, None
@@ -617,6 +628,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         for tool_use_id in TaskTool._extract_tool_result_ids(message):
             tool_name, tool_input = TaskTool._lookup_tool_use_input_by_id(history, tool_use_id)
             if tool_name != "SendMessage":
+                continue
+            if tool_input is None:
                 continue
             if str(tool_input.get("type") or "").strip() != "shutdown_response":
                 continue
@@ -1227,27 +1240,17 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
         updates: List[str] = []
         for block in blocks:
-            block_type = getattr(block, "type", None) or (
-                block.get("type") if isinstance(block, Dict) else None
-            )
+            block_type = TaskTool._get_block_attr(block, "type") or ""
             if block_type == "tool_use":
-                tool_name = getattr(block, "name", None) or (
-                    block.get("name") if isinstance(block, Dict) else "unknown tool"
-                )
-                block_input = (
-                    getattr(block, "input", None)
-                    if hasattr(block, "input")
-                    else (block.get("input") if isinstance(block, Dict) else None)
-                )
+                tool_name = TaskTool._get_block_attr(block, "name") or "unknown tool"
+                block_input = TaskTool._get_block_attr(block, "input")
                 summary = self._summarize_tool_input(block_input)
                 label = f"Subagent requesting {tool_name}"
                 if summary:
                     label += f" — {summary}"
                 updates.append(label)
-            if block_type == "text":
-                text_val = getattr(block, "text", None) or (
-                    block.get("text") if isinstance(block, Dict) else ""
-                )
+            elif block_type == "text":
+                text_val = TaskTool._get_block_attr(block, "text") or ""
                 if text_val:
                     snippet = str(text_val).strip()
                     if snippet:
@@ -1353,29 +1356,25 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         content = message.message.content
         if isinstance(content, str):
             return content
-        if isinstance(content, list):
-            parts: List[str] = []
-            for block in content:
-                text = getattr(block, "text", None) or (
-                    block.get("text") if isinstance(block, Dict) else None
-                )
-                if text:
-                    parts.append(str(text))
-            return "\n".join(parts)
-        return ""
+        if not isinstance(content, list):
+            return ""
+
+        parts = []
+        for block in content:
+            text = TaskTool._get_block_attr(block, "text")
+            if text:
+                parts.append(str(text))
+        return "\n".join(parts)
 
     def _count_tool_uses(self, message: AssistantMessage) -> int:
         content = message.message.content
         if not isinstance(content, list):
             return 0
-        count = 0
-        for block in content:
-            block_type = getattr(block, "type", None) or (
-                block.get("type") if isinstance(block, Dict) else None
-            )
-            if block_type == "tool_use":
-                count += 1
-        return count
+        return sum(
+            1
+            for block in content
+            if TaskTool._get_block_attr(block, "type") == "tool_use"
+        )
 
     def _summarize_tool_input(self, inp: Any) -> str:
         """Generate a short human-readable summary of a tool_use input."""

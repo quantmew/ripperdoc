@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 from textwrap import dedent
-from typing import Any, AsyncGenerator, Literal, Optional
+from typing import Any, AsyncGenerator, Callable, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -691,75 +691,66 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
     def needs_permissions(self, _input_data: Optional[SendMessageInput] = None) -> bool:
         return False
 
+    def _require_field(self, value: Optional[str], field_name: str) -> Optional[str]:
+        """Return error message if field is missing/empty, else None."""
+        if not (value or "").strip():
+            return f"{field_name} is required"
+        return None
+
+    def _validate_message_type(
+        self, message_type: str, allowed_types: set[str]
+    ) -> Optional[str]:
+        """Return error message if type is not allowed, else None."""
+        if message_type not in allowed_types:
+            return "Unsupported message type"
+        return None
+
     async def validate_input(
         self,
         input_data: SendMessageInput,
         _context: Optional[ToolUseContext] = None,
     ) -> ValidationResult:
         message_type = (input_data.type or "").strip()
-        if message_type not in {
+        allowed_types = {
             "message",
             "broadcast",
             "shutdown_request",
             "shutdown_response",
             "plan_approval_response",
-        }:
-            return ValidationResult(result=False, message="Unsupported message type")
+        }
 
-        if message_type == "message":
-            if not (input_data.recipient or "").strip():
-                return ValidationResult(result=False, message="recipient is required for type=message")
-            if not (input_data.content or "").strip():
-                return ValidationResult(result=False, message="content is required for type=message")
-            if not (input_data.summary or "").strip():
-                return ValidationResult(result=False, message="summary is required for type=message")
+        if error := self._validate_message_type(message_type, allowed_types):
+            return ValidationResult(result=False, message=error)
 
-        if message_type == "broadcast":
-            if not (input_data.content or "").strip():
-                return ValidationResult(result=False, message="content is required for type=broadcast")
-            if not (input_data.summary or "").strip():
-                return ValidationResult(result=False, message="summary is required for type=broadcast")
+        validators: dict[str, list[Callable[[], Optional[str]]]] = {
+            "message": [
+                lambda: self._require_field(input_data.recipient, "recipient"),
+                lambda: self._require_field(input_data.content, "content"),
+                lambda: self._require_field(input_data.summary, "summary"),
+            ],
+            "broadcast": [
+                lambda: self._require_field(input_data.content, "content"),
+                lambda: self._require_field(input_data.summary, "summary"),
+            ],
+            "shutdown_request": [
+                lambda: self._require_field(input_data.recipient, "recipient"),
+            ],
+            "shutdown_response": [
+                lambda: self._require_field(input_data.request_id, "request_id"),
+                lambda: None if input_data.approve is not None else "approve is required",
+                lambda: None if input_data.approve is not False or (input_data.content or "").strip()
+                else "content is required when approve=false",
+            ],
+            "plan_approval_response": [
+                lambda: self._require_field(input_data.request_id, "request_id"),
+                lambda: None if input_data.approve is not None else "approve is required",
+                lambda: self._require_field(input_data.recipient, "recipient"),
+            ],
+        }
 
-        if message_type == "shutdown_request":
-            if not (input_data.recipient or "").strip():
-                return ValidationResult(
-                    result=False,
-                    message="recipient is required for type=shutdown_request",
-                )
-
-        if message_type == "shutdown_response":
-            if not (input_data.request_id or "").strip():
-                return ValidationResult(
-                    result=False,
-                    message="request_id is required for type=shutdown_response",
-                )
-            if input_data.approve is None:
-                return ValidationResult(
-                    result=False,
-                    message="approve is required for type=shutdown_response",
-                )
-            if input_data.approve is False and not (input_data.content or "").strip():
-                return ValidationResult(
-                    result=False,
-                    message="content is required when approve=false",
-                )
-
-        if message_type == "plan_approval_response":
-            if not (input_data.request_id or "").strip():
-                return ValidationResult(
-                    result=False,
-                    message="request_id is required for type=plan_approval_response",
-                )
-            if input_data.approve is None:
-                return ValidationResult(
-                    result=False,
-                    message="approve is required for type=plan_approval_response",
-                )
-            if not (input_data.recipient or "").strip():
-                return ValidationResult(
-                    result=False,
-                    message="recipient is required for type=plan_approval_response",
-                )
+        for validator in validators.get(message_type, []):
+            if error := validator():
+                return ValidationResult(result=False, message=error)
 
         return ValidationResult(result=True)
 

@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple, cast
 
 from ripperdoc import __version__
 
@@ -23,20 +23,42 @@ GITHUB_RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 GITHUB_INSTALL_SH = f"https://raw.githubusercontent.com/{REPO}/main/install.sh"
 GITHUB_INSTALL_PS1 = f"https://raw.githubusercontent.com/{REPO}/main/install.ps1"
 
-try:
-    from distutils.version import LooseVersion
-except ModuleNotFoundError:  # Python 3.12+
+VersionParser = Callable[[str], Any]
+
+
+def _get_loose_version() -> VersionParser:
+    """Get LooseVersion class with fallback chain for Python 3.12+ compatibility."""
     try:
-        from setuptools._distutils.version import LooseVersion
+        from distutils.version import LooseVersion as DistutilsLooseVersion
+
+        return cast(VersionParser, DistutilsLooseVersion)
     except ModuleNotFoundError:
-        try:
-            from packaging.version import parse as LooseVersion
-        except ModuleNotFoundError:
+        pass
 
-            def LooseVersion(version: str) -> str:
-                """Fallback comparator if semantic parsing libraries are unavailable."""
+    try:
+        from setuptools._distutils.version import (  # type: ignore[import-untyped]
+            LooseVersion as SetuptoolsLooseVersion,
+        )
 
-                return version.strip()
+        return cast(VersionParser, SetuptoolsLooseVersion)
+    except ModuleNotFoundError:
+        pass
+
+    try:
+        from packaging.version import parse as parse_version
+
+        return cast(VersionParser, parse_version)
+    except ModuleNotFoundError:
+        pass
+
+    def _noop_loose_version(version: str) -> str:
+        """Fallback comparator if semantic parsing libraries are unavailable."""
+        return version.strip()
+
+    return _noop_loose_version
+
+
+LooseVersion = _get_loose_version()
 
 INSTALL_METHOD_PIP = "pip"
 INSTALL_METHOD_BINARY = "binary"
@@ -108,7 +130,9 @@ def is_update_available(current_version: str, latest_version: str) -> bool:
     normalized_current = _normalize_version(current_version)
     normalized_latest = _normalize_version(latest_version)
     try:
-        return LooseVersion(normalized_latest) > LooseVersion(normalized_current)
+        parsed_latest = LooseVersion(normalized_latest)
+        parsed_current = LooseVersion(normalized_current)
+        return bool(parsed_latest > parsed_current)
     except Exception:
         return normalized_latest > normalized_current
 
@@ -251,7 +275,10 @@ def _download_text(url: str) -> str:
     )
     try:
         with urllib.request.urlopen(request, timeout=12.0) as response:
-            return response.read().decode("utf-8", errors="replace")
+            payload = response.read()
+            if isinstance(payload, bytes):
+                return payload.decode("utf-8", errors="replace")
+            return str(payload)
     except (OSError, urllib.error.HTTPError, urllib.error.URLError, ValueError):
         return ""
 
