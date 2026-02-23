@@ -15,18 +15,10 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
   <a href="https://pypi.org/project/ripperdoc/">
-    <img src="https://img.shields.io/badge/version-0.4.0-orange.svg">
+    <img src="https://img.shields.io/badge/version-0.4.4-orange.svg">
   </a>
 </p>
 
-> **⚠️ 重要：v0.4.0 版本发布通知**
->
-> v0.4.0 版本包含**配置文件格式不兼容的重大变更**。在升级之前,请：
-> 1. **备份您的配置**：`cp ~/.ripperdoc/ ~/.ripperdoc.backup` 和 `cp ~/.ripperdoc.json ~/.ripperdoc.json.backup`
-> 2. **阅读迁移指南**：[MIGRATION_v0.4.0.md](MIGRATION_v0.4.0.md)
->
-> 主要变更是将配置文件中的 `provider` 重命名为 `protocol`。
->
 </div>
 
 **Ripperdoc** 是一个强大、可扩展的 AI 编程代理,直接在您的终端中运行。受到 [Claude Code](https://claude.com/claude-code)、[Aider](https://github.com/paul-gauthier/aider) 和 [Goose](https://github.com/block/goose) 等工具的启发,Ripperdoc 帮助您通过自然语言对话编写代码、重构项目、执行 shell 命令和管理文件。
