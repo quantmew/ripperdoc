@@ -5,6 +5,18 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-02-23
+
+### Added
+- **Diff preview for edit permissions** - Edit and MultiEdit permission prompts now show a diff preview before applying changes
+- **Adaptive onboarding palette** - Onboarding UI automatically adapts to light/dark terminal backgrounds using COLORFGBG detection
+- **Theme-aware diff styles** - Choice UI diff styles now follow the active theme for consistent appearance
+- **Restart notice for theme switching** - `/themes` command now displays a restart notice when switching themes
+
+### Changed
+- **EditResultRenderer improvement** - Now formats raw unified diff lines with line numbers instead of using preformatted tags
+- **Tool count update** - Updated documentation to reflect 30+ built-in tools (was 26+)
+
 ## [0.4.3] - 2026-02-15
 
 ### Added

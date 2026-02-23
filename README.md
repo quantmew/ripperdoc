@@ -15,7 +15,7 @@ _an open-source, extensible AI coding agent that runs in your terminal_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
   <a href="https://pypi.org/project/ripperdoc/">
-    <img src="https://img.shields.io/badge/version-0.4.3-orange.svg">
+    <img src="https://img.shields.io/badge/version-0.4.4-orange.svg">
   </a>
 </p>
 
