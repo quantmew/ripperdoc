@@ -4,11 +4,14 @@ This module provides a strategy pattern implementation for rendering different
 tool results in the Rich CLI interface.
 """
 
+import re
 from typing import Any, Callable, List, Literal, Optional, TypedDict
 
 from rich.console import Console
 from rich.markup import escape
+from rich.text import Text
 
+from ripperdoc.core.theme import theme_color
 from ripperdoc.utils.tasks import (
     list_tasks,
     resolve_task_list_id,
@@ -263,12 +266,72 @@ class EditResultRenderer(ToolResultRenderer):
     def can_handle(self, sender: str) -> bool:
         return "Write" in sender or "Edit" in sender or "MultiEdit" in sender
 
+    _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+    def _diff_style(self, *, bg_slot: str, fg_slot: str) -> str:
+        """Resolve diff line style from active theme slots."""
+        bg = theme_color(bg_slot)
+        fg = theme_color(fg_slot)
+        return f"{fg} on {bg}"
+
+    def _render_diff_lines(self, diff_lines: list[str]) -> None:
+        """Render unified diff lines with line numbers and color backgrounds."""
+        old_line_num: Optional[int] = None
+        new_line_num: Optional[int] = None
+
+        for raw_line in diff_lines:
+            line = str(raw_line).rstrip("\r\n")
+            if line.startswith("@@"):
+                match = self._HUNK_RE.search(line)
+                if match:
+                    old_line_num = int(match.group(1))
+                    new_line_num = int(match.group(2))
+                self.console.print(Text(f"      {line}", style="dim"))
+                continue
+
+            if line.startswith("+") and not line.startswith("+++"):
+                label = f"{new_line_num:6d}" if new_line_num is not None else "      "
+                text = Text(
+                    f"      {label} + {line[1:]}",
+                    style=self._diff_style(bg_slot="diff_add_bg", fg_slot="diff_add_fg"),
+                )
+                self.console.print(text, highlight=False)
+                if new_line_num is not None:
+                    new_line_num += 1
+                continue
+
+            if line.startswith("-") and not line.startswith("---"):
+                label = f"{old_line_num:6d}" if old_line_num is not None else "      "
+                text = Text(
+                    f"      {label} - {line[1:]}",
+                    style=self._diff_style(bg_slot="diff_del_bg", fg_slot="diff_del_fg"),
+                )
+                self.console.print(text, highlight=False)
+                if old_line_num is not None:
+                    old_line_num += 1
+                continue
+
+            left = f"{old_line_num:6d}" if old_line_num is not None else "      "
+            right = f"{new_line_num:6d}" if new_line_num is not None else "      "
+            content = line[1:] if line.startswith(" ") else line
+            self.console.print(
+                Text(
+                    f"      {left}   {right}   {content}",
+                    style="dim",
+                ),
+                highlight=False,
+            )
+            if old_line_num is not None:
+                old_line_num += 1
+            if new_line_num is not None:
+                new_line_num += 1
+
     def render(self, _content: str, tool_data: Any) -> None:
         if tool_data and (hasattr(tool_data, "file_path") or isinstance(tool_data, dict)):
             file_path = self._get_field(tool_data, "file_path")
             additions = self._get_field(tool_data, "additions", 0)
             deletions = self._get_field(tool_data, "deletions", 0)
-            diff_with_line_numbers = self._get_field(tool_data, "diff_with_line_numbers", [])
+            diff_lines = self._get_field(tool_data, "diff_lines", [])
 
             if not file_path:
                 self.console.print("  ⎿  [dim]File updated successfully[/]")
@@ -278,9 +341,8 @@ class EditResultRenderer(ToolResultRenderer):
                 f"  ⎿  [dim]Updated {escape(str(file_path))} with {additions} additions and {deletions} removals[/]"
             )
 
-            if self.verbose:
-                for line in diff_with_line_numbers:
-                    self.console.print(line, markup=False)
+            if self.verbose and isinstance(diff_lines, list) and diff_lines:
+                self._render_diff_lines([str(line) for line in diff_lines])
         else:
             self.console.print("  ⎿  [dim]File updated successfully[/]")
 

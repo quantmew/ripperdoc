@@ -105,6 +105,7 @@ def _switch_theme(ui: Any, theme_name: str, preview_only: bool = False) -> None:
         return
 
     ui.console.print(f"[{manager.get_color('success')}]✓ Theme switched to {theme.display_name}[/]")
+    ui.console.print("[dim]Theme saved. Restart Ripperdoc to ensure all UI components use it.[/dim]")
 
 
 def _handle(ui: Any, arg: str) -> bool:

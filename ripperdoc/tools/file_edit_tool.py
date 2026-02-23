@@ -374,49 +374,8 @@ match exactly (including whitespace and indentation)."""
 
             # Store diff lines for display
             diff_lines = []
-            for line in diff[3:]:  # Skip header lines
+            for line in diff[2:]:  # Skip from/to file lines, keep @@ hunk for line numbers
                 diff_lines.append(line)
-
-            # Generate diff with line numbers for better display
-            diff_with_line_numbers = []
-            old_line_num = None
-            new_line_num = None
-
-            for line in diff[3:]:  # Skip header lines
-                if line.startswith("@@"):
-                    # Parse line numbers from diff header
-                    import re
-
-                    match = re.search(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@", line)
-                    if match:
-                        old_line_num = int(match.group(1))
-                        new_line_num = int(match.group(3))
-                        diff_with_line_numbers.append(f"      [dim]{line}[/dim]")
-                elif line.startswith("+") and not line.startswith("+++"):
-                    if new_line_num is not None:
-                        diff_with_line_numbers.append(
-                            f"      [green]{new_line_num:6d} + {line[1:]}[/green]"
-                        )
-                        new_line_num += 1
-                    else:
-                        diff_with_line_numbers.append(f"      [green]{line}[/green]")
-                elif line.startswith("-") and not line.startswith("---"):
-                    if old_line_num is not None:
-                        diff_with_line_numbers.append(
-                            f"      [red]{old_line_num:6d} - {line[1:]}[/red]"
-                        )
-                        old_line_num += 1
-                    else:
-                        diff_with_line_numbers.append(f"      [red]{line}[/red]")
-                elif line.strip():
-                    if old_line_num is not None and new_line_num is not None:
-                        diff_with_line_numbers.append(
-                            f"      {old_line_num:6d}   {new_line_num:6d}   {line}"
-                        )
-                        old_line_num += 1
-                        new_line_num += 1
-                    else:
-                        diff_with_line_numbers.append(f"      {line}")
 
             output = FileEditToolOutput(
                 file_path=input_data.file_path,
@@ -426,7 +385,7 @@ match exactly (including whitespace and indentation)."""
                 additions=additions,
                 deletions=deletions,
                 diff_lines=diff_lines,
-                diff_with_line_numbers=diff_with_line_numbers,
+                diff_with_line_numbers=[],
             )
 
             yield ToolResult(

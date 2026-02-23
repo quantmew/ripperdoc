@@ -1,7 +1,8 @@
-from ripperdoc.cli.ui.choice import resolve_choice_style
+from ripperdoc.cli.ui.choice import onboarding_style, resolve_choice_style
 import pytest
 
 from ripperdoc.cli.ui.choice import prompt_checkbox_async, prompt_choice_async
+from ripperdoc.core.theme import get_theme_manager
 
 
 def _style_dict(style) -> dict[str, str]:
@@ -24,6 +25,50 @@ def test_resolve_choice_style_unknown_falls_back_to_neutral():
     style = _style_dict(resolve_choice_style("not-a-style"))
     assert style["frame.border"] == "#7f8fa6"
     assert style["question"] == "#e8ecf5"
+
+
+def test_choice_diff_styles_follow_active_theme():
+    manager = get_theme_manager()
+    original_theme = manager.current.name
+    try:
+        manager.set_theme("dark")
+        dark_style = _style_dict(resolve_choice_style("neutral"))
+
+        manager.set_theme("light")
+        light_style = _style_dict(resolve_choice_style("neutral"))
+
+        assert dark_style["diff-add"] != light_style["diff-add"]
+        assert dark_style["diff-del"] != light_style["diff-del"]
+        assert dark_style["diff-hunk"] != light_style["diff-hunk"]
+    finally:
+        manager.set_theme(original_theme)
+
+
+def test_onboarding_style_defaults_to_dark_palette(monkeypatch):
+    monkeypatch.delenv("RIPPERDOC_TERMINAL_BG", raising=False)
+    monkeypatch.delenv("COLORFGBG", raising=False)
+
+    style = _style_dict(onboarding_style())
+    assert style["option"] == "#f8f8f2"
+    assert style["value"] == "#f8f8f2"
+
+
+def test_onboarding_style_uses_light_palette_when_forced(monkeypatch):
+    monkeypatch.setenv("RIPPERDOC_TERMINAL_BG", "light")
+    monkeypatch.delenv("COLORFGBG", raising=False)
+
+    style = _style_dict(onboarding_style())
+    assert style["option"] == "#1f2937"
+    assert style["value"] == "#111827"
+
+
+def test_onboarding_style_detects_light_background_from_colorfgbg(monkeypatch):
+    monkeypatch.delenv("RIPPERDOC_TERMINAL_BG", raising=False)
+    monkeypatch.setenv("COLORFGBG", "15;7")
+
+    style = _style_dict(onboarding_style())
+    assert style["option"] == "#1f2937"
+    assert style["yes-option"] == "#111827"
 
 
 @pytest.mark.asyncio

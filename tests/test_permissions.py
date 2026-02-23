@@ -24,6 +24,8 @@ from ripperdoc.core.config import (
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.tools.bash_tool import BashTool, BashToolInput
 from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
+from ripperdoc.tools.file_edit_tool import FileEditTool, FileEditToolInput
+from ripperdoc.tools.multi_edit_tool import MultiEditTool, MultiEditToolInput
 
 
 class DummyInput(BaseModel):
@@ -488,3 +490,75 @@ def test_permission_request_hooks_deny_overrides_allow(tmp_path: Path, monkeypat
     finally:
         hook_manager.set_project_dir(original_project_dir)
         hook_manager.reload_config()
+
+
+def test_edit_permission_prompt_shows_diff_preview_before_apply(tmp_path: Path, monkeypatch):
+    """Edit permission prompt should include a before-apply diff preview."""
+    target = tmp_path / "sample.py"
+    target.write_text("a = 1\nb = 2\n", encoding="utf-8")
+
+    captured: dict[str, str] = {}
+
+    def fake_prompt_choice(*args: Any, **kwargs: Any) -> str:  # noqa: ANN401
+        captured["message"] = str(kwargs.get("message", ""))
+        return "n"
+
+    monkeypatch.setattr("ripperdoc.core.permission_engine.prompt_choice", fake_prompt_choice)
+
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=None)
+    result = asyncio.run(
+        checker(
+            FileEditTool(),
+            FileEditToolInput(
+                file_path=str(target),
+                old_string="a = 1",
+                new_string="a = 3",
+            ),
+        )
+    )
+
+    assert result.result is False
+    preview = captured.get("message", "")
+    assert "preview:" in preview
+    assert "-------------------" in preview
+    assert "1 - a = 1" in preview
+    assert "1 + a = 3" in preview
+    assert target.read_text(encoding="utf-8") == "a = 1\nb = 2\n"
+
+
+def test_multiedit_permission_prompt_shows_diff_preview_before_apply(tmp_path: Path, monkeypatch):
+    """MultiEdit permission prompt should include combined diff preview."""
+    target = tmp_path / "sample_multi.py"
+    target.write_text("x = 1\ny = 2\n", encoding="utf-8")
+
+    captured: dict[str, str] = {}
+
+    def fake_prompt_choice(*args: Any, **kwargs: Any) -> str:  # noqa: ANN401
+        captured["message"] = str(kwargs.get("message", ""))
+        return "n"
+
+    monkeypatch.setattr("ripperdoc.core.permission_engine.prompt_choice", fake_prompt_choice)
+
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=None)
+    result = asyncio.run(
+        checker(
+            MultiEditTool(),
+            MultiEditToolInput(
+                file_path=str(target),
+                edits=[
+                    {"old_string": "x = 1", "new_string": "x = 10"},
+                    {"old_string": "y = 2", "new_string": "y = 20"},
+                ],
+            ),
+        )
+    )
+
+    assert result.result is False
+    preview = captured.get("message", "")
+    assert "preview:" in preview
+    assert "-------------------" in preview
+    assert "1 - x = 1" in preview
+    assert "1 + x = 10" in preview
+    assert "2 - y = 2" in preview
+    assert "2 + y = 20" in preview
+    assert target.read_text(encoding="utf-8") == "x = 1\ny = 2\n"

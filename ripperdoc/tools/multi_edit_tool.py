@@ -271,7 +271,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
 
     def _build_diff(
         self, original: str, updated: str, file_path: str
-    ) -> tuple[list[str], list[str], int, int]:
+    ) -> tuple[list[str], int, int]:
         old_lines = original.splitlines(keepends=True)
         new_lines = updated.splitlines(keepends=True)
 
@@ -288,48 +288,9 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         additions = sum(1 for line in diff if line.startswith("+") and not line.startswith("+++"))
         deletions = sum(1 for line in diff if line.startswith("-") and not line.startswith("---"))
 
-        diff_lines = [line for line in diff[3:]]  # skip headers
+        diff_lines = [line for line in diff[2:]]  # skip from/to file lines, keep @@ hunk
 
-        diff_with_line_numbers: list[str] = []
-        old_line_num: Optional[int] = None
-        new_line_num: Optional[int] = None
-
-        for line in diff[3:]:
-            if line.startswith("@@"):
-                import re
-
-                match = re.search(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@", line)
-                if match:
-                    old_line_num = int(match.group(1))
-                    new_line_num = int(match.group(3))
-                    diff_with_line_numbers.append(f"      [dim]{line}[/dim]")
-            elif line.startswith("+") and not line.startswith("+++"):
-                if new_line_num is not None:
-                    diff_with_line_numbers.append(
-                        f"      [green]{new_line_num:6d} + {line[1:]}[/green]"
-                    )
-                    new_line_num += 1
-                else:
-                    diff_with_line_numbers.append(f"      [green]{line}[/green]")
-            elif line.startswith("-") and not line.startswith("---"):
-                if old_line_num is not None:
-                    diff_with_line_numbers.append(
-                        f"      [red]{old_line_num:6d} - {line[1:]}[/red]"
-                    )
-                    old_line_num += 1
-                else:
-                    diff_with_line_numbers.append(f"      [red]{line}[/red]")
-            elif line.strip():
-                if old_line_num is not None and new_line_num is not None:
-                    diff_with_line_numbers.append(
-                        f"      {old_line_num:6d}   {new_line_num:6d}   {line}"
-                    )
-                    old_line_num += 1
-                    new_line_num += 1
-                else:
-                    diff_with_line_numbers.append(f"      {line}")
-
-        return diff_lines, diff_with_line_numbers, additions, deletions
+        return diff_lines, additions, deletions
 
     async def call(
         self,
@@ -441,7 +402,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                 log_prefix="[multi_edit_tool]",
             )
 
-            diff_lines, diff_with_line_numbers, additions, deletions = self._build_diff(
+            diff_lines, additions, deletions = self._build_diff(
                 original_content, updated_content, str(resolved_path)
             )
 
@@ -456,7 +417,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                 additions=additions,
                 deletions=deletions,
                 diff_lines=diff_lines,
-                diff_with_line_numbers=diff_with_line_numbers,
+                diff_with_line_numbers=[],
                 applied_edits=applied,
                 created=True,
             )
@@ -602,7 +563,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             log_prefix="[multi_edit_tool]",
         )
 
-        diff_lines, diff_with_line_numbers, additions, deletions = self._build_diff(
+        diff_lines, additions, deletions = self._build_diff(
             original_content, updated_content, str(resolved_path)
         )
 
@@ -617,7 +578,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             additions=additions,
             deletions=deletions,
             diff_lines=diff_lines,
-            diff_with_line_numbers=diff_with_line_numbers,
+            diff_with_line_numbers=[],
             applied_edits=applied,
             created=created,
         )

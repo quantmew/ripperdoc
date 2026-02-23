@@ -34,6 +34,11 @@ class ThemeColors:
     # === Tool output ===
     tool_call: str = "dim cyan"
     tool_result: str = "dim"
+    diff_add_bg: str = "#2f6f3e"
+    diff_add_fg: str = "#f4fff4"
+    diff_del_bg: str = "#8b3030"
+    diff_del_fg: str = "#fff4f4"
+    diff_hunk: str = "#8aa0c4"
 
     # === Message senders ===
     sender_user: str = "bold green"
@@ -101,6 +106,11 @@ THEME_LIGHT = Theme(
         thinking_on="ansiblue bold",
         thinking_off="grey50",
         emphasis="bold blue",
+        diff_add_bg="#b8f2c8",
+        diff_add_fg="#12321f",
+        diff_del_bg="#ffd0d0",
+        diff_del_fg="#4a1f1f",
+        diff_hunk="#355e8a",
     ),
 )
 
@@ -123,6 +133,11 @@ THEME_MONOKAI = Theme(
         ctx_tools="#a6e22e",
         ctx_memory="#fd971f",  # Monokai orange
         ctx_messages="#ae81ff",  # Monokai purple
+        diff_add_bg="#3e5e2f",
+        diff_add_fg="#f8f8f2",
+        diff_del_bg="#6a2f3f",
+        diff_del_fg="#f8f8f2",
+        diff_hunk="#66d9ef",
     ),
 )
 
@@ -145,6 +160,11 @@ THEME_DRACULA = Theme(
         ctx_tools="#50fa7b",
         ctx_memory="#ffb86c",  # Dracula orange
         ctx_messages="#bd93f9",
+        diff_add_bg="#2f6b4f",
+        diff_add_fg="#f8f8f2",
+        diff_del_bg="#7a3f4f",
+        diff_del_fg="#f8f8f2",
+        diff_hunk="#bd93f9",
     ),
 )
 
@@ -166,6 +186,11 @@ THEME_SOLARIZED_DARK = Theme(
         ctx_tools="#859900",
         ctx_memory="#cb4b16",  # Solarized orange
         ctx_messages="#6c71c4",  # Solarized violet
+        diff_add_bg="#2f5f4f",
+        diff_add_fg="#fdf6e3",
+        diff_del_bg="#7a3f3f",
+        diff_del_fg="#fdf6e3",
+        diff_hunk="#268bd2",
     ),
 )
 
@@ -187,6 +212,11 @@ THEME_NORD = Theme(
         ctx_tools="#a3be8c",
         ctx_memory="#d08770",  # Nord orange
         ctx_messages="#b48ead",  # Nord purple
+        diff_add_bg="#3b5f50",
+        diff_add_fg="#eceff4",
+        diff_del_bg="#6a3f4c",
+        diff_del_fg="#eceff4",
+        diff_hunk="#81a1c1",
     ),
 )
 

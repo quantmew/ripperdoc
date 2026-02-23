@@ -8,6 +8,7 @@ user interactions.
 from __future__ import annotations
 
 import html
+import os
 import re
 import shutil
 from typing import Any, Optional, cast
@@ -23,84 +24,211 @@ from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Box, CheckboxList, Frame, Label, RadioList, TextArea
+from ripperdoc.core.theme import theme_color
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _choice_diff_style_slots() -> dict[str, str]:
+    """Return diff styles from active theme for prompt_toolkit."""
+    add_bg = theme_color("diff_add_bg")
+    add_fg = theme_color("diff_add_fg")
+    del_bg = theme_color("diff_del_bg")
+    del_fg = theme_color("diff_del_fg")
+    hunk = theme_color("diff_hunk")
+    return {
+        "diff-add": f"bg:{add_bg} {add_fg}",
+        "diff-del": f"bg:{del_bg} {del_fg}",
+        "diff-hunk": hunk,
+    }
 
 
 # Shared style system for all choice prompts
 def neutral_choice_style() -> Style:
     """Create the default neutral style for choice prompts."""
-    return Style.from_dict(
-        {
-            "frame.border": "#7f8fa6",  # Muted blue-gray border
-            "selected-option": "bold",
-            "option": "#d7e3f4",  # Soft blue for options
-            "title": "#c7d2e6",  # Light blue-gray title
-            "description": "#d9d9d9",
-            "question": "#e8ecf5",  # Neutral light text for questions
-            "label": "#9fb3d1",  # Medium blue-gray labels
-            "number": "#9fb3d1",  # Numbers for indexed options
-            "warning": "#ff6b6b",  # Warning stays distinct
-            "info": "#a7c7e7",  # Calm info blue
-            "dim": "#707070",
-            "yes-option": "#e8ecf5",
-            "no-option": "#e8ecf5",
-            "value": "#e8ecf5",
-            "default": "#88c0d0",
-            "marker": "#9fb3d1",
-        }
-    )
+    style_map = {
+        "frame.border": "#7f8fa6",  # Muted blue-gray border
+        "selected-option": "bold",
+        "option": "#d7e3f4",  # Soft blue for options
+        "title": "#c7d2e6",  # Light blue-gray title
+        "description": "#d9d9d9",
+        "question": "#e8ecf5",  # Neutral light text for questions
+        "label": "#9fb3d1",  # Medium blue-gray labels
+        "number": "#9fb3d1",  # Numbers for indexed options
+        "warning": "#ff6b6b",  # Warning stays distinct
+        "info": "#a7c7e7",  # Calm info blue
+        "dim": "#707070",
+        "yes-option": "#e8ecf5",
+        "no-option": "#e8ecf5",
+        "value": "#e8ecf5",
+        "default": "#88c0d0",
+        "marker": "#9fb3d1",
+    }
+    style_map.update(_choice_diff_style_slots())
+    return Style.from_dict(style_map)
 
 
 def amber_choice_style() -> Style:
     """Create the legacy amber style for choice prompts."""
-    return Style.from_dict(
-        {
-            "frame.border": "#d4a017",  # Golden/amber border
-            "selected-option": "bold",
-            "option": "#5fd7ff",  # Cyan for unselected options
-            "title": "#ffaf00",  # Orange/amber for titles
-            "description": "#ffffff",  # White for descriptions
-            "question": "#ffd700",  # Gold for questions
-            "label": "#87afff",  # Light blue for field labels
-            "number": "#87afff",  # Numbers for indexed options
-            "warning": "#ff5555",  # Red for warnings
-            "info": "#5fd7ff",  # Cyan for info text
-            "dim": "#626262",  # Dimmed text
-            "yes-option": "#ffffff",  # Neutral for Yes options
-            "no-option": "#ffffff",  # Neutral for No options
-            "value": "#f8f8f2",  # Off-white for values
-            "default": "#50fa7b",  # Green for defaults
-            "marker": "#ffb86c",  # Orange for markers (→, etc.)
-        }
-    )
+    style_map = {
+        "frame.border": "#d4a017",  # Golden/amber border
+        "selected-option": "bold",
+        "option": "#5fd7ff",  # Cyan for unselected options
+        "title": "#ffaf00",  # Orange/amber for titles
+        "description": "#ffffff",  # White for descriptions
+        "question": "#ffd700",  # Gold for questions
+        "label": "#87afff",  # Light blue for field labels
+        "number": "#87afff",  # Numbers for indexed options
+        "warning": "#ff5555",  # Red for warnings
+        "info": "#5fd7ff",  # Cyan for info text
+        "dim": "#626262",  # Dimmed text
+        "yes-option": "#ffffff",  # Neutral for Yes options
+        "no-option": "#ffffff",  # Neutral for No options
+        "value": "#f8f8f2",  # Off-white for values
+        "default": "#50fa7b",  # Green for defaults
+        "marker": "#ffb86c",  # Orange for markers (→, etc.)
+    }
+    style_map.update(_choice_diff_style_slots())
+    return Style.from_dict(style_map)
 
 
 def onboarding_style() -> Style:
     """Create the style for onboarding prompts.
 
-    Uses a balanced theme with purple accents for a modern setup experience.
+    Uses adaptive palettes to preserve contrast on both dark and light terminals.
     """
-    return Style.from_dict(
-        {
-            "frame.border": "#8b9dc3",  # Soft silver-blue border
+    if _should_use_light_onboarding_palette():
+        style_map = {
+            "frame.border": "#4b6584",  # Blue-gray border for light backgrounds
             "selected-option": "bold",
-            "option": "#f8f8f2",  # Off-white for options (cleaner)
-            "title": "#bd93f9",  # Soft purple for titles
-            "description": "#f0f0f0",  # Off-white for descriptions
-            "question": "#ff79c6",  # Pink for questions
-            "label": "#8be9fd",  # Cyan for labels
-            "number": "#8be9fd",  # Numbers for indexed options
-            "warning": "#ffb86c",  # Orange for warnings
-            "info": "#8be9fd",  # Cyan for info text
-            "dim": "#626262",  # Dimmed text
-            "yes-option": "#ffffff",
-            "no-option": "#ffffff",
-            "value": "#f8f8f2",
-            "default": "#50fa7b",  # Green for defaults
-            "marker": "#ff79c6",  # Pink for markers
+            "option": "#1f2937",  # Dark slate option text
+            "title": "#5b21b6",  # Deep purple title
+            "description": "#374151",  # Dark gray description text
+            "question": "#9f1239",  # Deep rose question
+            "label": "#0f766e",  # Teal labels
+            "number": "#0f766e",  # Teal indices
+            "warning": "#b45309",  # Amber warning
+            "info": "#0369a1",  # Blue info
+            "dim": "#6b7280",
+            "yes-option": "#111827",
+            "no-option": "#111827",
+            "value": "#111827",
+            "default": "#047857",  # Green default marker
+            "marker": "#be185d",  # Rose marker
         }
-    )
+        style_map.update(_choice_diff_style_slots())
+        return Style.from_dict(style_map)
+
+    style_map = {
+        "frame.border": "#8b9dc3",  # Soft silver-blue border
+        "selected-option": "bold",
+        "option": "#f8f8f2",  # Off-white for options (cleaner)
+        "title": "#bd93f9",  # Soft purple for titles
+        "description": "#f0f0f0",  # Off-white for descriptions
+        "question": "#ff79c6",  # Pink for questions
+        "label": "#8be9fd",  # Cyan for labels
+        "number": "#8be9fd",  # Numbers for indexed options
+        "warning": "#ffb86c",  # Orange for warnings
+        "info": "#8be9fd",  # Cyan for info text
+        "dim": "#626262",  # Dimmed text
+        "yes-option": "#ffffff",
+        "no-option": "#ffffff",
+        "value": "#f8f8f2",
+        "default": "#50fa7b",  # Green for defaults
+        "marker": "#ff79c6",  # Pink for markers
+    }
+    style_map.update(_choice_diff_style_slots())
+    return Style.from_dict(style_map)
+
+
+def _should_use_light_onboarding_palette() -> bool:
+    """Return whether onboarding UI should use light-background palette."""
+    forced = os.getenv("RIPPERDOC_TERMINAL_BG", "").strip().lower()
+    if forced == "light":
+        return True
+    if forced == "dark":
+        return False
+
+    detected = _detect_light_background_from_colorfgbg(os.getenv("COLORFGBG", ""))
+    if detected is not None:
+        return detected
+    return False
+
+
+def _detect_light_background_from_colorfgbg(raw_value: str) -> Optional[bool]:
+    """Best-effort light/dark detection from COLORFGBG env var.
+
+    COLORFGBG usually contains foreground/background ANSI indexes, e.g. "15;0".
+    We inspect the last numeric token as the background color index.
+    """
+    if not raw_value:
+        return None
+
+    bg_index: Optional[int] = None
+    for token in reversed(raw_value.split(";")):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            bg_index = int(token)
+            break
+        except ValueError:
+            continue
+    if bg_index is None:
+        return None
+
+    rgb = _xterm_index_to_rgb(bg_index)
+    if rgb is None:
+        return None
+
+    luminance = _perceived_luminance(*rgb)
+    return luminance >= 140.0
+
+
+def _xterm_index_to_rgb(index: int) -> Optional[tuple[int, int, int]]:
+    """Map xterm color index (0-255) to RGB."""
+    if index < 0 or index > 255:
+        return None
+
+    # xterm standard 16-color palette
+    base_16: dict[int, tuple[int, int, int]] = {
+        0: (0, 0, 0),
+        1: (205, 0, 0),
+        2: (0, 205, 0),
+        3: (205, 205, 0),
+        4: (0, 0, 238),
+        5: (205, 0, 205),
+        6: (0, 205, 205),
+        7: (229, 229, 229),
+        8: (127, 127, 127),
+        9: (255, 0, 0),
+        10: (0, 255, 0),
+        11: (255, 255, 0),
+        12: (92, 92, 255),
+        13: (255, 0, 255),
+        14: (0, 255, 255),
+        15: (255, 255, 255),
+    }
+    if index in base_16:
+        return base_16[index]
+
+    # xterm 6x6x6 color cube: indexes 16-231
+    if 16 <= index <= 231:
+        cube_index = index - 16
+        r = cube_index // 36
+        g = (cube_index % 36) // 6
+        b = cube_index % 6
+        steps = [0, 95, 135, 175, 215, 255]
+        return (steps[r], steps[g], steps[b])
+
+    # xterm grayscale ramp: indexes 232-255
+    gray = 8 + (index - 232) * 10
+    return (gray, gray, gray)
+
+
+def _perceived_luminance(r: int, g: int, b: int) -> float:
+    """Compute perceived luminance for contrast heuristics."""
+    return (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
 
 
 def theme_style() -> Style:
@@ -108,26 +236,26 @@ def theme_style() -> Style:
 
     Uses a subtle gray border for a clean, minimal appearance.
     """
-    return Style.from_dict(
-        {
-            "frame.border": "#626262",  # Subtle gray border
-            "selected-option": "bold",
-            "option": "#f8f8f2",
-            "title": "#f8f8f2",  # Off-white for titles
-            "description": "#f0f0f0",
-            "question": "#f8f8f2",
-            "label": "#8be9fd",
-            "number": "#8be9fd",
-            "warning": "#ffb86c",
-            "info": "#5fd7ff",
-            "dim": "#626262",
-            "yes-option": "#ffffff",
-            "no-option": "#ffffff",
-            "value": "#f8f8f2",
-            "default": "#50fa7b",
-            "marker": "#8be9fd",
-        }
-    )
+    style_map = {
+        "frame.border": "#626262",  # Subtle gray border
+        "selected-option": "bold",
+        "option": "#f8f8f2",
+        "title": "#f8f8f2",  # Off-white for titles
+        "description": "#f0f0f0",
+        "question": "#f8f8f2",
+        "label": "#8be9fd",
+        "number": "#8be9fd",
+        "warning": "#ffb86c",
+        "info": "#5fd7ff",
+        "dim": "#626262",
+        "yes-option": "#ffffff",
+        "no-option": "#ffffff",
+        "value": "#f8f8f2",
+        "default": "#50fa7b",
+        "marker": "#8be9fd",
+    }
+    style_map.update(_choice_diff_style_slots())
+    return Style.from_dict(style_map)
 
 
 def ask_user_question_style() -> Style:
@@ -135,26 +263,26 @@ def ask_user_question_style() -> Style:
 
     Uses a neutral blue/gray palette to avoid warning-like colors.
     """
-    return Style.from_dict(
-        {
-            "frame.border": "#7f8fa6",  # Muted blue-gray border
-            "selected-option": "bold",
-            "option": "#d7e3f4",  # Soft blue for options
-            "title": "#c7d2e6",  # Light blue-gray title
-            "description": "#d9d9d9",
-            "question": "#e8ecf5",  # Neutral light text for questions
-            "label": "#9fb3d1",  # Medium blue-gray labels
-            "number": "#9fb3d1",  # Numbers for indexed options
-            "warning": "#ff6b6b",  # Keep warning distinct (red)
-            "info": "#a7c7e7",  # Calm info blue
-            "dim": "#707070",
-            "yes-option": "#e8ecf5",
-            "no-option": "#e8ecf5",
-            "value": "#e8ecf5",
-            "default": "#88c0d0",
-            "marker": "#9fb3d1",
-        }
-    )
+    style_map = {
+        "frame.border": "#7f8fa6",  # Muted blue-gray border
+        "selected-option": "bold",
+        "option": "#d7e3f4",  # Soft blue for options
+        "title": "#c7d2e6",  # Light blue-gray title
+        "description": "#d9d9d9",
+        "question": "#e8ecf5",  # Neutral light text for questions
+        "label": "#9fb3d1",  # Medium blue-gray labels
+        "number": "#9fb3d1",  # Numbers for indexed options
+        "warning": "#ff6b6b",  # Keep warning distinct (red)
+        "info": "#a7c7e7",  # Calm info blue
+        "dim": "#707070",
+        "yes-option": "#e8ecf5",
+        "no-option": "#e8ecf5",
+        "value": "#e8ecf5",
+        "default": "#88c0d0",
+        "marker": "#9fb3d1",
+    }
+    style_map.update(_choice_diff_style_slots())
+    return Style.from_dict(style_map)
 
 
 def resolve_choice_style(style_variant: str) -> Style:

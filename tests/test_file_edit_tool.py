@@ -484,7 +484,7 @@ class TestFileEditExecution:
         assert output.additions == 1
         assert output.deletions == 1
         assert len(output.diff_lines) > 0
-        assert len(output.diff_with_line_numbers) > 0
+        assert output.diff_with_line_numbers == []
 
 
 class TestErrorHandling:

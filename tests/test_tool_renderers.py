@@ -2,7 +2,11 @@
 
 from rich.console import Console
 
-from ripperdoc.cli.ui.tool_renderers import BashResultRenderer, ToolResultRendererRegistry
+from ripperdoc.cli.ui.tool_renderers import (
+    BashResultRenderer,
+    EditResultRenderer,
+    ToolResultRendererRegistry,
+)
 from ripperdoc.utils.tasks import create_task
 
 
@@ -151,3 +155,34 @@ def test_task_graph_renderer_hides_completed_rows_by_default(monkeypatch) -> Non
     assert "◐ Add regression tests [2]" in output
     assert "Fix parser error" not in output
     assert "● 1 completed task(s) hidden" in output
+
+
+def test_edit_renderer_formats_raw_diff_with_line_numbers() -> None:
+    """Edit renderer should format raw unified diff lines without preformatted tags."""
+    console = Console(record=True, width=140)
+    renderer = EditResultRenderer(console, verbose=True)
+    renderer.render(
+        "",
+        {
+            "file_path": "/tmp/sample.py",
+            "additions": 2,
+            "deletions": 1,
+            "diff_lines": [
+                "@@ -1,2 +1,3 @@",
+                " line1",
+                "-line2",
+                "+line2_changed",
+                "+line3",
+            ],
+            "diff_with_line_numbers": ["[green]legacy should not be used[/green]"],
+        },
+    )
+
+    output = console.export_text()
+    assert "Updated /tmp/sample.py with 2 additions and 1 removals" in output
+    assert "@@ -1,2 +1,3 @@" in output
+    assert "line1" in output
+    assert "2 - line2" in output
+    assert "2 + line2_changed" in output
+    assert "3 + line3" in output
+    assert "legacy should not be used" not in output

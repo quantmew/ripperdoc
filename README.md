@@ -15,18 +15,10 @@ _an open-source, extensible AI coding agent that runs in your terminal_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
   <a href="https://pypi.org/project/ripperdoc/">
-    <img src="https://img.shields.io/badge/version-0.4.0-orange.svg">
+    <img src="https://img.shields.io/badge/version-0.4.3-orange.svg">
   </a>
 </p>
 
-> **⚠️ Important: v0.4.0 Release Notice**
->
-> Version 0.4.0 includes **breaking changes** to the configuration file format. Before upgrading, please:
-> 1. **Backup your configuration**: `cp ~/.ripperdoc/ ~/.ripperdoc.backup` and `cp ~/.ripperdoc.json ~/.ripperdoc.json.backup`
-> 2. **Read the migration guide**: [MIGRATION_v0.4.0.md](MIGRATION_v0.4.0.md)
->
-> The main change is renaming `provider` to `protocol` in configuration files.
->
 </div>
 
 **Ripperdoc** is a powerful, extensible AI coding agent that runs directly in your terminal. Inspired by tools like [Claude Code](https://claude.com/claude-code), [Aider](https://github.com/paul-gauthier/aider), and [Goose](https://github.com/block/goose), Ripperdoc helps you write code, refactor projects, execute shell commands, and manage files through natural language conversations.
@@ -34,7 +26,7 @@ _an open-source, extensible AI coding agent that runs in your terminal_
 ## What Makes Ripperdoc Different?
 
 - **🔌 Model Agnostic** - Works with Anthropic Claude, OpenAI, Google Gemini, DeepSeek, and any OpenAI-compatible API
-- **🎣 Extensible Architecture** - 26+ built-in tools with hooks system for custom workflows
+- **🎣 Extensible Architecture** - 30+ built-in tools with hooks system for custom workflows
 - **🤖 Multi-Agent Coordination** - Built-in task graph and team collaboration for complex workflows
 - **📚 Skill System** - Load capability bundles on-demand (PDF, Excel, PowerPoint, custom languages)
 - **🔌 MCP Integration** - First-class Model Context Protocol server support
@@ -47,7 +39,7 @@ _an open-source, extensible AI coding agent that runs in your terminal_
 ## Core Features
 
 ### 🛠️ Powerful Tool System
-- **26+ Built-in Tools** - File operations (Read, Write, Edit, MultiEdit), code search (Grep, Glob), shell execution (Bash, Background), LSP integration, and more
+- **30+ Built-in Tools** - File operations (Read, Write, Edit, MultiEdit), code search (Grep, Glob), shell execution (Bash, Background), LSP integration, and more
 - **Jupyter Support** - Direct .ipynb notebook editing with cell manipulation
 - **Background Tasks** - Run commands asynchronously with output monitoring and status tracking
 
@@ -305,7 +297,7 @@ Ripperdoc provides powerful slash commands for session management:
 
 - **CLI Layer** (`ripperdoc/cli/`) - Terminal interface, UI components, command handlers
 - **Core Layer** (`ripperdoc/core/`) - Agent definitions, configuration, hooks, providers
-- **Tools Layer** (`ripperdoc/tools/`) - 26+ built-in tools for file operations, code analysis, etc.
+- **Tools Layer** (`ripperdoc/tools/`) - 30+ built-in tools for file operations, code analysis, etc.
 - **Protocol Layer** (`ripperdoc/protocol/`) - Stdio protocol handler for SDK communication
 - **Utils Layer** (`ripperdoc/utils/`) - Shared utilities for logging, permissions, file operations
 
