@@ -154,7 +154,7 @@ def test_task_graph_renderer_hides_completed_rows_by_default(monkeypatch) -> Non
     assert "Tasks updated (total 2; 0 pending, 1 in progress, 1 completed)." in output
     assert "◐ Add regression tests [2]" in output
     assert "Fix parser error" not in output
-    assert "● 1 completed task(s) hidden" in output
+    assert "completed task(s) hidden" not in output
 
 
 def test_edit_renderer_formats_raw_diff_with_line_numbers() -> None:

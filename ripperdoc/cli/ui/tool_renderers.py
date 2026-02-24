@@ -184,19 +184,15 @@ class TaskGraphResultRenderer(ToolResultRenderer):
             f"{pending} pending, {in_progress} in progress, {completed} completed)."
         )
 
-    def _filter_completed(
-        self, entries: list[TaskRenderEntry]
-    ) -> tuple[list[TaskRenderEntry], int]:
+    def _filter_completed(self, entries: list[TaskRenderEntry]) -> list[TaskRenderEntry]:
         if should_show_completed_tasks_in_ui():
-            return entries, 0
-        visible = [entry for entry in entries if entry["status"] != "completed"]
-        return visible, len(entries) - len(visible)
+            return entries
+        return [entry for entry in entries if entry["status"] != "completed"]
 
     def _render_task_list_text(
         self,
         visible_entries: list[TaskRenderEntry],
         all_entries: list[TaskRenderEntry],
-        hidden_completed_count: int,
     ) -> str:
         lines: list[str] = []
         for entry in visible_entries:
@@ -217,10 +213,6 @@ class TaskGraphResultRenderer(ToolResultRenderer):
             if task_id:
                 line += f" [{task_id}]"
             lines.append(line)
-        if hidden_completed_count:
-            lines.append(
-                f"● {hidden_completed_count} completed task(s) hidden (set RIPPERDOC_UI_SHOW_COMPLETED_TASKS=true to show)"
-            )
         summary = self._summary(all_entries)
         return "\n".join([summary, *lines]) if lines else summary
 
@@ -230,8 +222,8 @@ class TaskGraphResultRenderer(ToolResultRenderer):
             entries = self._entries_from_storage()
 
         if entries:
-            visible_entries, hidden_completed = self._filter_completed(entries)
-            text = self._render_task_list_text(visible_entries, entries, hidden_completed)
+            visible_entries = self._filter_completed(entries)
+            text = self._render_task_list_text(visible_entries, entries)
             TodoResultRenderer._render_text(self.console, text, "Task update")
             return
 
