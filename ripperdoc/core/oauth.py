@@ -160,4 +160,3 @@ def delete_oauth_token(name: str) -> Dict[str, OAuthToken]:
 def oauth_models_for_type(token_type: OAuthTokenType) -> tuple[OAuthModelOption, ...]:
     """Return selectable model options for an OAuth token type."""
     return OAUTH_MODEL_OPTIONS.get(token_type, ())
-

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import httpx
 import openai
@@ -10,11 +11,17 @@ import pytest
 
 from ripperdoc.core.providers.base import call_with_timeout_and_retries
 from ripperdoc.core.config import ModelProfile, ProtocolType
+from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
 from ripperdoc.core.providers.errors import ProviderMappedError
 from ripperdoc.core.providers.openai import (
     OpenAIClient,
     _StreamAccumulator,
+    _build_codex_oauth_tools,
+    _build_codex_responses_input,
+    _extract_content_blocks_from_responses_payload,
+    _extract_from_codex_sse_events,
     _build_non_stream_empty_or_error_response,
+    _parse_sse_json_events,
     _build_stream_content_blocks,
     _consume_stream_chunk,
     _run_with_provider_error_mapping,
@@ -249,3 +256,234 @@ async def test_oauth_profile_missing_token_returns_auth_error(monkeypatch) -> No
 
     assert result.is_error is True
     assert result.error_code == "authentication_error"
+
+
+def test_build_codex_responses_input_flattens_messages() -> None:
+    messages = [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": [{"type": "text", "text": "Hi"}]},
+        {"role": "tool", "content": [{"type": "tool_result", "content": "done"}]},
+    ]
+
+    payload = _build_codex_responses_input(messages)
+
+    assert payload[0]["role"] == "user"
+    assert payload[0]["content"][0]["type"] == "input_text"
+    assert payload[1]["role"] == "assistant"
+    assert payload[1]["content"][0]["type"] == "output_text"
+    assert payload[2]["role"] == "assistant"
+    assert payload[2]["content"][0]["text"] == "done"
+
+
+def test_parse_codex_sse_events_and_extract_content() -> None:
+    sse = (
+        'event: response.output_text.delta\n'
+        'data: {"type":"response.output_text.delta","delta":"Hel"}\n'
+        "\n"
+        'event: response.output_text.delta\n'
+        'data: {"type":"response.output_text.delta","delta":"lo"}\n'
+        "\n"
+        'event: response.completed\n'
+        'data: {"type":"response.completed","response":{"usage":{"prompt_tokens":2,"completion_tokens":3}}}\n'
+        "\n"
+        "data: [DONE]\n"
+        "\n"
+    )
+    events = _parse_sse_json_events(sse)
+    text, usage, final_response = _extract_from_codex_sse_events(events)
+
+    assert len(events) == 3
+    assert text == "Hello"
+    assert usage["input_tokens"] == 2
+    assert usage["output_tokens"] == 3
+    assert isinstance(final_response, dict)
+
+
+def test_build_codex_oauth_tools_converts_function_shape() -> None:
+    openai_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "Read",
+                "description": "Read file",
+                "parameters": {"type": "object", "properties": {"path": {"type": "string"}}},
+            },
+        }
+    ]
+    converted = _build_codex_oauth_tools(openai_tools)
+    assert converted[0]["type"] == "function"
+    assert converted[0]["name"] == "Read"
+    assert "function" not in converted[0]
+
+
+def test_extract_content_blocks_from_responses_payload_includes_tool_use() -> None:
+    payload = {
+        "output": [
+            {
+                "type": "function_call",
+                "name": "Read",
+                "call_id": "call_1",
+                "arguments": '{"path":"README.md"}',
+            },
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": "done"}],
+            },
+        ]
+    }
+    blocks = _extract_content_blocks_from_responses_payload(payload)
+    assert blocks[0]["type"] == "tool_use"
+    assert blocks[0]["name"] == "Read"
+    assert blocks[0]["input"] == {"path": "README.md"}
+    assert blocks[1] == {"type": "text", "text": "done"}
+
+
+@pytest.mark.asyncio
+async def test_oauth_codex_payload_sets_store_false(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeAsyncClient:
+        def __init__(self, timeout: float = 0.0) -> None:  # noqa: ARG002
+            return
+
+        async def __aenter__(self) -> "_FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+        async def post(self, url: str, *, json: dict, headers: dict) -> httpx.Response:  # noqa: A002
+            captured["payload"] = json
+            captured["headers"] = headers
+            return httpx.Response(
+                status_code=200,
+                request=httpx.Request("POST", url),
+                json={
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "ok"}],
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai.httpx.AsyncClient",
+        _FakeAsyncClient,
+    )
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai.get_oauth_token",
+        lambda _name: OAuthToken(
+            type=OAuthTokenType.CODEX,
+            access_token="abcd1234efgh",
+            refresh_token=None,
+            expires_at=None,
+            account_id="acct_1",
+        ),
+    )
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OAUTH,
+        model="gpt-5.3-codex",
+        oauth_token_name="codex",
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[{"role": "user", "content": "hello"}],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is False
+    assert isinstance(captured.get("payload"), dict)
+    assert cast(dict[str, object], captured["payload"]).get("store") is False
+    assert cast(dict[str, object], captured["payload"]).get("stream") is True
+    assert "max_output_tokens" not in cast(dict[str, object], captured["payload"])
+
+
+@pytest.mark.asyncio
+async def test_oauth_codex_unsupported_parameter_is_removed_and_retried(monkeypatch) -> None:
+    payloads: list[dict] = []
+    calls = {"count": 0}
+
+    class _FakeAsyncClient:
+        def __init__(self, timeout: float = 0.0) -> None:  # noqa: ARG002
+            return
+
+        async def __aenter__(self) -> "_FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+        async def post(self, url: str, *, json: dict, headers: dict) -> httpx.Response:  # noqa: A002, ARG002
+            calls["count"] += 1
+            payloads.append(dict(json))
+            if calls["count"] == 1:
+                return httpx.Response(
+                    status_code=400,
+                    request=httpx.Request("POST", url),
+                    json={"detail": "Unsupported parameter: temperature"},
+                )
+            return httpx.Response(
+                status_code=200,
+                request=httpx.Request("POST", url),
+                json={
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "ok"}],
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai.httpx.AsyncClient",
+        _FakeAsyncClient,
+    )
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai.get_oauth_token",
+        lambda _name: OAuthToken(
+            type=OAuthTokenType.CODEX,
+            access_token="abcd1234efgh",
+            refresh_token=None,
+            expires_at=None,
+            account_id="acct_1",
+        ),
+    )
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OAUTH,
+        model="gpt-5.3-codex",
+        oauth_token_name="codex",
+        temperature=0.7,
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[{"role": "user", "content": "hello"}],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is False
+    assert calls["count"] == 2
+    assert "temperature" in payloads[0]
+    assert "temperature" not in payloads[1]
