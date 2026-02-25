@@ -24,6 +24,7 @@ from ripperdoc.core.plugins import (
     remove_enabled_plugin_for_scope,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.user_agent import build_user_agent
 
 logger = get_logger()
 
@@ -592,7 +593,7 @@ def _http_json(url: str) -> Any:
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Ripperdoc/1.0",
+            "User-Agent": build_user_agent(),
             "Accept": "application/vnd.github+json",
         },
     )
@@ -608,7 +609,7 @@ def _github_entries(marketplace: MarketplaceSource) -> List[PluginCatalogEntry]:
     default_branch = str(repo_meta.get("default_branch") or "main")
     archive_request = urllib.request.Request(
         f"https://codeload.github.com/{owner_repo}/zip/refs/heads/{default_branch}",
-        headers={"User-Agent": "Ripperdoc/1.0"},
+        headers={"User-Agent": build_user_agent()},
     )
     with urllib.request.urlopen(archive_request, timeout=60) as response:
         archive_bytes = response.read()

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, Tuple, cast
 
 from ripperdoc import __version__
+from ripperdoc.utils.user_agent import build_user_agent
 
 PACKAGE_NAME = "ripperdoc"
 REPO = "quantmew/ripperdoc"
@@ -204,7 +205,7 @@ def _fetch_latest_version_from_source(
 def _fetch_json(url: str, timeout_seconds: float = 8.0) -> Optional[dict[str, Any]]:
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": f"ripperdoc-update/{__version__}"},
+        headers={"User-Agent": build_user_agent()},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
@@ -271,7 +272,7 @@ def _run_binary_upgrade() -> Tuple[bool, str, str]:
 def _download_text(url: str) -> str:
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": f"ripperdoc-update/{__version__}"},
+        headers={"User-Agent": build_user_agent()},
     )
     try:
         with urllib.request.urlopen(request, timeout=12.0) as response:
