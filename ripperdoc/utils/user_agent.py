@@ -19,8 +19,9 @@ from ripperdoc import __version__
 # Source types for user-agent
 UserAgentSource = Literal["cli", "sdk-py", "sdk-ts", "sdk-cli", "vscode"]
 
-# Environment variable to override the source type
+# Environment variables
 RIPPERDOC_CLIENT_SOURCE_ENV = "RIPPERDOC_CLIENT_SOURCE"
+RIPPERDOC_AGENT_SDK_VERSION_ENV = "RIPPERDOC_AGENT_SDK_VERSION"
 
 # Default source when not specified
 DEFAULT_SOURCE: UserAgentSource = "cli"
@@ -47,13 +48,17 @@ def build_user_agent(source: UserAgentSource | None = None) -> str:
                 variable or defaults to "cli".
 
     Returns:
-        User-Agent string in format: ripperdoc-cli/{version} (external, {source}) agent-sdk/{version}
+        User-Agent string in format: ripperdoc-cli/{version} (external, {source}) agent-sdk/{sdk_version}
     """
     if source is None:
         source = get_client_source()
 
     version = __version__
-    return f"ripperdoc-cli/{version} (external, {source}) agent-sdk/{version}"
+    sdk_version = os.environ.get(RIPPERDOC_AGENT_SDK_VERSION_ENV, version)
+    if source != "cli":
+        return f"ripperdoc-cli/{version} (external, {source}, agent-sdk/{sdk_version})"
+    else:
+        return f"ripperdoc-cli/{version} (external, {source})"
 
 
 # Pre-built user-agents for common use cases
