@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -521,8 +522,8 @@ def test_edit_permission_prompt_shows_diff_preview_before_apply(tmp_path: Path, 
     preview = captured.get("message", "")
     assert "preview:" in preview
     assert "-------------------" in preview
-    assert "1 - a = 1" in preview
-    assert "1 + a = 3" in preview
+    assert re.search(r"<diff-del>\s*1\s+- a = 1</diff-del>", preview)
+    assert re.search(r"<diff-add>\s*1 \+ a = 3</diff-add>", preview)
     assert target.read_text(encoding="utf-8") == "a = 1\nb = 2\n"
 
 
@@ -557,8 +558,8 @@ def test_multiedit_permission_prompt_shows_diff_preview_before_apply(tmp_path: P
     preview = captured.get("message", "")
     assert "preview:" in preview
     assert "-------------------" in preview
-    assert "1 - x = 1" in preview
-    assert "1 + x = 10" in preview
-    assert "2 - y = 2" in preview
-    assert "2 + y = 20" in preview
+    assert re.search(r"<diff-del>\s*1\s+- x = 1</diff-del>", preview)
+    assert re.search(r"<diff-add>\s*1 \+ x = 10</diff-add>", preview)
+    assert re.search(r"<diff-del>\s*2\s+- y = 2</diff-del>", preview)
+    assert re.search(r"<diff-add>\s*2 \+ y = 20</diff-add>", preview)
     assert target.read_text(encoding="utf-8") == "x = 1\ny = 2\n"

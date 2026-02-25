@@ -18,6 +18,7 @@ from ripperdoc.core.config import config_manager
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool import Tool
 from ripperdoc.tools.file_read_tool import detect_file_encoding
+from ripperdoc.utils.diff_rendering import build_numbered_diff_layout, format_numbered_diff_text
 from ripperdoc.utils.permissions import PermissionDecision, ToolRule
 from ripperdoc.utils.permissions.rule_syntax import (
     ParsedPermissionRule,
@@ -36,7 +37,6 @@ _EDIT_PREVIEW_MAX_DIFF_LINES = 30
 _EDIT_PREVIEW_MAX_BYTES = 1_500_000
 _EDIT_PREVIEW_MATCH_SNIPPET_MAX = 140
 _EDIT_PREVIEW_SEPARATOR = "-------------------"
-_EDIT_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _PERMISSION_PROMPT_RESERVED_LINES = 14
 _PERMISSION_PROMPT_MIN_DIFF_LINES = 4
 
@@ -169,39 +169,26 @@ def _build_edit_permission_preview(parsed_input: Any, *, tool_name: str) -> str:
     )
     lines.append(f"<dim>{_EDIT_PREVIEW_SEPARATOR}</dim>")
 
-    clipped = diff_lines[:line_budget]
-    old_line_num: Optional[int] = None
-    new_line_num: Optional[int] = None
-    for line in clipped:
-        display_line = line.rstrip("\r\n")
-        escaped_line = html.escape(display_line)
-        if line.startswith("@@"):
-            match = _EDIT_HUNK_RE.search(display_line)
-            if match:
-                old_line_num = int(match.group(1))
-                new_line_num = int(match.group(2))
-            lines.append(f"<diff-hunk>{escaped_line}</diff-hunk>")
+    layout = build_numbered_diff_layout(diff_lines)
+    clipped = layout.lines[:line_budget]
+    for diff_line in clipped:
+        rendered = format_numbered_diff_text(
+            diff_line,
+            old_width=layout.old_width,
+            new_width=layout.new_width,
+        )
+        escaped_rendered = html.escape(rendered)
+        if diff_line.kind == "hunk":
+            lines.append(f"<diff-hunk>{escaped_rendered}</diff-hunk>")
             continue
-        if line.startswith("+"):
-            label = f"{new_line_num:6d}" if new_line_num is not None else "      "
-            lines.append(f"<diff-add>{label} + {escaped_line[1:]}</diff-add>")
-            if new_line_num is not None:
-                new_line_num += 1
+
+        if diff_line.kind == "add":
+            lines.append(f"<diff-add>{escaped_rendered}</diff-add>")
             continue
-        if line.startswith("-"):
-            label = f"{old_line_num:6d}" if old_line_num is not None else "      "
-            lines.append(f"<diff-del>{label} - {escaped_line[1:]}</diff-del>")
-            if old_line_num is not None:
-                old_line_num += 1
+        if diff_line.kind == "del":
+            lines.append(f"<diff-del>{escaped_rendered}</diff-del>")
             continue
-        left = f"{old_line_num:6d}" if old_line_num is not None else "      "
-        right = f"{new_line_num:6d}" if new_line_num is not None else "      "
-        context_line = escaped_line[1:] if escaped_line.startswith(" ") else escaped_line
-        lines.append(f"<value>{left}   {right}   {context_line}</value>")
-        if old_line_num is not None:
-            old_line_num += 1
-        if new_line_num is not None:
-            new_line_num += 1
+        lines.append(f"<value>{escaped_rendered}</value>")
 
     if len(diff_lines) > line_budget:
         hidden = len(diff_lines) - line_budget

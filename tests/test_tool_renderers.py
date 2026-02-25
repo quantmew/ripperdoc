@@ -181,8 +181,38 @@ def test_edit_renderer_formats_raw_diff_with_line_numbers() -> None:
     output = console.export_text()
     assert "Updated /tmp/sample.py with 2 additions and 1 removals" in output
     assert "@@ -1,2 +1,3 @@" in output
-    assert "line1" in output
-    assert "2 - line2" in output
-    assert "2 + line2_changed" in output
-    assert "3 + line3" in output
+    assert "1   1   line1" in output
+    assert "2     - line2" in output
+    assert "    2 + line2_changed" in output
+    assert "    3 + line3" in output
     assert "legacy should not be used" not in output
+
+
+def test_edit_renderer_aligns_change_rows_with_context_content_column() -> None:
+    """Add/del lines should align their content with context rows."""
+    console = Console(record=True, width=160)
+    renderer = EditResultRenderer(console, verbose=True)
+    renderer.render(
+        "",
+        {
+            "file_path": "/tmp/sample.py",
+            "additions": 2,
+            "deletions": 1,
+            "diff_lines": [
+                "@@ -120,2 +997,3 @@",
+                " keep_a",
+                "-removed",
+                "+added",
+                "+tail",
+            ],
+        },
+    )
+
+    output_lines = console.export_text().splitlines()
+    context_line = next(line for line in output_lines if "keep_a" in line)
+    deleted_line = next(line for line in output_lines if "removed" in line)
+    added_line = next(line for line in output_lines if "added" in line)
+
+    assert context_line.index("keep_a") == deleted_line.index("removed")
+    assert context_line.index("keep_a") == added_line.index("added")
+    assert "120   997" in context_line

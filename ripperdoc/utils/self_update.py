@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, Tuple, cast
 
-from ripperdoc import __version__
 from ripperdoc.utils.user_agent import build_user_agent
 
 PACKAGE_NAME = "ripperdoc"
