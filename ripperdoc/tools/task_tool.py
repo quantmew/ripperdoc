@@ -8,7 +8,18 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Union, cast
+from typing import (
+    Any,
+    AsyncGenerator,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Union,
+    cast,
+)
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -51,6 +62,13 @@ from ripperdoc.utils.teams import (
     send_team_message,
     upsert_team_member,
 )
+from ripperdoc.utils.teammate_state import (
+    IdleReason,
+    InProcessTeammateState,
+    set_teammate_idle,
+    set_teammate_active,
+    inject_user_message,
+)
 
 logger = get_logger()
 
@@ -60,7 +78,11 @@ MessageType = Union[UserMessage, AssistantMessage]
 
 @dataclass
 class AgentRunRecord:
-    """In-memory record for a subagent run (foreground or background)."""
+    """In-memory record for a subagent run (foreground or background).
+
+    This record tracks both the run state and integrates with the teammate
+    state management system for team coordination.
+    """
 
     agent_id: str
     agent_type: str
@@ -80,6 +102,24 @@ class AgentRunRecord:
     hook_scopes: List[HooksConfig] = field(default_factory=list)
     team_name: Optional[str] = None
     teammate_name: Optional[str] = None
+
+    # Idle state management (Claude Code in_process_teammate compatibility)
+    is_idle: bool = False
+    pending_user_messages: List[str] = field(default_factory=list)
+    on_idle_callbacks: List[Callable[[], None]] = field(default_factory=list)
+
+    # Permission mode (inherited from team lead)
+    permission_mode: str = "default"  # "default", "plan", "bypassPermissions", "acceptEdits"
+
+    # Plan approval workflow
+    awaiting_plan_approval: bool = False
+
+    # Shutdown protocol
+    shutdown_requested: bool = False
+    shutdown_request_id: Optional[str] = None
+
+    # Linked teammate state (for advanced coordination)
+    teammate_state: Optional[InProcessTeammateState] = None
 
 
 _AGENT_RUNS: Dict[str, AgentRunRecord] = {}
@@ -121,7 +161,190 @@ def _snapshot_agent_run(record: AgentRunRecord) -> dict:
         "is_background": record.is_background,
         "team_name": record.team_name,
         "teammate_name": record.teammate_name,
+        # Idle state fields
+        "is_idle": record.is_idle,
+        "pending_messages": len(record.pending_user_messages),
+        "permission_mode": record.permission_mode,
+        "shutdown_requested": record.shutdown_requested,
     }
+
+
+def inject_user_message_to_teammate(
+    agent_id: str,
+    message: str,
+) -> bool:
+    """Inject a user message into a running teammate's pending queue.
+
+    This allows the team lead to send messages to teammates that will be
+    processed on their next polling cycle. If the teammate is idle, it will
+    be woken up to process the message.
+
+    Args:
+        agent_id: The agent ID to inject the message into.
+        message: The message content to inject.
+
+    Returns:
+        True if the message was successfully injected, False otherwise.
+    """
+    record = _get_agent_run(agent_id)
+    if not record:
+        logger.debug(
+            "[task_tool] inject_user_message: agent %s not found",
+            agent_id,
+        )
+        return False
+
+    if record.status != "running":
+        logger.debug(
+            "[task_tool] inject_user_message: agent %s is not running (status=%s)",
+            agent_id,
+            record.status,
+        )
+        return False
+
+    record.pending_user_messages.append(message)
+    record.is_idle = False
+
+    # Also sync with teammate_state if available
+    if record.teammate_state:
+        inject_user_message(record.teammate_state.id, message)
+
+    logger.debug(
+        "[task_tool] Injected message into %s's queue (depth=%d)",
+        agent_id,
+        len(record.pending_user_messages),
+    )
+    return True
+
+
+def pop_pending_user_message_from_teammate(agent_id: str) -> Optional[str]:
+    """Pop the next pending user message from a teammate's queue.
+
+    Args:
+        agent_id: The agent ID to pop the message from.
+
+    Returns:
+        The next message in the queue, or None if the queue is empty.
+    """
+    record = _get_agent_run(agent_id)
+    if not record or not record.pending_user_messages:
+        return None
+
+    return record.pending_user_messages.pop(0)
+
+
+def set_agent_idle_state(
+    agent_id: str,
+    is_idle: bool,
+    *,
+    idle_reason: Optional[IdleReason] = None,
+    summary: Optional[str] = None,
+) -> bool:
+    """Set the idle state of an agent run.
+
+    When setting to idle, this will also trigger idle callbacks and send
+    an idle notification to the team lead.
+
+    Args:
+        agent_id: The agent ID to update.
+        is_idle: Whether the agent should be marked as idle.
+        idle_reason: The reason for going idle (required when is_idle=True).
+        summary: Optional summary of what the agent accomplished.
+
+    Returns:
+        True if the state was updated, False if the agent was not found.
+    """
+    record = _get_agent_run(agent_id)
+    if not record:
+        return False
+
+    if is_idle and not record.is_idle:
+        record.is_idle = True
+
+        # Execute idle callbacks
+        for callback in record.on_idle_callbacks:
+            try:
+                callback()
+            except Exception as exc:
+                logger.warning(
+                    "[task_tool] Idle callback failed for %s: %s: %s",
+                    agent_id,
+                    type(exc).__name__,
+                    exc,
+                )
+        record.on_idle_callbacks = []
+
+        # Sync with teammate_state
+        if record.teammate_state and idle_reason:
+            set_teammate_idle(
+                record.teammate_state.id,
+                idle_reason=idle_reason,
+                summary=summary,
+            )
+
+        # Send idle notification to team lead
+        if record.team_name:
+            _send_idle_notification_to_team_lead(
+                record,
+                idle_reason=idle_reason or IdleReason.AVAILABLE,
+                summary=summary,
+            )
+
+        logger.debug(
+            "[task_tool] Agent %s is now idle (reason=%s)",
+            agent_id,
+            idle_reason.value if idle_reason else "unknown",
+        )
+    elif not is_idle and record.is_idle:
+        record.is_idle = False
+        if record.teammate_state:
+            set_teammate_active(record.teammate_state.id)
+        logger.debug("[task_tool] Agent %s is now active", agent_id)
+
+    return True
+
+
+def _send_idle_notification_to_team_lead(
+    record: AgentRunRecord,
+    *,
+    idle_reason: IdleReason,
+    summary: Optional[str] = None,
+) -> None:
+    """Send an idle notification message to the team lead."""
+    if not record.team_name:
+        return
+
+    import json
+    from datetime import datetime, timezone
+
+    notification = {
+        "type": "idle_notification",
+        "from": record.teammate_name or record.agent_type,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "idleReason": idle_reason.value,
+        "summary": summary,
+        "agentId": record.agent_id,
+        "completedStatus": record.status if record.status != "running" else None,
+    }
+
+    try:
+        send_team_message(
+            team_name=record.team_name,
+            sender=record.teammate_name or record.agent_type,
+            recipients=["team-lead"],
+            message_type="idle_notification",
+            content=json.dumps(notification, ensure_ascii=False),
+            metadata={
+                "idle_notification": True,
+                "idle_reason": idle_reason.value,
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            "[task_tool] Failed to send idle notification: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
 
 
 def list_agent_runs() -> List[str]:
@@ -412,9 +635,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 )
             return ValidationResult(result=True)
 
-        if not input_data.subagent_type and not (
-            input_data.team_name and input_data.teammate_name
-        ):
+        if not input_data.subagent_type and not (input_data.team_name and input_data.teammate_name):
             return ValidationResult(
                 result=False,
                 message=(
@@ -483,7 +704,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         return context
 
     def _render_tool_result(self, output: TaskToolOutput) -> ToolResult:
-        return ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+        return ToolResult(
+            data=output, result_for_assistant=self.render_result_for_assistant(output)
+        )
 
     def _resolve_team_agent_target(
         self,
@@ -606,9 +829,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 if block_type != "tool_use":
                     continue
 
-                block_id = (
-                    TaskTool._get_block_attr(block, "id")
-                    or TaskTool._get_block_attr(block, "tool_use_id")
+                block_id = TaskTool._get_block_attr(block, "id") or TaskTool._get_block_attr(
+                    block, "tool_use_id"
                 )
                 if str(block_id or "").strip() != tool_use_id:
                     continue
@@ -783,6 +1005,47 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             record.error = None
         elif error is not None:
             record.error = error
+
+        # Set idle state and send idle notification
+        idle_reason = IdleReason.AVAILABLE
+        if status == "failed":
+            idle_reason = IdleReason.FAILED
+        elif status == "cancelled":
+            idle_reason = IdleReason.INTERRUPTED
+        elif status == "shutdown":
+            idle_reason = IdleReason.SHUTDOWN
+
+        record.is_idle = True
+
+        # Execute idle callbacks
+        for callback in record.on_idle_callbacks:
+            try:
+                callback()
+            except Exception as exc:
+                logger.warning(
+                    "[task_tool] Idle callback failed for %s: %s: %s",
+                    record.agent_id,
+                    type(exc).__name__,
+                    exc,
+                )
+        record.on_idle_callbacks = []
+
+        # Sync with teammate_state if available
+        if record.teammate_state:
+            set_teammate_idle(
+                record.teammate_state.id,
+                idle_reason=idle_reason,
+                summary=result_text[:500] if result_text else None,
+            )
+
+        # Send idle notification to team lead
+        if record.team_name:
+            _send_idle_notification_to_team_lead(
+                record,
+                idle_reason=idle_reason,
+                summary=result_text[:500] if result_text else None,
+            )
+
         _set_team_member_active_state(
             record.team_name,
             record.teammate_name,
@@ -831,6 +1094,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                     continue
 
                 tool_use_count, updates = self._track_subagent_message(
+                    record,
                     message,
                     record.history,
                     assistant_messages,
@@ -857,13 +1121,13 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                         )
                         yield ToolProgress(
                             content=(
-                                f"Shutdown approved for subagent '{record.agent_id}', "
-                                "exiting run."
-                            )
+                                f"Shutdown approved for subagent '{record.agent_id}', exiting run."
+                            ),
+                            progress_sender=self._subagent_progress_sender(record),
                         )
                         break
-                for update in updates:
-                    yield ToolProgress(content=update)
+                for sender, text in updates:
+                    yield ToolProgress(content=text, progress_sender=sender)
 
                 if msg_type in ("assistant", "user"):
                     message_with_parent = (
@@ -871,7 +1135,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                         if parent_tool_use_id
                         else message
                     )
-                    yield ToolProgress(content=message_with_parent, is_subagent_message=True)
+                    yield ToolProgress(
+                        content=message_with_parent,
+                        is_subagent_message=True,
+                        progress_sender=self._subagent_progress_sender(record),
+                    )
         except asyncio.CancelledError:
             finalize_status = "cancelled"
             finalize_error = "Subagent run was cancelled."
@@ -941,7 +1209,10 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 )
                 yield self._render_tool_result(output)
                 return
-            yield ToolProgress(content=f"Waiting for subagent '{record.agent_type}' ({record.agent_id})")
+            yield ToolProgress(
+                content=f"Waiting for subagent '{record.agent_type}' ({record.agent_id})",
+                progress_sender=self._subagent_progress_sender(record),
+            )
             await self._wait_for_running_record(record)
 
         if not input_data.prompt:
@@ -976,7 +1247,10 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             agent_id=record.agent_id,
             hook_scopes=record.hook_scopes,
         )
-        yield ToolProgress(content=f"Resuming subagent '{record.agent_type}'")
+        yield ToolProgress(
+            content=f"Resuming subagent '{record.agent_type}'",
+            progress_sender=self._subagent_progress_sender(record),
+        )
 
         async for progress in self._run_subagent_foreground(
             record=record,
@@ -1036,7 +1310,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             resume=None,
             run_in_background=input_data.run_in_background,
         )
-        for notice in self._build_subagent_start_notices(hook_result, agent_type=target_agent.agent_type):
+        for notice in self._build_subagent_start_notices(
+            hook_result, agent_type=target_agent.agent_type
+        ):
             yield notice
         hook_context = self._build_subagent_hook_context(hook_result)
 
@@ -1141,7 +1417,10 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             yield self._render_tool_result(output)
             return
 
-        yield ToolProgress(content=f"Launching subagent '{target_agent.agent_type}'")
+        yield ToolProgress(
+            content=f"Launching subagent '{target_agent.agent_type}'",
+            progress_sender=self._subagent_progress_sender(record),
+        )
         async for progress in self._run_subagent_foreground(
             record=record,
             subagent_context=subagent_context,
@@ -1214,12 +1493,13 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
 
     def _track_subagent_message(
         self,
+        record: AgentRunRecord,
         message: object,
         history: List[MessageType],
         assistant_messages: List[AssistantMessage],
         tool_use_count: int,
-    ) -> tuple[int, List[str]]:
-        updates: List[str] = []
+    ) -> tuple[int, List[tuple[str, str]]]:
+        updates: List[tuple[str, str]] = []
         msg_type = getattr(message, "type", "")
         if msg_type in ("assistant", "user"):
             history.append(message)  # type: ignore[arg-type]
@@ -1227,35 +1507,48 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         if msg_type == "assistant":
             if isinstance(message, AssistantMessage):
                 tool_use_count += self._count_tool_uses(message)
-            updates = self._extract_progress_updates(message)
+            updates = self._extract_progress_updates(message, record=record)
             assistant_messages.append(message)  # type: ignore[arg-type]
 
         return tool_use_count, updates
 
-    def _extract_progress_updates(self, message: object) -> List[str]:
+    @staticmethod
+    def _subagent_progress_label(record: AgentRunRecord) -> str:
+        base = (record.teammate_name or record.agent_type or "subagent").strip() or "subagent"
+        agent_id = (record.agent_id or "").strip()
+        return f"{base}:{agent_id}" if agent_id else base
+
+    @classmethod
+    def _subagent_progress_sender(cls, record: AgentRunRecord) -> str:
+        return f"Subagent({cls._subagent_progress_label(record)})"
+
+    def _extract_progress_updates(
+        self, message: object, *, record: AgentRunRecord
+    ) -> List[tuple[str, str]]:
         msg_content = getattr(message, "message", None)
         blocks = getattr(msg_content, "content", []) if msg_content else []
         if not isinstance(blocks, list):
             return []
 
-        updates: List[str] = []
+        sender = self._subagent_progress_sender(record)
+        updates: List[tuple[str, str]] = []
         for block in blocks:
             block_type = TaskTool._get_block_attr(block, "type") or ""
             if block_type == "tool_use":
                 tool_name = TaskTool._get_block_attr(block, "name") or "unknown tool"
                 block_input = TaskTool._get_block_attr(block, "input")
                 summary = self._summarize_tool_input(block_input)
-                label = f"Subagent requesting {tool_name}"
+                label = f"requesting {tool_name}"
                 if summary:
                     label += f" — {summary}"
-                updates.append(label)
+                updates.append((sender, label))
             elif block_type == "text":
                 text_val = TaskTool._get_block_attr(block, "text") or ""
                 if text_val:
                     snippet = str(text_val).strip()
                     if snippet:
                         short = snippet if len(snippet) <= 200 else snippet[:197] + "..."
-                        updates.append(f"Subagent: {short}")
+                        updates.append((sender, short))
         return updates
 
     async def _run_subagent_background(
@@ -1282,6 +1575,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                     continue
 
                 tool_use_count, _ = self._track_subagent_message(
+                    record,
                     message,
                     record.history,
                     assistant_messages,
@@ -1370,11 +1664,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         content = message.message.content
         if not isinstance(content, list):
             return 0
-        return sum(
-            1
-            for block in content
-            if TaskTool._get_block_attr(block, "type") == "tool_use"
-        )
+        return sum(1 for block in content if TaskTool._get_block_attr(block, "type") == "tool_use")
 
     def _summarize_tool_input(self, inp: Any) -> str:
         """Generate a short human-readable summary of a tool_use input."""

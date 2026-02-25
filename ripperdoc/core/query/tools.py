@@ -150,6 +150,7 @@ async def _run_tool_use_generator(
                             tool_use_id=tool_use_id,
                             sibling_tool_use_ids=sibling_ids,
                             content=output.content,
+                            progress_sender=getattr(output, "progress_sender", None),
                             is_subagent_message=getattr(output, "is_subagent_message", False),
                         )
                         logger.debug(

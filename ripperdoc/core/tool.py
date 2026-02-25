@@ -31,6 +31,7 @@ class ToolProgress(BaseModel):
     content: Any
     normalized_messages: list = []
     tools: list = []
+    progress_sender: Optional[str] = None
     # Flag to indicate if content is a subagent message that should be forwarded to SDK
     is_subagent_message: bool = False
 

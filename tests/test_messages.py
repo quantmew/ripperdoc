@@ -42,6 +42,18 @@ def test_create_progress_message():
     assert msg.type == "progress"
     assert msg.tool_use_id == "test_id"
     assert msg.content == "Working..."
+    assert msg.progress_sender is None
+
+
+def test_create_progress_message_with_sender() -> None:
+    msg = create_progress_message(
+        tool_use_id="test_id",
+        sibling_tool_use_ids=set(),
+        content="Working...",
+        progress_sender="Subagent(writer:agent_abcd1234)",
+    )
+
+    assert msg.progress_sender == "Subagent(writer:agent_abcd1234)"
 
 
 def test_normalize_messages_for_api():

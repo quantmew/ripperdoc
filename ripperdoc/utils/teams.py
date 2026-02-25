@@ -34,6 +34,7 @@ TeamMessageType = Literal[
     "shutdown_request",
     "shutdown_response",
     "plan_approval_response",
+    "plan_approval_request",
     # Internal/system-level message kinds used by task delegation flows.
     "direct",
     "shutdown",
@@ -42,6 +43,8 @@ TeamMessageType = Literal[
     "task_assignment",
     "delegate",
     "status",
+    # Idle notification from teammates
+    "idle_notification",
 ]
 
 
@@ -245,11 +248,7 @@ def drain_team_inbox_messages(team_name: str, participant: str) -> list[dict[str
 
     with _team_lock(clean_team):
         entries = _load_team_inbox_entries(clean_team, clean_participant)
-        unread = [
-            dict(item)
-            for item in entries
-            if isinstance(item, dict) and not item.get("read")
-        ]
+        unread = [dict(item) for item in entries if isinstance(item, dict) and not item.get("read")]
         if not unread:
             return []
 
@@ -370,9 +369,7 @@ def _build_queue_notification_payload(
 
 def _coerce_message_recipients(recipients: Optional[Sequence[str]]) -> list[str]:
     values = [
-        str(value).strip()
-        for value in recipients or []
-        if value is not None and str(value).strip()
+        str(value).strip() for value in recipients or [] if value is not None and str(value).strip()
     ]
     return values or ["*"]
 
@@ -765,8 +762,7 @@ def send_team_message(
 
     recipient_listener_map = _snapshot_listeners_for_recipients(team_name, message.recipients)
     live_recipients = {
-        _normalize_team_participant(recipient)
-        for _, recipient in recipient_listener_map.values()
+        _normalize_team_participant(recipient) for _, recipient in recipient_listener_map.values()
     }
 
     for recipient in inbox_recipients:

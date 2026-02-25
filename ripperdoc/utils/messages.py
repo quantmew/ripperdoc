@@ -235,6 +235,7 @@ class ProgressMessage(BaseModel):
     uuid: str = ""
     tool_use_id: str
     content: Any
+    progress_sender: Optional[str] = None
     normalized_messages: List[Message] = []
     sibling_tool_use_ids: set[str] = set()
     is_subagent_message: bool = False  # Flag to indicate if content is a subagent message
@@ -413,6 +414,7 @@ def create_progress_message(
     tool_use_id: str,
     sibling_tool_use_ids: set[str],
     content: Any,
+    progress_sender: Optional[str] = None,
     normalized_messages: Optional[List[Message]] = None,
     is_subagent_message: bool = False,
 ) -> ProgressMessage:
@@ -421,6 +423,7 @@ def create_progress_message(
         tool_use_id=tool_use_id,
         sibling_tool_use_ids=sibling_tool_use_ids,
         content=content,
+        progress_sender=progress_sender,
         normalized_messages=normalized_messages or [],
         is_subagent_message=is_subagent_message,
     )

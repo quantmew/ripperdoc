@@ -17,6 +17,36 @@ from ripperdoc.utils.token_estimation import estimate_tokens
 from rich.markup import escape
 
 
+def _summarize_subagent_progress_content(content: Any) -> str:
+    """Best-effort text summary for structured subagent progress payloads."""
+    if isinstance(content, str):
+        return content
+
+    msg_type = getattr(content, "type", None)
+    if msg_type not in {"assistant", "user"}:
+        return str(content)
+
+    message_payload = getattr(content, "message", None)
+    body = getattr(message_payload, "content", None) if message_payload is not None else None
+    if isinstance(body, str):
+        return body
+    if not isinstance(body, list):
+        return ""
+
+    for block in body:
+        block_type = getattr(block, "type", None)
+        if block_type == "tool_use":
+            tool_name = getattr(block, "name", None) or "unknown tool"
+            return f"requesting {tool_name}"
+        if block_type == "text":
+            text_value = str(getattr(block, "text", "") or "").strip()
+            if text_value:
+                return text_value
+        if block_type == "tool_result":
+            return "received tool result"
+    return ""
+
+
 def simplify_progress_suffix(content: Any) -> str:
     """Simplify progress message content for cleaner spinner display."""
     if not isinstance(content, str):
@@ -167,18 +197,15 @@ def handle_progress_message(
             )
         return output_token_est
 
-    if ui.verbose:
+    progress_sender = str(getattr(message, "progress_sender", "") or "").strip()
+    if progress_sender:
+        progress_text = _summarize_subagent_progress_content(message.content)
+        if progress_text:
+            with spinner.paused():
+                ui.display_message(progress_sender, progress_text, is_tool=True)
+    elif ui.verbose:
         with spinner.paused():
             ui.display_message("System", f"Progress: {message.content}", is_tool=True)
-    elif message.content and isinstance(message.content, str):
-        if message.content.startswith("Subagent: "):
-            with spinner.paused():
-                ui.display_message(
-                    "Subagent", message.content[len("Subagent: ") :], is_tool=True
-                )
-        elif message.content.startswith("Subagent"):
-            with spinner.paused():
-                ui.display_message("Subagent", message.content, is_tool=True)
 
     if message.tool_use_id == "stream":
         delta_tokens = estimate_tokens(message.content)
