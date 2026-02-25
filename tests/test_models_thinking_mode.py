@@ -9,6 +9,7 @@ from rich.console import Console
 from ripperdoc.cli.commands import models_cmd
 from ripperdoc.cli.ui.models_tui.textual_app import ModelFormScreen
 from ripperdoc.core.config import ModelProfile, ProtocolType
+from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
 
 
 class _FakeConsole:
@@ -126,3 +127,51 @@ def test_render_models_table_includes_thinking_mode_column() -> None:
     output = console.export_text()
     assert "Think" in output
     assert "openrouter" in output
+
+
+def test_collect_add_profile_input_oauth_uses_token_and_curated_model(monkeypatch) -> None:
+    console = _FakeConsole(
+        [
+            "oauth",  # protocol
+            "1",  # oauth token
+            "2",  # oauth model
+            "",  # max_input_tokens
+            "",  # max_output_tokens
+            "",  # max_tokens
+            "",  # temperature
+            "",  # thinking_mode
+            "auto",  # supports_vision
+            "",  # currency
+            "",  # input_price
+            "",  # output_price
+            "",  # set_as_main
+        ]
+    )
+    monkeypatch.setattr(models_cmd, "prompt_secret", lambda _prompt: "")
+    monkeypatch.setattr(
+        models_cmd,
+        "list_oauth_tokens",
+        lambda: {
+            "codex-main": OAuthToken(
+                type=OAuthTokenType.CODEX,
+                access_token="abcd1234efgh",
+            )
+        },
+    )
+
+    config = SimpleNamespace(
+        model_profiles={},
+        model_pointers=SimpleNamespace(main="default"),
+    )
+    profile, _ = models_cmd._collect_add_profile_input(
+        console,
+        config,
+        existing_profile=None,
+        current_profile=None,
+    )
+
+    assert profile is not None
+    assert profile.protocol == ProtocolType.OAUTH
+    assert profile.oauth_token_name == "codex-main"
+    assert profile.oauth_token_type == OAuthTokenType.CODEX
+    assert profile.model == "gpt-5.3-codex-spark"

@@ -40,6 +40,8 @@ def get_provider_client(protocol: ProtocolType) -> Optional[ProviderClient]:
         return _load_client("openai", "OpenAIClient", "openai")()
     if protocol == ProtocolType.GEMINI:
         return _load_client("gemini", "GeminiClient", "gemini")()
+    if protocol == ProtocolType.OAUTH:
+        return _load_client("openai", "OpenAIClient", "openai")()
     logger.warning("[providers] Unsupported protocol", extra={"protocol": protocol})
     return None
 

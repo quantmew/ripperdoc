@@ -12,6 +12,7 @@ from ripperdoc.core.config import (
     get_effective_config,
     get_global_config_path,
 )
+from ripperdoc.core.oauth import get_oauth_token
 from ripperdoc.utils.memory import MAX_CONTENT_LENGTH, MemoryFile, collect_all_memory_files
 
 from .base import SlashCommand
@@ -27,6 +28,14 @@ def _auth_token_display(profile: Optional[ModelProfile]) -> Tuple[str, Optional[
         return ("RIPPERDOC_AUTH_TOKEN (env)", "RIPPERDOC_AUTH_TOKEN")
     if os.getenv("RIPPERDOC_API_KEY"):
         return ("RIPPERDOC_API_KEY (env)", "RIPPERDOC_API_KEY")
+
+    if profile.protocol == ProtocolType.OAUTH:
+        token_name = getattr(profile, "oauth_token_name", None) or ""
+        if token_name and get_oauth_token(token_name):
+            return (f"OAuth token '{token_name}' (config)", None)
+        if token_name:
+            return (f"OAuth token '{token_name}' (missing)", None)
+        return ("OAuth token missing", None)
 
     if profile.api_key or getattr(profile, "auth_token", None):
         return ("Configured in profile", None)
@@ -46,8 +55,11 @@ def _api_base_display(profile: Optional[ModelProfile]) -> str:
         ProtocolType.ANTHROPIC: "Anthropic base URL",
         ProtocolType.OPENAI_COMPATIBLE: "OpenAI-compatible base URL",
         ProtocolType.GEMINI: "Gemini base URL",
+        ProtocolType.OAUTH: "OAuth provider endpoint",
     }
     label = label_map.get(profile.protocol, "API base URL")
+    if profile.protocol == ProtocolType.OAUTH:
+        return f"{label}: managed automatically"
     base_url = profile.api_base
 
     return f"{label}: {base_url or 'default'}"

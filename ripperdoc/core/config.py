@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional, Literal, TYPE_CHECKING, cast
 from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
+from ripperdoc.core.oauth import OAuthTokenType
 from ripperdoc.utils.log import get_logger
 
 
@@ -29,6 +30,7 @@ class ProtocolType(str, Enum):
     ANTHROPIC = "anthropic"
     OPENAI_COMPATIBLE = "openai_compatible"
     GEMINI = "gemini"
+    OAUTH = "oauth"
 
 
 def provider_protocol(protocol: ProtocolType) -> str:
@@ -40,6 +42,8 @@ def provider_protocol(protocol: ProtocolType) -> str:
     if protocol == ProtocolType.GEMINI:
         # Gemini support is planned; default to OpenAI-style formatting for now.
         return "openai"
+    if protocol == ProtocolType.OAUTH:
+        return "openai"
     return "openai"
 
 
@@ -50,6 +54,8 @@ def _default_model_for_protocol(protocol: ProtocolType) -> str:
         return "claude-sonnet-4-5-20250929"
     if protocol == ProtocolType.GEMINI:
         return "gemini-1.5-pro"
+    if protocol == ProtocolType.OAUTH:
+        return "gpt-5.3-codex"
     return "gpt-4o-mini"
 
 
@@ -81,6 +87,9 @@ class ModelProfile(BaseModel):
     # Anthropic supports either api_key or auth_token; api_key takes precedence when both are set.
     auth_token: Optional[str] = None
     api_base: Optional[str] = None
+    # OAuth provider token reference, used when protocol == oauth.
+    oauth_token_name: Optional[str] = None
+    oauth_token_type: Optional[OAuthTokenType] = None
     max_tokens: int = 4096
     temperature: float = 0.7
     # Optional split limits if provider reports separate input/output budgets.
@@ -105,6 +114,16 @@ class ModelProfile(BaseModel):
     @model_validator(mode="after")
     def _apply_catalog_defaults(self) -> "ModelProfile":
         """Fill optional capability/pricing fields from packaged model catalog."""
+        if self.protocol == ProtocolType.OAUTH:
+            # OAuth-backed profiles resolve auth/base from named token storage.
+            self.api_key = None
+            self.auth_token = None
+            self.api_base = None
+            self.oauth_token_type = self.oauth_token_type or OAuthTokenType.CODEX
+        else:
+            self.oauth_token_name = None
+            self.oauth_token_type = None
+
         metadata = _lookup_model_metadata_safely(self.model, self.protocol)
         if metadata is None:
             return self
@@ -806,7 +825,7 @@ def _get_ripperdoc_env_overrides() -> Dict[str, Any]:
             overrides["protocol"] = ProtocolType(protocol_str.lower())
         except ValueError:
             logger.warning(
-                "[config] Invalid RIPPERDOC_PROTOCOL value: %s (must be anthropic, openai_compatible, or gemini)",
+                "[config] Invalid RIPPERDOC_PROTOCOL value: %s (must be anthropic, openai_compatible, gemini, or oauth)",
                 protocol_str,
             )
     return overrides

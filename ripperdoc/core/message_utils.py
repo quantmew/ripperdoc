@@ -152,7 +152,7 @@ def resolve_model_profile(model: str) -> ModelProfile:
 
 def determine_tool_mode(model_profile: ModelProfile) -> str:
     """Return configured tool mode for provider."""
-    if model_profile.protocol != ProtocolType.OPENAI_COMPATIBLE:
+    if model_profile.protocol not in (ProtocolType.OPENAI_COMPATIBLE, ProtocolType.OAUTH):
         return "native"
     configured = getattr(model_profile, "openai_tool_mode", "native") or "native"
     configured = configured.lower()

@@ -123,6 +123,10 @@ def test_new_alias_points_to_clear_command():
     assert get_slash_command("new") == clear_command
 
 
+def test_oauth_command_is_registered():
+    assert get_slash_command("oauth") is not None
+
+
 def test_todos_command_empty(tmp_path, monkeypatch):
     """Todos command should show an empty state when nothing is stored."""
     monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)

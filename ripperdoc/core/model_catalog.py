@@ -178,7 +178,7 @@ def _protocol_bonus(provider: str, protocol: str) -> int:
         if any(token in provider_lower for token in ("gemini", "vertex", "google")):
             return 90
         return 0
-    if protocol == "openai_compatible":
+    if protocol in {"openai_compatible", "oauth"}:
         if provider_lower in _OPENAI_LIKE_PROVIDERS:
             return 70
         return 15 if provider_lower else 0

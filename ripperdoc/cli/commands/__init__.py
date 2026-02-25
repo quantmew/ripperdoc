@@ -24,6 +24,7 @@ from .memory_cmd import command as memory_command
 from .mcp_cmd import command as mcp_command
 from .models_cmd import command as models_command
 from .output_language_cmd import command as output_language_command
+from .oauth_cmd import command as oauth_command
 from .output_style_cmd import command as output_style_command
 from .permissions_cmd import command as permissions_command
 from .plugins_cmd import command as plugins_command
@@ -62,6 +63,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     config_command,
     tools_command,
     models_command,
+    oauth_command,
     output_style_command,
     output_language_command,
     exit_command,

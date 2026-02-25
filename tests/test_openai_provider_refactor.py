@@ -9,8 +9,10 @@ import openai
 import pytest
 
 from ripperdoc.core.providers.base import call_with_timeout_and_retries
+from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.providers.errors import ProviderMappedError
 from ripperdoc.core.providers.openai import (
+    OpenAIClient,
     _StreamAccumulator,
     _build_non_stream_empty_or_error_response,
     _build_stream_content_blocks,
@@ -220,3 +222,30 @@ async def test_remote_protocol_error_is_mapped_and_retried(monkeypatch) -> None:
 
     assert result == "ok"
     assert attempts["count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_oauth_profile_missing_token_returns_auth_error(monkeypatch) -> None:
+    monkeypatch.setattr("ripperdoc.core.providers.openai.get_oauth_token", lambda _name: None)
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OAUTH,
+        model="gpt-5.3-codex",
+        oauth_token_name="missing-token",
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is True
+    assert result.error_code == "authentication_error"

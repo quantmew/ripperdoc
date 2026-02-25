@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 from uuid import uuid4
 
@@ -13,7 +14,9 @@ import httpx
 import openai
 from openai import AsyncOpenAI
 
-from ripperdoc.core.config import ModelProfile
+from ripperdoc.core.config import ModelProfile, ProtocolType
+from ripperdoc.core.oauth import OAuthTokenType, add_oauth_token, get_oauth_token
+from ripperdoc.core.oauth_codex import CodexOAuthError, refresh_codex_access_token
 from ripperdoc.core.providers.base import (
     ProgressCallback,
     ProviderClient,
@@ -48,6 +51,7 @@ from ripperdoc.utils.session_usage import record_usage
 from ripperdoc.utils.user_agent import build_user_agent
 
 logger = get_logger()
+_CODEX_OAUTH_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 
 
 def _map_openai_exception(exc: Exception) -> Exception:
@@ -543,6 +547,40 @@ def _build_non_stream_empty_or_error_response(
     )
 
 
+def _to_namespace(value: Any) -> Any:
+    """Convert nested dict/list structures into attribute-access objects."""
+    if isinstance(value, dict):
+        return SimpleNamespace(**{k: _to_namespace(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return [_to_namespace(item) for item in value]
+    return value
+
+
+def _extract_text_from_responses_payload(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Best-effort extraction of text blocks from OpenAI Responses API payloads."""
+    blocks: List[Dict[str, Any]] = []
+    output = payload.get("output")
+    if not isinstance(output, list):
+        return blocks
+
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").lower() != "message":
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = str(part.get("type") or "").lower()
+            text_value = part.get("text")
+            if part_type in {"output_text", "text"} and isinstance(text_value, str) and text_value:
+                blocks.append({"type": "text", "text": text_value})
+    return blocks
+
+
 class OpenAIClient(ProviderClient):
     """OpenAI-compatible client with streaming and non-streaming support."""
 
@@ -621,6 +659,21 @@ class OpenAIClient(ProviderClient):
         start_time: float,
     ) -> ProviderResponse:
         """Internal implementation of call, may raise exceptions."""
+        if model_profile.protocol == ProtocolType.OAUTH:
+            return await self._call_oauth_codex(
+                model_profile=model_profile,
+                system_prompt=system_prompt,
+                normalized_messages=normalized_messages,
+                tools=tools,
+                tool_mode=tool_mode,
+                stream=stream,
+                progress_callback=progress_callback,
+                request_timeout=request_timeout,
+                max_retries=max_retries,
+                max_thinking_tokens=max_thinking_tokens,
+                start_time=start_time,
+            )
+
         openai_tools = await build_openai_tool_schemas(tools)
         openai_messages: List[Dict[str, object]] = [
             {"role": "system", "content": system_prompt}
@@ -809,6 +862,198 @@ class OpenAIClient(ProviderClient):
                 "finish_reason": finish_reason,
             },
         )
+
+        return ProviderResponse(
+            content_blocks=content_blocks,
+            usage_tokens=usage_tokens,
+            cost_usd=cost_usd,
+            duration_ms=duration_ms,
+            metadata=response_metadata,
+        )
+
+    async def _call_oauth_codex(
+        self,
+        *,
+        model_profile: ModelProfile,
+        system_prompt: str,
+        normalized_messages: List[Dict[str, Any]],
+        tools: List[Tool[Any, Any]],
+        tool_mode: str,
+        stream: bool,
+        progress_callback: Optional[ProgressCallback],
+        request_timeout: Optional[float],
+        max_retries: int,
+        max_thinking_tokens: int,
+        start_time: float,
+    ) -> ProviderResponse:
+        """OAuth-backed Codex request path."""
+        token_name = (model_profile.oauth_token_name or "").strip()
+        if not token_name:
+            return ProviderResponse.create_error(
+                error_code="authentication_error",
+                error_message="OAuth token is not configured for this model profile.",
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+
+        oauth_token = get_oauth_token(token_name)
+        if oauth_token is None:
+            return ProviderResponse.create_error(
+                error_code="authentication_error",
+                error_message=(
+                    f"OAuth token '{token_name}' was not found. "
+                    "Configure it with /oauth add <name>."
+                ),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+
+        now_ms = int(time.time() * 1000)
+        refresh_deadline_ms = now_ms + 30_000
+        needs_refresh = bool(
+            oauth_token.refresh_token
+            and (
+                not oauth_token.access_token
+                or (oauth_token.expires_at is not None and oauth_token.expires_at <= refresh_deadline_ms)
+            )
+        )
+        if needs_refresh:
+            try:
+                refreshed = refresh_codex_access_token(oauth_token)
+                add_oauth_token(token_name, refreshed, overwrite=True)
+                oauth_token = refreshed
+            except CodexOAuthError as exc:
+                logger.warning(
+                    "[openai_client] OAuth token refresh failed; using existing token",
+                    extra={"token_name": token_name, "error": str(exc)},
+                )
+
+        if not oauth_token.access_token:
+            return ProviderResponse.create_error(
+                error_code="authentication_error",
+                error_message=(
+                    f"OAuth token '{token_name}' does not have an access token."
+                ),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+
+        if oauth_token.type != OAuthTokenType.CODEX:
+            return ProviderResponse.create_error(
+                error_code="authentication_error",
+                error_message=(
+                    f"OAuth token '{token_name}' has unsupported type '{oauth_token.type.value}'."
+                ),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+
+        if stream:
+            logger.debug(
+                "[openai_client] OAuth Codex path does not support streaming; using non-stream request",
+                extra={"model": model_profile.model},
+            )
+
+        openai_tools = await build_openai_tool_schemas(tools)
+        openai_messages: List[Dict[str, object]] = [
+            {"role": "system", "content": system_prompt}
+        ] + sanitize_tool_history(list(normalized_messages))
+        thinking_extra_body, thinking_top_level = _build_thinking_kwargs(
+            model_profile, max_thinking_tokens
+        )
+        payload = _build_openai_request_kwargs(
+            model_profile=model_profile,
+            openai_messages=openai_messages,
+            openai_tools=openai_tools,
+            thinking_top_level=thinking_top_level,
+            thinking_extra_body=thinking_extra_body,
+            stream=False,
+        )
+        payload = {key: value for key, value in payload.items() if value is not None}
+        if "stream" in payload:
+            payload.pop("stream", None)
+        if "stream_options" in payload:
+            payload.pop("stream_options", None)
+
+        headers = {
+            "Authorization": f"Bearer {oauth_token.access_token}",
+            "User-Agent": build_user_agent(),
+            "originator": "ripperdoc",
+        }
+        if oauth_token.account_id:
+            headers["ChatGPT-Account-Id"] = oauth_token.account_id
+
+        timeout = request_timeout if request_timeout and request_timeout > 0 else 120.0
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async def _request() -> httpx.Response:
+                return await client.post(
+                    _CODEX_OAUTH_ENDPOINT,
+                    json=payload,
+                    headers=headers,
+                )
+
+            response = await call_with_timeout_and_retries(
+                lambda: _run_with_provider_error_mapping(_request),
+                request_timeout,
+                max_retries,
+            )
+
+        duration_ms = (time.time() - start_time) * 1000
+        response_metadata: Dict[str, Any] = {
+            "oauth_token_name": token_name,
+            "oauth_token_type": oauth_token.type.value,
+            "http_status": response.status_code,
+        }
+
+        raw_text = response.text or ""
+        payload_json: Dict[str, Any] = {}
+        if raw_text:
+            try:
+                maybe_json = response.json()
+                if isinstance(maybe_json, dict):
+                    payload_json = maybe_json
+            except ValueError:
+                payload_json = {}
+
+        if response.status_code >= 400:
+            message = (
+                payload_json.get("error", {}).get("message")
+                if isinstance(payload_json.get("error"), dict)
+                else None
+            ) or raw_text or f"HTTP {response.status_code}"
+            mapped = map_api_status_error(str(message), response.status_code)
+            code, msg = classify_mapped_error(mapped) or ("api_error", str(mapped))
+            return ProviderResponse.create_error(
+                error_code=code,
+                error_message=msg,
+                duration_ms=duration_ms,
+            )
+
+        usage_tokens = openai_usage_tokens(payload_json.get("usage"))
+        cost_usd = estimate_cost_usd(model_profile, usage_tokens)
+        record_usage(
+            model_profile.model,
+            duration_ms=duration_ms,
+            cost_usd=cost_usd,
+            **usage_tokens,
+        )
+
+        content_blocks: List[Dict[str, Any]] = []
+        response_choices = payload_json.get("choices")
+        if isinstance(response_choices, list) and response_choices:
+            try:
+                choice_obj = _to_namespace(response_choices[0])
+                content_blocks = content_blocks_from_openai_choice(choice_obj, tool_mode)
+            except Exception:
+                content_blocks = []
+        if not content_blocks:
+            content_blocks = _extract_text_from_responses_payload(payload_json)
+        if not content_blocks and raw_text:
+            content_blocks = [{"type": "text", "text": raw_text}]
+        if not content_blocks:
+            content_blocks = [{"type": "text", "text": "Model returned no content."}]
+
+        if progress_callback:
+            for block in content_blocks:
+                if block.get("type") == "text" and isinstance(block.get("text"), str):
+                    await _safe_emit_progress(progress_callback, cast(str, block["text"]))
 
         return ProviderResponse(
             content_blocks=content_blocks,

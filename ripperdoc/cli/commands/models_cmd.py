@@ -19,6 +19,11 @@ from ripperdoc.core.config import (
     model_supports_vision,
     set_model_pointer,
 )
+from ripperdoc.core.oauth import (
+    OAuthTokenType,
+    list_oauth_tokens,
+    oauth_models_for_type,
+)
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.prompt import prompt_secret
 
@@ -35,6 +40,112 @@ _KNOWN_THINKING_MODES = {
     "off",
     "disabled",
 }
+
+
+def _prompt_oauth_token_selection(
+    console: Any, default_name: Optional[str]
+) -> tuple[Optional[str], Optional[OAuthTokenType]]:
+    tokens = list_oauth_tokens()
+    if not tokens:
+        console.print(
+            "[red]No OAuth tokens configured. Add one with /oauth add <name> first.[/red]"
+        )
+        return None, None
+
+    # For now only codex token type is supported for model OAuth provider usage.
+    supported = {
+        name: token for name, token in tokens.items() if token.type == OAuthTokenType.CODEX
+    }
+    if not supported:
+        console.print(
+            "[red]No supported OAuth tokens found. Add a codex token with /oauth add <name>.[/red]"
+        )
+        return None, None
+
+    names = list(supported.keys())
+    default_index = 1
+    if default_name and default_name in supported:
+        default_index = names.index(default_name) + 1
+
+    console.print("[bold]Available OAuth tokens:[/bold]")
+    for idx, name in enumerate(names, start=1):
+        token = supported[name]
+        masked = (
+            f"{token.access_token[:4]}…{token.access_token[-2:]}"
+            if len(token.access_token) > 8
+            else "***"
+        )
+        console.print(
+            f"  {idx}. {escape(name)} ({token.type.value}, access={escape(masked)})"
+        )
+
+    raw = console.input(f"OAuth token [{default_index}]: ").strip()
+    if not raw:
+        selected = names[default_index - 1]
+        token = supported[selected]
+        return selected, token.type
+
+    if raw.isdigit():
+        idx = int(raw)
+        if 1 <= idx <= len(names):
+            selected = names[idx - 1]
+            token = supported[selected]
+            return selected, token.type
+        console.print("[red]Invalid selection.[/red]")
+        return None, None
+
+    if raw in supported:
+        token = supported[raw]
+        return raw, token.type
+
+    lowered = raw.lower()
+    for name in names:
+        if name.lower() == lowered:
+            token = supported[name]
+            return name, token.type
+
+    console.print("[red]OAuth token not found.[/red]")
+    return None, None
+
+
+def _prompt_oauth_model_selection(
+    console: Any, token_type: OAuthTokenType, default_model: Optional[str]
+) -> str:
+    options = oauth_models_for_type(token_type)
+    if not options:
+        fallback = default_model or "gpt-5.3-codex"
+        console.print(
+            f"[yellow]No curated OAuth model list for type '{escape(token_type.value)}'; using '{escape(fallback)}'.[/yellow]"
+        )
+        return fallback
+
+    default_index = 1
+    if default_model:
+        for idx, option in enumerate(options, start=1):
+            if option.model == default_model:
+                default_index = idx
+                break
+
+    console.print("[bold]OAuth models:[/bold]")
+    for idx, option in enumerate(options, start=1):
+        console.print(f"  {idx}. {escape(option.label)}  {escape(option.description)}")
+
+    raw = console.input(f"Model [{default_index}]: ").strip()
+    if not raw:
+        return options[default_index - 1].model
+    if raw.isdigit():
+        idx = int(raw)
+        if 1 <= idx <= len(options):
+            return options[idx - 1].model
+        console.print("[yellow]Invalid selection, keeping default model.[/yellow]")
+        return options[default_index - 1].model
+
+    lowered = raw.lower()
+    for option in options:
+        if option.model.lower() == lowered:
+            return option.model
+    console.print("[yellow]Unknown model, keeping default model.[/yellow]")
+    return options[default_index - 1].model
 
 
 def _resolve_thinking_mode_input(
@@ -193,33 +304,56 @@ def _collect_add_profile_input(
         if existing_profile
         else (current_profile.model if current_profile else "")
     )
-    model_prompt = f"Model name to send{f' [{default_model}]' if default_model else ''}: "
-    model_name = console.input(model_prompt).strip() or default_model
-    if not model_name:
-        console.print("[red]Model name is required.[/red]")
-        return None, False
-
-    inferred_profile = ModelProfile(protocol=protocol, model=model_name)
-
-    api_key_input = prompt_secret("API key (leave blank to keep unset)").strip()
-    api_key = api_key_input or (existing_profile.api_key if existing_profile else None)
-
-    auth_token = existing_profile.auth_token if existing_profile else None
-    if protocol == ProtocolType.ANTHROPIC:
-        auth_token_input = prompt_secret(
-            "Auth token (Anthropic only, leave blank to keep unset)"
-        ).strip()
-        auth_token = auth_token_input or auth_token
-    else:
+    oauth_token_name: Optional[str] = None
+    oauth_token_type: Optional[OAuthTokenType] = None
+    if protocol == ProtocolType.OAUTH:
+        oauth_default_name = (
+            existing_profile.oauth_token_name
+            if existing_profile
+            else (current_profile.oauth_token_name if current_profile else None)
+        )
+        oauth_name, oauth_type = _prompt_oauth_token_selection(console, oauth_default_name)
+        if not oauth_name or not oauth_type:
+            return None, False
+        oauth_token_name = oauth_name
+        oauth_token_type = oauth_type
+        model_name = _prompt_oauth_model_selection(console, oauth_type, default_model)
+        api_key = None
         auth_token = None
+        api_base = None
+    else:
+        model_prompt = f"Model name to send{f' [{default_model}]' if default_model else ''}: "
+        model_name = console.input(model_prompt).strip() or default_model
+        if not model_name:
+            console.print("[red]Model name is required.[/red]")
+            return None, False
 
-    api_base_default = existing_profile.api_base if existing_profile else ""
-    api_base = (
-        console.input(
-            f"API base (optional){f' [{api_base_default}]' if api_base_default else ''}: "
-        ).strip()
-        or api_base_default
-        or None
+        api_key_input = prompt_secret("API key (leave blank to keep unset)").strip()
+        api_key = api_key_input or (existing_profile.api_key if existing_profile else None)
+
+        auth_token = existing_profile.auth_token if existing_profile else None
+        if protocol == ProtocolType.ANTHROPIC:
+            auth_token_input = prompt_secret(
+                "Auth token (Anthropic only, leave blank to keep unset)"
+            ).strip()
+            auth_token = auth_token_input or auth_token
+        else:
+            auth_token = None
+
+        api_base_default = existing_profile.api_base if existing_profile else ""
+        api_base = (
+            console.input(
+                f"API base (optional){f' [{api_base_default}]' if api_base_default else ''}: "
+            ).strip()
+            or api_base_default
+            or None
+        )
+
+    inferred_profile = ModelProfile(
+        protocol=protocol,
+        model=model_name,
+        oauth_token_name=oauth_token_name,
+        oauth_token_type=oauth_token_type,
     )
 
     max_input_default = (
@@ -319,6 +453,8 @@ def _collect_add_profile_input(
         temperature=temperature,
         thinking_mode=thinking_mode,
         auth_token=auth_token,
+        oauth_token_name=oauth_token_name,
+        oauth_token_type=oauth_token_type,
         supports_vision=supports_vision,
         price={"input": input_price, "output": output_price},
         currency=currency,
@@ -336,39 +472,54 @@ def _collect_edit_profile_input(
     if protocol is None:
         return None
 
-    model_name = (
-        console.input(f"Model name to send [{existing_profile.model}]: ").strip()
-        or existing_profile.model
-    )
-
-    api_key_label = "[set]" if existing_profile.api_key else "[not set]"
-    api_key_prompt = f"API key {api_key_label} (Enter=keep, '-'=clear)"
-    api_key_input = prompt_secret(api_key_prompt).strip()
-    if api_key_input == "-":
+    oauth_token_name: Optional[str] = None
+    oauth_token_type: Optional[OAuthTokenType] = None
+    if protocol == ProtocolType.OAUTH:
+        oauth_name, oauth_type = _prompt_oauth_token_selection(
+            console, existing_profile.oauth_token_name
+        )
+        if not oauth_name or not oauth_type:
+            return None
+        oauth_token_name = oauth_name
+        oauth_token_type = oauth_type
+        model_name = _prompt_oauth_model_selection(console, oauth_type, existing_profile.model)
         api_key = None
-    elif api_key_input:
-        api_key = api_key_input
-    else:
-        api_key = existing_profile.api_key
-
-    auth_token = existing_profile.auth_token
-    if protocol == ProtocolType.ANTHROPIC or existing_profile.protocol == ProtocolType.ANTHROPIC:
-        auth_label = "[set]" if auth_token else "[not set]"
-        auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear)"
-        auth_token_input = prompt_secret(auth_prompt).strip()
-        if auth_token_input == "-":
-            auth_token = None
-        elif auth_token_input:
-            auth_token = auth_token_input
-    else:
         auth_token = None
-
-    api_base = (
-        console.input(f"API base (optional) [{existing_profile.api_base or ''}]: ").strip()
-        or existing_profile.api_base
-    )
-    if api_base == "":
         api_base = None
+    else:
+        model_name = (
+            console.input(f"Model name to send [{existing_profile.model}]: ").strip()
+            or existing_profile.model
+        )
+
+        api_key_label = "[set]" if existing_profile.api_key else "[not set]"
+        api_key_prompt = f"API key {api_key_label} (Enter=keep, '-'=clear)"
+        api_key_input = prompt_secret(api_key_prompt).strip()
+        if api_key_input == "-":
+            api_key = None
+        elif api_key_input:
+            api_key = api_key_input
+        else:
+            api_key = existing_profile.api_key
+
+        auth_token = existing_profile.auth_token
+        if protocol == ProtocolType.ANTHROPIC or existing_profile.protocol == ProtocolType.ANTHROPIC:
+            auth_label = "[set]" if auth_token else "[not set]"
+            auth_prompt = f"Auth token (Anthropic only) {auth_label} (Enter=keep, '-'=clear)"
+            auth_token_input = prompt_secret(auth_prompt).strip()
+            if auth_token_input == "-":
+                auth_token = None
+            elif auth_token_input:
+                auth_token = auth_token_input
+        else:
+            auth_token = None
+
+        api_base = (
+            console.input(f"API base (optional) [{existing_profile.api_base or ''}]: ").strip()
+            or existing_profile.api_base
+        )
+        if api_base == "":
+            api_base = None
 
     max_input_label = (
         str(existing_profile.max_input_tokens)
@@ -443,6 +594,8 @@ def _collect_edit_profile_input(
         temperature=temperature,
         thinking_mode=thinking_mode,
         auth_token=auth_token,
+        oauth_token_name=oauth_token_name,
+        oauth_token_type=oauth_token_type,
         supports_vision=supports_vision,
         price={"input": input_price, "output": output_price},
         currency=currency,
@@ -490,7 +643,19 @@ def _render_models_plain(console: Any, config: Any) -> None:
             f"      price: in={profile.price.input}/1M, out={profile.price.output}/1M ({profile.currency})",
             markup=False,
         )
-        console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}", markup=False)
+        if profile.protocol == ProtocolType.OAUTH:
+            token_name = profile.oauth_token_name or "Not set"
+            token_type = (
+                profile.oauth_token_type.value
+                if profile.oauth_token_type is not None
+                else OAuthTokenType.CODEX.value
+            )
+            console.print(
+                f"      oauth_token: {token_name} ({token_type})",
+                markup=False,
+            )
+        else:
+            console.print(f"      api_key: {'***' if profile.api_key else 'Not set'}", markup=False)
         if profile.protocol == ProtocolType.ANTHROPIC:
             console.print(
                 f"      auth_token: {'***' if getattr(profile, 'auth_token', None) else 'Not set'}",
@@ -533,9 +698,15 @@ def _render_models_table(console: Any, config: Any) -> None:
         vision_display = _vision_labels(profile)[0]
         thinking_display = profile.thinking_mode or "auto"
         api_base = profile.api_base or "-"
-        if profile.api_base:
+        if profile.protocol == ProtocolType.OAUTH:
+            api_base = "-"
+        elif profile.api_base:
             api_base = textwrap.shorten(profile.api_base, width=28, placeholder="...")
-        key_display = "set" if profile.api_key else "-"
+        if profile.protocol == ProtocolType.OAUTH:
+            token_name = profile.oauth_token_name or "-"
+            key_display = f"oauth:{token_name}"
+        else:
+            key_display = "set" if profile.api_key else "-"
         table.add_row(
             escape(name),
             pointer_label,
@@ -570,7 +741,10 @@ def _build_model_details_panel(
     details.add_row("Pointers", escape(marker_text))
     details.add_row("Protocol", escape(profile.protocol.value))
     details.add_row("Model", escape(profile.model))
-    details.add_row("API base", escape(profile.api_base or "-"))
+    if profile.protocol == ProtocolType.OAUTH:
+        details.add_row("API base", "-")
+    else:
+        details.add_row("API base", escape(profile.api_base or "-"))
     details.add_row(
         "Max input tokens",
         escape(str(profile.max_input_tokens) if profile.max_input_tokens else "auto"),
@@ -588,7 +762,18 @@ def _build_model_details_panel(
         ),
     )
     details.add_row("Vision", escape(vision_detail if vision_short == "auto" else vision_short))
-    details.add_row("API key", "set" if profile.api_key else "unset")
+    if profile.protocol == ProtocolType.OAUTH:
+        token_type = (
+            profile.oauth_token_type.value
+            if profile.oauth_token_type is not None
+            else OAuthTokenType.CODEX.value
+        )
+        details.add_row(
+            "OAuth token",
+            escape(f"{profile.oauth_token_name or 'unset'} ({token_type})"),
+        )
+    else:
+        details.add_row("API key", "set" if profile.api_key else "unset")
     if profile.protocol == ProtocolType.ANTHROPIC:
         details.add_row("Auth token", "set" if getattr(profile, "auth_token", None) else "unset")
     if profile.openai_tool_mode:

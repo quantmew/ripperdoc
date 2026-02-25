@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, cast
 
 from rich.markup import escape
 from rich.panel import Panel
@@ -17,6 +17,7 @@ from ripperdoc.core.config import (
     get_ripperdoc_env_status,
     has_ripperdoc_env_overrides,
 )
+from ripperdoc.core.oauth import get_oauth_token
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.mcp import load_mcp_servers_async
@@ -39,15 +40,25 @@ def _status_row(label: str, status: str, detail: str = "") -> Tuple[str, str, st
     return (label, icon, detail)
 
 
-def _api_key_status(protocol: ProtocolType, profile_key: Optional[str]) -> Tuple[str, str]:
+def _api_key_status(profile: Any) -> Tuple[str, str]:
     """Check API key presence and source."""
     import os
+
+    protocol = cast(ProtocolType, getattr(profile, "protocol", ProtocolType.OPENAI_COMPATIBLE))
+    if protocol == ProtocolType.OAUTH:
+        token_name = str(getattr(profile, "oauth_token_name", "") or "")
+        if token_name and get_oauth_token(token_name):
+            return ("ok", f"OAuth token '{token_name}' is configured")
+        if token_name:
+            return ("error", f"OAuth token '{token_name}' is missing; configure it with /oauth")
+        return ("error", "OAuth token missing; configure it with /oauth add <name>")
 
     # First check global RIPPERDOC_API_KEY
     if ripperdoc_api_key := os.getenv("RIPPERDOC_API_KEY"):
         masked = ripperdoc_api_key[:4] + "…" if len(ripperdoc_api_key) > 4 else "set"
         return ("ok", f"Found in $RIPPERDOC_API_KEY ({masked})")
 
+    profile_key = cast(Optional[str], getattr(profile, "api_key", None))
     if profile_key:
         return ("ok", "Stored in config profile")
 
@@ -82,7 +93,7 @@ def _model_status(project_path: Path) -> List[Tuple[str, str, str]]:
         )
     )
 
-    key_status, key_detail = _api_key_status(profile.protocol, profile.api_key)
+    key_status, key_detail = _api_key_status(profile)
     rows.append(_status_row("API key", key_status, key_detail))
     return rows
 

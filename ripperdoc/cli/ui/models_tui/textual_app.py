@@ -32,6 +32,11 @@ from ripperdoc.core.config import (
     model_supports_vision,
     set_model_pointer,
 )
+from ripperdoc.core.oauth import (
+    OAuthTokenType,
+    list_oauth_tokens,
+    oauth_models_for_type,
+)
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 
 _KNOWN_THINKING_MODES = {
@@ -95,6 +100,24 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         self._default_set_quick = default_set_quick
         self._error_text: Optional[str] = None
 
+    def _oauth_token_select_options(
+        self, selected_name: Optional[str]
+    ) -> list[tuple[str, str]]:
+        tokens = list_oauth_tokens()
+        options: list[tuple[str, str]] = []
+        for name, token in tokens.items():
+            if token.type != OAuthTokenType.CODEX:
+                continue
+            masked = (
+                f"{token.access_token[:4]}…{token.access_token[-2:]}"
+                if len(token.access_token) > 8
+                else "***"
+            )
+            options.append((f"{name} ({token.type.value}, {masked})", name))
+        if not options and selected_name:
+            options.append((f"{selected_name} (missing)", selected_name))
+        return options
+
     def compose(self) -> ComposeResult:
         title = "Add model" if self._mode == "add" else "Edit model"
         with Container(id="form_dialog"):
@@ -125,19 +148,43 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 model_default = (
                     self._existing_profile.model if self._existing_profile else ""
                 )
-                yield Static("Model name", classes="field_label")
+                yield Static("Model name", classes="field_label", id="model_input_label")
                 yield Input(value=model_default, placeholder="Model name", id="model_input")
+                oauth_model_options = [
+                    (option.label, option.model)
+                    for option in oauth_models_for_type(OAuthTokenType.CODEX)
+                ]
+                oauth_model_default = (
+                    model_default
+                    if any(value == model_default for _label, value in oauth_model_options)
+                    else (oauth_model_options[0][1] if oauth_model_options else Select.BLANK)
+                )
+                yield Select(
+                    oauth_model_options if oauth_model_options else [("No OAuth models", Select.BLANK)],
+                    value=oauth_model_default,
+                    id="oauth_model_select",
+                )
 
-                api_key_placeholder = "[set]" if (self._existing_profile and self._existing_profile.api_key) else "[not set]"
-                yield Static("API key", classes="field_label")
+                api_key_placeholder = (
+                    "[set]" if (self._existing_profile and self._existing_profile.api_key) else "[not set]"
+                )
+                yield Static("API key", classes="field_label", id="api_key_label")
                 yield Input(
                     placeholder=f"API key {api_key_placeholder} (blank=keep, '-'=clear)",
                     password=True,
                     id="api_key_input",
                 )
 
-                auth_placeholder = "[set]" if (self._existing_profile and self._existing_profile.auth_token) else "[not set]"
-                yield Static("Auth token (Anthropic only)", classes="field_label")
+                auth_placeholder = (
+                    "[set]"
+                    if (self._existing_profile and self._existing_profile.auth_token)
+                    else "[not set]"
+                )
+                yield Static(
+                    "Auth token (Anthropic only)",
+                    classes="field_label",
+                    id="auth_token_label",
+                )
                 yield Input(
                     placeholder=f"Auth token (Anthropic only) {auth_placeholder} (blank=keep, '-'=clear)",
                     password=True,
@@ -145,11 +192,26 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 )
 
                 api_base_default = self._existing_profile.api_base if self._existing_profile else ""
-                yield Static("API base", classes="field_label")
+                yield Static("API base", classes="field_label", id="api_base_label")
                 yield Input(
                     value=api_base_default or "",
                     placeholder="API base (optional)",
                     id="api_base_input",
+                )
+
+                oauth_token_options = self._oauth_token_select_options(
+                    self._existing_profile.oauth_token_name if self._existing_profile else None
+                )
+                oauth_token_value = oauth_token_options[0][1] if oauth_token_options else Select.BLANK
+                if self._existing_profile and self._existing_profile.oauth_token_name:
+                    existing_name = self._existing_profile.oauth_token_name
+                    if any(value == existing_name for _label, value in oauth_token_options):
+                        oauth_token_value = existing_name
+                yield Static("OAuth token", classes="field_label", id="oauth_token_label")
+                yield Select(
+                    oauth_token_options if oauth_token_options else [("No OAuth tokens", Select.BLANK)],
+                    value=oauth_token_value,
+                    id="oauth_token_select",
                 )
 
                 max_input_tokens_default = (
@@ -276,6 +338,56 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 yield Button("Save", id="form_save", variant="primary")
                 yield Button("Cancel", id="form_cancel")
 
+    def on_mount(self) -> None:
+        self._refresh_provider_fields()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "provider_select":
+            self._refresh_provider_fields()
+
+    def _set_widget_visible(self, selector: str, visible: bool) -> None:
+        try:
+            widget = self.query_one(selector)
+        except Exception:
+            return
+        try:
+            widget.display = visible
+        except Exception:
+            try:
+                widget.styles.display = "block" if visible else "none"
+            except Exception:
+                pass
+
+    def _refresh_provider_fields(self) -> None:
+        provider_select = self.query_one("#provider_select", Select)
+        provider_raw = provider_select.value
+        provider_value = provider_raw.strip() if isinstance(provider_raw, str) else ""
+        try:
+            protocol = ProtocolType(provider_value)
+        except ValueError:
+            protocol = ProtocolType.OPENAI_COMPATIBLE
+
+        is_oauth = protocol == ProtocolType.OAUTH
+        is_anthropic = protocol == ProtocolType.ANTHROPIC
+
+        self._set_widget_visible("#model_input", not is_oauth)
+        self._set_widget_visible("#oauth_model_select", is_oauth)
+        self._set_widget_visible("#oauth_token_label", is_oauth)
+        self._set_widget_visible("#oauth_token_select", is_oauth)
+
+        self._set_widget_visible("#api_key_label", not is_oauth)
+        self._set_widget_visible("#api_key_input", not is_oauth)
+        self._set_widget_visible("#api_base_label", not is_oauth)
+        self._set_widget_visible("#api_base_input", not is_oauth)
+        self._set_widget_visible("#auth_token_label", (not is_oauth) and is_anthropic)
+        self._set_widget_visible("#auth_token_input", (not is_oauth) and is_anthropic)
+
+        try:
+            model_label = self.query_one("#model_input_label", Static)
+            model_label.update("Model (OAuth preset)" if is_oauth else "Model name")
+        except Exception:
+            pass
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "form_cancel":
             self.dismiss(None)
@@ -286,6 +398,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         name_input = self.query_one("#name_input", Input) if self._mode == "add" else None
         provider_select = self.query_one("#provider_select", Select)
         model_input = self.query_one("#model_input", Input)
+        oauth_model_select = self.query_one("#oauth_model_select", Select)
+        oauth_token_select = self.query_one("#oauth_token_select", Select)
         api_key_input = self.query_one("#api_key_input", Input)
         auth_token_input = self.query_one("#auth_token_input", Input)
         api_base_input = self.query_one("#api_base_input", Input)
@@ -315,40 +429,71 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             self._set_error("Invalid protocol.")
             return
 
-        model_name = (model_input.value or "").strip()
+        oauth_token_name: Optional[str] = None
+        oauth_token_type: Optional[OAuthTokenType] = None
+        if protocol == ProtocolType.OAUTH:
+            oauth_model_raw = oauth_model_select.value
+            model_name = (
+                oauth_model_raw.strip()
+                if isinstance(oauth_model_raw, str)
+                else ""
+            )
+            oauth_token_raw = oauth_token_select.value
+            oauth_token_name = (
+                oauth_token_raw.strip()
+                if isinstance(oauth_token_raw, str)
+                else ""
+            )
+            token = list_oauth_tokens().get(oauth_token_name or "")
+            if not oauth_token_name or token is None:
+                self._set_error("Select a valid OAuth token first.")
+                return
+            oauth_token_type = token.type
+        else:
+            model_name = (model_input.value or "").strip()
         if not model_name:
             self._set_error("Model name is required.")
             return
-        inferred_profile = ModelProfile(protocol=protocol, model=model_name)
+        inferred_profile = ModelProfile(
+            protocol=protocol,
+            model=model_name,
+            oauth_token_name=oauth_token_name,
+            oauth_token_type=oauth_token_type,
+        )
 
-        api_key_raw = (api_key_input.value or "").strip()
-        if self._existing_profile:
-            if api_key_raw == "-":
-                api_key = None
-            elif api_key_raw:
-                api_key = api_key_raw
-            else:
-                api_key = self._existing_profile.api_key
-        else:
-            api_key = api_key_raw or None
-
-        auth_token_raw = (auth_token_input.value or "").strip()
-        if protocol == ProtocolType.ANTHROPIC or (
-            self._existing_profile and self._existing_profile.protocol == ProtocolType.ANTHROPIC
-        ):
-            if self._existing_profile:
-                if auth_token_raw == "-":
-                    auth_token = None
-                elif auth_token_raw:
-                    auth_token = auth_token_raw
-                else:
-                    auth_token = self._existing_profile.auth_token
-            else:
-                auth_token = auth_token_raw or None
-        else:
+        if protocol == ProtocolType.OAUTH:
+            api_key = None
             auth_token = None
+            api_base = None
+        else:
+            api_key_raw = (api_key_input.value or "").strip()
+            if self._existing_profile:
+                if api_key_raw == "-":
+                    api_key = None
+                elif api_key_raw:
+                    api_key = api_key_raw
+                else:
+                    api_key = self._existing_profile.api_key
+            else:
+                api_key = api_key_raw or None
 
-        api_base = (api_base_input.value or "").strip() or None
+            auth_token_raw = (auth_token_input.value or "").strip()
+            if protocol == ProtocolType.ANTHROPIC or (
+                self._existing_profile and self._existing_profile.protocol == ProtocolType.ANTHROPIC
+            ):
+                if self._existing_profile:
+                    if auth_token_raw == "-":
+                        auth_token = None
+                    elif auth_token_raw:
+                        auth_token = auth_token_raw
+                    else:
+                        auth_token = self._existing_profile.auth_token
+                else:
+                    auth_token = auth_token_raw or None
+            else:
+                auth_token = None
+
+            api_base = (api_base_input.value or "").strip() or None
 
         max_input_tokens_default = (
             self._existing_profile.max_input_tokens
@@ -451,6 +596,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             api_key=api_key,
             auth_token=auth_token,
             api_base=api_base,
+            oauth_token_name=oauth_token_name,
+            oauth_token_type=oauth_token_type,
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
             max_tokens=max_tokens,
@@ -836,7 +983,8 @@ class ModelsApp(App[None]):
         table.add_row("Pointers", marker_text)
         table.add_row("Protocol", profile.protocol.value)
         table.add_row("Model", profile.model)
-        table.add_row("API base", profile.api_base or "-")
+        api_base_display = "-" if profile.protocol == ProtocolType.OAUTH else (profile.api_base or "-")
+        table.add_row("API base", api_base_display)
         table.add_row(
             "Max input tokens",
             str(profile.max_input_tokens) if profile.max_input_tokens else "auto",
@@ -852,7 +1000,15 @@ class ModelsApp(App[None]):
             f"in={profile.price.input}/1M, out={profile.price.output}/1M ({profile.currency})",
         )
         table.add_row("Vision", vision_display)
-        table.add_row("API key", "set" if profile.api_key else "unset")
+        if profile.protocol == ProtocolType.OAUTH:
+            token_type = (
+                profile.oauth_token_type.value
+                if profile.oauth_token_type is not None
+                else OAuthTokenType.CODEX.value
+            )
+            table.add_row("OAuth token", f"{profile.oauth_token_name or 'unset'} ({token_type})")
+        else:
+            table.add_row("API key", "set" if profile.api_key else "unset")
         if profile.protocol == ProtocolType.ANTHROPIC:
             table.add_row(
                 "Auth token",
