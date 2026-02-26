@@ -81,10 +81,7 @@ class IdleNotification:
 
 @dataclass
 class InProcessTeammateState:
-    """State tracking for an in-process teammate.
-
-    This mirrors Claude Code's in_process_teammate task state structure.
-    """
+    """State tracking for an in-process teammate."""
 
     id: str
     identity: TeammateIdentity

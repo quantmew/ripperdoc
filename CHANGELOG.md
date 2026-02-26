@@ -5,6 +5,23 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-02-26
+
+### Added
+- **Session rename command** - New `/rename` command for changing session title during conversation
+- **Codex OAuth authentication** - OAuth authentication support for Codex models with improved API handling
+- **Extended OAuth providers** - OAuth support for Copilot and GitLab providers
+- **Unified User-Agent header** - Consistent User-Agent header across all API requests for better tracking
+- **Custom SDK version** - Support for custom SDK version via `RIPPERDOC_SDK_VERSION` environment variable
+- **In-process teammate state** - State management for multi-agent team coordination
+
+### Changed
+- **Diff rendering utilities** - Extracted diff rendering into reusable utilities module
+- **Task graph renderer** - Simplified by removing hidden task count display
+
+### Fixed
+- **Compound command parsing** - Improved parsing for read-only shell checks in compound commands (e.g., `cd dir && ls`)
+
 ## [0.4.4] - 2026-02-23
 
 ### Added
@@ -419,6 +436,7 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.4.5]: https://github.com/quantmew/Ripperdoc/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/quantmew/Ripperdoc/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/quantmew/Ripperdoc/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/quantmew/Ripperdoc/compare/v0.4.1...v0.4.2

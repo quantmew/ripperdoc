@@ -103,7 +103,7 @@ class AgentRunRecord:
     team_name: Optional[str] = None
     teammate_name: Optional[str] = None
 
-    # Idle state management (Claude Code in_process_teammate compatibility)
+    # Idle state management
     is_idle: bool = False
     pending_user_messages: List[str] = field(default_factory=list)
     on_idle_callbacks: List[Callable[[], None]] = field(default_factory=list)
