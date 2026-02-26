@@ -26,6 +26,10 @@ from ripperdoc.core.providers.openai import (
     _consume_stream_chunk,
     _run_with_provider_error_mapping,
 )
+from ripperdoc.core.providers.openai_responses import (
+    build_input_from_normalized_messages,
+    extract_content_blocks_from_output,
+)
 
 
 @pytest.mark.asyncio
@@ -233,7 +237,10 @@ async def test_remote_protocol_error_is_mapped_and_retried(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_oauth_profile_missing_token_returns_auth_error(monkeypatch) -> None:
-    monkeypatch.setattr("ripperdoc.core.providers.openai.get_oauth_token", lambda _name: None)
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai_oauth_codex.get_oauth_token",
+        lambda _name: None,
+    )
 
     client = OpenAIClient()
     profile = ModelProfile(
@@ -258,6 +265,287 @@ async def test_oauth_profile_missing_token_returns_auth_error(monkeypatch) -> No
     assert result.error_code == "authentication_error"
 
 
+@pytest.mark.asyncio
+async def test_non_oauth_mode_responses_uses_responses_api(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeResponseObject:
+        usage = {"input_tokens": 2, "output_tokens": 3}
+        output_text = "hello from responses"
+        status = "completed"
+
+        @staticmethod
+        def model_dump(*, exclude_none: bool = True) -> dict[str, object]:  # noqa: ARG004
+            return {
+                "status": "completed",
+                "usage": {"input_tokens": 2, "output_tokens": 3},
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "hello from responses"}],
+                    }
+                ],
+            }
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs: object) -> None:  # noqa: ARG002
+            self.responses = SimpleNamespace(create=self._responses_create)
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self._chat_create),
+            )
+
+        async def __aenter__(self) -> "_FakeAsyncOpenAI":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+        async def _responses_create(self, **kwargs: object) -> _FakeResponseObject:
+            captured["responses_kwargs"] = kwargs
+            return _FakeResponseObject()
+
+        async def _chat_create(self, **kwargs: object) -> object:  # noqa: ARG002
+            raise AssertionError("chat.completions.create should not be used for mode=responses")
+
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai_non_oauth_strategies.AsyncOpenAI",
+        _FakeAsyncOpenAI,
+    )
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="gpt-5",
+        mode="responses",
+        api_key="sk-test",
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[{"role": "user", "content": "hello"}],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is False
+    assert result.content_blocks == [{"type": "text", "text": "hello from responses"}]
+    assert result.metadata.get("status") == "completed"
+    kwargs = cast(dict[str, object], captured["responses_kwargs"])
+    assert kwargs["model"] == "gpt-5"
+    assert kwargs["instructions"] == "You are a test assistant."
+    assert isinstance(kwargs.get("input"), list)
+    assert "messages" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_non_oauth_mode_responses_assistant_history_uses_output_text_and_phase(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeResponseObject:
+        usage = {"input_tokens": 1, "output_tokens": 1}
+        output_text = "ok"
+        status = "completed"
+
+        @staticmethod
+        def model_dump(*, exclude_none: bool = True) -> dict[str, object]:  # noqa: ARG004
+            return {
+                "status": "completed",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "ok"}],
+                    }
+                ],
+            }
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs: object) -> None:  # noqa: ARG002
+            self.responses = SimpleNamespace(create=self._responses_create)
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._chat_create))
+
+        async def __aenter__(self) -> "_FakeAsyncOpenAI":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+        async def _responses_create(self, **kwargs: object) -> _FakeResponseObject:
+            captured["responses_kwargs"] = kwargs
+            return _FakeResponseObject()
+
+        async def _chat_create(self, **kwargs: object) -> object:  # noqa: ARG002
+            raise AssertionError("chat.completions.create should not be used for mode=responses")
+
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai_non_oauth_strategies.AsyncOpenAI",
+        _FakeAsyncOpenAI,
+    )
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="gpt-5",
+        mode="responses",
+        api_key="sk-test",
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[{"role": "assistant", "content": "hello", "phase": "commentary"}],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is False
+    kwargs = cast(dict[str, object], captured["responses_kwargs"])
+    payload_input = cast(list[dict[str, object]], kwargs.get("input"))
+    assert payload_input[0].get("phase") == "commentary"
+    content_blocks = cast(list[dict[str, object]], payload_input[0].get("content"))
+    assert content_blocks[0].get("type") == "output_text"
+
+
+@pytest.mark.asyncio
+async def test_non_oauth_mode_responses_error_payload_returns_error(monkeypatch) -> None:
+    class _FakeResponseObject:
+        usage = {"input_tokens": 0, "output_tokens": 0}
+        output_text = ""
+        status = "failed"
+
+        @staticmethod
+        def model_dump(*, exclude_none: bool = True) -> dict[str, object]:  # noqa: ARG004
+            return {
+                "status": "failed",
+                "error": {"message": "Invalid prompt"},
+            }
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs: object) -> None:  # noqa: ARG002
+            self.responses = SimpleNamespace(create=self._responses_create)
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self._chat_create),
+            )
+
+        async def __aenter__(self) -> "_FakeAsyncOpenAI":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+        async def _responses_create(self, **kwargs: object) -> _FakeResponseObject:  # noqa: ARG002
+            return _FakeResponseObject()
+
+        async def _chat_create(self, **kwargs: object) -> object:  # noqa: ARG002
+            raise AssertionError("chat.completions.create should not be used for mode=responses")
+
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai_non_oauth_strategies.AsyncOpenAI",
+        _FakeAsyncOpenAI,
+    )
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="gpt-5",
+        mode="responses",
+        api_key="sk-test",
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[{"role": "user", "content": "hello"}],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is True
+    assert result.error_code == "api_error"
+    assert result.error_message == "Invalid prompt"
+
+
+@pytest.mark.asyncio
+async def test_non_oauth_mode_chat_uses_chat_completions_api(monkeypatch) -> None:
+    calls = {"chat": 0, "responses": 0}
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs: object) -> None:  # noqa: ARG002
+            self.responses = SimpleNamespace(create=self._responses_create)
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self._chat_create),
+            )
+
+        async def __aenter__(self) -> "_FakeAsyncOpenAI":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+        async def _responses_create(self, **kwargs: object) -> object:  # noqa: ARG002
+            calls["responses"] += 1
+            raise AssertionError("responses.create should not be used for mode=chat")
+
+        async def _chat_create(self, **kwargs: object) -> object:
+            calls["chat"] += 1
+            return SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="stop",
+                        message=SimpleNamespace(
+                            content="hello from chat",
+                            tool_calls=[],
+                        ),
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai_non_oauth_strategies.AsyncOpenAI",
+        _FakeAsyncOpenAI,
+    )
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="gpt-4o-mini",
+        mode="chat",
+        api_key="sk-test",
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[{"role": "user", "content": "hello"}],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is False
+    assert calls["chat"] == 1
+    assert calls["responses"] == 0
+
+
 def test_build_codex_responses_input_flattens_messages() -> None:
     messages = [
         {"role": "user", "content": "Hello"},
@@ -273,6 +561,90 @@ def test_build_codex_responses_input_flattens_messages() -> None:
     assert payload[1]["content"][0]["type"] == "output_text"
     assert payload[2]["role"] == "assistant"
     assert payload[2]["content"][0]["text"] == "done"
+
+
+def test_build_responses_input_supports_assistant_phase_and_input_text() -> None:
+    payload = build_input_from_normalized_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "Interim thought",
+                "phase": "commentary",
+            }
+        ],
+        assistant_text_type="input_text",
+        include_phase=True,
+    )
+
+    assert payload[0]["role"] == "assistant"
+    assert payload[0]["content"][0]["type"] == "input_text"
+    assert payload[0]["phase"] == "commentary"
+
+
+def test_build_responses_input_converts_tool_history_to_structured_items() -> None:
+    payload = build_input_from_normalized_messages(
+        [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I will read the file."},
+                    {
+                        "type": "tool_use",
+                        "tool_use_id": "call_1",
+                        "name": "Read",
+                        "input": {"path": "README.md"},
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_1",
+                        "content": [{"type": "text", "text": "README content"}],
+                    },
+                    {"type": "text", "text": "continue"},
+                ],
+            },
+        ],
+        assistant_text_type="input_text",
+        include_phase=False,
+    )
+
+    assert payload[0] == {
+        "role": "assistant",
+        "content": [{"type": "input_text", "text": "I will read the file."}],
+    }
+    assert payload[1] == {
+        "type": "function_call",
+        "call_id": "call_1",
+        "name": "Read",
+        "arguments": '{"path":"README.md"}',
+    }
+    assert payload[2] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": "README content",
+    }
+    assert payload[3] == {
+        "role": "user",
+        "content": [{"type": "input_text", "text": "continue"}],
+    }
+
+
+def test_extract_content_blocks_from_output_handles_refusal_items() -> None:
+    payload = {
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "refusal", "refusal": "I can't help with that."}],
+            }
+        ]
+    }
+    blocks = extract_content_blocks_from_output(payload)
+
+    assert blocks == [{"type": "text", "text": "I can't help with that."}]
 
 
 def test_parse_codex_sse_events_and_extract_content() -> None:
@@ -370,11 +742,11 @@ async def test_oauth_codex_payload_sets_store_false(monkeypatch) -> None:
             )
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai.httpx.AsyncClient",
+        "ripperdoc.core.providers.openai_oauth_codex.httpx.AsyncClient",
         _FakeAsyncClient,
     )
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai.get_oauth_token",
+        "ripperdoc.core.providers.openai_oauth_codex.get_oauth_token",
         lambda _name: OAuthToken(
             type=OAuthTokenType.CODEX,
             access_token="abcd1234efgh",
@@ -393,7 +765,9 @@ async def test_oauth_codex_payload_sets_store_false(monkeypatch) -> None:
     result = await client.call(
         model_profile=profile,
         system_prompt="You are a test assistant.",
-        normalized_messages=[{"role": "user", "content": "hello"}],
+        normalized_messages=[
+            {"role": "assistant", "content": "hello", "phase": "commentary"},
+        ],
         tools=[],
         tool_mode="native",
         stream=False,
@@ -405,9 +779,14 @@ async def test_oauth_codex_payload_sets_store_false(monkeypatch) -> None:
 
     assert result.is_error is False
     assert isinstance(captured.get("payload"), dict)
-    assert cast(dict[str, object], captured["payload"]).get("store") is False
-    assert cast(dict[str, object], captured["payload"]).get("stream") is True
-    assert "max_output_tokens" not in cast(dict[str, object], captured["payload"])
+    payload = cast(dict[str, object], captured["payload"])
+    assert payload.get("store") is False
+    assert payload.get("stream") is True
+    assert "max_output_tokens" not in payload
+    payload_input = cast(list[dict[str, object]], payload.get("input"))
+    assert payload_input[0].get("phase") == "commentary"
+    content_blocks = cast(list[dict[str, object]], payload_input[0].get("content"))
+    assert content_blocks[0].get("type") == "output_text"
 
 
 @pytest.mark.asyncio
@@ -449,11 +828,11 @@ async def test_oauth_codex_unsupported_parameter_is_removed_and_retried(monkeypa
             )
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai.httpx.AsyncClient",
+        "ripperdoc.core.providers.openai_oauth_codex.httpx.AsyncClient",
         _FakeAsyncClient,
     )
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai.get_oauth_token",
+        "ripperdoc.core.providers.openai_oauth_codex.get_oauth_token",
         lambda _name: OAuthToken(
             type=OAuthTokenType.CODEX,
             access_token="abcd1234efgh",
