@@ -52,13 +52,10 @@ def _prompt_oauth_token_selection(
         )
         return None, None
 
-    # For now only codex token type is supported for model OAuth provider usage.
-    supported = {
-        name: token for name, token in tokens.items() if token.type == OAuthTokenType.CODEX
-    }
+    supported = tokens
     if not supported:
         console.print(
-            "[red]No supported OAuth tokens found. Add a codex token with /oauth add <name>.[/red]"
+            "[red]No supported OAuth tokens found. Add one with /oauth add <name>.[/red]"
         )
         return None, None
 

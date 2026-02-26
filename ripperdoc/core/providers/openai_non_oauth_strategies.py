@@ -63,6 +63,7 @@ class NonOAuthOpenAIStrategy(Protocol):
         max_retries: int,
         max_thinking_tokens: int,
         start_time: float,
+        default_headers: Optional[Dict[str, str]] = None,
     ) -> ProviderResponse: ...
 
 
@@ -489,6 +490,7 @@ class OpenAIChatStrategy(_BaseNonOAuthStrategy):
         max_retries: int,
         max_thinking_tokens: int,
         start_time: float,
+        default_headers: Optional[Dict[str, str]] = None,
     ) -> ProviderResponse:
         openai_tools = await build_openai_tool_schemas(tools)
         openai_messages: List[Dict[str, object]] = [
@@ -538,10 +540,14 @@ class OpenAIChatStrategy(_BaseNonOAuthStrategy):
             },
         )
 
+        headers = {"User-Agent": build_user_agent()}
+        if default_headers:
+            headers.update(default_headers)
+
         async with AsyncOpenAI(
             api_key=model_profile.api_key,
             base_url=model_profile.api_base,
-            default_headers={"User-Agent": build_user_agent()},
+            default_headers=headers,
         ) as client:
 
             async def _stream_request() -> Dict[str, Dict[str, int]]:
@@ -700,6 +706,7 @@ class OpenAIResponsesStrategy(_BaseNonOAuthStrategy):
         max_retries: int,
         max_thinking_tokens: int,
         start_time: float,
+        default_headers: Optional[Dict[str, str]] = None,
     ) -> ProviderResponse:
         openai_tools = await build_openai_tool_schemas(tools)
         response_tools = convert_chat_function_tools_to_responses_tools(openai_tools)
@@ -735,10 +742,14 @@ class OpenAIResponsesStrategy(_BaseNonOAuthStrategy):
             },
         )
 
+        headers = {"User-Agent": build_user_agent()}
+        if default_headers:
+            headers.update(default_headers)
+
         async with AsyncOpenAI(
             api_key=model_profile.api_key,
             base_url=model_profile.api_base,
-            default_headers={"User-Agent": build_user_agent()},
+            default_headers=headers,
         ) as client:
 
             async def _stream_request() -> Dict[str, Any]:

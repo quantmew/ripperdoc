@@ -1,4 +1,4 @@
-"""OAuth token storage and Codex OAuth model presets."""
+"""OAuth token storage and OAuth model presets."""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ class OAuthTokenType(str, Enum):
     """Supported OAuth token provider types."""
 
     CODEX = "codex"
+    COPILOT = "copilot"
+    GITLAB = "gitlab"
 
 
 class OAuthToken(BaseModel):
@@ -80,8 +82,146 @@ _CODEX_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
     ),
 )
 
+_COPILOT_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
+    OAuthModelOption(
+        model="gpt-4.1",
+        label="GPT-4.1",
+        description="OpenAI · GA",
+    ),
+    OAuthModelOption(
+        model="gpt-5-mini",
+        label="GPT-5 mini",
+        description="OpenAI · GA",
+    ),
+    OAuthModelOption(
+        model="gpt-5.1",
+        label="GPT-5.1",
+        description="OpenAI · GA",
+    ),
+    OAuthModelOption(
+        model="gpt-5.1-codex",
+        label="GPT-5.1-Codex",
+        description="OpenAI · GA",
+    ),
+    OAuthModelOption(
+        model="gpt-5.1-codex-mini",
+        label="GPT-5.1-Codex-Mini",
+        description="OpenAI · Public preview",
+    ),
+    OAuthModelOption(
+        model="gpt-5.1-codex-max",
+        label="GPT-5.1-Codex-Max",
+        description="OpenAI · GA",
+    ),
+    OAuthModelOption(
+        model="gpt-5.2",
+        label="GPT-5.2",
+        description="OpenAI · GA",
+    ),
+    OAuthModelOption(
+        model="gpt-5.2-codex",
+        label="GPT-5.2-Codex",
+        description="OpenAI · GA",
+    ),
+    OAuthModelOption(
+        model="gpt-5.3-codex",
+        label="GPT-5.3-Codex",
+        description="OpenAI · GA",
+    ),
+    OAuthModelOption(
+        model="claude-haiku-4.5",
+        label="Claude Haiku 4.5",
+        description="Anthropic · GA",
+    ),
+    OAuthModelOption(
+        model="claude-opus-4.5",
+        label="Claude Opus 4.5",
+        description="Anthropic · GA",
+    ),
+    OAuthModelOption(
+        model="claude-opus-4.6",
+        label="Claude Opus 4.6",
+        description="Anthropic · GA",
+    ),
+    OAuthModelOption(
+        model="claude-opus-4.6-fast",
+        label="Claude Opus 4.6 (fast mode)",
+        description="Anthropic · Public preview",
+    ),
+    OAuthModelOption(
+        model="claude-sonnet-4",
+        label="Claude Sonnet 4",
+        description="Anthropic · GA",
+    ),
+    OAuthModelOption(
+        model="claude-sonnet-4.5",
+        label="Claude Sonnet 4.5",
+        description="Anthropic · GA",
+    ),
+    OAuthModelOption(
+        model="claude-sonnet-4.6",
+        label="Claude Sonnet 4.6",
+        description="Anthropic · GA",
+    ),
+    OAuthModelOption(
+        model="gemini-2.5-pro",
+        label="Gemini 2.5 Pro",
+        description="Google · GA",
+    ),
+    OAuthModelOption(
+        model="gemini-3-flash",
+        label="Gemini 3 Flash",
+        description="Google · Public preview",
+    ),
+    OAuthModelOption(
+        model="gemini-3-pro-preview",
+        label="Gemini 3 Pro",
+        description="Google · Public preview",
+    ),
+    OAuthModelOption(
+        model="gemini-3.1-pro",
+        label="Gemini 3.1 Pro",
+        description="Google · Public preview",
+    ),
+    OAuthModelOption(
+        model="grok-code-fast-1",
+        label="Grok Code Fast 1",
+        description="xAI · GA",
+    ),
+    OAuthModelOption(
+        model="raptor-mini",
+        label="Raptor mini",
+        description="Fine-tuned GPT-5 mini · Public preview",
+    ),
+    OAuthModelOption(
+        model="goldeneye",
+        label="Goldeneye",
+        description="Fine-tuned GPT-5.1-Codex · Public preview",
+    ),
+)
+
+_GITLAB_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
+    OAuthModelOption(
+        model="duo-chat-haiku-4-5",
+        label="duo-chat-haiku-4-5 (default)",
+        description="Fast responses for quick tasks.",
+    ),
+    OAuthModelOption(
+        model="duo-chat-sonnet-4-5",
+        label="duo-chat-sonnet-4-5",
+        description="Balanced performance for most workflows.",
+    ),
+    OAuthModelOption(
+        model="duo-chat-opus-4-5",
+        label="duo-chat-opus-4-5",
+        description="Most capable for complex analysis.",
+    ),
+)
+
 OAUTH_MODEL_OPTIONS: Dict[OAuthTokenType, tuple[OAuthModelOption, ...]] = {
     OAuthTokenType.CODEX: _CODEX_MODEL_OPTIONS,
+    OAuthTokenType.COPILOT: _COPILOT_MODEL_OPTIONS,
+    OAuthTokenType.GITLAB: _GITLAB_MODEL_OPTIONS,
 }
 
 

@@ -6,7 +6,7 @@ import base64
 import json
 import urllib.parse
 
-from ripperdoc.core.oauth_codex import (
+from ripperdoc.core.oauth.codex import (
     extract_account_id,
     extract_account_id_from_claims,
     parse_jwt_claims,
@@ -45,7 +45,7 @@ def test_start_codex_browser_auth_builds_context(monkeypatch) -> None:
     notices: list[str] = []
 
     monkeypatch.setattr(
-        "ripperdoc.core.oauth_codex.webbrowser.open",
+        "ripperdoc.core.oauth.codex.webbrowser.open",
         lambda url, new=2: opened.append(url),  # noqa: ARG005
     )
 

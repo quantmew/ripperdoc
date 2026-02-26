@@ -16,7 +16,7 @@ from ripperdoc.core.message_utils import (
     openai_usage_tokens,
 )
 from ripperdoc.core.oauth import OAuthTokenType, add_oauth_token, get_oauth_token
-from ripperdoc.core.oauth_codex import CodexOAuthError, refresh_codex_access_token
+from ripperdoc.core.oauth.codex import CodexOAuthError, refresh_codex_access_token
 from ripperdoc.core.providers.base import (
     ProgressCallback,
     ProviderResponse,

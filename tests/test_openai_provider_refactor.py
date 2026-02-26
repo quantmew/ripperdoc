@@ -9,7 +9,7 @@ import httpx
 import openai
 import pytest
 
-from ripperdoc.core.providers.base import call_with_timeout_and_retries
+from ripperdoc.core.providers.base import ProviderResponse, call_with_timeout_and_retries
 from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
 from ripperdoc.core.providers.errors import ProviderMappedError
@@ -866,3 +866,104 @@ async def test_oauth_codex_unsupported_parameter_is_removed_and_retried(monkeypa
     assert calls["count"] == 2
     assert "temperature" in payloads[0]
     assert "temperature" not in payloads[1]
+
+
+@pytest.mark.asyncio
+async def test_oauth_copilot_dispatch_uses_openai_strategy(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeStrategy:
+        name = "chat"
+
+        async def call(self, **kwargs: object) -> ProviderResponse:
+            captured.update(kwargs)
+            return ProviderResponse(
+                content_blocks=[{"type": "text", "text": "ok"}],
+                usage_tokens={"input_tokens": 1, "output_tokens": 1},
+                cost_usd=0.0,
+                duration_ms=1.0,
+                metadata={"strategy": "chat"},
+            )
+
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai.get_oauth_token",
+        lambda _name: OAuthToken(
+            type=OAuthTokenType.COPILOT,
+            access_token="copilot_token",
+            refresh_token="copilot_token",
+            expires_at=None,
+            account_id=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai.build_non_oauth_openai_strategy",
+        lambda **kwargs: _FakeStrategy(),  # noqa: ARG005
+    )
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OAUTH,
+        model="gpt-4.1",
+        oauth_token_name="copilot-main",
+        oauth_token_type=OAuthTokenType.COPILOT,
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[{"role": "user", "content": "hello"}],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is False
+    called_profile = cast(ModelProfile, captured["model_profile"])
+    assert called_profile.protocol == ProtocolType.OPENAI_COMPATIBLE
+    assert called_profile.api_key == "copilot_token"
+    assert called_profile.api_base == "https://api.githubcopilot.com"
+    called_headers = cast(dict[str, str], captured["default_headers"])
+    assert called_headers["Openai-Intent"] == "conversation-edits"
+    assert result.metadata["oauth_token_type"] == "copilot"
+
+
+@pytest.mark.asyncio
+async def test_oauth_gitlab_requires_gateway_base_url(monkeypatch) -> None:
+    monkeypatch.delenv("GITLAB_AI_GATEWAY_URL", raising=False)
+    monkeypatch.delenv("RIPPERDOC_GITLAB_API_BASE", raising=False)
+    monkeypatch.setattr(
+        "ripperdoc.core.providers.openai.get_oauth_token",
+        lambda _name: OAuthToken(
+            type=OAuthTokenType.GITLAB,
+            access_token="gitlab_token",
+            refresh_token="refresh_token",
+            expires_at=None,
+            account_id="https://gitlab.com",
+        ),
+    )
+
+    client = OpenAIClient()
+    profile = ModelProfile(
+        protocol=ProtocolType.OAUTH,
+        model="duo-chat-haiku-4-5",
+        oauth_token_name="gitlab-main",
+        oauth_token_type=OAuthTokenType.GITLAB,
+    )
+    result = await client.call(
+        model_profile=profile,
+        system_prompt="You are a test assistant.",
+        normalized_messages=[{"role": "user", "content": "hello"}],
+        tools=[],
+        tool_mode="native",
+        stream=False,
+        progress_callback=None,
+        request_timeout=1.0,
+        max_retries=0,
+        max_thinking_tokens=0,
+    )
+
+    assert result.is_error is True
+    assert result.error_code == "configuration_error"

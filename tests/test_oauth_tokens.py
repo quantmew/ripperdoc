@@ -13,27 +13,34 @@ from ripperdoc.core.oauth import (
     list_oauth_tokens,
 )
 
-
-def test_oauth_token_store_roundtrip(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("token_name", "token_type"),
+    [
+        ("codex-main", OAuthTokenType.CODEX),
+        ("copilot-main", OAuthTokenType.COPILOT),
+        ("gitlab-main", OAuthTokenType.GITLAB),
+    ],
+)
+def test_oauth_token_store_roundtrip(tmp_path, monkeypatch, token_name, token_type):
     monkeypatch.setattr("ripperdoc.core.oauth.Path.home", lambda: tmp_path)
 
     token = OAuthToken(
-        type=OAuthTokenType.CODEX,
+        type=token_type,
         access_token="abcd1234efgh5678",
         refresh_token="refresh123",
         expires_at=1234567890,
         account_id="acct_123",
     )
-    add_oauth_token("codex-main", token)
+    add_oauth_token(token_name, token)
 
     loaded = list_oauth_tokens()
-    assert "codex-main" in loaded
-    assert loaded["codex-main"].type == OAuthTokenType.CODEX
-    assert loaded["codex-main"].refresh_token == "refresh123"
-    assert get_oauth_token("codex-main") is not None
+    assert token_name in loaded
+    assert loaded[token_name].type == token_type
+    assert loaded[token_name].refresh_token == "refresh123"
+    assert get_oauth_token(token_name) is not None
 
-    delete_oauth_token("codex-main")
-    assert get_oauth_token("codex-main") is None
+    delete_oauth_token(token_name)
+    assert get_oauth_token(token_name) is None
 
 
 def test_delete_missing_oauth_token_raises(tmp_path, monkeypatch):

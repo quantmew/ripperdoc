@@ -16,12 +16,25 @@ from ripperdoc.core.oauth import (
     get_oauth_tokens_path,
     list_oauth_tokens,
 )
-from ripperdoc.core.oauth_codex import (
+from ripperdoc.core.oauth.codex import (
     CodexOAuthPendingCallback,
     CodexOAuthError,
     complete_codex_browser_auth_from_callback_url,
     login_codex_with_browser,
     login_codex_with_device_code,
+)
+from ripperdoc.core.oauth.copilot import (
+    COPILOT_DEFAULT_DOMAIN,
+    CopilotOAuthError,
+    login_copilot_with_device_code,
+)
+from ripperdoc.core.oauth.gitlab import (
+    GITLAB_DEFAULT_INSTANCE_URL,
+    GitLabOAuthError,
+    GitLabOAuthPendingCallback,
+    complete_gitlab_browser_auth_from_callback_url,
+    login_gitlab_with_browser,
+    normalize_gitlab_instance_url,
 )
 from ripperdoc.utils.prompt import prompt_secret
 
@@ -165,17 +178,23 @@ def _parse_login_args(args: list[str]) -> tuple[str, str, str]:
     mode = "browser"
     remaining = list(args)
 
-    if remaining and remaining[0].lower() in {"codex"}:
+    if remaining and remaining[0].lower() in {"codex", "copilot", "gitlab"}:
         provider = remaining.pop(0).lower()
+    token_name = provider
+    mode = "device" if provider == "copilot" else ("browser" if provider == "gitlab" else "browser")
 
-    if remaining and remaining[0].lower() in {"browser", "device"}:
+    allowed_modes = {"browser", "device"} if provider == "codex" else {"browser"}
+    if provider == "copilot":
+        allowed_modes = {"device"}
+
+    if remaining and remaining[0].lower() in allowed_modes:
         mode = remaining.pop(0).lower()
     elif remaining:
         token_name = remaining.pop(0)
 
-    if remaining and remaining[0].lower() in {"browser", "device"}:
+    if remaining and remaining[0].lower() in allowed_modes:
         mode = remaining.pop(0).lower()
-    elif remaining and token_name == "codex":
+    elif remaining and token_name == provider:
         token_name = remaining.pop(0)
 
     return provider, token_name, mode
@@ -252,6 +271,115 @@ def _run_codex_login(
     return True
 
 
+def _run_copilot_login(
+    console: Any,
+    *,
+    token_name: str,
+    github_domain: str = COPILOT_DEFAULT_DOMAIN,
+) -> bool:
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", token_name or ""):
+        console.print(
+            "[red]Token name must match [A-Za-z0-9._-]+ (no spaces).[/red]"
+        )
+        return True
+
+    existing = list_oauth_tokens().get(token_name)
+    if existing and not _confirm_action(
+        console, f"OAuth token '{token_name}' exists. Overwrite with new login?"
+    ):
+        return True
+
+    normalized_domain = (github_domain or "").strip() or COPILOT_DEFAULT_DOMAIN
+    try:
+        token, code = login_copilot_with_device_code(
+            github_domain=normalized_domain,
+            notify=lambda msg: console.print(f"[cyan]{escape(msg)}[/cyan]"),
+        )
+        console.print(f"[dim]Device code used: {escape(code)}[/dim]")
+    except CopilotOAuthError as exc:
+        console.print(f"[red]Copilot OAuth login failed: {escape(str(exc))}[/red]")
+        return True
+
+    try:
+        add_oauth_token(token_name, token, overwrite=True)
+    except (ValueError, OSError, IOError, PermissionError) as exc:
+        console.print(f"[red]Failed to save OAuth token: {escape(str(exc))}[/red]")
+        return True
+
+    account_display = token.account_id or "-"
+    console.print(
+        f"[green]✓ Logged in and saved token '{escape(token_name)}' "
+        f"(type={token.type.value}, account={escape(account_display)})[/green]"
+    )
+    return True
+
+
+def _run_gitlab_login(
+    console: Any,
+    *,
+    token_name: str,
+    instance_url: str = GITLAB_DEFAULT_INSTANCE_URL,
+) -> bool:
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", token_name or ""):
+        console.print(
+            "[red]Token name must match [A-Za-z0-9._-]+ (no spaces).[/red]"
+        )
+        return True
+
+    existing = list_oauth_tokens().get(token_name)
+    if existing and not _confirm_action(
+        console, f"OAuth token '{token_name}' exists. Overwrite with new login?"
+    ):
+        return True
+
+    try:
+        normalized_instance = normalize_gitlab_instance_url(instance_url)
+    except GitLabOAuthError as exc:
+        console.print(f"[red]Invalid GitLab instance URL: {escape(str(exc))}[/red]")
+        return True
+
+    try:
+        token = login_gitlab_with_browser(
+            instance_url=normalized_instance,
+            notify=lambda msg: console.print(f"[cyan]{escape(msg)}[/cyan]"),
+        )
+    except GitLabOAuthPendingCallback as pending:
+        console.print(
+            "[yellow]Local callback timed out. If browser redirected to localhost and failed,"
+            " copy that full URL and paste it below.[/yellow]"
+        )
+        console.print(f"[dim]Auth URL: {escape(pending.context.auth_url)}[/dim]")
+        callback_url = console.input("Callback URL (or blank to cancel): ").strip()
+        if not callback_url:
+            console.print("[yellow]Login cancelled.[/yellow]")
+            return True
+        try:
+            token = complete_gitlab_browser_auth_from_callback_url(
+                pending.context, callback_url
+            )
+        except GitLabOAuthError as exc:
+            console.print(
+                f"[red]Manual callback completion failed: {escape(str(exc))}[/red]"
+            )
+            return True
+    except GitLabOAuthError as exc:
+        console.print(f"[red]GitLab OAuth login failed: {escape(str(exc))}[/red]")
+        return True
+
+    try:
+        add_oauth_token(token_name, token, overwrite=True)
+    except (ValueError, OSError, IOError, PermissionError) as exc:
+        console.print(f"[red]Failed to save OAuth token: {escape(str(exc))}[/red]")
+        return True
+
+    account_display = token.account_id or "-"
+    console.print(
+        f"[green]✓ Logged in and saved token '{escape(token_name)}' "
+        f"(type={token.type.value}, account={escape(account_display)})[/green]"
+    )
+    return True
+
+
 def _handle_oauth_tui(ui: Any) -> bool:
     console = ui.console
     if not sys.stdin.isatty():
@@ -289,6 +417,12 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         console.print(
             "[bold]/oauth login codex [name] [browser|device][/bold] — login and save token"
         )
+        console.print(
+            "[bold]/oauth login copilot [name] [domain][/bold] — login Copilot token (device flow)"
+        )
+        console.print(
+            "[bold]/oauth login gitlab [name] [instance-url][/bold] — login GitLab token (browser flow)"
+        )
         console.print("[bold]/oauth add <name>[/bold] — add an OAuth token")
         console.print("[bold]/oauth edit <name>[/bold] — edit an OAuth token")
         console.print("[bold]/oauth delete <name>[/bold] — delete an OAuth token")
@@ -302,13 +436,49 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         _render_oauth_plain(console)
         return True
     if subcmd in {"login", "auth"}:
-        provider, token_name, mode = _parse_login_args(tokens[1:])
-        if provider != "codex":
-            console.print(
-                f"[red]Unsupported OAuth provider '{escape(provider)}'. Only 'codex' is supported currently.[/red]"
+        login_args = tokens[1:]
+        provider, token_name, mode = _parse_login_args(login_args)
+        if provider == "codex":
+            return _run_codex_login(console, token_name=token_name, mode=mode)
+        if provider == "copilot":
+            provider_args = login_args[1:] if login_args and login_args[0].lower() == "copilot" else login_args
+            parsed_token_name = token_name
+            parsed_domain = COPILOT_DEFAULT_DOMAIN
+            if provider_args:
+                first = provider_args[0].strip()
+                if first and first.lower() not in {"device"}:
+                    parsed_token_name = first
+                if len(provider_args) > 1:
+                    second = provider_args[1].strip()
+                    if second and second.lower() not in {"device"}:
+                        parsed_domain = second
+            return _run_copilot_login(
+                console,
+                token_name=parsed_token_name,
+                github_domain=parsed_domain,
             )
-            return True
-        return _run_codex_login(console, token_name=token_name, mode=mode)
+        if provider == "gitlab":
+            provider_args = login_args[1:] if login_args and login_args[0].lower() == "gitlab" else login_args
+            parsed_token_name = token_name
+            parsed_instance_url = GITLAB_DEFAULT_INSTANCE_URL
+            if provider_args:
+                first = provider_args[0].strip()
+                if first and first.lower() not in {"browser"}:
+                    parsed_token_name = first
+                if len(provider_args) > 1:
+                    second = provider_args[1].strip()
+                    if second and second.lower() not in {"browser"}:
+                        parsed_instance_url = second
+            return _run_gitlab_login(
+                console,
+                token_name=parsed_token_name,
+                instance_url=parsed_instance_url,
+            )
+        console.print(
+            f"[red]Unsupported OAuth provider '{escape(provider)}'. "
+            "Supported providers: codex, copilot, gitlab.[/red]"
+        )
+        return True
     if subcmd in {"add", "create"}:
         name = tokens[1] if len(tokens) > 1 else console.input("Token name: ").strip()
         if not name:
@@ -369,4 +539,4 @@ command = SlashCommand(
 )
 
 
-__all__ = ["command", "_run_codex_login"]
+__all__ = ["command", "_run_codex_login", "_run_copilot_login", "_run_gitlab_login"]

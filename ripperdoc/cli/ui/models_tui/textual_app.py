@@ -106,8 +106,6 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         tokens = list_oauth_tokens()
         options: list[tuple[str, str]] = []
         for name, token in tokens.items():
-            if token.type != OAuthTokenType.CODEX:
-                continue
             masked = (
                 f"{token.access_token[:4]}…{token.access_token[-2:]}"
                 if len(token.access_token) > 8
@@ -117,6 +115,57 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         if not options and selected_name:
             options.append((f"{selected_name} (missing)", selected_name))
         return options
+
+    def _oauth_model_select_options(
+        self,
+        token_type: OAuthTokenType,
+    ) -> list[tuple[str, str]]:
+        return [
+            (option.label, option.model)
+            for option in oauth_models_for_type(token_type)
+        ]
+
+    def _selected_oauth_token_type(self) -> OAuthTokenType:
+        try:
+            oauth_token_select = self.query_one("#oauth_token_select", Select)
+        except Exception:
+            return OAuthTokenType.CODEX
+        token_raw = oauth_token_select.value
+        token_name = token_raw.strip() if isinstance(token_raw, str) else ""
+        token = list_oauth_tokens().get(token_name)
+        if token is not None:
+            return token.type
+        if self._existing_profile and self._existing_profile.oauth_token_type:
+            return self._existing_profile.oauth_token_type
+        return OAuthTokenType.CODEX
+
+    def _refresh_oauth_model_options(self) -> None:
+        try:
+            oauth_model_select = self.query_one("#oauth_model_select", Select)
+        except Exception:
+            return
+
+        token_type = self._selected_oauth_token_type()
+        model_options = self._oauth_model_select_options(token_type)
+        current_raw = oauth_model_select.value
+        current_value = current_raw.strip() if isinstance(current_raw, str) else ""
+        existing_default = (
+            self._existing_profile.model
+            if self._existing_profile and self._existing_profile.protocol == ProtocolType.OAUTH
+            else ""
+        )
+        preferred = current_value or existing_default
+        if model_options:
+            selected_value = (
+                preferred
+                if any(value == preferred for _label, value in model_options)
+                else model_options[0][1]
+            )
+            oauth_model_select.set_options(model_options)
+            oauth_model_select.value = selected_value
+            return
+        oauth_model_select.set_options([("No OAuth models", Select.BLANK)])
+        oauth_model_select.value = Select.BLANK
 
     def compose(self) -> ComposeResult:
         title = "Add model" if self._mode == "add" else "Edit model"
@@ -150,9 +199,29 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 )
                 yield Static("Model name", classes="field_label", id="model_input_label")
                 yield Input(value=model_default, placeholder="Model name", id="model_input")
+                oauth_token_options = self._oauth_token_select_options(
+                    self._existing_profile.oauth_token_name if self._existing_profile else None
+                )
+                oauth_token_value = oauth_token_options[0][1] if oauth_token_options else Select.BLANK
+                if self._existing_profile and self._existing_profile.oauth_token_name:
+                    existing_name = self._existing_profile.oauth_token_name
+                    if any(value == existing_name for _label, value in oauth_token_options):
+                        oauth_token_value = existing_name
+                selected_oauth_token = list_oauth_tokens().get(
+                    oauth_token_value if isinstance(oauth_token_value, str) else ""
+                )
+                selected_oauth_token_type = (
+                    selected_oauth_token.type
+                    if selected_oauth_token is not None
+                    else (
+                        self._existing_profile.oauth_token_type
+                        if self._existing_profile and self._existing_profile.oauth_token_type
+                        else OAuthTokenType.CODEX
+                    )
+                )
                 oauth_model_options = [
                     (option.label, option.model)
-                    for option in oauth_models_for_type(OAuthTokenType.CODEX)
+                    for option in oauth_models_for_type(selected_oauth_token_type)
                 ]
                 oauth_model_default = (
                     model_default
@@ -199,14 +268,6 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     id="api_base_input",
                 )
 
-                oauth_token_options = self._oauth_token_select_options(
-                    self._existing_profile.oauth_token_name if self._existing_profile else None
-                )
-                oauth_token_value = oauth_token_options[0][1] if oauth_token_options else Select.BLANK
-                if self._existing_profile and self._existing_profile.oauth_token_name:
-                    existing_name = self._existing_profile.oauth_token_name
-                    if any(value == existing_name for _label, value in oauth_token_options):
-                        oauth_token_value = existing_name
                 yield Static("OAuth token", classes="field_label", id="oauth_token_label")
                 yield Select(
                     oauth_token_options if oauth_token_options else [("No OAuth tokens", Select.BLANK)],
@@ -340,10 +401,16 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
 
     def on_mount(self) -> None:
         self._refresh_provider_fields()
+        self._refresh_oauth_model_options()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "provider_select":
             self._refresh_provider_fields()
+            if isinstance(event.value, str) and event.value == ProtocolType.OAUTH.value:
+                self._refresh_oauth_model_options()
+            return
+        if event.select.id == "oauth_token_select":
+            self._refresh_oauth_model_options()
 
     def _set_widget_visible(self, selector: str, visible: bool) -> None:
         try:

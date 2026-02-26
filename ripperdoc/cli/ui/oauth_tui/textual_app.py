@@ -32,11 +32,22 @@ from ripperdoc.core.oauth import (
     get_oauth_tokens_path,
     list_oauth_tokens,
 )
-from ripperdoc.core.oauth_codex import (
+from ripperdoc.core.oauth.codex import (
     CodexOAuthError,
     complete_codex_browser_auth_from_callback_url,
     login_codex_with_device_code,
     start_codex_browser_auth,
+)
+from ripperdoc.core.oauth.copilot import (
+    COPILOT_DEFAULT_DOMAIN,
+    CopilotOAuthError,
+    login_copilot_with_device_code,
+)
+from ripperdoc.core.oauth.gitlab import (
+    GITLAB_DEFAULT_INSTANCE_URL,
+    GitLabOAuthError,
+    complete_gitlab_browser_auth_from_callback_url,
+    start_gitlab_browser_auth,
 )
 
 
@@ -56,8 +67,10 @@ class OAuthFormResult:
 
 @dataclass
 class OAuthLoginResult:
+    provider: str
     token_name: str
     mode: str
+    endpoint: Optional[str] = None
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -253,19 +266,33 @@ class OAuthFormScreen(ModalScreen[Optional[OAuthFormResult]]):
 
 
 class OAuthLoginScreen(ModalScreen[Optional[OAuthLoginResult]]):
-    """Modal form for Codex OAuth login."""
+    """Modal form for OAuth login."""
 
     def compose(self) -> ComposeResult:
         with Container(id="form_dialog"):
-            yield Static("Codex OAuth Login", id="form_title")
+            yield Static("OAuth Login", id="form_title")
             with VerticalScroll(id="form_fields"):
+                yield Static("Provider", classes="field_label")
+                yield Select(
+                    [("codex", "codex"), ("copilot", "copilot"), ("gitlab", "gitlab")],
+                    value="codex",
+                    id="login_provider_select",
+                )
                 yield Static("Token name", classes="field_label")
-                yield Input(value="codex", placeholder="Token name", id="login_name_input")
+                yield Input(value="", placeholder="Token name", id="login_name_input")
                 yield Static("Mode", classes="field_label")
                 yield Select(
                     [("browser", "browser"), ("device", "device")],
                     value="browser",
                     id="login_mode_select",
+                )
+                yield Static("Provider endpoint (optional)", classes="field_label")
+                yield Input(
+                    placeholder=(
+                        "Copilot: github.com or enterprise domain; "
+                        "GitLab: https://gitlab.company.com"
+                    ),
+                    id="login_endpoint_input",
                 )
             with Horizontal(id="form_buttons"):
                 yield Button("Login", id="login_submit", variant="primary")
@@ -278,19 +305,38 @@ class OAuthLoginScreen(ModalScreen[Optional[OAuthLoginResult]]):
         if event.button.id != "login_submit":
             return
 
+        provider_raw = self.query_one("#login_provider_select", Select).value
+        provider = provider_raw.strip().lower() if isinstance(provider_raw, str) else "codex"
         name = (self.query_one("#login_name_input", Input).value or "").strip()
         mode_raw = self.query_one("#login_mode_select", Select).value
         mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else "browser"
+        endpoint = (self.query_one("#login_endpoint_input", Input).value or "").strip() or None
         if not name:
             self._set_error("Token name is required.")
             return
         if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
             self._set_error("Token name must match [A-Za-z0-9._-]+ (no spaces).")
             return
+        if provider not in {"codex", "copilot", "gitlab"}:
+            self._set_error("Unsupported provider.")
+            return
+        if provider == "copilot" and mode != "device":
+            self._set_error("Copilot login only supports device mode.")
+            return
+        if provider == "gitlab" and mode != "browser":
+            self._set_error("GitLab login only supports browser mode.")
+            return
         if mode not in {"browser", "device"}:
             self._set_error("Login mode must be browser or device.")
             return
-        self.dismiss(OAuthLoginResult(token_name=name, mode=mode))
+        self.dismiss(
+            OAuthLoginResult(
+                provider=provider,
+                token_name=name,
+                mode=mode,
+                endpoint=endpoint,
+            )
+        )
 
     def _set_error(self, message: str) -> None:
         app = getattr(self, "app", None)
@@ -530,7 +576,9 @@ class OAuthApp(App[None]):
         if not result:
             return
         self._login_in_progress = True
-        self._set_status(f"Starting {result.mode} login for token '{result.token_name}'...")
+        self._set_status(
+            f"Starting {result.provider}/{result.mode} login for token '{result.token_name}'..."
+        )
         self.run_worker(
             self._run_login_flow(result),
             exclusive=True,
@@ -542,15 +590,41 @@ class OAuthApp(App[None]):
             self.call_from_thread(self._set_status, message)
 
         try:
-            if result.mode == "device":
+            if result.provider == "codex":
+                if result.mode == "device":
+                    token, code = await asyncio.to_thread(
+                        login_codex_with_device_code,
+                        notify=_notify,
+                    )
+                    self._set_status(f"Device code used: {code}")
+                else:
+                    context = await asyncio.to_thread(
+                        start_codex_browser_auth,
+                        notify=_notify,
+                    )
+                    self._set_status("Paste callback URL to complete login.")
+                    callback_url = await self._prompt_callback_url(context.auth_url)
+                    if not callback_url:
+                        self._set_status("Login cancelled.")
+                        return
+                    token = await asyncio.to_thread(
+                        complete_codex_browser_auth_from_callback_url,
+                        context,
+                        callback_url,
+                    )
+            elif result.provider == "copilot":
+                domain = (result.endpoint or COPILOT_DEFAULT_DOMAIN).strip()
                 token, code = await asyncio.to_thread(
-                    login_codex_with_device_code,
+                    login_copilot_with_device_code,
+                    github_domain=domain,
                     notify=_notify,
                 )
                 self._set_status(f"Device code used: {code}")
-            else:
+            elif result.provider == "gitlab":
+                instance_url = (result.endpoint or GITLAB_DEFAULT_INSTANCE_URL).strip()
                 context = await asyncio.to_thread(
-                    start_codex_browser_auth,
+                    start_gitlab_browser_auth,
+                    instance_url=instance_url,
                     notify=_notify,
                 )
                 self._set_status("Paste callback URL to complete login.")
@@ -559,15 +633,19 @@ class OAuthApp(App[None]):
                     self._set_status("Login cancelled.")
                     return
                 token = await asyncio.to_thread(
-                    complete_codex_browser_auth_from_callback_url,
+                    complete_gitlab_browser_auth_from_callback_url,
                     context,
                     callback_url,
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported OAuth provider '{result.provider}'."
                 )
 
             await asyncio.to_thread(
                 lambda: add_oauth_token(result.token_name, token, overwrite=True)
             )
-        except CodexOAuthError as exc:
+        except (CodexOAuthError, CopilotOAuthError, GitLabOAuthError) as exc:
             self._set_status(f"Login failed: {exc}")
         except (ValueError, OSError, IOError, PermissionError) as exc:
             self._set_status(f"Failed to save token: {exc}")
@@ -664,7 +742,7 @@ class OAuthApp(App[None]):
         )
         table.add_row("Account", token.account_id or "-")
         table.add_row("Path", str(get_oauth_tokens_path()))
-        table.add_row("Login", "Codex browser/device via key 'L'")
+        table.add_row("Login", "Press 'L' to login (codex/copilot/gitlab)")
         details.update(Panel(table, title=f"OAuth: {self._selected_name}", box=box.ROUNDED))
 
     def _set_status(self, message: str) -> None:

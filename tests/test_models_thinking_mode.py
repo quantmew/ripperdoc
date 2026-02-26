@@ -110,6 +110,28 @@ def test_models_tui_parse_thinking_mode_values() -> None:
     )
 
 
+def test_models_tui_oauth_token_options_include_non_codex(monkeypatch) -> None:
+    screen = ModelFormScreen("add")
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.models_tui.textual_app.list_oauth_tokens",
+        lambda: {
+            "copilot-main": OAuthToken(
+                type=OAuthTokenType.COPILOT,
+                access_token="abcd1234efgh",
+            ),
+            "gitlab-main": OAuthToken(
+                type=OAuthTokenType.GITLAB,
+                access_token="ijkl1234mnop",
+            ),
+        },
+    )
+
+    options = screen._oauth_token_select_options(None)
+    values = [value for _label, value in options]
+    assert "copilot-main" in values
+    assert "gitlab-main" in values
+
+
 def test_render_models_table_includes_thinking_mode_column() -> None:
     profile = ModelProfile(
         protocol=ProtocolType.OPENAI_COMPATIBLE,
@@ -175,3 +197,51 @@ def test_collect_add_profile_input_oauth_uses_token_and_curated_model(monkeypatc
     assert profile.oauth_token_name == "codex-main"
     assert profile.oauth_token_type == OAuthTokenType.CODEX
     assert profile.model == "gpt-5.3-codex-spark"
+
+
+def test_collect_add_profile_input_oauth_supports_non_codex_token(monkeypatch) -> None:
+    console = _FakeConsole(
+        [
+            "oauth",  # protocol
+            "1",  # oauth token
+            "2",  # oauth model
+            "",  # max_input_tokens
+            "",  # max_output_tokens
+            "",  # max_tokens
+            "",  # temperature
+            "",  # thinking_mode
+            "auto",  # supports_vision
+            "",  # currency
+            "",  # input_price
+            "",  # output_price
+            "",  # set_as_main
+        ]
+    )
+    monkeypatch.setattr(models_cmd, "prompt_secret", lambda _prompt: "")
+    monkeypatch.setattr(
+        models_cmd,
+        "list_oauth_tokens",
+        lambda: {
+            "gitlab-main": OAuthToken(
+                type=OAuthTokenType.GITLAB,
+                access_token="abcd1234efgh",
+            )
+        },
+    )
+
+    config = SimpleNamespace(
+        model_profiles={},
+        model_pointers=SimpleNamespace(main="default"),
+    )
+    profile, _ = models_cmd._collect_add_profile_input(
+        console,
+        config,
+        existing_profile=None,
+        current_profile=None,
+    )
+
+    assert profile is not None
+    assert profile.protocol == ProtocolType.OAUTH
+    assert profile.oauth_token_name == "gitlab-main"
+    assert profile.oauth_token_type == OAuthTokenType.GITLAB
+    assert profile.model == "duo-chat-sonnet-4-5"
