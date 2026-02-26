@@ -178,6 +178,59 @@ def _is_command_read_only(
 
     # Treat pipelines/compound commands as read-only only if every segment is safe.
     tokens = parse_shell_tokens(command)
+    
+    # Split compound commands by control operators (&&, ||, ;)
+    def split_compound_commands(token_list: list[str]) -> list[list[str]]:
+        """Split tokens into command segments by control operators."""
+        parts: list[list[str]] = []
+        current: list[str] = []
+        i = 0
+        while i < len(token_list):
+            token = token_list[i]
+            # Check for && and || (two-character operators)
+            if token in ("&&", "||"):
+                if current:
+                    parts.append(current)
+                current = []
+                i += 1
+                continue
+            # Check for standalone semicolon
+            if token == ";":
+                if current:
+                    parts.append(current)
+                current = []
+                i += 1
+                continue
+            # Check for tokens that end with semicolon (e.g., "echo hi;" from "echo hi; ls")
+            if token.endswith(";") and len(token) > 1:
+                current.append(token[:-1])
+                if current:
+                    parts.append(current)
+                current = []
+                i += 1
+                continue
+            # Check for tokens that start with semicolon
+            if token.startswith(";") and len(token) > 1:
+                if current:
+                    parts.append(current)
+                current = [token[1:]]
+                i += 1
+                continue
+            current.append(token)
+            i += 1
+        if current:
+            parts.append(current)
+        return parts
+    
+    command_segments = split_compound_commands(tokens)
+    if len(command_segments) > 1:
+        # Multiple command segments - check each one
+        return all(
+            _is_command_read_only(" ".join(segment), injection_check)
+            for segment in command_segments
+        )
+    
+    # Check for pipeline operator
     if "|" in tokens:
         parts: list[str] = []
         current: list[str] = []
