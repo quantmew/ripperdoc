@@ -10,11 +10,13 @@ from ripperdoc.cli.commands import get_slash_command
 from ripperdoc.cli.commands.memory_cmd import command as memory_command
 from ripperdoc.cli.commands.mcp_cmd import command as mcp_command
 from ripperdoc.cli.commands.plugins_cmd import command as plugins_command
+from ripperdoc.cli.commands.rename_cmd import command as rename_command
 from ripperdoc.cli.commands.tasks_cmd import command as tasks_command
 from ripperdoc.cli.commands.todos_cmd import command as todos_command
 from ripperdoc.core.plugins import clear_runtime_plugin_dirs
 from ripperdoc.tools import background_shell
 from ripperdoc.utils.mcp import McpServerInfo
+from ripperdoc.utils.messages import create_user_message
 from ripperdoc.utils.working_directories import normalize_directory_inputs
 from ripperdoc.utils.todo import TodoItem, set_todos
 from ripperdoc.utils.tasks import create_task
@@ -90,6 +92,13 @@ class _ClearFallbackUI(_DummyUI):
         self.start_calls.append(source)
 
 
+class _RenameUI(_DummyUI):
+    def __init__(self, console: Console, project_path):
+        super().__init__(console, project_path)
+        self.session_id = "rename-session-1"
+        self.conversation_messages = []
+
+
 def test_clear_command_switches_session_and_resets_messages(tmp_path, monkeypatch):
     fixed_uuid = UUID("11111111-2222-3333-4444-555555555555")
     monkeypatch.setattr("ripperdoc.cli.commands.clear_cmd.uuid4", lambda: fixed_uuid)
@@ -125,6 +134,41 @@ def test_new_alias_points_to_clear_command():
 
 def test_oauth_command_is_registered():
     assert get_slash_command("oauth") is not None
+
+
+def test_rename_command_is_registered():
+    assert get_slash_command("rename") == rename_command
+
+
+def test_rename_command_can_set_explicit_title(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.session_history.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.session_index.Path.home", lambda: tmp_path)
+
+    ui = _RenameUI(Console(record=True, width=120), tmp_path)
+    rename_command.handler(ui, "一个小测试")
+
+    output = ui.console.export_text()
+    assert "Session renamed to: 一个小测试" in output
+
+
+def test_rename_command_without_context_shows_usage(tmp_path):
+    ui = _RenameUI(Console(record=True, width=120), tmp_path)
+    rename_command.handler(ui, "")
+
+    output = ui.console.export_text()
+    assert "Could not generate a name: no conversation context yet. Usage: /rename" in output
+
+
+def test_rename_command_auto_extracts_title(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.session_history.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.session_index.Path.home", lambda: tmp_path)
+
+    ui = _RenameUI(Console(record=True, width=120), tmp_path)
+    ui.conversation_messages = [create_user_message("Need help with indexing performance")]
+    rename_command.handler(ui, "")
+
+    output = ui.console.export_text()
+    assert "Session renamed to: Need help with indexing performance" in output
 
 
 def test_todos_command_empty(tmp_path, monkeypatch):

@@ -738,7 +738,7 @@ def _resolve_resume_state(
                 resumed_summary = match
                 session_id = match.session_id
                 resume_messages = load_session_messages(project_path, session_id)
-                console.print(f"[dim]Resuming session: {match.last_prompt}[/dim]")
+                console.print(f"[dim]Resuming session: {match.display_title}[/dim]")
             else:
                 raise click.ClickException(f"No session found matching '{resume_session}'.")
         else:
@@ -749,7 +749,7 @@ def _resolve_resume_state(
             most_recent = summaries[0]
             session_id = most_recent.session_id
             resume_messages = load_session_messages(project_path, session_id)
-            console.print(f"[dim]Continuing session: {most_recent.last_prompt}[/dim]")
+            console.print(f"[dim]Continuing session: {most_recent.display_title}[/dim]")
         else:
             console.print("[yellow]No previous sessions found in this directory.[/yellow]")
 
@@ -771,6 +771,7 @@ def _log_resume_state(
             extra={
                 "session_id": session_id,
                 "message_count": len(resume_messages) if resume_messages else 0,
+                "title": resumed_summary.display_title,
                 "last_prompt": resumed_summary.last_prompt,
                 "log_file": str(log_file),
             },
@@ -781,6 +782,7 @@ def _log_resume_state(
             extra={
                 "session_id": session_id,
                 "message_count": len(resume_messages) if resume_messages else 0,
+                "title": most_recent.display_title,
                 "last_prompt": most_recent.last_prompt,
                 "log_file": str(log_file),
             },

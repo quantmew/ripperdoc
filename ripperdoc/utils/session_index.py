@@ -29,6 +29,7 @@ class SessionIndexEntry:
     message_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    title: str = ""
     last_prompt: str = ""
     last_long_prompt: str = ""
     total_input_tokens: int = 0
@@ -44,6 +45,13 @@ class SessionIndexEntry:
     def preferred_prompt(self) -> str:
         prompt = self.last_long_prompt or self.last_prompt
         return prompt if prompt else "(no prompt)"
+
+    @property
+    def preferred_title(self) -> str:
+        title = (self.title or "").strip()
+        if title:
+            return title
+        return self.preferred_prompt
 
 
 @dataclass
@@ -181,6 +189,7 @@ def _entry_from_dict(session_id: str, data: dict) -> SessionIndexEntry:
         message_count=_coerce_int(data.get("message_count")),
         created_at=_from_iso(data.get("created_at")),
         updated_at=_from_iso(data.get("updated_at")),
+        title=str(data.get("title") or ""),
         last_prompt=str(data.get("last_prompt") or ""),
         last_long_prompt=str(data.get("last_long_prompt") or ""),
         total_input_tokens=_coerce_int(data.get("total_input_tokens")),
@@ -199,6 +208,7 @@ def _entry_to_dict(entry: SessionIndexEntry) -> dict:
         "message_count": entry.message_count,
         "created_at": _to_utc_iso(entry.created_at) if entry.created_at else None,
         "updated_at": _to_utc_iso(entry.updated_at) if entry.updated_at else None,
+        "title": entry.title,
         "last_prompt": entry.last_prompt,
         "last_long_prompt": entry.last_long_prompt,
         "total_input_tokens": entry.total_input_tokens,
@@ -460,6 +470,9 @@ def load_or_build_session_index(project_path: Path) -> SessionIndex:
                 if scanned is None:
                     index.sessions.pop(session_id, None)
                     continue
+                cached = index.sessions.get(session_id)
+                if cached is not None and cached.title and not scanned.title:
+                    scanned.title = cached.title
                 index.sessions[session_id] = scanned
 
         if changed or not index_exists:
@@ -527,6 +540,50 @@ def update_session_index_for_payload(
         _write_index_file(index_path, index)
 
 
+def set_session_index_title(
+    project_path: Path,
+    session_id: str,
+    title: str,
+    *,
+    session_file: Optional[Path] = None,
+) -> None:
+    """Set a session title in the sidecar index."""
+    resolved_project = str(project_path.resolve())
+    index_path = _index_path(project_path)
+    normalized_title = str(title or "").strip()
+
+    with _locked(_lock_path(index_path)):
+        index = _read_index_file(index_path, resolved_project)
+        if index is None:
+            index = SessionIndex(project_path=resolved_project)
+
+        entry = index.sessions.get(session_id)
+        if entry is None:
+            entry = SessionIndexEntry(session_id=session_id)
+            index.sessions[session_id] = entry
+
+        entry.title = normalized_title
+        now = _now_utc()
+        entry.updated_at = now
+        if entry.created_at is None:
+            entry.created_at = now
+
+        target_file = session_file
+        if target_file is None:
+            directory = _session_dir(project_path, ensure=False)
+            target_file = directory / f"{session_id}.jsonl"
+        try:
+            if target_file.exists():
+                stat = target_file.stat()
+                entry.file_size = stat.st_size
+                entry.file_mtime_ns = stat.st_mtime_ns
+        except OSError:
+            pass
+
+        index.generated_at = now
+        _write_index_file(index_path, index)
+
+
 __all__ = [
     "SessionIndexEntry",
     "SessionIndex",
@@ -535,4 +592,5 @@ __all__ = [
     "list_session_index_entries",
     "load_or_build_session_index",
     "update_session_index_for_payload",
+    "set_session_index_title",
 ]

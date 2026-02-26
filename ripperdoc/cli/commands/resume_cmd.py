@@ -22,12 +22,12 @@ def _format_time(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
-def _truncate_prompt(prompt: str, max_length: int = 50) -> str:
-    """Truncate prompt text for display."""
-    prompt = prompt.strip()
-    if len(prompt) > max_length:
-        return prompt[:max_length - 3] + "..."
-    return prompt
+def _truncate_text(value: str, max_length: int = 50) -> str:
+    """Truncate text for display."""
+    value = value.strip()
+    if len(value) > max_length:
+        return value[:max_length - 3] + "..."
+    return value
 
 
 def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
@@ -56,12 +56,12 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
         # Build choice options
         options = []
         for summary in page_sessions:
-            prompt_preview = _truncate_prompt(summary.last_prompt)
+            title_preview = _truncate_text(summary.display_title)
             label = (
                 f"<info>{summary.session_id[:8]}...</info> "
                 f"({summary.message_count} msgs) "
                 f"<dim>{_format_time(summary.created_at)}</dim> "
-                f"<dim>{escape(prompt_preview)}</dim>"
+                f"<dim>{escape(title_preview)}</dim>"
             )
             options.append(ChoiceOption(summary.session_id, label))
 

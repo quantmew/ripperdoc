@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from ripperdoc.utils.messages import create_assistant_message, create_user_message
 from ripperdoc.utils.session_history import SessionHistory, list_session_summaries
-from ripperdoc.utils.session_index import load_or_build_session_index
+from ripperdoc.utils.session_index import load_or_build_session_index, set_session_index_title
 from ripperdoc.utils.session_stats import collect_session_stats
 
 
@@ -152,3 +152,22 @@ def test_collect_session_stats_aggregates_from_index(tmp_path, monkeypatch):
     assert stats.current_streak >= 0
     assert stats.longest_streak >= 1
     assert stats.active_days >= 1
+
+
+def test_session_title_can_be_renamed_and_survives_new_messages(tmp_path, monkeypatch):
+    _patch_session_home(monkeypatch, tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+
+    session = SessionHistory(project, "s-title")
+    session.append(create_user_message("Initial prompt"))
+
+    set_session_index_title(project, "s-title", "My Session")
+    renamed = list_session_summaries(project)[0]
+    assert renamed.title == "My Session"
+    assert renamed.display_title == "My Session"
+
+    session.append(create_user_message("Follow-up prompt"))
+    refreshed = list_session_summaries(project)[0]
+    assert refreshed.title == "My Session"
+    assert refreshed.display_title == "My Session"

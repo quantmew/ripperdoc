@@ -33,7 +33,15 @@ class SessionSummary:
     message_count: int
     created_at: datetime
     updated_at: datetime
+    title: str
     last_prompt: str
+
+    @property
+    def display_title(self) -> str:
+        title = (self.title or "").strip()
+        if title:
+            return title
+        return self.last_prompt
 
 
 def _sessions_root() -> Path:
@@ -175,6 +183,7 @@ def list_session_summaries(project_path: Path) -> List[SessionSummary]:
                 message_count=entry.message_count,
                 created_at=created_at,
                 updated_at=updated_at,
+                title=entry.title,
                 last_prompt=entry.preferred_prompt,
             )
         )

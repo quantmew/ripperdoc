@@ -29,6 +29,7 @@ from .output_style_cmd import command as output_style_command
 from .permissions_cmd import command as permissions_command
 from .plugins_cmd import command as plugins_command
 from .rewind_cmd import command as rewind_command
+from .rename_cmd import command as rename_command
 from .resume_cmd import command as resume_command
 from .skills_cmd import command as skills_command
 from .stats_cmd import command as stats_command
@@ -82,6 +83,7 @@ ALL_COMMANDS: List[SlashCommand] = [
     context_command,
     compact_command,
     fork_command,
+    rename_command,
     resume_command,
     skills_command,
     rewind_command,
