@@ -15,15 +15,17 @@ TIPS: List[str] = [
     "Type @ and press Tab to autocomplete file mentions from your project.",
     "Press Alt+Enter to insert newlines in your input for multi-line prompts.",
     "Type / then press Tab to see all available slash commands.",
+    "Press Shift+Tab on an empty prompt to cycle permission mode.",
     "Press Ctrl+C once to clear the current input without exiting.",
     "Double-press Ctrl+C to quickly exit Ripperdoc.",
     "Double-press Esc to open history and roll back to a previous message.",
 
     # Slash Commands
     "Use /help to see all available commands and get started.",
-    "Use /clear to clear the current conversation and start fresh.",
+    "Use /clear or /new to clear the current conversation and start fresh.",
     "Use /compact to compress conversation history when tokens run low.",
     "Use /status to check your session statistics and context usage.",
+    "Use /status to inspect the current permission mode for this session.",
     "Use /stats to see usage totals and a session heatmap.",
     "Use /cost to estimate token costs for your current session.",
     "Use /themes to switch between different visual themes (light, dark, etc.).",
@@ -37,11 +39,14 @@ TIPS: List[str] = [
     # Advanced Features
     "Use /memory to edit AGENTS.md for persistent preferences.",
     "Use /skills to enable/disable skills, or /skills list to inspect details.",
-    "Use /mcp to list configured Model Context Protocol servers and tools.",
+    "Use /mcp or /mcp list to inspect configured Model Context Protocol servers.",
+    "Use /mcp tui for interactive MCP server management.",
+    "Use /mcp logs <server> -f to follow MCP server stderr logs.",
     "Use /permissions add/remove to tune tool permission prompts.",
     "Use /context to view context usage and token budget.",
     "Use /resume to continue your most recent conversation.",
     "Use /fork to branch the current conversation into a new session.",
+    "Use /rename to set a session title; omit text to auto-generate one.",
 
     # Productivity
     "Use /exit to cleanly shut down Ripperdoc and save your session.",
@@ -60,12 +65,14 @@ TIPS: List[str] = [
     "Custom commands support $ARGUMENTS for simple parameterization.",
     "Configure hooks in .ripperdoc/hooks/ to automate session events.",
     "Use --yolo mode to skip all permission prompts (use with caution!).",
+    "Use --permission-mode to start in default, acceptEdits, plan, dontAsk, or bypassPermissions.",
     "Use --cwd to run Ripperdoc in a different project directory.",
     "Pipe stdin into Ripperdoc: echo 'your query' | ripperdoc",
     "Use -p flag for single-shot queries: ripperdoc -p 'your prompt'",
 
     # MCP & Extensions
     "Connect to MCP servers to extend Ripperdoc with external tools and data sources.",
+    "Manage MCP servers from the shell with: ripperdoc mcp add/list/get/remove.",
     "Project skills in .ripperdoc/skills override user skills with the same name.",
 
     # Session Management
