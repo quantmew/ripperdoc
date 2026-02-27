@@ -19,6 +19,7 @@ from ripperdoc.core.config import (
     get_project_local_config,
     get_project_config,
 )
+from ripperdoc.cli.mcp_cli import mcp_group
 from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.tool_defaults import (
     BUILTIN_TOOL_NAMES,
@@ -1320,7 +1321,7 @@ def cli(
         )
 
         # Ensure onboarding is complete
-        skip_onboarding = ctx.invoked_subcommand in ("update", "upgrade")
+        skip_onboarding = ctx.invoked_subcommand in ("update", "upgrade", "mcp")
         if not skip_onboarding:
             if not check_onboarding():
                 logger.info(
@@ -1483,6 +1484,7 @@ def update_cmd() -> None:
 
 
 cli.add_command(update_cmd, name="upgrade")
+cli.add_command(mcp_group, name="mcp")
 
 
 @cli.command(name="version")
