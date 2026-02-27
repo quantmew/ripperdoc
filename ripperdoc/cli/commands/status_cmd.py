@@ -145,6 +145,9 @@ def _handle(ui: Any, _: str) -> bool:
     ui.console.print(" Status:\n")
     ui.console.print(f" Version: {__version__}")
     ui.console.print(f" Session ID: {ui.session_id}")
+    ui.console.print(
+        f" Permission mode: {escape(str(getattr(ui, 'permission_mode', 'default')))}"
+    )
     ui.console.print(f" cwd: {Path.cwd()}")
     list_dirs = getattr(ui, "list_additional_working_directories", None)
     if callable(list_dirs):

@@ -69,7 +69,7 @@ class HookInput(BaseModel):
     session_id: Optional[str] = None
     transcript_path: Optional[str] = None  # Path to conversation JSON
     cwd: Optional[str] = None  # Current working directory
-    permission_mode: str = "default"  # "default", "plan", "acceptEdits", "bypassPermissions"
+    permission_mode: str = "default"  # "default", "plan", "dontAsk", "acceptEdits", "bypassPermissions"
     hook_event_name: str = ""
 
     model_config = ConfigDict(populate_by_name=True)

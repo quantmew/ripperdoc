@@ -45,7 +45,7 @@ class StdioProtocolHandler(
     - Message streaming for query results
     """
 
-    _PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions"}
+    _PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"}
 
     def __init__(
         self,
@@ -78,6 +78,7 @@ class StdioProtocolHandler(
         self._local_can_use_tool: Any | None = None
         self._sdk_can_use_tool_enabled: bool = False
         self._sdk_can_use_tool_supported: bool = True
+        self._pre_plan_mode: str | None = None
         self._hooks: dict[str, list[dict[str, Any]]] = {}
         self._sdk_hook_scope: HooksConfig | None = None
         self._pending_requests: dict[str, Any] = {}

@@ -109,7 +109,7 @@ class AgentRunRecord:
     on_idle_callbacks: List[Callable[[], None]] = field(default_factory=list)
 
     # Permission mode (inherited from team lead)
-    permission_mode: str = "default"  # "default", "plan", "bypassPermissions", "acceptEdits"
+    permission_mode: str = "default"  # "default", "plan", "dontAsk", "bypassPermissions", "acceptEdits"
 
     # Plan approval workflow
     awaiting_plan_approval: bool = False

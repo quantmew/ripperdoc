@@ -31,7 +31,7 @@ from .handler import StdioProtocolHandler
 )
 @click.option(
     "--permission-mode",
-    type=click.Choice(["default", "acceptEdits", "plan", "bypassPermissions"]),
+    type=click.Choice(["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"]),
     default="default",
     help="Permission mode for tool usage.",
 )

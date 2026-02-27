@@ -239,6 +239,49 @@ def test_bash_permissions_apply_ask_rules(tmp_path: Path, isolated_config):
     assert prompt_calls == 1
 
 
+def test_dont_ask_mode_denies_without_prompt_when_confirmation_needed(
+    tmp_path: Path, isolated_config
+):
+    """dontAsk mode must deny ask-required operations without showing prompts."""
+    save_global_config(UserConfig(user_ask_rules=["ls"]))
+
+    prompt_calls = 0
+
+    def prompt_fn(_: str) -> str:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "y"
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        permission_mode="dontAsk",
+        prompt_fn=prompt_fn,
+    )
+    result = asyncio.run(checker(BashTool(), BashToolInput(command="ls")))
+
+    assert result.result is False
+    assert result.message is not None
+    assert "dontAsk" in result.message
+    assert prompt_calls == 0
+
+
+def test_dont_ask_mode_allows_read_only_when_no_prompt_required(tmp_path: Path):
+    """dontAsk mode should not block read-only operations that do not require prompts."""
+    target = tmp_path / "note.txt"
+    target.write_text("hello", encoding="utf-8")
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        permission_mode="dontAsk",
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+    )
+    result = asyncio.run(checker(FileReadTool(), FileReadToolInput(file_path=str(target))))
+
+    assert result.result is True
+
+
 def test_read_rule_with_specifier_can_force_prompt(tmp_path: Path, isolated_config):
     """Tool(specifier) ask rules should prompt even for read-only tools."""
     env_file = tmp_path / ".env"

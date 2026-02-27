@@ -39,6 +39,7 @@ _EDIT_PREVIEW_MATCH_SNIPPET_MAX = 140
 _EDIT_PREVIEW_SEPARATOR = "-------------------"
 _PERMISSION_PROMPT_RESERVED_LINES = 14
 _PERMISSION_PROMPT_MIN_DIFF_LINES = 4
+_PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"}
 
 
 @dataclass
@@ -481,6 +482,20 @@ def _permission_denied_message(tool_name: str, decision: PermissionDecision) -> 
     return decision.message or f"Permission denied for tool '{tool_name}'."
 
 
+def _dont_ask_permission_denied_message(tool_name: str) -> str:
+    """Return deny message used when running in dontAsk mode."""
+    return (
+        f"Permission denied for tool '{tool_name}' because permission mode is dontAsk."
+    )
+
+
+def _normalize_permission_mode(mode: str) -> str:
+    normalized = str(mode or "").strip()
+    if normalized in _PERMISSION_MODES:
+        return normalized
+    return "default"
+
+
 def _parse_rule_collection(rules: Iterable[str]) -> list[ParsedPermissionRule]:
     parsed_rules: list[ParsedPermissionRule] = []
     for rule in rules:
@@ -724,6 +739,7 @@ def _run_permission_decision_engine(
     *,
     tool_name: str,
     yolo_mode: bool,
+    permission_mode: str,
     force_prompt: bool,
     needs_permission: bool,
     is_preapproved: bool,
@@ -786,6 +802,17 @@ def _run_permission_decision_engine(
             decision=resolved_decision,
         )
 
+    if permission_mode == "dontAsk":
+        return PermissionPreview(
+            requires_user_input=False,
+            result=PermissionResult(
+                result=False,
+                message=_dont_ask_permission_denied_message(tool_name),
+                decision=resolved_decision,
+            ),
+            decision=resolved_decision,
+        )
+
     return PermissionPreview(
         requires_user_input=True,
         result=None,
@@ -796,6 +823,7 @@ def _run_permission_decision_engine(
 def make_permission_checker(
     project_path: Path,
     yolo_mode: bool,
+    permission_mode: str = "default",
     prompt_fn: Optional[Callable[[str], str]] = None,
     console: Optional["Console"] = None,  # noqa: ARG001 (kept for backward compatibility)
     prompt_session: Optional["PromptSession"] = None,  # noqa: ARG001 (kept for backward compatibility)
@@ -806,6 +834,7 @@ def make_permission_checker(
     Args:
         project_path: Path to the project directory
         yolo_mode: If True, all tool calls are allowed without prompting
+        permission_mode: Permission mode for mode-specific behavior (e.g. dontAsk)
         prompt_fn: Optional function to use for prompting (defaults to input())
         console: (Deprecated) No longer used, kept for backward compatibility
         prompt_session: (Deprecated) No longer used, kept for backward compatibility
@@ -815,6 +844,7 @@ def make_permission_checker(
 
     _ = console, prompt_session  # Mark as intentionally unused
     project_path = project_path.resolve()
+    permission_mode = _normalize_permission_mode(permission_mode)
     config_manager.get_project_config(project_path)
 
     session_allowed_tools: Set[str] = set()
@@ -919,6 +949,7 @@ def make_permission_checker(
         return _run_permission_decision_engine(
             tool_name=tool.name,
             yolo_mode=yolo_mode,
+            permission_mode=permission_mode,
             force_prompt=force_prompt,
             needs_permission=needs_permission,
             is_preapproved=is_preapproved,

@@ -206,6 +206,9 @@ class QueryContext:
         pending_message_queue: Optional[PendingMessageQueue] = None,
         max_turns: Optional[int] = None,
         permission_mode: str = "default",
+        pre_plan_mode: Optional[str] = None,
+        on_enter_plan_mode: Optional[Callable[[], None]] = None,
+        on_exit_plan_mode: Optional[Callable[[], None]] = None,
         hook_scopes: Optional[List[HooksConfig]] = None,
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
@@ -232,6 +235,9 @@ class QueryContext:
         self.subagent_type = subagent_type
         self.max_turns = max_turns
         self.permission_mode = permission_mode
+        self.pre_plan_mode = pre_plan_mode
+        self.on_enter_plan_mode = on_enter_plan_mode
+        self.on_exit_plan_mode = on_exit_plan_mode
         self.hook_scopes: List[HooksConfig] = list(hook_scopes) if hook_scopes else []
         self._hook_scope_ids: set[str] = set()
 

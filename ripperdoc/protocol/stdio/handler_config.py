@@ -35,6 +35,7 @@ class StdioConfigMixin:
     _session_id: str | None
     _sdk_hook_scope: HooksConfig | None
     _session_additional_working_dirs: set[str]
+    _pre_plan_mode: str | None
 
     def _normalize_permission_mode(self, mode: Any) -> str:
         """Normalize permission mode to a supported value."""
@@ -94,10 +95,18 @@ class StdioConfigMixin:
 
     def _apply_permission_mode(self, mode: str) -> None:
         """Apply permission mode across query context, hooks, and permissions."""
+        previous_mode = "default"
+        if self._query_context is not None:
+            previous_mode = self._normalize_permission_mode(
+                getattr(self._query_context, "permission_mode", "default")
+            )
+        if previous_mode == "plan" and mode != "plan":
+            self._pre_plan_mode = None
         yolo_mode = mode == "bypassPermissions"
         if self._query_context:
             self._query_context.yolo_mode = yolo_mode
             self._query_context.permission_mode = mode
+            self._query_context.pre_plan_mode = self._pre_plan_mode
 
         hook_manager.set_permission_mode(mode)
 
@@ -109,6 +118,7 @@ class StdioConfigMixin:
             self._local_can_use_tool = make_permission_checker(
                 self._project_path,
                 yolo_mode=False,
+                permission_mode=mode,
                 session_additional_working_dirs=self._session_additional_working_dirs,
             )
             self._sdk_can_use_tool_supported = True
@@ -136,6 +146,25 @@ class StdioConfigMixin:
                     Optional[Callable[[Any, Any], Coroutine[Any, Any, PermissionResult]]],
                     self._local_can_use_tool,
                 )
+
+    def _enter_plan_mode(self) -> None:
+        """Switch runtime permission mode to plan and persist previous mode."""
+        current_mode = "default"
+        if self._query_context is not None:
+            current_mode = self._normalize_permission_mode(
+                getattr(self._query_context, "permission_mode", "default")
+            )
+        if current_mode != "plan":
+            self._pre_plan_mode = current_mode
+        self._apply_permission_mode("plan")
+
+    def _exit_plan_mode(self) -> None:
+        """Restore runtime mode from pre-plan state (or default)."""
+        target_mode = self._normalize_permission_mode(self._pre_plan_mode or "default")
+        if target_mode == "plan":
+            target_mode = "default"
+        self._pre_plan_mode = None
+        self._apply_permission_mode(target_mode)
 
     def _coerce_bool_option(self, value: Any, default: bool) -> bool:
         """Parse flexible bool option values from SDK initialize payloads."""

@@ -92,6 +92,21 @@ def build_prompt_session(ui: object, ignore_filter: Any) -> PromptSession:
         else:
             buf.start_completion(select_first=True)
 
+    @key_bindings.add("s-tab")
+    def _(event: Any) -> None:
+        """Cycle permission mode when input is empty; otherwise cycle completion backward."""
+        buf = event.current_buffer
+        if not buf.text.strip():
+            from prompt_toolkit.application import run_in_terminal
+
+            def _cycle_mode() -> None:
+                ui._cycle_permission_mode()
+
+            run_in_terminal(_cycle_mode)
+            return
+        if buf.complete_state:
+            buf.complete_previous()
+
     @key_bindings.add("escape", "enter")
     def _(event: Any) -> None:
         """Insert newline on Alt+Enter."""
@@ -198,6 +213,11 @@ def build_prompt_session(ui: object, ignore_filter: Any) -> PromptSession:
         {
             "rprompt-on": "fg:ansicyan bold",
             "rprompt-off": "fg:ansibrightblack",
+            "rprompt-sep": "fg:ansibrightblack",
+            "rprompt-mode-normal": "fg:ansibrightblack",
+            "rprompt-mode-accept": "fg:ansiyellow bold",
+            "rprompt-mode-plan": "fg:ansiblue bold",
+            "rprompt-mode-bypass": "fg:ansired bold",
         }
     )
     return PromptSession(

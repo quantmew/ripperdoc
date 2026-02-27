@@ -466,6 +466,7 @@ async def run_query(
         else make_permission_checker(
             project_path,
             yolo_mode=False,
+            permission_mode=permission_mode,
             session_additional_working_dirs=additional_working_dirs or [],
         )
     )
@@ -1016,7 +1017,7 @@ def _read_initial_query_from_stdin(
 )
 @click.option(
     "--permission-mode",
-    type=click.Choice(["default", "acceptEdits", "plan", "bypassPermissions"]),
+    type=click.Choice(["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"]),
     default="default",
     help="Permission mode for tool usage.",
 )

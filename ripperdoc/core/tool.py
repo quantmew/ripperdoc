@@ -60,7 +60,10 @@ class ToolUseContext(BaseModel):
     # UI control callbacks for tools that need user interaction
     pause_ui: Optional[Any] = Field(default=None, description="Callback to pause UI spinner")
     resume_ui: Optional[Any] = Field(default=None, description="Callback to resume UI spinner")
-    # Plan mode control callback
+    # Plan mode control callbacks
+    on_enter_plan_mode: Optional[Any] = Field(
+        default=None, description="Callback invoked when entering plan mode"
+    )
     on_exit_plan_mode: Optional[Any] = Field(
         default=None, description="Callback invoked when exiting plan mode"
     )

@@ -102,6 +102,13 @@ console = Console()
 logger = get_logger()
 _RESUME_REPLAY_LIMIT_ENV = "RIPPERDOC_RESUME_REPLAY_MAX_MESSAGES"
 _DEFAULT_RESUME_REPLAY_LIMIT = 120
+_PERMISSION_MODE_LABELS: dict[str, str] = {
+    "default": "Mode: normal",
+    "acceptEdits": "⏵⏵ accept edits on",
+    "plan": "⏸ plan mode on",
+    "dontAsk": "⏸ don't ask mode on",
+    "bypassPermissions": "⏵⏵ bypass permissions on",
+}
 
 
 def _resolve_resume_replay_limit() -> Optional[int]:
@@ -223,6 +230,7 @@ class RichUI:
         self._permission_checker: Any = None
         self.max_turns = max_turns
         self.permission_mode = permission_mode
+        self._pre_plan_mode: Optional[str] = None
         self._max_thinking_tokens_override = (
             max(0, int(max_thinking_tokens))
             if isinstance(max_thinking_tokens, int)
@@ -242,25 +250,9 @@ class RichUI:
         hook_manager.set_transcript_path(str(self._session_history.path))
 
         # Create permission checker with Rich console and PromptSession support
-        if not yolo_mode:
-            # Create a dedicated PromptSession for permission dialogs
-            # This provides better interrupt handling than console.input()
-            # Disable CPR (Cursor Position Request) to avoid warnings in terminals
-            # that don't support it (like some remote/CI terminals)
-            import os
-            os.environ['PROMPT_TOOLKIT_NO_CPR'] = '1'
-
-            permission_session: PromptSession = PromptSession()
-
-            self._permission_checker = make_permission_checker(
-                self.project_path,
-                yolo_mode=False,
-                console=console,  # Pass console for Rich Panel rendering
-                prompt_session=permission_session,  # Use PromptSession for input
-                session_additional_working_dirs=self._session_additional_working_dirs,
-            )
-        else:
-            self._permission_checker = None
+        self._permission_checker = (
+            None if yolo_mode else self._create_permission_checker()
+        )
         # Build ignore filter for file completion
         from ripperdoc.utils.path_ignore import get_project_ignore_patterns
 
@@ -326,6 +318,88 @@ class RichUI:
     # Thinking mode toggle
     # ─────────────────────────────────────────────────────────────────────────────
 
+    def _create_permission_checker(self) -> Any:
+        """Create a permission checker using current session directory scope."""
+        return make_permission_checker(
+            self.project_path,
+            yolo_mode=False,
+            permission_mode=self.permission_mode,
+            session_additional_working_dirs=self._session_additional_working_dirs,
+        )
+
+    def _normalize_permission_mode(self, mode: str) -> str:
+        normalized = str(mode or "").strip()
+        if normalized in {"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"}:
+            return normalized
+        return "default"
+
+    def _is_bypass_permissions_mode_available(self) -> bool:
+        """Return whether bypassPermissions mode can be cycled to."""
+        return True
+
+    def _permission_mode_label(self, mode: Optional[str] = None) -> str:
+        normalized = self._normalize_permission_mode(mode or self.permission_mode)
+        return _PERMISSION_MODE_LABELS.get(normalized, _PERMISSION_MODE_LABELS["default"])
+
+    def _next_permission_mode(self) -> str:
+        current = self._normalize_permission_mode(self.permission_mode)
+        if current == "default":
+            return "acceptEdits"
+        if current == "acceptEdits":
+            return "plan"
+        if current == "plan":
+            if self._is_bypass_permissions_mode_available():
+                return "bypassPermissions"
+            return "default"
+        if current in {"bypassPermissions", "dontAsk"}:
+            return "default"
+        return "default"
+
+    def _apply_permission_mode(self, mode: str, *, announce: bool = True) -> str:
+        """Apply a new permission mode across UI/query/hook state."""
+        previous_mode = self._normalize_permission_mode(self.permission_mode)
+        normalized = self._normalize_permission_mode(mode)
+        if previous_mode == "plan" and normalized != "plan":
+            self._pre_plan_mode = None
+        self.permission_mode = normalized
+        self.yolo_mode = normalized == "bypassPermissions"
+        hook_manager.set_permission_mode(normalized)
+
+        if self.query_context is not None:
+            self.query_context.permission_mode = normalized
+            self.query_context.yolo_mode = self.yolo_mode
+            self.query_context.pre_plan_mode = self._pre_plan_mode
+
+        if self.yolo_mode:
+            self._permission_checker = None
+        else:
+            self._permission_checker = self._create_permission_checker()
+
+        label = self._permission_mode_label(normalized)
+        if announce:
+            self.console.print(f"[cyan]{label}[/cyan]")
+        return normalized
+
+    def _cycle_permission_mode(self) -> None:
+        """Cycle permission mode using Claude-compatible ordering."""
+        next_mode = self._next_permission_mode()
+        self._apply_permission_mode(next_mode, announce=False)
+
+    def _enter_plan_mode(self) -> None:
+        """Switch to plan mode and remember the prior mode for restoration."""
+        current_mode = self._normalize_permission_mode(self.permission_mode)
+        if current_mode != "plan":
+            self._pre_plan_mode = current_mode
+        self._apply_permission_mode("plan", announce=False)
+
+    def _exit_plan_mode(self) -> None:
+        """Exit plan mode and restore the pre-plan mode (or default)."""
+        target = self._normalize_permission_mode(self._pre_plan_mode or "default")
+        if target == "plan":
+            target = "default"
+        self._pre_plan_mode = None
+        self._apply_permission_mode(target, announce=False)
+
     def _supports_thinking_mode(self) -> bool:
         """Check if the current model supports extended thinking mode."""
         from ripperdoc.core.query import infer_thinking_mode
@@ -361,20 +435,24 @@ class RichUI:
         return "> "
 
     def _get_rprompt(self) -> Union[str, FormattedText]:
-        """Generate the right prompt with thinking mode status."""
-        if not self._supports_thinking_mode():
-            return ""
-        if self._thinking_mode_enabled:
-            return FormattedText(
-                [
-                    ("class:rprompt-on", "⚡ Thinking"),
-                ]
-            )
-        return FormattedText(
-            [
-                ("class:rprompt-off", "Thinking: off"),
-            ]
-        )
+        """Generate the right prompt with permission/thinking mode status."""
+        mode = self._normalize_permission_mode(self.permission_mode)
+        mode_style = {
+            "default": "class:rprompt-mode-normal",
+            "acceptEdits": "class:rprompt-mode-accept",
+            "plan": "class:rprompt-mode-plan",
+            "dontAsk": "class:rprompt-mode-plan",
+            "bypassPermissions": "class:rprompt-mode-bypass",
+        }.get(mode, "class:rprompt-mode-normal")
+
+        fragments: list[tuple[str, str]] = [(mode_style, self._permission_mode_label(mode))]
+        if self._supports_thinking_mode():
+            fragments.append(("class:rprompt-sep", " | "))
+            if self._thinking_mode_enabled:
+                fragments.append(("class:rprompt-on", "⚡ Thinking"))
+            else:
+                fragments.append(("class:rprompt-off", "Thinking: off"))
+        return FormattedText(fragments)
 
     def _context_usage_lines(
         self, breakdown: Any, model_label: str, auto_compact_enabled: bool
@@ -1129,6 +1207,9 @@ class RichUI:
                 model=self.model,
                 max_turns=self.max_turns,
                 permission_mode=self.permission_mode,
+                pre_plan_mode=self._pre_plan_mode,
+                on_enter_plan_mode=self._enter_plan_mode,
+                on_exit_plan_mode=self._exit_plan_mode,
             )
         else:
             abort_controller = getattr(self.query_context, "abort_controller", None)
@@ -1136,7 +1217,11 @@ class RichUI:
                 abort_controller.clear()
             self.query_context.max_thinking_tokens = self._get_thinking_tokens()
             self.query_context.max_turns = self.max_turns
+            self.query_context.yolo_mode = self.yolo_mode
             self.query_context.permission_mode = self.permission_mode
+            self.query_context.pre_plan_mode = self._pre_plan_mode
+            self.query_context.on_enter_plan_mode = self._enter_plan_mode
+            self.query_context.on_exit_plan_mode = self._exit_plan_mode
         self.query_context.stop_hook_active = False
         return self.query_context
 

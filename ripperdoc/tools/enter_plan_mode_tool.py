@@ -213,6 +213,12 @@ class EnterPlanModeTool(Tool[EnterPlanModeToolInput, EnterPlanModeToolOutput]):
             )
             return
 
+        if context.on_enter_plan_mode:
+            try:
+                context.on_enter_plan_mode()
+            except (RuntimeError, ValueError, TypeError):
+                logger.debug("[enter_plan_mode_tool] Failed to call on_enter_plan_mode")
+
         output = EnterPlanModeToolOutput(
             message=(
                 "Entered plan mode. You should now focus on exploring "

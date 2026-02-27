@@ -74,6 +74,7 @@ def print_shortcuts(console: Console) -> None:
     pairs: List[Tuple[str, str]] = [
         ("? for shortcuts", "! for bash mode"),
         ("/ for commands", "@ for file mention"),
+        ("Tab thinking mode", "Shift+Tab permission mode"),
         ("Alt+Enter for newline", "Enter to submit"),
         ("Esc Esc for history", ""),
     ]

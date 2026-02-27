@@ -6,6 +6,8 @@ from typing import Any, List
 
 import pytest
 
+from pathlib import Path
+
 from ripperdoc.cli.ui.rich_ui.session import RichUI
 from ripperdoc.utils.messages import create_assistant_message, create_user_message
 
@@ -28,6 +30,7 @@ def _new_ui() -> RichUI:
     ui.session_id = "test-session"
     ui.conversation_messages = []
     ui._saved_conversation = None
+    ui._pre_plan_mode = None
     return ui
 
 
@@ -75,6 +78,124 @@ def test_rollback_to_index_truncates_and_replays_from_turn_boundary() -> None:
 
     assert len(ui.conversation_messages) == 3
     assert replay_calls == [3]
+
+
+def test_cycle_permission_mode_rotates_with_bypass_when_available(monkeypatch: Any) -> None:
+    ui = _new_ui()
+    ui.permission_mode = "default"
+    ui.yolo_mode = False
+    ui._permission_checker = object()
+    ui._session_additional_working_dirs = set()
+    ui.project_path = Path.cwd()
+    ui.query_context = type(
+        "Q",
+        (),
+        {
+            "permission_mode": "default",
+            "yolo_mode": False,
+        },
+    )()
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.hook_manager.set_permission_mode",
+        lambda mode: seen.append(mode),
+    )
+
+    ui._cycle_permission_mode()
+    assert ui.permission_mode == "acceptEdits"
+    assert ui.query_context.permission_mode == "acceptEdits"
+    assert ui.query_context.yolo_mode is False
+
+    ui._cycle_permission_mode()
+    assert ui.permission_mode == "plan"
+    assert ui.query_context.permission_mode == "plan"
+
+    ui._cycle_permission_mode()
+    assert ui.permission_mode == "bypassPermissions"
+    assert ui.query_context.permission_mode == "bypassPermissions"
+    assert ui.query_context.yolo_mode is True
+
+    ui._cycle_permission_mode()
+    assert ui.permission_mode == "default"
+    assert ui.query_context.permission_mode == "default"
+    assert ui.query_context.yolo_mode is False
+    assert seen == ["acceptEdits", "plan", "bypassPermissions", "default"]
+    assert ui.console.lines == []
+
+
+def test_cycle_permission_mode_skips_bypass_when_unavailable(monkeypatch: Any) -> None:
+    ui = _new_ui()
+    ui.permission_mode = "default"
+    ui.yolo_mode = False
+    ui._permission_checker = object()
+    ui._session_additional_working_dirs = set()
+    ui.project_path = Path.cwd()
+    ui.query_context = type(
+        "Q",
+        (),
+        {
+            "permission_mode": "default",
+            "yolo_mode": False,
+        },
+    )()
+    monkeypatch.setattr(RichUI, "_is_bypass_permissions_mode_available", lambda self: False)
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.hook_manager.set_permission_mode",
+        lambda mode: None,
+    )
+
+    ui._cycle_permission_mode()
+    assert ui.permission_mode == "acceptEdits"
+    ui._cycle_permission_mode()
+    assert ui.permission_mode == "plan"
+    ui._cycle_permission_mode()
+    assert ui.permission_mode == "default"
+
+
+def test_apply_permission_mode_recreates_checker_when_leaving_bypass(monkeypatch: Any) -> None:
+    ui = _new_ui()
+    ui.permission_mode = "bypassPermissions"
+    ui.yolo_mode = True
+    ui._permission_checker = None
+    ui._session_additional_working_dirs = set()
+    ui.project_path = Path.cwd()
+    ui.query_context = type(
+        "Q",
+        (),
+        {
+            "permission_mode": "bypassPermissions",
+            "yolo_mode": True,
+        },
+    )()
+
+    marker = object()
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.make_permission_checker",
+        lambda *args, **kwargs: marker,
+    )
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.hook_manager.set_permission_mode",
+        lambda mode: None,
+    )
+
+    ui._apply_permission_mode("default", announce=False)
+
+    assert ui.permission_mode == "default"
+    assert ui.yolo_mode is False
+    assert ui.query_context.permission_mode == "default"
+    assert ui.query_context.yolo_mode is False
+    assert ui._permission_checker is marker
+
+
+def test_get_rprompt_keeps_permission_mode_label_when_thinking_unsupported(monkeypatch: Any) -> None:
+    ui = _new_ui()
+    ui.permission_mode = "plan"
+    ui._thinking_mode_enabled = False
+    monkeypatch.setattr(RichUI, "_supports_thinking_mode", lambda self: False)
+
+    fragments = list(ui._get_rprompt())
+    assert fragments == [("class:rprompt-mode-plan", "⏸ plan mode on")]
 
 
 @pytest.mark.asyncio

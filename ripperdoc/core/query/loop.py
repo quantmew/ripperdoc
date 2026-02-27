@@ -1131,6 +1131,8 @@ async def _parse_and_validate_tool_input_for_call(
                 abort_signal=query_context.abort_controller,
                 pause_ui=query_context.pause_ui,
                 resume_ui=query_context.resume_ui,
+                on_enter_plan_mode=query_context.on_enter_plan_mode,
+                on_exit_plan_mode=query_context.on_exit_plan_mode,
                 pending_message_queue=query_context.pending_message_queue,
             ),
             {},
@@ -1158,6 +1160,8 @@ async def _parse_and_validate_tool_input_for_call(
         abort_signal=query_context.abort_controller,
         pause_ui=query_context.pause_ui,
         resume_ui=query_context.resume_ui,
+        on_enter_plan_mode=query_context.on_enter_plan_mode,
+        on_exit_plan_mode=query_context.on_exit_plan_mode,
         pending_message_queue=query_context.pending_message_queue,
     )
     validation = await tool.validate_input(parsed_input, tool_context)

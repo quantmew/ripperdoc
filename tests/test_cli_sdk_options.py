@@ -141,6 +141,30 @@ def test_cli_prompt_forwards_permission_mode_and_max_turns(monkeypatch, tmp_path
     assert captured["args"][2] is False  # yolo_mode
 
 
+def test_cli_prompt_accepts_dont_ask_permission_mode(monkeypatch, tmp_path):
+    captured: dict[str, Any] = {}
+
+    async def fake_run_query(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--prompt", "hi", "--permission-mode", "dontAsk"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["permission_mode"] == "dontAsk"
+    assert captured["args"][2] is False
+
+
 def test_cli_yolo_overrides_permission_mode_for_prompt(monkeypatch, tmp_path):
     captured: dict[str, Any] = {}
 

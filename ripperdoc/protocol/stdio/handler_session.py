@@ -229,6 +229,7 @@ class StdioSessionMixin:
                 options.get("permission_mode", "default")
             )
             yolo_mode = permission_mode == "bypassPermissions"
+            self._pre_plan_mode = None
             self._sdk_can_use_tool_enabled = self._coerce_bool_option(
                 options.get("sdk_can_use_tool"),
                 self._input_format == "stream-json" and self._output_format == "stream-json",
@@ -268,6 +269,9 @@ class StdioSessionMixin:
                 max_thinking_tokens=max_thinking_tokens,
                 max_turns=max_turns,
                 permission_mode=permission_mode,
+                pre_plan_mode=self._pre_plan_mode,
+                on_enter_plan_mode=self._enter_plan_mode,
+                on_exit_plan_mode=self._exit_plan_mode,
             )
 
             # Initialize hook manager

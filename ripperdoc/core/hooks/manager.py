@@ -176,7 +176,7 @@ class HookManager:
             project_dir: The project directory
             session_id: Current session ID for hook input
             transcript_path: Path to the conversation transcript JSON
-            permission_mode: Current permission mode (default, plan, acceptEdits, bypassPermissions)
+            permission_mode: Current permission mode (default, plan, dontAsk, acceptEdits, bypassPermissions)
             llm_callback: Async callback for prompt-based hooks. Takes prompt string,
                          returns LLM response string. If not set, prompt hooks will
                          be skipped with a warning.

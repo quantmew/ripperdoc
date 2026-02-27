@@ -45,9 +45,9 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
     # Capture permission checker instantiation.
     checker_calls = []
 
-    def fake_make_permission_checker(project_path, yolo_mode=False, **_kwargs):
+    def fake_make_permission_checker(project_path, yolo_mode=False, **kwargs):
         checker = object()
-        checker_calls.append((project_path, yolo_mode, checker))
+        checker_calls.append((project_path, yolo_mode, kwargs.get("permission_mode"), checker))
         return checker
 
     monkeypatch.setattr(handler_config, "make_permission_checker", fake_make_permission_checker)
@@ -69,7 +69,8 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
         assert handler._query_context.permission_mode == "plan"
         assert handler._query_context.yolo_mode is False
         assert hook_manager.permission_mode == "plan"
-        assert handler._can_use_tool is checker_calls[-1][2]
+        assert handler._can_use_tool is checker_calls[-1][3]
+        assert checker_calls[-1][2] == "plan"
         assert len(checker_calls) == 1
 
         await handler._handle_set_permission_mode({"mode": "bypassPermissions"}, "set1")
@@ -83,7 +84,16 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
         assert handler._query_context.permission_mode == "default"
         assert handler._query_context.yolo_mode is False
         assert hook_manager.permission_mode == "default"
-        assert handler._can_use_tool is checker_calls[-1][2]
+        assert handler._can_use_tool is checker_calls[-1][3]
+        assert checker_calls[-1][2] == "default"
         assert len(checker_calls) == 2
+
+        await handler._handle_set_permission_mode({"mode": "dontAsk"}, "set3")
+        assert handler._query_context.permission_mode == "dontAsk"
+        assert handler._query_context.yolo_mode is False
+        assert hook_manager.permission_mode == "dontAsk"
+        assert handler._can_use_tool is checker_calls[-1][3]
+        assert checker_calls[-1][2] == "dontAsk"
+        assert len(checker_calls) == 3
     finally:
         hook_manager.set_permission_mode(previous_mode)

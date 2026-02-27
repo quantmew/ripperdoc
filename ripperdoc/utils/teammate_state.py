@@ -95,7 +95,7 @@ class InProcessTeammateState:
     on_idle_callbacks: List[Callable[[], None]] = field(default_factory=list)
 
     # Permission and mode
-    permission_mode: str = "default"  # "default", "plan", "bypassPermissions", "acceptEdits"
+    permission_mode: str = "default"  # "default", "plan", "dontAsk", "bypassPermissions", "acceptEdits"
     awaiting_plan_approval: bool = False
 
     # Shutdown protocol
