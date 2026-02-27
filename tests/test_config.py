@@ -174,3 +174,52 @@ def test_known_providers_use_model_profile_objects():
     provider = KNOWN_PROVIDERS.default_choice.provider
     assert provider.model_list
     assert isinstance(provider.model_list[0], ModelProfile)
+
+
+def test_config_manager_rename_model_profile_updates_pointers():
+    """Renaming a profile should move pointers from old key to new key."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        manager = ConfigManager()
+        manager.global_config_path = Path(tmpdir) / "config.json"
+
+        config = manager.get_global_config()
+        config.model_profiles["old"] = ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="model-old",
+        )
+        config.model_profiles["other"] = ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="model-other",
+        )
+        config.model_pointers.main = "old"
+        config.model_pointers.quick = "other"
+        manager.save_global_config(config)
+        manager._global_config = None
+
+        renamed = manager.rename_model_profile("old", "new")
+        assert "new" in renamed.model_profiles
+        assert "old" not in renamed.model_profiles
+        assert renamed.model_pointers.main == "new"
+        assert renamed.model_pointers.quick == "other"
+
+
+def test_config_manager_rename_model_profile_rejects_duplicates():
+    """Renaming to an existing profile name should fail."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        manager = ConfigManager()
+        manager.global_config_path = Path(tmpdir) / "config.json"
+
+        config = manager.get_global_config()
+        config.model_profiles["a"] = ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="model-a",
+        )
+        config.model_profiles["b"] = ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="model-b",
+        )
+        manager.save_global_config(config)
+        manager._global_config = None
+
+        with pytest.raises(ValueError, match="already exists"):
+            manager.rename_model_profile("a", "b")

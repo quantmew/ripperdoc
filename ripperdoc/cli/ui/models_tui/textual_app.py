@@ -30,6 +30,7 @@ from ripperdoc.core.config import (
     delete_model_profile,
     get_global_config,
     model_supports_vision,
+    rename_model_profile,
     set_model_pointer,
 )
 from ripperdoc.core.oauth import (
@@ -49,6 +50,16 @@ _KNOWN_THINKING_MODES = {
     "disabled",
 }
 _THINKING_MODE_CUSTOM = "__custom__"
+
+
+def _next_copied_profile_name(source_name: str, existing_names: set[str]) -> str:
+    """Return the next available copied profile name, e.g. `x (1)`."""
+    index = 1
+    while True:
+        candidate = f"{source_name} ({index})"
+        if candidate not in existing_names:
+            return candidate
+        index += 1
 
 
 @dataclass
@@ -78,6 +89,49 @@ class ConfirmScreen(ModalScreen[bool]):
             self.dismiss(True)
         else:
             self.dismiss(False)
+
+
+class RenameScreen(ModalScreen[Optional[str]]):
+    """Prompt for a new model profile name."""
+
+    def __init__(self, current_name: str) -> None:
+        super().__init__()
+        self._current_name = current_name
+
+    def compose(self) -> ComposeResult:
+        with Container(id="confirm_dialog"):
+            yield Static(f"Rename '{self._current_name}' to:", id="confirm_message")
+            yield Input(value=self._current_name, id="rename_input", placeholder="New profile name")
+            with Horizontal(id="confirm_buttons"):
+                yield Button("Rename", id="rename_save", variant="primary")
+                yield Button("Cancel", id="rename_cancel")
+
+    def on_mount(self) -> None:
+        try:
+            rename_input = self.query_one("#rename_input", Input)
+            rename_input.focus()
+            rename_input.select_all()
+        except Exception:
+            pass
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "rename_cancel":
+            self.dismiss(None)
+            return
+        if event.button.id != "rename_save":
+            return
+        self._submit()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "rename_input":
+            self._submit()
+
+    def _submit(self) -> None:
+        try:
+            rename_input = self.query_one("#rename_input", Input)
+            self.dismiss((rename_input.value or "").strip())
+        except Exception:
+            self.dismiss(None)
 
 
 class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
@@ -823,6 +877,8 @@ class ModelsApp(App[None]):
         ("escape", "quit", "Quit"),
         ("a", "add", "Add"),
         ("e", "edit", "Edit"),
+        ("c", "copy", "Copy"),
+        ("n", "rename", "Rename"),
         ("d", "delete", "Delete"),
         ("m", "set_main", "Set main"),
         ("k", "set_quick", "Set quick"),
@@ -881,6 +937,39 @@ class ModelsApp(App[None]):
             existing_profile=profile,
         )
         self.push_screen(screen, self._handle_edit_result)
+
+    def action_copy(self) -> None:
+        profile = self._selected_profile()
+        if not profile or not self._selected_name:
+            self._set_status("No model selected.")
+            return
+
+        source_name = self._selected_name
+        config = get_global_config()
+        existing_names = set(config.model_profiles.keys())
+        new_name = _next_copied_profile_name(source_name, existing_names)
+
+        try:
+            add_model_profile(
+                new_name,
+                profile.model_copy(deep=True),
+                overwrite=False,
+                set_as_main=False,
+            )
+        except (OSError, IOError, ValueError, TypeError, PermissionError) as exc:
+            self._set_status(str(exc))
+            return
+
+        self._selected_name = new_name
+        self._set_status(f"Copied {source_name} as {new_name}.")
+        self._refresh_models(select_first=False)
+
+    def action_rename(self) -> None:
+        if not self._selected_name:
+            self._set_status("No model selected.")
+            return
+        screen = RenameScreen(self._selected_name)
+        self.push_screen(screen, self._handle_rename_result)
 
     def action_delete(self) -> None:
         profile = self._selected_profile()
@@ -970,6 +1059,31 @@ class ModelsApp(App[None]):
         self._set_status(f"Deleted {self._selected_name}.")
         self._selected_name = None
         self._refresh_models(select_first=True)
+
+    def _handle_rename_result(self, new_name: Optional[str]) -> None:
+        if new_name is None or not self._selected_name:
+            return
+        if new_name == self._selected_name:
+            self._set_status("Name unchanged.")
+            return
+        try:
+            rename_model_profile(self._selected_name, new_name)
+        except (OSError, IOError, KeyError, ValueError, PermissionError) as exc:
+            message = str(exc)
+            self._set_status(message)
+            try:
+                self.notify(
+                    message,
+                    title="Rename failed",
+                    severity="error",
+                    timeout=6,
+                )
+            except Exception:
+                pass
+            return
+        self._selected_name = new_name
+        self._set_status(f"Renamed profile to {new_name}.")
+        self._refresh_models(select_first=False)
 
     def _refresh_models(self, select_first: bool) -> None:
         config = get_global_config()

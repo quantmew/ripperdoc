@@ -659,6 +659,34 @@ class ConfigManager:
         self.save_global_config(config)
         return config
 
+    def rename_model_profile(self, old_name: str, new_name: str) -> UserConfig:
+        """Rename a model profile key and retarget pointers."""
+        old_name = old_name.strip()
+        new_name = new_name.strip()
+        if not old_name:
+            raise ValueError("Old model profile name is required.")
+        if not new_name:
+            raise ValueError("New model profile name is required.")
+
+        config = self.get_global_config()
+        if old_name not in config.model_profiles:
+            raise KeyError(f"Model profile '{old_name}' does not exist.")
+        if old_name == new_name:
+            return config
+        if new_name in config.model_profiles:
+            raise ValueError(f"Model profile '{new_name}' already exists.")
+
+        profile = config.model_profiles.pop(old_name)
+        config.model_profiles[new_name] = profile
+
+        for pointer_field in ModelPointers.model_fields:
+            current = getattr(config.model_pointers, pointer_field, "")
+            if current == old_name:
+                setattr(config.model_pointers, pointer_field, new_name)
+
+        self.save_global_config(config)
+        return config
+
     def set_model_pointer(self, pointer: str, profile_name: str) -> UserConfig:
         """Point a logical model slot (e.g., main/quick) to a profile name."""
         if pointer not in ModelPointers.model_fields:
@@ -725,6 +753,11 @@ def add_model_profile(
 def delete_model_profile(name: str) -> UserConfig:
     """Remove a model profile and update pointers as needed."""
     return config_manager.delete_model_profile(name)
+
+
+def rename_model_profile(old_name: str, new_name: str) -> UserConfig:
+    """Rename a model profile and update pointers referencing it."""
+    return config_manager.rename_model_profile(old_name, new_name)
 
 
 def set_model_pointer(pointer: str, profile_name: str) -> UserConfig:

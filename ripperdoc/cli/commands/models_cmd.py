@@ -17,6 +17,7 @@ from ripperdoc.core.config import (
     delete_model_profile,
     get_global_config,
     model_supports_vision,
+    rename_model_profile,
     set_model_pointer,
 )
 from ripperdoc.core.oauth import (
@@ -858,7 +859,7 @@ def _build_models_header_panel(config: Any, selected_name: Optional[str]) -> Pan
 
 def _build_models_footer_panel() -> Panel:
     footer = Text(
-        "↑/↓ move  A add  E edit  D delete  M set main  K set quick  Q exit  R refresh",
+        "↑/↓ move  A add  E edit  C copy  N rename  D delete  M set main  K set quick  Q exit  R refresh",
         style="dim",
     )
     return Panel(footer, box=box.ROUNDED, padding=(0, 1))
@@ -902,7 +903,7 @@ def _prompt_models_command(console: Any) -> str:
         from prompt_toolkit import prompt as pt_prompt
         from prompt_toolkit.key_binding import KeyBindings
     except (ImportError, OSError, RuntimeError):
-        return str(console.input("Command (a/e/d/m/k/q/r or model #/name): ")).strip()
+        return str(console.input("Command (a/e/c/n/d/m/k/q/r or model #/name): ")).strip()
 
     key_bindings = KeyBindings()
 
@@ -916,6 +917,10 @@ def _prompt_models_command(console: Any) -> str:
         key_bindings.add(key, eager=True)(_exit_with("a"))
     for key in ("e", "E"):
         key_bindings.add(key, eager=True)(_exit_with("e"))
+    for key in ("c", "C"):
+        key_bindings.add(key, eager=True)(_exit_with("c"))
+    for key in ("n", "N"):
+        key_bindings.add(key, eager=True)(_exit_with("n"))
     for key in ("d", "D"):
         key_bindings.add(key, eager=True)(_exit_with("d"))
     for key in ("m", "M"):
@@ -963,6 +968,16 @@ def _resolve_model_selection(
     # Case-insensitive match
     lower_map = {name.lower(): name for name in config.model_profiles}
     return lower_map.get(raw.lower(), selected_name)
+
+
+def _next_copied_profile_name(source_name: str, existing_names: set[str]) -> str:
+    """Return the next available copied profile name, e.g. `x (1)`."""
+    index = 1
+    while True:
+        candidate = f"{source_name} ({index})"
+        if candidate not in existing_names:
+            return candidate
+        index += 1
 
 
 def _handle_models_rich_tui(ui: Any) -> bool:
@@ -1062,7 +1077,22 @@ def _handle_models_rich_tui(ui: Any) -> bool:
             continue
 
         model_name: Optional[str]
-        if command in ("e", "edit", "d", "delete", "del", "remove", "m", "main", "k", "quick"):
+        if command in (
+            "e",
+            "edit",
+            "c",
+            "copy",
+            "n",
+            "rename",
+            "d",
+            "delete",
+            "del",
+            "remove",
+            "m",
+            "main",
+            "k",
+            "quick",
+        ):
             if not selected_name:
                 console.print("[yellow]No model selected.[/yellow]")
                 continue
@@ -1096,6 +1126,40 @@ def _handle_models_rich_tui(ui: Any) -> bool:
                 console.print(f"[red]Failed to update model: {escape(str(exc))}[/red]")
                 continue
             console.print(f"[green]✓ Model '{escape(model_name)}' updated[/green]")
+            continue
+
+        if command in ("c", "copy"):
+            new_name = _next_copied_profile_name(model_name, set(config.model_profiles.keys()))
+            try:
+                add_model_profile(
+                    new_name,
+                    profile.model_copy(deep=True),
+                    overwrite=False,
+                    set_as_main=False,
+                )
+            except (OSError, IOError, ValueError, TypeError, PermissionError) as exc:
+                console.print(f"[red]Failed to copy model: {escape(str(exc))}[/red]")
+                continue
+            console.print(
+                f"[green]✓ Copied model '{escape(model_name)}' to '{escape(new_name)}'[/green]"
+            )
+            selected_name = new_name
+            continue
+
+        if command in ("n", "rename"):
+            new_name = console.input(f"New name for '{model_name}': ").strip()
+            if not new_name:
+                console.print("[red]New model profile name is required.[/red]")
+                continue
+            try:
+                rename_model_profile(model_name, new_name)
+            except (OSError, IOError, KeyError, ValueError, PermissionError) as exc:
+                console.print(f"[red]Failed to rename model: {escape(str(exc))}[/red]")
+                continue
+            console.print(
+                f"[green]✓ Renamed model '{escape(model_name)}' to '{escape(new_name)}'[/green]"
+            )
+            selected_name = new_name
             continue
 
         if command in ("m", "main", "k", "quick"):

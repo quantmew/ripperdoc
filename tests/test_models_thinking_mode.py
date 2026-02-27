@@ -7,7 +7,11 @@ from types import SimpleNamespace
 from rich.console import Console
 
 from ripperdoc.cli.commands import models_cmd
-from ripperdoc.cli.ui.models_tui.textual_app import ModelFormScreen
+from ripperdoc.cli.ui.models_tui.textual_app import (
+    ModelFormScreen,
+    ModelsApp,
+    _next_copied_profile_name,
+)
 from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
 
@@ -108,6 +112,134 @@ def test_models_tui_parse_thinking_mode_values() -> None:
         screen._resolve_thinking_mode(selected_value="__custom__", custom_value="Vendor_Mode")
         == "vendor_mode"
     )
+
+
+def test_models_tui_copy_name_increments() -> None:
+    assert _next_copied_profile_name("x", {"x"}) == "x (1)"
+    assert _next_copied_profile_name("x", {"x", "x (1)"}) == "x (2)"
+    assert _next_copied_profile_name("x", {"x", "x (1)", "x (2)"}) == "x (3)"
+
+
+def test_models_cmd_copy_name_increments() -> None:
+    assert models_cmd._next_copied_profile_name("x", {"x"}) == "x (1)"
+    assert models_cmd._next_copied_profile_name("x", {"x", "x (1)"}) == "x (2)"
+
+
+def test_models_tui_action_copy_duplicates_profile(monkeypatch) -> None:
+    source_profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="openrouter/demo",
+        max_tokens=1024,
+    )
+    config = SimpleNamespace(
+        model_profiles={"x": source_profile, "x (1)": source_profile.model_copy(deep=True)},
+    )
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.models_tui.textual_app.get_global_config",
+        lambda: config,
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_add_model_profile(name, profile, overwrite=False, set_as_main=False):  # noqa: ANN001
+        captured["name"] = name
+        captured["profile"] = profile
+        captured["overwrite"] = overwrite
+        captured["set_as_main"] = set_as_main
+
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.models_tui.textual_app.add_model_profile",
+        _fake_add_model_profile,
+    )
+
+    app = ModelsApp()
+    app._selected_name = "x"
+    monkeypatch.setattr(app, "_set_status", lambda message: captured.setdefault("status", message))
+    monkeypatch.setattr(
+        app,
+        "_refresh_models",
+        lambda select_first: captured.setdefault("refresh_select_first", select_first),
+    )
+
+    app.action_copy()
+
+    assert captured["name"] == "x (2)"
+    assert captured["overwrite"] is False
+    assert captured["set_as_main"] is False
+    assert isinstance(captured["profile"], ModelProfile)
+    assert captured["profile"] is not source_profile
+    assert captured["profile"].model_dump() == source_profile.model_dump()
+    assert app._selected_name == "x (2)"
+
+
+def test_models_tui_handle_rename_result_renames_profile(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_rename_model_profile(old_name, new_name):  # noqa: ANN001
+        captured["old_name"] = old_name
+        captured["new_name"] = new_name
+
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.models_tui.textual_app.rename_model_profile",
+        _fake_rename_model_profile,
+    )
+
+    app = ModelsApp()
+    app._selected_name = "demo"
+    monkeypatch.setattr(app, "_set_status", lambda message: captured.setdefault("status", message))
+    monkeypatch.setattr(
+        app,
+        "_refresh_models",
+        lambda select_first: captured.setdefault("refresh_select_first", select_first),
+    )
+
+    app._handle_rename_result("demo-v2")
+
+    assert captured["old_name"] == "demo"
+    assert captured["new_name"] == "demo-v2"
+    assert app._selected_name == "demo-v2"
+    assert captured["status"] == "Renamed profile to demo-v2."
+    assert captured["refresh_select_first"] is False
+
+
+def test_models_tui_handle_rename_result_shows_notify_on_duplicate(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_rename_model_profile(_old_name, _new_name):  # noqa: ANN001
+        raise ValueError("Model profile 'demo-v2' already exists.")
+
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.models_tui.textual_app.rename_model_profile",
+        _fake_rename_model_profile,
+    )
+
+    app = ModelsApp()
+    app._selected_name = "demo"
+    monkeypatch.setattr(app, "_set_status", lambda message: captured.setdefault("status", message))
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, title, severity, timeout: captured.setdefault(
+            "notify",
+            {
+                "message": message,
+                "title": title,
+                "severity": severity,
+                "timeout": timeout,
+            },
+        ),
+    )
+
+    app._handle_rename_result("demo-v2")
+
+    assert captured["status"] == "Model profile 'demo-v2' already exists."
+    assert captured["notify"] == {
+        "message": "Model profile 'demo-v2' already exists.",
+        "title": "Rename failed",
+        "severity": "error",
+        "timeout": 6,
+    }
+    assert app._selected_name == "demo"
 
 
 def test_models_tui_oauth_token_options_include_non_codex(monkeypatch) -> None:
