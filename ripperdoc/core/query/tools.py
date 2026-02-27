@@ -4,6 +4,7 @@ import asyncio
 import os
 import sys
 from asyncio import CancelledError
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Dict, List, Optional, Union, cast
 
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
@@ -33,6 +34,44 @@ DEFAULT_TOOL_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_TOOL_TIMEOUT", "300"))  # 
 DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC = float(
     os.getenv("RIPPERDOC_CONCURRENT_TOOL_TIMEOUT", "600")
 )  # 10 minutes
+_INFINITE_TIMEOUT_TOOLS = {"AskUserQuestion"}
+
+
+def _resolve_tool_timeout_sec(tool_name: str) -> Optional[float]:
+    """Resolve per-tool timeout in seconds.
+
+    AskUserQuestion is intentionally unbounded so users can take their time.
+    """
+    if tool_name in _INFINITE_TIMEOUT_TOOLS:
+        return None
+    return DEFAULT_TOOL_TIMEOUT_SEC
+
+
+def _resolve_concurrent_timeout_sec(tool_names: List[str]) -> Optional[float]:
+    """Resolve overall timeout for a concurrent tool batch."""
+    if any(name in _INFINITE_TIMEOUT_TOOLS for name in tool_names):
+        return None
+    return DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC
+
+
+@asynccontextmanager
+async def _optional_timeout(timeout_sec: Optional[float]) -> AsyncGenerator[None, None]:
+    """Apply asyncio timeout only when a positive timeout is configured."""
+    if timeout_sec is None or timeout_sec <= 0:
+        yield
+        return
+    async with asyncio_timeout(timeout_sec):
+        yield
+
+
+async def _queue_get_with_timeout(
+    queue: asyncio.Queue[Optional[Union[UserMessage, ProgressMessage]]],
+    timeout_sec: Optional[float],
+) -> Optional[Union[UserMessage, ProgressMessage]]:
+    """Read from queue with optional timeout."""
+    if timeout_sec is None or timeout_sec <= 0:
+        return await queue.get()
+    return await asyncio.wait_for(queue.get(), timeout=timeout_sec)
 
 
 def _resolve_tool(
@@ -137,8 +176,9 @@ async def _run_tool_use_generator(
     try:
         logger.debug("[query] _run_tool_use_generator: BEFORE tool.call() for '%s'", tool_name)
         # Wrap tool execution with timeout to prevent hangs
+        tool_timeout_sec = _resolve_tool_timeout_sec(tool_name)
         try:
-            async with asyncio_timeout(DEFAULT_TOOL_TIMEOUT_SEC):
+            async with _optional_timeout(tool_timeout_sec):
                 async for output in tool.call(parsed_input, tool_context):
                     logger.debug(
                         "[query] _run_tool_use_generator: tool='%s' yielded output type=%s",
@@ -166,11 +206,11 @@ async def _run_tool_use_generator(
                         )
         except asyncio.TimeoutError:
             logger.error(
-                f"[query] Tool '{tool_name}' timed out after {DEFAULT_TOOL_TIMEOUT_SEC}s",
+                f"[query] Tool '{tool_name}' timed out after {tool_timeout_sec}s",
                 extra={"tool": tool_name, "tool_use_id": tool_use_id},
             )
             tool_error = (
-                f"Tool '{tool_name}' timed out after {DEFAULT_TOOL_TIMEOUT_SEC:.0f} seconds"
+                f"Tool '{tool_name}' timed out after {float(tool_timeout_sec or 0):.0f} seconds"
             )
             yield tool_result_message(
                 tool_use_id,
@@ -387,11 +427,12 @@ async def _run_concurrent_tool_uses(
     tool_results: List[UserMessage],
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Drain multiple tool generators concurrently and stream outputs with overall timeout."""
+    overall_timeout_sec = _resolve_concurrent_timeout_sec(tool_names)
     logger.debug(
         "[query] _run_concurrent_tool_uses ENTER: %d generators, tools=%s, timeout=%s",
         len(generators),
         tool_names,
-        DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC,
+        overall_timeout_sec,
     )
     if not generators:
         logger.debug("[query] _run_concurrent_tool_uses: no generators, returning")
@@ -462,15 +503,13 @@ async def _run_concurrent_tool_uses(
 
     try:
         # Add overall timeout for entire concurrent execution
-        async with asyncio_timeout(DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC):
+        async with _optional_timeout(overall_timeout_sec):
             while active:
                 logger.debug(
                     "[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active
                 )
                 try:
-                    message = await asyncio.wait_for(
-                        queue.get(), timeout=DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC
-                    )
+                    message = await _queue_get_with_timeout(queue, overall_timeout_sec)
                 except asyncio.TimeoutError:
                     logger.error(
                         "[query] Concurrent tool execution timed out waiting for messages"
@@ -498,7 +537,7 @@ async def _run_concurrent_tool_uses(
             logger.debug("[query] _run_concurrent_tool_uses: while loop finished, all tools done")
     except asyncio.TimeoutError:
         logger.error(
-            f"[query] Concurrent tool execution timed out after {DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC}s",
+            f"[query] Concurrent tool execution timed out after {overall_timeout_sec}s",
             extra={"tool_names": tool_names},
         )
         # Ensure all tasks are cancelled

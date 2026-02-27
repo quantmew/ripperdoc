@@ -283,11 +283,12 @@ class StdioConfigMixin:
         }
         if force_prompt:
             request_payload["force_prompt"] = True
+        request_timeout = 0.0 if tool_name == "AskUserQuestion" else STDIO_HOOK_TIMEOUT_SEC
 
         try:
             response = await self._send_control_request(
                 request_payload,
-                timeout=STDIO_HOOK_TIMEOUT_SEC,
+                timeout=request_timeout,
             )
         except asyncio.TimeoutError:
             logger.warning(

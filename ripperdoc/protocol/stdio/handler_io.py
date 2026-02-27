@@ -128,9 +128,10 @@ class StdioIOMixin:
             }
         )
         try:
-            return await asyncio.wait_for(
-                future, timeout=timeout if timeout is not None else STDIO_HOOK_TIMEOUT_SEC
-            )
+            effective_timeout = STDIO_HOOK_TIMEOUT_SEC if timeout is None else timeout
+            if effective_timeout <= 0:
+                return await future
+            return await asyncio.wait_for(future, timeout=effective_timeout)
         except asyncio.TimeoutError:
             self._pending_requests.pop(request_id, None)
             raise

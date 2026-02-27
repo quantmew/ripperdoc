@@ -271,6 +271,7 @@ async def test_stdio_sdk_can_use_tool_bridges_ask_user_question(monkeypatch, tmp
     assert result.result is True
     assert result.updated_input == {"value": "sdk-answer"}
     assert len(requests) == 1
+    assert requests[0]["timeout"] == 0.0
 
 
 @pytest.mark.asyncio
