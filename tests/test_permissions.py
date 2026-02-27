@@ -26,6 +26,7 @@ from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.tools.bash_tool import BashTool, BashToolInput
 from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
 from ripperdoc.tools.file_edit_tool import FileEditTool, FileEditToolInput
+from ripperdoc.tools.file_write_tool import FileWriteTool, FileWriteToolInput
 from ripperdoc.tools.multi_edit_tool import MultiEditTool, MultiEditToolInput
 
 
@@ -664,3 +665,35 @@ def test_multiedit_permission_prompt_shows_diff_preview_before_apply(tmp_path: P
     assert re.search(r"<diff-del>\s*2\s+- y = 2</diff-del>", preview)
     assert re.search(r"<diff-add>\s*2 \+ y = 20</diff-add>", preview)
     assert target.read_text(encoding="utf-8") == "x = 1\ny = 2\n"
+
+
+def test_write_permission_prompt_shows_diff_preview_before_apply(tmp_path: Path, monkeypatch):
+    """Write permission prompt should include a before-apply content preview."""
+    target = tmp_path / "created.txt"
+
+    captured: dict[str, str] = {}
+
+    def fake_prompt_choice(*args: Any, **kwargs: Any) -> str:  # noqa: ANN401
+        captured["message"] = str(kwargs.get("message", ""))
+        return "n"
+
+    monkeypatch.setattr("ripperdoc.core.permission_engine.prompt_choice", fake_prompt_choice)
+
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=None)
+    result = asyncio.run(
+        checker(
+            FileWriteTool(),
+            FileWriteToolInput(
+                file_path=str(target),
+                content="alpha\nbeta\n",
+            ),
+        )
+    )
+
+    assert result.result is False
+    preview = captured.get("message", "")
+    assert "preview:" in preview
+    assert "-------------------" in preview
+    assert re.search(r"<diff-add>\s*1 \+ alpha</diff-add>", preview)
+    assert re.search(r"<diff-add>\s*2 \+ beta</diff-add>", preview)
+    assert not target.exists()
