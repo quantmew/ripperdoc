@@ -97,6 +97,9 @@ class ModelProfile(BaseModel):
     max_output_tokens: Optional[int] = None
     # Model mode from catalog (e.g. chat, completion, responses, image_generation).
     mode: Optional[str] = None
+    # Optional OpenAI-compatible endpoint override: "legacy" -> /v1/chat/completions,
+    # "responses" -> /v1/responses. None keeps auto-selection behavior.
+    openai_mode: Optional[Literal["legacy", "responses"]] = None
     # Tool handling for OpenAI-compatible providers. "native" uses tool_calls, "text" flattens tool
     # interactions into plain text to support providers that reject tool roles.
     openai_tool_mode: Literal["native", "text"] = "native"

@@ -36,6 +36,7 @@ def test_collect_add_profile_input_sets_thinking_mode(monkeypatch) -> None:
             "openai_compatible",  # protocol
             "openrouter/demo",  # model
             "",  # api_base
+            "",  # openai_mode
             "",  # max_input_tokens
             "",  # max_output_tokens
             "",  # max_tokens
@@ -77,6 +78,7 @@ def test_collect_edit_profile_input_can_clear_thinking_mode(monkeypatch) -> None
             "",  # protocol (keep existing)
             "",  # model name
             "",  # api_base
+            "",  # openai_mode
             "",  # max_input_tokens
             "",  # max_output_tokens
             "",  # max_tokens

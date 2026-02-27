@@ -43,6 +43,30 @@ _KNOWN_THINKING_MODES = {
 }
 
 
+def _default_openai_mode(profile: Optional[ModelProfile]) -> str:
+    if profile is None:
+        return "legacy"
+    explicit = (profile.openai_mode or "").strip().lower()
+    if explicit in {"legacy", "responses"}:
+        return explicit
+    inferred = (profile.mode or "").strip().lower()
+    if profile.protocol == ProtocolType.OPENAI_COMPATIBLE and inferred == "responses":
+        return "responses"
+    return "legacy"
+
+
+def _prompt_openai_mode(console: Any, default_value: str) -> str:
+    raw = console.input(
+        f"OpenAI mode [{default_value}] (legacy/responses): "
+    ).strip().lower()
+    if not raw:
+        return default_value
+    if raw in {"legacy", "responses"}:
+        return raw
+    console.print("[yellow]Invalid OpenAI mode, keeping previous value.[/yellow]")
+    return default_value
+
+
 def _prompt_oauth_token_selection(
     console: Any, default_name: Optional[str]
 ) -> tuple[Optional[str], Optional[OAuthTokenType]]:
@@ -302,6 +326,7 @@ def _collect_add_profile_input(
         if existing_profile
         else (current_profile.model if current_profile else "")
     )
+    openai_mode: Optional[str] = None
     oauth_token_name: Optional[str] = None
     oauth_token_type: Optional[OAuthTokenType] = None
     if protocol == ProtocolType.OAUTH:
@@ -346,6 +371,17 @@ def _collect_add_profile_input(
             or api_base_default
             or None
         )
+        if protocol == ProtocolType.OPENAI_COMPATIBLE:
+            openai_mode_default = _default_openai_mode(
+                existing_profile
+                if existing_profile and existing_profile.protocol == ProtocolType.OPENAI_COMPATIBLE
+                else (
+                    current_profile
+                    if current_profile and current_profile.protocol == ProtocolType.OPENAI_COMPATIBLE
+                    else None
+                )
+            )
+            openai_mode = _prompt_openai_mode(console, openai_mode_default)
 
     inferred_profile = ModelProfile(
         protocol=protocol,
@@ -445,6 +481,7 @@ def _collect_add_profile_input(
         model=model_name,
         api_key=api_key,
         api_base=api_base,
+        openai_mode=openai_mode,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         max_tokens=max_tokens,
@@ -470,6 +507,7 @@ def _collect_edit_profile_input(
     if protocol is None:
         return None
 
+    openai_mode: Optional[str] = None
     oauth_token_name: Optional[str] = None
     oauth_token_type: Optional[OAuthTokenType] = None
     if protocol == ProtocolType.OAUTH:
@@ -518,6 +556,13 @@ def _collect_edit_profile_input(
         )
         if api_base == "":
             api_base = None
+        if protocol == ProtocolType.OPENAI_COMPATIBLE:
+            openai_mode_default = _default_openai_mode(
+                existing_profile
+                if existing_profile.protocol == ProtocolType.OPENAI_COMPATIBLE
+                else None
+            )
+            openai_mode = _prompt_openai_mode(console, openai_mode_default)
 
     max_input_label = (
         str(existing_profile.max_input_tokens)
@@ -586,6 +631,7 @@ def _collect_edit_profile_input(
         model=model_name,
         api_key=api_key,
         api_base=api_base,
+        openai_mode=openai_mode,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         max_tokens=max_tokens,
@@ -612,6 +658,15 @@ def _vision_labels(profile: ModelProfile) -> tuple[str, str]:
     if profile.supports_vision:
         return "yes", "yes"
     return "no", "no"
+
+
+def _openai_mode_label(profile: ModelProfile) -> str:
+    explicit = (profile.openai_mode or "").strip().lower()
+    if explicit in {"legacy", "responses"}:
+        return explicit
+    inferred = (profile.mode or "").strip().lower()
+    resolved = "responses" if inferred == "responses" else "legacy"
+    return f"auto ({resolved})"
 
 
 def _render_models_plain(console: Any, config: Any) -> None:
@@ -659,6 +714,8 @@ def _render_models_plain(console: Any, config: Any) -> None:
                 f"      auth_token: {'***' if getattr(profile, 'auth_token', None) else 'Not set'}",
                 markup=False,
             )
+        if profile.protocol == ProtocolType.OPENAI_COMPATIBLE:
+            console.print(f"      openai_mode: {_openai_mode_label(profile)}", markup=False)
         if profile.openai_tool_mode:
             console.print(f"      openai_tool_mode: {profile.openai_tool_mode}", markup=False)
         if profile.thinking_mode:
@@ -774,6 +831,8 @@ def _build_model_details_panel(
         details.add_row("API key", "set" if profile.api_key else "unset")
     if profile.protocol == ProtocolType.ANTHROPIC:
         details.add_row("Auth token", "set" if getattr(profile, "auth_token", None) else "unset")
+    if profile.protocol == ProtocolType.OPENAI_COMPATIBLE:
+        details.add_row("OpenAI mode", escape(_openai_mode_label(profile)))
     if profile.openai_tool_mode:
         details.add_row("OpenAI tool mode", escape(profile.openai_tool_mode))
     if profile.thinking_mode:

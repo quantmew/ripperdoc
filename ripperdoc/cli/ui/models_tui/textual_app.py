@@ -50,6 +50,10 @@ _KNOWN_THINKING_MODES = {
     "disabled",
 }
 _THINKING_MODE_CUSTOM = "__custom__"
+_OPENAI_MODE_OPTIONS: list[tuple[str, str]] = [
+    ("legacy (/v1/chat/completions)", "legacy"),
+    ("responses (/v1/responses)", "responses"),
+]
 
 
 def _next_copied_profile_name(source_name: str, existing_names: set[str]) -> str:
@@ -221,6 +225,18 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         oauth_model_select.set_options([("No OAuth models", Select.BLANK)])
         oauth_model_select.value = Select.BLANK
 
+    def _openai_mode_form_default(self) -> str:
+        profile = self._existing_profile
+        if profile is None:
+            return "legacy"
+        explicit = (profile.openai_mode or "").strip().lower()
+        if explicit in {"legacy", "responses"}:
+            return explicit
+        inferred = (profile.mode or "").strip().lower()
+        if profile.protocol == ProtocolType.OPENAI_COMPATIBLE and inferred == "responses":
+            return "responses"
+        return "legacy"
+
     def compose(self) -> ComposeResult:
         title = "Add model" if self._mode == "add" else "Edit model"
         with Container(id="form_dialog"):
@@ -320,6 +336,17 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     value=api_base_default or "",
                     placeholder="API base (optional)",
                     id="api_base_input",
+                )
+
+                yield Static(
+                    "OpenAI mode (openai_compatible only)",
+                    classes="field_label",
+                    id="openai_mode_label",
+                )
+                yield Select(
+                    _OPENAI_MODE_OPTIONS,
+                    value=self._openai_mode_form_default(),
+                    id="openai_mode_select",
                 )
 
                 yield Static("OAuth token", classes="field_label", id="oauth_token_label")
@@ -490,6 +517,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
 
         is_oauth = protocol == ProtocolType.OAUTH
         is_anthropic = protocol == ProtocolType.ANTHROPIC
+        is_openai_compatible = protocol == ProtocolType.OPENAI_COMPATIBLE
 
         self._set_widget_visible("#model_input", not is_oauth)
         self._set_widget_visible("#oauth_model_select", is_oauth)
@@ -500,6 +528,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         self._set_widget_visible("#api_key_input", not is_oauth)
         self._set_widget_visible("#api_base_label", not is_oauth)
         self._set_widget_visible("#api_base_input", not is_oauth)
+        self._set_widget_visible("#openai_mode_label", is_openai_compatible)
+        self._set_widget_visible("#openai_mode_select", is_openai_compatible)
         self._set_widget_visible("#auth_token_label", (not is_oauth) and is_anthropic)
         self._set_widget_visible("#auth_token_input", (not is_oauth) and is_anthropic)
 
@@ -524,6 +554,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         api_key_input = self.query_one("#api_key_input", Input)
         auth_token_input = self.query_one("#auth_token_input", Input)
         api_base_input = self.query_one("#api_base_input", Input)
+        openai_mode_select = self.query_one("#openai_mode_select", Select)
         max_input_tokens_input = self.query_one("#max_input_tokens_input", Input)
         max_output_tokens_input = self.query_one("#max_output_tokens_input", Input)
         max_tokens_input = self.query_one("#max_tokens_input", Input)
@@ -586,6 +617,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             api_key = None
             auth_token = None
             api_base = None
+            openai_mode = None
         else:
             api_key_raw = (api_key_input.value or "").strip()
             if self._existing_profile:
@@ -615,6 +647,17 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 auth_token = None
 
             api_base = (api_base_input.value or "").strip() or None
+            if protocol == ProtocolType.OPENAI_COMPATIBLE:
+                openai_mode_raw = openai_mode_select.value
+                openai_mode_value = (
+                    openai_mode_raw.strip().lower() if isinstance(openai_mode_raw, str) else ""
+                )
+                if openai_mode_value not in {"legacy", "responses"}:
+                    self._set_error("OpenAI mode must be either legacy or responses.")
+                    return
+                openai_mode = openai_mode_value
+            else:
+                openai_mode = None
 
         max_input_tokens_default = (
             self._existing_profile.max_input_tokens
@@ -723,6 +766,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             max_output_tokens=max_output_tokens,
             max_tokens=max_tokens,
             temperature=temperature,
+            openai_mode=openai_mode,
             thinking_mode=thinking_mode,
             supports_vision=supports_vision,
             price={"input": input_price, "output": output_price},
@@ -1195,6 +1239,8 @@ class ModelsApp(App[None]):
                 "Auth token",
                 "set" if getattr(profile, "auth_token", None) else "unset",
             )
+        if profile.protocol == ProtocolType.OPENAI_COMPATIBLE:
+            table.add_row("OpenAI mode", self._openai_mode_display(profile))
         if profile.openai_tool_mode:
             table.add_row("OpenAI tool mode", profile.openai_tool_mode)
         if profile.thinking_mode:
@@ -1207,6 +1253,14 @@ class ModelsApp(App[None]):
             detected = model_supports_vision(profile)
             return f"auto (detected {'yes' if detected else 'no'})"
         return "yes" if profile.supports_vision else "no"
+
+    def _openai_mode_display(self, profile: ModelProfile) -> str:
+        explicit = (profile.openai_mode or "").strip().lower()
+        if explicit in {"legacy", "responses"}:
+            return explicit
+        inferred = (profile.mode or "").strip().lower()
+        resolved = "responses" if inferred == "responses" else "legacy"
+        return f"auto ({resolved})"
 
     def _set_status(self, message: str) -> None:
         status = self.query_one("#status_bar", Static)

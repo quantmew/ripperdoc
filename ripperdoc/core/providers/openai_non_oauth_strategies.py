@@ -450,6 +450,12 @@ def _responses_error_message(payload: Dict[str, Any]) -> Optional[str]:
 
 def _resolve_strategy_name(model_profile: ModelProfile) -> str:
     """Pick chat/responses strategy from model metadata."""
+    explicit_mode = (getattr(model_profile, "openai_mode", None) or "").strip().lower()
+    if explicit_mode == "responses":
+        return "responses"
+    if explicit_mode == "legacy":
+        return "chat"
+
     mode = (model_profile.mode or "").strip().lower()
     if mode == "responses":
         return "responses"

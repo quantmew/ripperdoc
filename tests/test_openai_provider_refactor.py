@@ -30,6 +30,7 @@ from ripperdoc.core.providers.openai_responses import (
     build_input_from_normalized_messages,
     extract_content_blocks_from_output,
 )
+from ripperdoc.core.providers.openai_non_oauth_strategies import build_non_oauth_openai_strategy
 
 
 @pytest.mark.asyncio
@@ -544,6 +545,52 @@ async def test_non_oauth_mode_chat_uses_chat_completions_api(monkeypatch) -> Non
     assert result.is_error is False
     assert calls["chat"] == 1
     assert calls["responses"] == 0
+
+
+def test_openai_mode_legacy_overrides_responses_catalog_mode() -> None:
+    async def _noop_mapper(fn):
+        return await fn()
+
+    async def _noop_emit(_progress_callback, _chunk: str) -> None:
+        return None
+
+    strategy = build_non_oauth_openai_strategy(
+        model_profile=ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="gpt-5",
+            mode="responses",
+            openai_mode="legacy",
+            api_key="sk-test",
+        ),
+        build_thinking_kwargs=lambda _profile, _max_tokens: ({}, {}),
+        run_with_provider_error_mapping=_noop_mapper,
+        safe_emit_progress=_noop_emit,
+    )
+
+    assert strategy.name == "chat"
+
+
+def test_openai_mode_responses_overrides_chat_catalog_mode() -> None:
+    async def _noop_mapper(fn):
+        return await fn()
+
+    async def _noop_emit(_progress_callback, _chunk: str) -> None:
+        return None
+
+    strategy = build_non_oauth_openai_strategy(
+        model_profile=ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="gpt-4o-mini",
+            mode="chat",
+            openai_mode="responses",
+            api_key="sk-test",
+        ),
+        build_thinking_kwargs=lambda _profile, _max_tokens: ({}, {}),
+        run_with_provider_error_mapping=_noop_mapper,
+        safe_emit_progress=_noop_emit,
+    )
+
+    assert strategy.name == "responses"
 
 
 def test_build_codex_responses_input_flattens_messages() -> None:
