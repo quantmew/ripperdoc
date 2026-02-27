@@ -203,3 +203,21 @@ def test_cli_interactive_uses_fallback_model_and_forwards_modes(monkeypatch, tmp
     assert captured["model"] == "backup-model"
     assert captured["max_turns"] == 9
     assert captured["permission_mode"] == "acceptEdits"
+
+
+def test_cli_short_v_prints_version(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli_module.cli, ["-v"], env={"HOME": str(tmp_path)})
+
+    assert result.exit_code == 0
+    assert f"{cli_module.__version__} (Ripperdoc)" in result.output
+
+
+def test_cli_long_version_prints_version(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli_module.cli, ["--version"], env={"HOME": str(tmp_path)})
+
+    assert result.exit_code == 0
+    assert f"{cli_module.__version__} (Ripperdoc)" in result.output

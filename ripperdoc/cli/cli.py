@@ -967,7 +967,12 @@ def _read_initial_query_from_stdin(
     invoke_without_command=True,
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
 )
-@click.version_option(version=__version__)
+@click.version_option(
+    __version__,
+    "--version",
+    "-v",
+    message="%(version)s (Ripperdoc)",
+)
 @click.option("--cwd", type=click.Path(exists=True), help="Working directory")
 @click.option(
     "--yolo",
