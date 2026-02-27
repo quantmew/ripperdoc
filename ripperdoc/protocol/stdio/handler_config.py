@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Any, Awaitable, Callable, Coroutine, Optional, cast
 
+from ripperdoc.core.config import get_effective_config
 from ripperdoc.core.tool_defaults import filter_tools_by_names
 from ripperdoc.core.hooks.config import HookDefinition, HookMatcher, HooksConfig, DEFAULT_HOOK_TIMEOUT
 from ripperdoc.core.hooks.events import HookOutput
@@ -36,12 +37,17 @@ class StdioConfigMixin:
     _sdk_hook_scope: HooksConfig | None
     _session_additional_working_dirs: set[str]
     _pre_plan_mode: str | None
+    _clear_context_after_turn: bool
 
     def _normalize_permission_mode(self, mode: Any) -> str:
         """Normalize permission mode to a supported value."""
         if isinstance(mode, str) and mode in self._PERMISSION_MODES:
             return mode
         return "default"
+
+    def _is_bypass_permissions_mode_available(self) -> bool:
+        config = get_effective_config(self._project_path)
+        return not bool(getattr(config, "disable_bypass_permissions_mode", False))
 
     def _normalize_tool_list(self, value: Any) -> list[str] | None:
         """Normalize tool list inputs from SDK/CLI options."""
@@ -95,20 +101,24 @@ class StdioConfigMixin:
 
     def _apply_permission_mode(self, mode: str) -> None:
         """Apply permission mode across query context, hooks, and permissions."""
+        normalized_mode = self._normalize_permission_mode(mode)
+        if normalized_mode == "bypassPermissions" and not self._is_bypass_permissions_mode_available():
+            normalized_mode = "default"
+
         previous_mode = "default"
         if self._query_context is not None:
             previous_mode = self._normalize_permission_mode(
                 getattr(self._query_context, "permission_mode", "default")
             )
-        if previous_mode == "plan" and mode != "plan":
+        if previous_mode == "plan" and normalized_mode != "plan":
             self._pre_plan_mode = None
-        yolo_mode = mode == "bypassPermissions"
+        yolo_mode = normalized_mode == "bypassPermissions"
         if self._query_context:
             self._query_context.yolo_mode = yolo_mode
-            self._query_context.permission_mode = mode
+            self._query_context.permission_mode = normalized_mode
             self._query_context.pre_plan_mode = self._pre_plan_mode
 
-        hook_manager.set_permission_mode(mode)
+        hook_manager.set_permission_mode(normalized_mode)
 
         if yolo_mode:
             self._local_can_use_tool = None
@@ -118,7 +128,8 @@ class StdioConfigMixin:
             self._local_can_use_tool = make_permission_checker(
                 self._project_path,
                 yolo_mode=False,
-                permission_mode=mode,
+                permission_mode=normalized_mode,
+                is_bypass_permissions_mode_available=self._is_bypass_permissions_mode_available(),
                 session_additional_working_dirs=self._session_additional_working_dirs,
             )
             self._sdk_can_use_tool_supported = True
@@ -165,6 +176,29 @@ class StdioConfigMixin:
             target_mode = "default"
         self._pre_plan_mode = None
         self._apply_permission_mode(target_mode)
+
+    def _on_exit_plan_mode(
+        self,
+        *,
+        plan: str,  # noqa: ARG002
+        is_agent: bool = False,  # noqa: ARG002
+    ) -> dict[str, Any]:
+        """Non-interactive plan-exit callback for stdio sessions."""
+        target_mode = self._normalize_permission_mode(self._pre_plan_mode or "default")
+        if target_mode == "plan":
+            target_mode = "default"
+        if target_mode == "bypassPermissions" and not self._is_bypass_permissions_mode_available():
+            target_mode = "default"
+
+        self._pre_plan_mode = None
+        self._apply_permission_mode(target_mode)
+        # In stdio mode, keep context by default.
+        self._clear_context_after_turn = False
+        return {
+            "approved": True,
+            "permission_mode": target_mode,
+            "clear_context": False,
+        }
 
     def _coerce_bool_option(self, value: Any, default: bool) -> bool:
         """Parse flexible bool option values from SDK initialize payloads."""

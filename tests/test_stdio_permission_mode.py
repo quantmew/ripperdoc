@@ -95,5 +95,14 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
         assert handler._can_use_tool is checker_calls[-1][3]
         assert checker_calls[-1][2] == "dontAsk"
         assert len(checker_calls) == 3
+
+        # Exit plan callback should restore pre-plan mode and keep context in stdio mode.
+        handler._pre_plan_mode = "acceptEdits"
+        handler._query_context.permission_mode = "plan"
+        decision = handler._on_exit_plan_mode(plan="demo plan", is_agent=False)
+        assert decision["approved"] is True
+        assert decision["permission_mode"] == "acceptEdits"
+        assert decision["clear_context"] is False
+        assert handler._query_context.permission_mode == "acceptEdits"
     finally:
         hook_manager.set_permission_mode(previous_mode)

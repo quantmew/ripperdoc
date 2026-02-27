@@ -85,6 +85,7 @@ class StdioQueryMixin:
     _session_history: SessionHistory | None
     _session_id: str | None
     _json_schema: dict[str, Any] | None
+    _clear_context_after_turn: bool
 
     async def _handle_query(self, request: dict[str, Any], request_id: str) -> None:
         """Handle query request from SDK with comprehensive timeout and error handling."""
@@ -248,6 +249,9 @@ class StdioQueryMixin:
 
     def _finalize_query_stage(self, request_id: str, state: _QueryRuntimeState) -> None:
         """Finalize request with terminal log event."""
+        if self._clear_context_after_turn:
+            self._conversation_messages = self._clear_context_messages(self._conversation_messages)
+            self._clear_context_after_turn = False
         logger.info(
             "[stdio] Query completed",
             extra={
@@ -432,6 +436,12 @@ class StdioQueryMixin:
 
         if text_parts:
             state.final_result_text = "\n".join(text_parts)
+
+    def _clear_context_messages(self, messages: list[Any]) -> list[Any]:
+        retained = [msg for msg in messages if getattr(msg, "type", None) in {"user", "assistant"}]
+        if not retained:
+            return []
+        return retained[-4:]
 
     def _extract_final_text_parts(self, content_blocks: list[Any]) -> list[str]:
         """Extract user-visible text for the final result summary.

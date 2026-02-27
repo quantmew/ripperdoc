@@ -67,6 +67,23 @@ async def test_enter_and_exit_plan_mode_tools_invoke_callbacks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_exit_plan_mode_tool_respects_callback_decision_payload() -> None:
+    async def _decision_callback(**kwargs):  # noqa: ANN003
+        assert kwargs["plan"] == "step1"
+        return {"approved": False, "permission_mode": "plan", "clear_context": False}
+
+    context = ToolUseContext(on_exit_plan_mode=_decision_callback)
+    exit_tool = ExitPlanModeTool()
+    outputs = [item async for item in exit_tool.call(ExitPlanModeToolInput(plan="step1"), context)]
+
+    assert outputs
+    payload = outputs[-1].data
+    assert payload.approved is False
+    assert payload.permission_mode == "plan"
+    assert payload.clear_context is False
+
+
+@pytest.mark.asyncio
 async def test_parse_and_validate_tool_context_includes_plan_callbacks() -> None:
     def on_enter() -> None:
         return None

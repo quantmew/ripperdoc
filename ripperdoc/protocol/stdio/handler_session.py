@@ -230,6 +230,7 @@ class StdioSessionMixin:
             )
             yolo_mode = permission_mode == "bypassPermissions"
             self._pre_plan_mode = None
+            self._clear_context_after_turn = False
             self._sdk_can_use_tool_enabled = self._coerce_bool_option(
                 options.get("sdk_can_use_tool"),
                 self._input_format == "stream-json" and self._output_format == "stream-json",
@@ -271,7 +272,7 @@ class StdioSessionMixin:
                 permission_mode=permission_mode,
                 pre_plan_mode=self._pre_plan_mode,
                 on_enter_plan_mode=self._enter_plan_mode,
-                on_exit_plan_mode=self._exit_plan_mode,
+                on_exit_plan_mode=self._on_exit_plan_mode,
             )
 
             # Initialize hook manager
@@ -355,6 +356,9 @@ class StdioSessionMixin:
 
             # Apply permission mode to runtime state (checker + query context)
             self._apply_permission_mode(permission_mode)
+            applied_permission_mode = (
+                self._query_context.permission_mode if self._query_context else permission_mode
+            )
 
             # Mark as initialized
             self._initialized = True
@@ -412,7 +416,7 @@ class StdioSessionMixin:
                         else []
                     ),
                     model=resolved_model,
-                    permission_mode=permission_mode,
+                    permission_mode=applied_permission_mode,
                     slash_commands=slash_commands,
                     ripperdoc_version=init_response.ripperdoc_version,
                     output_style=init_response.output_style,

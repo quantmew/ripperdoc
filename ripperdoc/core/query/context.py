@@ -207,8 +207,8 @@ class QueryContext:
         max_turns: Optional[int] = None,
         permission_mode: str = "default",
         pre_plan_mode: Optional[str] = None,
-        on_enter_plan_mode: Optional[Callable[[], None]] = None,
-        on_exit_plan_mode: Optional[Callable[[], None]] = None,
+        on_enter_plan_mode: Optional[Callable[..., Any]] = None,
+        on_exit_plan_mode: Optional[Callable[..., Any]] = None,
         hook_scopes: Optional[List[HooksConfig]] = None,
     ) -> None:
         self.tool_registry = ToolRegistry(tools)

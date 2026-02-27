@@ -79,6 +79,7 @@ class StdioProtocolHandler(
         self._sdk_can_use_tool_enabled: bool = False
         self._sdk_can_use_tool_supported: bool = True
         self._pre_plan_mode: str | None = None
+        self._clear_context_after_turn: bool = False
         self._hooks: dict[str, list[dict[str, Any]]] = {}
         self._sdk_hook_scope: HooksConfig | None = None
         self._pending_requests: dict[str, Any] = {}

@@ -35,6 +35,7 @@ from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, lo
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
+from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.cli.ui.spinner import Spinner
@@ -231,6 +232,7 @@ class RichUI:
         self.max_turns = max_turns
         self.permission_mode = permission_mode
         self._pre_plan_mode: Optional[str] = None
+        self._clear_context_after_turn: bool = False
         self._max_thinking_tokens_override = (
             max(0, int(max_thinking_tokens))
             if isinstance(max_thinking_tokens, int)
@@ -324,6 +326,7 @@ class RichUI:
             self.project_path,
             yolo_mode=False,
             permission_mode=self.permission_mode,
+            is_bypass_permissions_mode_available=self._is_bypass_permissions_mode_available(),
             session_additional_working_dirs=self._session_additional_working_dirs,
         )
 
@@ -335,7 +338,8 @@ class RichUI:
 
     def _is_bypass_permissions_mode_available(self) -> bool:
         """Return whether bypassPermissions mode can be cycled to."""
-        return True
+        effective_config = get_effective_config(self.project_path)
+        return not bool(getattr(effective_config, "disable_bypass_permissions_mode", False))
 
     def _permission_mode_label(self, mode: Optional[str] = None) -> str:
         normalized = self._normalize_permission_mode(mode or self.permission_mode)
@@ -359,6 +363,8 @@ class RichUI:
         """Apply a new permission mode across UI/query/hook state."""
         previous_mode = self._normalize_permission_mode(self.permission_mode)
         normalized = self._normalize_permission_mode(mode)
+        if normalized == "bypassPermissions" and not self._is_bypass_permissions_mode_available():
+            normalized = "default"
         if previous_mode == "plan" and normalized != "plan":
             self._pre_plan_mode = None
         self.permission_mode = normalized
@@ -399,6 +405,116 @@ class RichUI:
             target = "default"
         self._pre_plan_mode = None
         self._apply_permission_mode(target, announce=False)
+
+    def _exit_ready_mode_cycle(self) -> tuple[str, ...]:
+        modes = ["default", "acceptEdits"]
+        if self._is_bypass_permissions_mode_available():
+            modes.append("bypassPermissions")
+        return tuple(modes)
+
+    def _normalize_exit_ready_mode(self, mode: Optional[str]) -> str:
+        cycle = self._exit_ready_mode_cycle()
+        normalized = self._normalize_permission_mode(mode or "")
+        if normalized in cycle:
+            return normalized
+        return cycle[0]
+
+    def _next_exit_ready_mode(self, mode: str) -> str:
+        cycle = self._exit_ready_mode_cycle()
+        current = self._normalize_exit_ready_mode(mode)
+        index = cycle.index(current)
+        return cycle[(index + 1) % len(cycle)]
+
+    def _truncate_exit_plan_preview(self, plan: str, max_chars: int = 4000) -> str:
+        text = (plan or "").strip()
+        if len(text) <= max_chars:
+            return text
+        return text[: max_chars - 3] + "..."
+
+    def _clear_context_messages(self, messages: List[ConversationMessage]) -> List[ConversationMessage]:
+        retained: List[ConversationMessage] = [
+            msg for msg in messages if getattr(msg, "type", None) in {"user", "assistant"}
+        ]
+        if not retained:
+            return []
+        # Keep the most recent exchange so execution can continue with minimal context.
+        return retained[-4:]
+
+    async def _on_exit_plan_mode(
+        self,
+        *,
+        plan: str,
+        is_agent: bool = False,
+    ) -> dict[str, Any]:
+        """Prompt for plan approval and apply mode/context decisions."""
+        if is_agent:
+            self._exit_plan_mode()
+            return {
+                "approved": True,
+                "permission_mode": self.permission_mode,
+                "clear_context": False,
+            }
+
+        selected_mode = self._normalize_exit_ready_mode(self._pre_plan_mode)
+        cycle_value = "__cycle_mode__"
+        mode_titles = {
+            "default": "normal mode",
+            "acceptEdits": "accept edits mode",
+            "bypassPermissions": "bypass permissions mode",
+        }
+
+        while True:
+            plan_preview = html.escape(self._truncate_exit_plan_preview(plan))
+            mode_title = html.escape(mode_titles.get(selected_mode, selected_mode))
+            message = (
+                "<question>Ready to code?</question>\n\n"
+                "Here is the proposed plan:\n"
+                f"<value>{plan_preview}</value>\n\n"
+                "Claude has written up a plan and is ready to execute. "
+                "Would you like to proceed?\n"
+                f"<dim>Current execution mode: {mode_title}. Press Shift+Tab to cycle mode.</dim>"
+            )
+            selection = await prompt_choice_async(
+                message=message,
+                options=[
+                    ChoiceOption(
+                        value="yes_clear",
+                        label="<yes-option>Yes, clear context and proceed</yes-option>",
+                    ),
+                    ChoiceOption(
+                        value="yes_keep",
+                        label="<yes-option>Yes, keep context and proceed</yes-option>",
+                    ),
+                    ChoiceOption(
+                        value="no",
+                        label="<no-option>No, continue planning</no-option>",
+                    ),
+                ],
+                title="Ready to Code",
+                allow_esc=True,
+                esc_value="no",
+                shift_tab_value=cycle_value,
+            )
+            if selection == cycle_value:
+                selected_mode = self._next_exit_ready_mode(selected_mode)
+                continue
+            if selection == "no":
+                self._apply_permission_mode("plan", announce=False)
+                return {
+                    "approved": False,
+                    "permission_mode": "plan",
+                    "clear_context": False,
+                }
+
+            clear_context = selection == "yes_clear"
+            self._apply_permission_mode(selected_mode, announce=False)
+            if clear_context:
+                self._clear_context_after_turn = True
+            return {
+                "approved": True,
+                "permission_mode": selected_mode,
+                "clear_context": clear_context,
+            }
 
     def _supports_thinking_mode(self) -> bool:
         """Check if the current model supports extended thinking mode."""
@@ -1209,7 +1325,7 @@ class RichUI:
                 permission_mode=self.permission_mode,
                 pre_plan_mode=self._pre_plan_mode,
                 on_enter_plan_mode=self._enter_plan_mode,
-                on_exit_plan_mode=self._exit_plan_mode,
+                on_exit_plan_mode=self._on_exit_plan_mode,
             )
         else:
             abort_controller = getattr(self.query_context, "abort_controller", None)
@@ -1221,7 +1337,7 @@ class RichUI:
             self.query_context.permission_mode = self.permission_mode
             self.query_context.pre_plan_mode = self._pre_plan_mode
             self.query_context.on_enter_plan_mode = self._enter_plan_mode
-            self.query_context.on_exit_plan_mode = self._exit_plan_mode
+            self.query_context.on_exit_plan_mode = self._on_exit_plan_mode
         self.query_context.stop_hook_active = False
         return self.query_context
 
@@ -1368,7 +1484,11 @@ class RichUI:
         self._stop_interrupt_listener()
         self._query_in_progress = False
         self._active_spinner = None
-        self.conversation_messages = messages
+        if self._clear_context_after_turn:
+            self.conversation_messages = self._clear_context_messages(messages)
+            self._clear_context_after_turn = False
+        else:
+            self.conversation_messages = messages
         logger.info(
             "[ui] Query processing completed",
             extra={

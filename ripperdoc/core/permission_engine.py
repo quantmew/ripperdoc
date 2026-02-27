@@ -496,6 +496,13 @@ def _normalize_permission_mode(mode: str) -> str:
     return "default"
 
 
+def _is_rule_ask_decision(decision: PermissionDecision) -> bool:
+    if decision.behavior != "ask":
+        return False
+    reason = decision.decision_reason or {}
+    return isinstance(reason, dict) and reason.get("type") == "rule"
+
+
 def _parse_rule_collection(rules: Iterable[str]) -> list[ParsedPermissionRule]:
     parsed_rules: list[ParsedPermissionRule] = []
     for rule in rules:
@@ -740,6 +747,7 @@ def _run_permission_decision_engine(
     tool_name: str,
     yolo_mode: bool,
     permission_mode: str,
+    is_bypass_permissions_mode_available: bool,
     force_prompt: bool,
     needs_permission: bool,
     is_preapproved: bool,
@@ -802,6 +810,23 @@ def _run_permission_decision_engine(
             decision=resolved_decision,
         )
 
+    if (
+        permission_mode == "plan"
+        and is_bypass_permissions_mode_available
+        and not force_prompt
+        and not _is_rule_ask_decision(resolved_decision)
+    ):
+        return PermissionPreview(
+            requires_user_input=False,
+            result=PermissionResult(
+                result=True,
+                message=resolved_decision.message,
+                updated_input=resolved_decision.updated_input,
+                decision=resolved_decision,
+            ),
+            decision=resolved_decision,
+        )
+
     if permission_mode == "dontAsk":
         return PermissionPreview(
             requires_user_input=False,
@@ -824,6 +849,7 @@ def make_permission_checker(
     project_path: Path,
     yolo_mode: bool,
     permission_mode: str = "default",
+    is_bypass_permissions_mode_available: Optional[bool] = None,
     prompt_fn: Optional[Callable[[str], str]] = None,
     console: Optional["Console"] = None,  # noqa: ARG001 (kept for backward compatibility)
     prompt_session: Optional["PromptSession"] = None,  # noqa: ARG001 (kept for backward compatibility)
@@ -835,6 +861,7 @@ def make_permission_checker(
         project_path: Path to the project directory
         yolo_mode: If True, all tool calls are allowed without prompting
         permission_mode: Permission mode for mode-specific behavior (e.g. dontAsk)
+        is_bypass_permissions_mode_available: Whether plan mode can auto-bypass prompts
         prompt_fn: Optional function to use for prompting (defaults to input())
         console: (Deprecated) No longer used, kept for backward compatibility
         prompt_session: (Deprecated) No longer used, kept for backward compatibility
@@ -845,6 +872,12 @@ def make_permission_checker(
     _ = console, prompt_session  # Mark as intentionally unused
     project_path = project_path.resolve()
     permission_mode = _normalize_permission_mode(permission_mode)
+    if is_bypass_permissions_mode_available is None:
+        effective_config = config_manager.get_effective_config(project_path)
+        is_bypass_permissions_mode_available = not bool(
+            getattr(effective_config, "disable_bypass_permissions_mode", False)
+        )
+    bypass_permissions_mode_available = bool(is_bypass_permissions_mode_available)
     config_manager.get_project_config(project_path)
 
     session_allowed_tools: Set[str] = set()
@@ -950,6 +983,7 @@ def make_permission_checker(
             tool_name=tool.name,
             yolo_mode=yolo_mode,
             permission_mode=permission_mode,
+            is_bypass_permissions_mode_available=bypass_permissions_mode_available,
             force_prompt=force_prompt,
             needs_permission=needs_permission,
             is_preapproved=is_preapproved,

@@ -73,9 +73,14 @@ class StdioControlMixin:
         """
         mode = self._normalize_permission_mode(request.get("mode", "default"))
         self._apply_permission_mode(mode)
+        applied_mode = (
+            getattr(self._query_context, "permission_mode", mode)
+            if getattr(self, "_query_context", None) is not None
+            else mode
+        )
 
         await self._write_control_response(
-            request_id, response={"status": "permission_mode_set", "mode": mode}
+            request_id, response={"status": "permission_mode_set", "mode": applied_mode}
         )
 
     async def _handle_set_model(self, request: dict[str, Any], request_id: str) -> None:

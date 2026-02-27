@@ -239,6 +239,64 @@ def test_bash_permissions_apply_ask_rules(tmp_path: Path, isolated_config):
     assert prompt_calls == 1
 
 
+def test_plan_mode_auto_allows_default_permission_prompts(tmp_path: Path):
+    """Plan mode should auto-allow non-rule ask flows when bypass is available."""
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        permission_mode="plan",
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+    )
+    result = asyncio.run(checker(DummyTool(), DummyInput(command="echo plan-mode")))
+    assert result.result is True
+
+
+def test_plan_mode_respects_disable_bypass_setting(tmp_path: Path, isolated_config):
+    """Plan mode should stop auto-allowing when bypass mode is disabled by config."""
+    save_global_config(UserConfig(disable_bypass_permissions_mode=True))
+
+    prompt_calls = 0
+
+    def prompt_fn(_: str) -> str:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "n"
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        permission_mode="plan",
+        prompt_fn=prompt_fn,
+    )
+    result = asyncio.run(checker(DummyTool(), DummyInput(command="echo blocked")))
+
+    assert result.result is False
+    assert prompt_calls == 1
+
+
+def test_plan_mode_still_prompts_for_explicit_ask_rules(tmp_path: Path, isolated_config):
+    """Explicit ask rules should still require confirmation in plan mode."""
+    save_global_config(UserConfig(user_ask_rules=["ls"]))
+
+    prompt_calls = 0
+
+    def prompt_fn(_: str) -> str:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "n"
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        permission_mode="plan",
+        prompt_fn=prompt_fn,
+    )
+    result = asyncio.run(checker(BashTool(), BashToolInput(command="ls")))
+
+    assert result.result is False
+    assert prompt_calls == 1
+
+
 def test_dont_ask_mode_denies_without_prompt_when_confirmation_needed(
     tmp_path: Path, isolated_config
 ):

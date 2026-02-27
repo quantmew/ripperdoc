@@ -6,8 +6,9 @@ plan to the user for approval before starting to code.
 
 from __future__ import annotations
 
+import inspect
 from textwrap import dedent
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from pydantic import BaseModel, Field
 
@@ -68,6 +69,9 @@ class ExitPlanModeToolOutput(BaseModel):
 
     plan: str
     is_agent: bool = False
+    approved: bool = True
+    permission_mode: Optional[str] = None
+    clear_context: bool = False
 
 
 class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
@@ -117,7 +121,20 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
 
     def render_result_for_assistant(self, output: ExitPlanModeToolOutput) -> str:
         """Render the tool output for the AI assistant."""
-        return f"Exit plan mode and start coding now. Plan:\n{output.plan}"
+        if not output.approved:
+            return "User declined the proposed plan. Stay in plan mode and continue refining it."
+
+        mode_suffix = (
+            f"\nExecution mode: {output.permission_mode}"
+            if output.permission_mode
+            else ""
+        )
+        clear_suffix = (
+            "\nContext strategy: clear existing context before implementation."
+            if output.clear_context
+            else "\nContext strategy: keep existing context."
+        )
+        return f"Exit plan mode and start coding now. Plan:\n{output.plan}{mode_suffix}{clear_suffix}"
 
     def render_tool_use_message(
         self,
@@ -135,19 +152,72 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         context: ToolUseContext,
     ) -> AsyncGenerator[ToolOutput, None]:
         """Execute the tool to exit plan mode."""
-        # Invoke the exit plan mode callback if available
+        is_agent = bool(context.agent_id)
+        approved = True
+        selected_mode: Optional[str] = None
+        clear_context = False
+
+        # Invoke the exit plan mode callback if available. Rich UI uses this to
+        # implement the "Ready to code?" confirmation flow.
         if context.on_exit_plan_mode:
             try:
-                context.on_exit_plan_mode()
+                if context.pause_ui:
+                    try:
+                        context.pause_ui()
+                    except (RuntimeError, ValueError, OSError):
+                        logger.debug("[exit_plan_mode_tool] Failed to pause UI")
+
+                decision_payload = await self._invoke_exit_callback(
+                    context.on_exit_plan_mode,
+                    plan=input_data.plan,
+                    is_agent=is_agent,
+                )
+                approved, selected_mode, clear_context = self._coerce_exit_decision(decision_payload)
             except (RuntimeError, ValueError, TypeError):
                 logger.debug("[exit_plan_mode_tool] Failed to call on_exit_plan_mode")
+            finally:
+                if context.resume_ui:
+                    try:
+                        context.resume_ui()
+                    except (RuntimeError, ValueError, OSError):
+                        logger.debug("[exit_plan_mode_tool] Failed to resume UI")
 
-        is_agent = bool(context.agent_id)
         output = ExitPlanModeToolOutput(
             plan=input_data.plan,
             is_agent=is_agent,
+            approved=approved,
+            permission_mode=selected_mode,
+            clear_context=clear_context,
         )
         yield ToolResult(
             data=output,
             result_for_assistant=self.render_result_for_assistant(output),
         )
+
+    @staticmethod
+    async def _invoke_exit_callback(callback: Any, **kwargs: Any) -> Any:
+        """Invoke exit callback with backward-compatible fallback signatures."""
+        try:
+            result = callback(**kwargs)
+        except TypeError:
+            result = callback()
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    @staticmethod
+    def _coerce_exit_decision(decision_payload: Any) -> tuple[bool, Optional[str], bool]:
+        """Normalize callback return value into (approved, mode, clear_context)."""
+        if isinstance(decision_payload, bool):
+            return decision_payload, None, False
+        if isinstance(decision_payload, dict):
+            return (
+                bool(decision_payload.get("approved", True)),
+                (
+                    str(decision_payload.get("permission_mode"))
+                    if decision_payload.get("permission_mode") is not None
+                    else None
+                ),
+                bool(decision_payload.get("clear_context", False)),
+            )
+        return True, None, False

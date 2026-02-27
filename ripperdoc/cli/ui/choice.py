@@ -409,6 +409,7 @@ def prompt_choice(
     style: Optional[Style] = None,
     style_variant: str = "neutral",
     external_header: Optional[str] = None,
+    shift_tab_value: Optional[str] = None,
 ) -> str:
     """Prompt the user to make a choice from a list of options.
 
@@ -489,6 +490,11 @@ def prompt_choice(
         def _esc_handler(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
             event.app.exit(result=result_on_esc, style="class:aborting")
 
+    if shift_tab_value is not None:
+        @key_bindings.add("s-tab", eager=True)
+        def _shift_tab_handler(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
+            event.app.exit(result=shift_tab_value, style="class:accepted")
+
     if external_header:
         print(external_header)
 
@@ -498,7 +504,7 @@ def prompt_choice(
         options=choice_options_formatted,
         style=style or resolve_choice_style(style_variant),
         show_frame=cast(Any, ~is_done),
-        key_bindings=key_bindings if allow_esc else None,
+        key_bindings=key_bindings,
     )
 
     # Clear the prompt from screen by calculating the exact number of lines
@@ -537,6 +543,7 @@ async def prompt_choice_async(
     next_value: Optional[str] = None,
     external_header: Optional[str] = None,
     custom_input_label: Optional[str] = None,
+    shift_tab_value: Optional[str] = None,
 ) -> str:
     """Async variant of prompt_choice for use inside running event loops."""
     choice_options: list[ChoiceOption] = []
@@ -703,6 +710,11 @@ async def prompt_choice_async(
             style=style or resolve_choice_style(style_variant),
         ).run_async()
     else:
+        if shift_tab_value is not None:
+            @key_bindings.add("s-tab", eager=True)
+            def _shift_tab_cycle(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
+                event.app.exit(result=shift_tab_value, style="class:accepted")
+
         @key_bindings.add("left", eager=True)
         def _left_nav(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
             if back_value is not None:
@@ -721,7 +733,7 @@ async def prompt_choice_async(
             options=choice_options_formatted,
             style=style or resolve_choice_style(style_variant),
             show_frame=~is_done,
-            key_bindings=key_bindings if allow_esc else None,
+            key_bindings=key_bindings,
         ).prompt_async()
 
     term_width = _terminal_width()

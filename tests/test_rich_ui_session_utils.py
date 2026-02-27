@@ -199,6 +199,69 @@ def test_get_rprompt_keeps_permission_mode_label_when_thinking_unsupported(monke
 
 
 @pytest.mark.asyncio
+async def test_on_exit_plan_mode_shift_tab_cycles_confirmation_mode(monkeypatch: Any) -> None:
+    ui = _new_ui()
+    ui.permission_mode = "plan"
+    ui._pre_plan_mode = "default"
+    ui._clear_context_after_turn = False
+    ui._session_additional_working_dirs = set()
+    ui.project_path = Path.cwd()
+    ui.query_context = type("Q", (), {"permission_mode": "plan", "yolo_mode": False})()
+
+    answers = iter(["__cycle_mode__", "yes_keep"])
+    async def _fake_prompt_choice_async(*args: Any, **kwargs: Any) -> str:  # noqa: ARG001
+        return next(answers)
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.prompt_choice_async",
+        _fake_prompt_choice_async,
+    )
+    monkeypatch.setattr(RichUI, "_is_bypass_permissions_mode_available", lambda self: True)
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.hook_manager.set_permission_mode",
+        lambda mode: None,
+    )
+
+    decision = await ui._on_exit_plan_mode(plan="plan text", is_agent=False)
+
+    assert decision["approved"] is True
+    assert decision["permission_mode"] == "acceptEdits"
+    assert decision["clear_context"] is False
+    assert ui.permission_mode == "acceptEdits"
+    assert ui._clear_context_after_turn is False
+
+
+@pytest.mark.asyncio
+async def test_finalize_query_stream_clears_context_after_plan_exit() -> None:
+    ui = _new_ui()
+    ui._clear_context_after_turn = True
+    ui._query_in_progress = True
+    ui._active_spinner = object()
+    ui._stop_interrupt_listener = lambda: None  # type: ignore[assignment]
+    ui.project_path = Path.cwd()
+    ui.session_id = "test-session"
+
+    class _DummySpinner:
+        def stop(self) -> None:
+            return None
+
+    messages = [
+        create_user_message("turn1"),
+        create_assistant_message("a1"),
+        create_user_message("turn2"),
+        create_assistant_message("a2"),
+        create_user_message("turn3"),
+        create_assistant_message("a3"),
+    ]
+
+    ui._finalize_query_stream(_DummySpinner(), messages)
+
+    assert len(ui.conversation_messages) == 4
+    assert ui._clear_context_after_turn is False
+    assert ui._query_in_progress is False
+    assert ui._active_spinner is None
+
+
+@pytest.mark.asyncio
 async def test_check_and_compact_messages_warns_when_auto_compact_disabled(monkeypatch: Any) -> None:
     ui = _new_ui()
     dummy_console = _DummyConsole()

@@ -208,6 +208,7 @@ class UserConfig(BaseModel):
     show_full_thinking: bool = Field(default=False)
     auto_compact_enabled: bool = True
     context_token_limit: Optional[int] = None
+    disable_bypass_permissions_mode: bool = Field(default=False)
     # Default thinking tokens budget when thinking mode is enabled (0 = disabled by default)
     default_thinking_tokens: int = Field(default=10240)
 
