@@ -97,6 +97,9 @@ class StdioProtocolHandler(
         self._fallback_model: str | None = None
         self._max_budget_usd: float | None = None
         self._json_schema: dict[str, Any] | None = None
+        self._session_agent_name: str | None = None
+        self._session_agents: dict[str, dict[str, str]] = {}
+        self._session_agent_prompt: str | None = None
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []

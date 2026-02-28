@@ -18,6 +18,11 @@ from ripperdoc.core.config import (
     get_project_config,
     get_project_local_config,
 )
+from ripperdoc.core.session_agents import (
+    normalize_agent_name,
+    parse_session_agents,
+    resolve_session_agent_prompt,
+)
 from ripperdoc.core.output_styles import resolve_output_style
 from ripperdoc.core.plugins import discover_plugins, set_runtime_plugin_dirs
 from ripperdoc.core.tool_defaults import get_default_tools
@@ -61,6 +66,9 @@ class StdioSessionMixin:
     _fallback_model: str | None
     _max_budget_usd: float | None
     _json_schema: dict[str, Any] | None
+    _session_agent_name: str | None
+    _session_agents: dict[str, dict[str, str]]
+    _session_agent_prompt: str | None
 
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
@@ -139,7 +147,6 @@ class StdioSessionMixin:
                 "permission_prompt_tool",
                 "include_partial_messages",
                 "fork_session",
-                "agents",
                 "setting_sources",
                 "betas",
             ]
@@ -209,6 +216,18 @@ class StdioSessionMixin:
             )
             requested_output_language = options.get("output_language") or configured_output_language
             self._output_language = str(requested_output_language or "auto").strip() or "auto"
+
+            try:
+                self._session_agents = parse_session_agents(options.get("agents"), source="agents")
+                self._session_agent_name = normalize_agent_name(options.get("agent"), source="agent")
+                self._session_agent_prompt = resolve_session_agent_prompt(
+                    self._session_agent_name,
+                    self._session_agents,
+                    source="agent",
+                )
+            except ValueError as exc:
+                await self._write_control_response(request_id, error=str(exc))
+                return
 
             # Parse tool options
             self._allowed_tools = self._normalize_tool_list(options.get("allowed_tools"))

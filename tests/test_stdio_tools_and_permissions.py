@@ -181,6 +181,73 @@ async def test_stdio_initialize_applies_fallback_model_and_thinking_tokens(monke
 
 
 @pytest.mark.asyncio
+async def test_stdio_initialize_applies_session_agent_prompt(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    captured: dict[str, Any] = {}
+
+    def fake_build_system_prompt(*_args, **kwargs):
+        captured["additional_instructions"] = kwargs.get("additional_instructions")
+        return "system"
+
+    monkeypatch.setattr(handler_config, "build_system_prompt", fake_build_system_prompt)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize(
+        {
+            "options": {
+                "agent": "reviewer",
+                "agents": {"reviewer": {"prompt": "Focus on correctness and risk."}},
+            }
+        },
+        "init",
+    )
+
+    assert responses["init"]["error"] is None
+    assert handler._session_agent_name == "reviewer"
+    assert handler._session_agent_prompt == "Focus on correctness and risk."
+    assert "Focus on correctness and risk." in (captured.get("additional_instructions") or [])
+
+
+@pytest.mark.asyncio
+async def test_stdio_initialize_rejects_unknown_session_agent(monkeypatch, tmp_path):
+    tools = [DummyTool("Read")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize(
+        {
+            "options": {
+                "agent": "unknown",
+                "agents": {"reviewer": {"prompt": "Focus on correctness and risk."}},
+            }
+        },
+        "init",
+    )
+
+    assert responses["init"]["error"] == "Unknown agent 'unknown'. Available agents: reviewer."
+
+
+@pytest.mark.asyncio
 async def test_stdio_can_use_tool_permission_result(monkeypatch, tmp_path):
     tools = [DummyTool("Read")]
     _patch_stdio_dependencies(monkeypatch, tools)

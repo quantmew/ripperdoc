@@ -35,6 +35,10 @@ def test_cli_forwards_hidden_sdk_options_to_stdio_defaults(monkeypatch, tmp_path
             '{"type":"object"}',
             "--include-partial-messages",
             "--fork-session",
+            "--agent",
+            "reviewer",
+            "--agents",
+            '{"reviewer":{"description":"Reviews code","prompt":"You are a code reviewer"}}',
             "--plugin-dir",
             "plugins/a",
             "--betas",
@@ -52,6 +56,8 @@ def test_cli_forwards_hidden_sdk_options_to_stdio_defaults(monkeypatch, tmp_path
     assert default_options["json_schema"] == '{"type":"object"}'
     assert default_options["include_partial_messages"] is True
     assert default_options["fork_session"] is True
+    assert default_options["agent"] == "reviewer"
+    assert default_options["agents"]["reviewer"]["prompt"] == "You are a code reviewer"
     assert default_options["plugin_dirs"] == ["plugins/a"]
     assert default_options["betas"] == "exp-beta"
 
@@ -113,6 +119,61 @@ def test_cli_rejects_sdk_only_options_outside_stdio(monkeypatch, tmp_path):
     assert result.exit_code != 0
     assert "SDK-only" in result.output
     assert "--json-schema" in result.output
+
+
+def test_cli_agent_overrides_settings_agent_for_prompt(monkeypatch, tmp_path):
+    captured: dict[str, Any] = {}
+
+    async def fake_run_query(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "--prompt",
+            "hi",
+            "--settings",
+            (
+                '{"agent":"reviewer","agents":{"reviewer":{"prompt":"Use reviewer behavior from '
+                'settings."}}}'
+            ),
+            "--agent",
+            "writer",
+            "--agents",
+            '{"writer":{"prompt":"Use writer behavior from CLI."}}',
+        ],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["append_system_prompt"] == "Use writer behavior from CLI."
+
+
+def test_cli_rejects_unknown_agent_name(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "--prompt",
+            "hi",
+            "--agent",
+            "unknown",
+            "--agents",
+            '{"reviewer":{"prompt":"You are a reviewer."}}',
+        ],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code != 0
+    assert "Unknown agent 'unknown'" in result.output
 
 
 def test_cli_prompt_forwards_permission_mode_and_max_turns(monkeypatch, tmp_path):

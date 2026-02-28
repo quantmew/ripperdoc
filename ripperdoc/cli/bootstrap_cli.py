@@ -12,6 +12,12 @@ from rich.console import Console
 
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.session_agents import (
+    merge_session_agents,
+    normalize_agent_name,
+    parse_session_agents,
+    resolve_session_agent_prompt,
+)
 from ripperdoc.core.tool_defaults import BUILTIN_TOOL_NAMES
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.session_history import (
@@ -34,7 +40,6 @@ _SDK_ONLY_OPTION_FLAGS: tuple[tuple[str, str], ...] = (
     ("mcp_config", "--mcp-config"),
     ("include_partial_messages", "--include-partial-messages"),
     ("fork_session", "--fork-session"),
-    ("agents", "--agents"),
     ("setting_sources", "--setting-sources"),
     ("betas", "--betas"),
     ("max_budget_usd", "--max-budget-usd"),
@@ -62,7 +67,6 @@ def _collect_sdk_only_option_uses(
     mcp_config: Optional[str],
     include_partial_messages: bool,
     fork_session: bool,
-    agents: Optional[str],
     setting_sources: Optional[str],
     plugin_dirs: tuple[str, ...],
     betas: Optional[str],
@@ -77,7 +81,6 @@ def _collect_sdk_only_option_uses(
         "mcp_config": mcp_config,
         "include_partial_messages": include_partial_messages,
         "fork_session": fork_session,
-        "agents": agents,
         "setting_sources": setting_sources,
         "plugin_dirs": plugin_dirs,
         "betas": betas,
@@ -194,13 +197,41 @@ def _resolve_additional_working_dirs(
     return list(dict.fromkeys([*settings_dirs, *cli_dirs]))
 
 
+def _resolve_session_agent_options(
+    *,
+    settings: Optional[str],
+    agent: Optional[str],
+    agents: Optional[str],
+) -> tuple[Optional[str], dict[str, dict[str, str]], Optional[str]]:
+    settings_payload, _ = _load_settings_payload(settings)
+    try:
+        settings_agent = normalize_agent_name(settings_payload.get("agent"), source="settings.agent")
+        settings_agents = parse_session_agents(
+            settings_payload.get("agents"),
+            source="settings.agents",
+        )
+        cli_agent = normalize_agent_name(agent, source="--agent")
+        cli_agents = parse_session_agents(agents, source="--agents")
+        effective_agents = merge_session_agents(settings_agents, cli_agents)
+        effective_agent = cli_agent if cli_agent is not None else settings_agent
+        effective_agent_prompt = resolve_session_agent_prompt(
+            effective_agent,
+            effective_agents,
+            source="--agent",
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    return effective_agent, effective_agents, effective_agent_prompt
+
+
 def _build_sdk_default_options(
     *,
     permission_prompt_tool: Optional[str],
     mcp_config: Optional[str],
     include_partial_messages: bool,
     fork_session: bool,
-    agents: Optional[str],
+    agent: Optional[str],
+    agents: Optional[dict[str, dict[str, str]]],
     setting_sources: Optional[str],
     plugin_dirs: tuple[str, ...],
     betas: Optional[str],
@@ -213,6 +244,7 @@ def _build_sdk_default_options(
     value_options: dict[str, Any] = {
         "permission_prompt_tool": permission_prompt_tool,
         "mcp_config": mcp_config,
+        "agent": agent,
         "agents": agents,
         "setting_sources": setting_sources,
         "betas": betas,
@@ -443,13 +475,14 @@ def _prepare_cli_runtime_inputs(
     print_mode: bool,
     settings: Optional[str],
     add_dirs: tuple[str, ...],
+    agent: Optional[str],
+    agents: Optional[str],
     allowed_tools_csv: Optional[str],
     disallowed_tools_csv: Optional[str],
     permission_prompt_tool: Optional[str],
     mcp_config: Optional[str],
     include_partial_messages: bool,
     fork_session: bool,
-    agents: Optional[str],
     setting_sources: Optional[str],
     plugin_dirs: tuple[str, ...],
     betas: Optional[str],
@@ -457,10 +490,15 @@ def _prepare_cli_runtime_inputs(
     max_budget_usd: Optional[float],
     max_thinking_tokens: Optional[int],
     json_schema: Optional[str],
-) -> tuple[Path, List[str], dict[str, Any]]:
+) -> tuple[Path, List[str], dict[str, Any], Optional[str]]:
     """Resolve working-directory inputs and SDK default options for CLI entrypoints."""
     project_path = Path.cwd()
     additional_working_dirs = _resolve_additional_working_dirs(settings, add_dirs, project_path)
+    effective_agent, effective_agents, effective_agent_prompt = _resolve_session_agent_options(
+        settings=settings,
+        agent=agent,
+        agents=agents,
+    )
     stdio_mode_request = _is_stdio_mode_request(ctx, output_format, print_mode)
     provided_sdk_only_options = _collect_sdk_only_option_uses(
         allowed_tools_csv=allowed_tools_csv,
@@ -469,7 +507,6 @@ def _prepare_cli_runtime_inputs(
         mcp_config=mcp_config,
         include_partial_messages=include_partial_messages,
         fork_session=fork_session,
-        agents=agents,
         setting_sources=setting_sources,
         plugin_dirs=plugin_dirs,
         betas=betas,
@@ -485,7 +522,8 @@ def _prepare_cli_runtime_inputs(
         mcp_config=mcp_config,
         include_partial_messages=include_partial_messages,
         fork_session=fork_session,
-        agents=agents,
+        agent=effective_agent,
+        agents=effective_agents if effective_agents else None,
         setting_sources=setting_sources,
         plugin_dirs=plugin_dirs,
         betas=betas,
@@ -494,7 +532,7 @@ def _prepare_cli_runtime_inputs(
         max_thinking_tokens=max_thinking_tokens,
         json_schema=json_schema,
     )
-    return project_path, additional_working_dirs, sdk_default_options
+    return project_path, additional_working_dirs, sdk_default_options, effective_agent_prompt
 
 
 def _read_initial_query_from_stdin(

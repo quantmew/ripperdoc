@@ -65,6 +65,18 @@ def _resolve_model_pointer_with_fallback(
     return resolved_model
 
 
+def _merge_append_system_prompt(
+    append_system_prompt: Optional[str],
+    session_agent_prompt: Optional[str],
+) -> Optional[str]:
+    """Compose agent prompt and append-system-prompt with deterministic order."""
+    if not session_agent_prompt:
+        return append_system_prompt
+    if not append_system_prompt:
+        return session_agent_prompt
+    return f"{session_agent_prompt}\n\n{append_system_prompt}"
+
+
 @click.group(
     invoke_without_command=True,
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
@@ -185,11 +197,19 @@ def _resolve_model_pointer_with_fallback(
     hidden=True,
 )
 @click.option(
+    "--agent",
+    type=str,
+    default=None,
+    help="Agent for the current session. Overrides the 'agent' setting.",
+)
+@click.option(
     "--agents",
     type=str,
     default=None,
-    help="Agents JSON (SDK only).",
-    hidden=True,
+    help=(
+        "JSON object defining custom agents "
+        '(e.g. \'{"reviewer":{"description":"Reviews code","prompt":"You are a code reviewer"}}\').'
+    ),
 )
 @click.option(
     "--setting-sources",
@@ -322,6 +342,7 @@ def cli(
     mcp_config: Optional[str],
     include_partial_messages: bool,
     fork_session: bool,
+    agent: Optional[str],
     agents: Optional[str],
     setting_sources: Optional[str],
     plugin_dirs: tuple[str, ...],
@@ -348,19 +369,25 @@ def cli(
     )
     cwd_changed = _change_cwd_if_requested(cwd)
 
-    project_path, additional_working_dirs, sdk_default_options = _prepare_cli_runtime_inputs(
+    (
+        project_path,
+        additional_working_dirs,
+        sdk_default_options,
+        session_agent_prompt,
+    ) = _prepare_cli_runtime_inputs(
         ctx=ctx,
         output_format=output_format,
         print_mode=print_mode,
         settings=settings,
         add_dirs=add_dirs,
+        agent=agent,
+        agents=agents,
         allowed_tools_csv=allowed_tools_csv,
         disallowed_tools_csv=disallowed_tools_csv,
         permission_prompt_tool=permission_prompt_tool,
         mcp_config=mcp_config,
         include_partial_messages=include_partial_messages,
         fork_session=fork_session,
-        agents=agents,
         setting_sources=setting_sources,
         plugin_dirs=plugin_dirs,
         betas=betas,
@@ -368,6 +395,10 @@ def cli(
         max_budget_usd=max_budget_usd,
         max_thinking_tokens=max_thinking_tokens,
         json_schema=json_schema,
+    )
+    effective_append_system_prompt = _merge_append_system_prompt(
+        append_system_prompt,
+        session_agent_prompt,
     )
     set_runtime_plugin_dirs(plugin_dirs, base_dir=project_path)
 
@@ -470,7 +501,7 @@ def cli(
                 "allowed_tools": allowed_tools,
                 "model": model,
                 "has_system_prompt": system_prompt is not None,
-                "has_append_system_prompt": append_system_prompt is not None,
+                "has_append_system_prompt": effective_append_system_prompt is not None,
                 "continue_session": continue_session,
             },
         )
@@ -485,7 +516,7 @@ def cli(
                     verbose,
                     session_id=session_id,
                     custom_system_prompt=system_prompt,
-                    append_system_prompt=append_system_prompt,
+                    append_system_prompt=effective_append_system_prompt,
                     model=model,
                     fallback_model=fallback_model,
                     max_thinking_tokens=max_thinking_tokens,
@@ -514,7 +545,7 @@ def cli(
                 log_file_path=log_file,
                 allowed_tools=allowed_tools,
                 custom_system_prompt=system_prompt,
-                append_system_prompt=append_system_prompt,
+                append_system_prompt=effective_append_system_prompt,
                 model=interactive_model,
                 max_thinking_tokens=max_thinking_tokens,
                 max_turns=max_turns,

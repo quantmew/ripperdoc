@@ -36,6 +36,7 @@ class StdioConfigMixin:
     _session_id: str | None
     _sdk_hook_scope: HooksConfig | None
     _session_additional_working_dirs: set[str]
+    _session_agent_prompt: str | None
     _pre_plan_mode: str | None
     _clear_context_after_turn: bool
 
@@ -435,6 +436,8 @@ class StdioConfigMixin:
             return str(self._custom_system_prompt)
 
         additional_instructions: list[str] = []
+        if self._session_agent_prompt:
+            additional_instructions.append(self._session_agent_prompt)
         if self._skill_instructions:
             additional_instructions.append(self._skill_instructions)
         memory_instructions = build_memory_instructions()
