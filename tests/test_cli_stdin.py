@@ -25,6 +25,7 @@ def test_cli_consumes_piped_stdin_as_initial_query(monkeypatch, tmp_path):
         resume_messages=None,
         initial_query=None,
         additional_working_dirs=None,
+        disable_slash_commands=False,
     ):
         """Mock main_rich to record the initial_query parameter."""
         recorded["initial_query"] = initial_query
@@ -32,6 +33,7 @@ def test_cli_consumes_piped_stdin_as_initial_query(monkeypatch, tmp_path):
         recorded["session_id"] = session_id
         recorded["max_turns"] = max_turns
         recorded["permission_mode"] = permission_mode
+        recorded["disable_slash_commands"] = disable_slash_commands
 
     # Import the ui module to mock main_rich
     from ripperdoc.cli.ui import rich_ui

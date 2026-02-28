@@ -69,6 +69,7 @@ class StdioSessionMixin:
     _session_agent_name: str | None
     _session_agents: dict[str, dict[str, str]]
     _session_agent_prompt: str | None
+    _disable_slash_commands: bool
 
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
@@ -228,6 +229,10 @@ class StdioSessionMixin:
             except ValueError as exc:
                 await self._write_control_response(request_id, error=str(exc))
                 return
+            self._disable_slash_commands = self._coerce_bool_option(
+                options.get("disable_slash_commands"),
+                False,
+            )
 
             # Parse tool options
             self._allowed_tools = self._normalize_tool_list(options.get("allowed_tools"))
@@ -236,6 +241,8 @@ class StdioSessionMixin:
 
             # Get the tool list (apply SDK filters)
             tools = get_default_tools()
+            if self._disable_slash_commands:
+                tools = [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
             tools = self._apply_tool_filters(
                 tools,
                 allowed_tools=self._allowed_tools,
@@ -356,11 +363,15 @@ class StdioSessionMixin:
                 load_all_skills,
             )
 
-            skill_result = load_all_skills(self._project_path)
-            enabled_skills = filter_enabled_skills(
-                skill_result.skills, project_path=self._project_path
-            )
-            self._skill_instructions = build_skill_summary(enabled_skills)
+            enabled_skills = []
+            if self._disable_slash_commands:
+                self._skill_instructions = ""
+            else:
+                skill_result = load_all_skills(self._project_path)
+                enabled_skills = filter_enabled_skills(
+                    skill_result.skills, project_path=self._project_path
+                )
+                self._skill_instructions = build_skill_summary(enabled_skills)
 
             agent_result = load_agent_definitions(project_path=self._project_path)
             plugin_result = discover_plugins(project_path=self._project_path)
@@ -394,10 +405,12 @@ class StdioSessionMixin:
             ]
             skill_names = [skill.name for skill in enabled_skills] if enabled_skills else []
 
-            slash_commands = [cmd.name for cmd in list_slash_commands()]
-            for custom_cmd in list_custom_commands(self._project_path):
-                if custom_cmd.name not in slash_commands:
-                    slash_commands.append(custom_cmd.name)
+            slash_commands: list[str] = []
+            if not self._disable_slash_commands:
+                slash_commands = [cmd.name for cmd in list_slash_commands()]
+                for custom_cmd in list_custom_commands(self._project_path):
+                    if custom_cmd.name not in slash_commands:
+                        slash_commands.append(custom_cmd.name)
 
             resolved_model_profile = resolve_model_profile(model or "main")
             resolved_model = (

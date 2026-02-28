@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any, List
 
 import pytest
@@ -245,6 +246,38 @@ async def test_stdio_initialize_rejects_unknown_session_agent(monkeypatch, tmp_p
     )
 
     assert responses["init"]["error"] == "Unknown agent 'unknown'. Available agents: reviewer."
+
+
+@pytest.mark.asyncio
+async def test_stdio_initialize_disable_slash_commands_removes_skill_tool(monkeypatch, tmp_path):
+    tools = [DummyTool("Read"), DummyTool("Skill")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+    monkeypatch.setattr(
+        handler_session,
+        "list_slash_commands",
+        lambda: [SimpleNamespace(name="help"), SimpleNamespace(name="skills")],
+    )
+    monkeypatch.setattr(handler_session, "list_custom_commands", lambda *_args, **_kwargs: [])
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize(
+        {"options": {"disable_slash_commands": True}},
+        "init",
+    )
+
+    assert responses["init"]["error"] is None
+    response = responses["init"]["response"]
+    assert "Skill" not in response["tools"]
+    assert response["slash_commands"] == []
 
 
 @pytest.mark.asyncio

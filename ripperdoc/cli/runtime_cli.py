@@ -88,6 +88,7 @@ async def _prepare_prompt_runtime_assets(
     tools: list,
     allowed_tools: Optional[List[str]],
     query_context: QueryContext,
+    disable_skills: bool,
 ) -> tuple[list, str, List[str]]:
     servers, dynamic_tools = await asyncio.gather(
         load_mcp_servers_async(project_path),
@@ -100,18 +101,18 @@ async def _prepare_prompt_runtime_assets(
         query_context.tools = tools
     mcp_instructions = format_mcp_instructions(servers)
 
-    skill_result = load_all_skills(project_path)
-    for err in skill_result.errors:
-        logger.warning(
-            "[skills] Failed to load skill",
-            extra={"path": str(err.path), "reason": err.reason},
-        )
-    enabled_skills = filter_enabled_skills(skill_result.skills, project_path=project_path)
-    skill_instructions = build_skill_summary(enabled_skills)
-
     additional_instructions: List[str] = []
-    if skill_instructions:
-        additional_instructions.append(skill_instructions)
+    if not disable_skills:
+        skill_result = load_all_skills(project_path)
+        for err in skill_result.errors:
+            logger.warning(
+                "[skills] Failed to load skill",
+                extra={"path": str(err.path), "reason": err.reason},
+            )
+        enabled_skills = filter_enabled_skills(skill_result.skills, project_path=project_path)
+        skill_instructions = build_skill_summary(enabled_skills)
+        if skill_instructions:
+            additional_instructions.append(skill_instructions)
     memory_instructions = build_memory_instructions()
     if memory_instructions:
         additional_instructions.append(memory_instructions)
@@ -245,6 +246,7 @@ async def run_query(
     permission_mode: str = "default",
     allowed_tools: Optional[List[str]] = None,
     additional_working_dirs: Optional[List[str]] = None,
+    disable_skills: bool = False,
 ) -> None:
     """Run a single query and print the response."""
     logger.info(
@@ -261,6 +263,7 @@ async def run_query(
             "permission_mode": permission_mode,
             "has_custom_system_prompt": custom_system_prompt is not None,
             "has_append_system_prompt": append_system_prompt is not None,
+            "disable_skills": disable_skills,
         },
     )
     if prompt:
@@ -319,6 +322,7 @@ async def run_query(
             tools=tools,
             allowed_tools=allowed_tools,
             query_context=query_context,
+            disable_skills=disable_skills,
         )
         should_continue = await _run_prompt_submission_hooks(
             prompt=prompt,

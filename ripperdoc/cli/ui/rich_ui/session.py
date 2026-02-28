@@ -167,6 +167,7 @@ class RichUI:
         max_thinking_tokens: Optional[int] = None,
         max_turns: Optional[int] = None,
         permission_mode: str = "default",
+        disable_slash_commands: bool = False,
     ):
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(
@@ -192,8 +193,13 @@ class RichUI:
         self._should_exit: bool = False
         self._last_ctrl_c_time: float = 0.0  # Track Ctrl+C timing for double-press exit
         self._initial_query = initial_query  # Query from piped stdin to auto-send on startup
-        self.command_list = list_slash_commands()
-        self._custom_command_list = list_custom_commands()
+        self.disable_slash_commands = disable_slash_commands
+        if disable_slash_commands:
+            self.command_list = []
+            self._custom_command_list = []
+        else:
+            self.command_list = list_slash_commands()
+            self._custom_command_list = list_custom_commands()
         self._prompt_session: Optional[PromptSession] = None
         self.project_path = Path.cwd()
         project_local_config = get_project_local_config(self.project_path)
@@ -215,6 +221,7 @@ class RichUI:
                 "log_file": str(self.log_file_path),
                 "yolo_mode": self.yolo_mode,
                 "verbose": self.verbose,
+                "disable_slash_commands": self.disable_slash_commands,
             },
         )
         self._session_history = SessionHistory(self.project_path, self.session_id)
@@ -1052,7 +1059,10 @@ class RichUI:
 
     def get_default_tools(self) -> list:
         """Get the default set of tools, filtered by allowed_tools if specified."""
-        return get_default_tools(allowed_tools=self.allowed_tools)
+        tools = get_default_tools(allowed_tools=self.allowed_tools)
+        if self.disable_slash_commands:
+            return [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
+        return tools
 
     def display_message(
         self,
@@ -1138,23 +1148,24 @@ class RichUI:
         )
 
         mcp_instructions = format_mcp_instructions(servers)
-        skill_result = load_all_skills(self.project_path)
-
-        for err in skill_result.errors:
-            logger.warning(
-                "[skills] Failed to load skill",
-                extra={
-                    "path": str(err.path),
-                    "reason": err.reason,
-                    "session_id": self.session_id,
-                },
-            )
-
-        enabled_skills = filter_enabled_skills(skill_result.skills, project_path=self.project_path)
-        skill_instructions = build_skill_summary(enabled_skills)
         additional_instructions: List[str] = []
-        if skill_instructions:
-            additional_instructions.append(skill_instructions)
+        if not self.disable_slash_commands:
+            skill_result = load_all_skills(self.project_path)
+
+            for err in skill_result.errors:
+                logger.warning(
+                    "[skills] Failed to load skill",
+                    extra={
+                        "path": str(err.path),
+                        "reason": err.reason,
+                        "session_id": self.session_id,
+                    },
+                )
+
+            enabled_skills = filter_enabled_skills(skill_result.skills, project_path=self.project_path)
+            skill_instructions = build_skill_summary(enabled_skills)
+            if skill_instructions:
+                additional_instructions.append(skill_instructions)
 
         memory_instructions = build_memory_instructions()
         if memory_instructions:
@@ -1647,6 +1658,8 @@ class RichUI:
         Returns True if handled as built-in, False if not a command,
         or a string if it's a custom command that should be sent to the AI.
         """
+        if self.disable_slash_commands:
+            return False
         from ripperdoc.cli.ui.rich_ui import suggest_slash_command_matches
 
         return _handle_slash_command(self, user_input, suggest_slash_command_matches)
@@ -1655,7 +1668,11 @@ class RichUI:
         """Create (or return) the prompt session with command completion."""
         if self._prompt_session:
             return self._prompt_session
-        self._prompt_session = build_prompt_session(self, self._ignore_filter)
+        self._prompt_session = build_prompt_session(
+            self,
+            self._ignore_filter,
+            disable_slash_commands=self.disable_slash_commands,
+        )
         return self._prompt_session
 
     def run(self) -> None:
@@ -1722,7 +1739,7 @@ class RichUI:
                         continue
 
                     # Handle slash commands locally
-                    if user_input.startswith("/"):
+                    if user_input.startswith("/") and not self.disable_slash_commands:
                         logger.debug(
                             "[ui] Received slash command",
                             extra={"session_id": self.session_id, "command": user_input},
@@ -2023,6 +2040,7 @@ def main_rich(
     resume_messages: Optional[List[Any]] = None,
     initial_query: Optional[str] = None,
     additional_working_dirs: Optional[List[str]] = None,
+    disable_slash_commands: bool = False,
 ) -> None:
     """Main entry point for Rich interface.
 
@@ -2059,6 +2077,7 @@ def main_rich(
         resume_messages=resume_messages,
         initial_query=initial_query,
         additional_working_dirs=additional_working_dirs,
+        disable_slash_commands=disable_slash_commands,
     )
     ui.run()
 

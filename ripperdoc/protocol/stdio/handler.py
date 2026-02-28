@@ -100,6 +100,7 @@ class StdioProtocolHandler(
         self._session_agent_name: str | None = None
         self._session_agents: dict[str, dict[str, str]] = {}
         self._session_agent_prompt: str | None = None
+        self._disable_slash_commands: bool = False
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []

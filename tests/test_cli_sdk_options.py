@@ -5,6 +5,7 @@ from __future__ import annotations
 from click.testing import CliRunner
 import pytest
 from typing import Any
+from pathlib import Path
 
 from ripperdoc.cli import cli as cli_module
 from ripperdoc.protocol.stdio import command as stdio_command
@@ -39,6 +40,7 @@ def test_cli_forwards_hidden_sdk_options_to_stdio_defaults(monkeypatch, tmp_path
             "reviewer",
             "--agents",
             '{"reviewer":{"description":"Reviews code","prompt":"You are a code reviewer"}}',
+            "--disable-slash-commands",
             "--plugin-dir",
             "plugins/a",
             "--betas",
@@ -58,6 +60,7 @@ def test_cli_forwards_hidden_sdk_options_to_stdio_defaults(monkeypatch, tmp_path
     assert default_options["fork_session"] is True
     assert default_options["agent"] == "reviewer"
     assert default_options["agents"]["reviewer"]["prompt"] == "You are a code reviewer"
+    assert default_options["disable_slash_commands"] is True
     assert default_options["plugin_dirs"] == ["plugins/a"]
     assert default_options["betas"] == "exp-beta"
 
@@ -156,6 +159,90 @@ def test_cli_agent_overrides_settings_agent_for_prompt(monkeypatch, tmp_path):
     assert captured["kwargs"]["append_system_prompt"] == "Use writer behavior from CLI."
 
 
+def test_cli_debug_with_filter(monkeypatch, tmp_path):
+    captured: dict[str, Any] = {}
+
+    async def fake_run_query(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+
+    def fake_configure_debug_logging(**kwargs):
+        captured["debug"] = kwargs
+        return None
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr(cli_module, "configure_debug_logging", fake_configure_debug_logging)
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--prompt", "hi", "--debug", "--debug-filter", "api,hooks"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert captured["debug"]["enabled"] is True
+    assert captured["debug"]["filter_spec"] == "api,hooks"
+
+
+def test_main_rewrites_debug_optional_filter(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    def fake_cli_main(*, args, prog_name):
+        captured["args"] = list(args)
+        captured["prog_name"] = prog_name
+
+    monkeypatch.setattr(cli_module.cli, "main", fake_cli_main)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        ["ripperdoc", "--prompt", "hi", "--debug", "api,hooks"],
+    )
+
+    cli_module.main()
+
+    assert captured["prog_name"] == "ripperdoc"
+    assert "--debug-filter" in captured["args"]
+    idx = captured["args"].index("--debug-filter")
+    assert captured["args"][idx + 1] == "api,hooks"
+
+
+def test_cli_debug_file_implies_debug_and_skips_session_log_path(monkeypatch, tmp_path):
+    captured: dict[str, Any] = {}
+
+    async def fake_run_query(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+
+    def fake_configure_debug_logging(**kwargs):
+        captured["debug"] = kwargs
+        return Path(tmp_path / "debug.log")
+
+    def fail_enable_session_file_logging(*_args, **_kwargs):
+        raise AssertionError("enable_session_file_logging should not be called with --debug-file")
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr(cli_module, "configure_debug_logging", fake_configure_debug_logging)
+    monkeypatch.setattr(cli_module, "enable_session_file_logging", fail_enable_session_file_logging)
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--prompt", "hi", "--debug-file", "debug.log"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert captured["debug"]["enabled"] is True
+    assert str(captured["debug"]["debug_file"]).endswith("debug.log")
+
+
 def test_cli_rejects_unknown_agent_name(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
@@ -174,6 +261,39 @@ def test_cli_rejects_unknown_agent_name(monkeypatch, tmp_path):
 
     assert result.exit_code != 0
     assert "Unknown agent 'unknown'" in result.output
+
+
+def test_cli_disable_slash_commands_disables_skills_for_prompt(monkeypatch, tmp_path):
+    captured: dict[str, Any] = {}
+
+    class DummyTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    async def fake_run_query(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(
+        cli_module,
+        "get_default_tools",
+        lambda **_: [DummyTool("Skill"), DummyTool("Read")],
+    )
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--prompt", "hi", "--disable-slash-commands"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    forwarded_tools = captured["args"][1]
+    assert [getattr(tool, "name", None) for tool in forwarded_tools] == ["Read"]
+    assert captured["kwargs"]["disable_skills"] is True
 
 
 def test_cli_prompt_forwards_permission_mode_and_max_turns(monkeypatch, tmp_path):
@@ -280,6 +400,7 @@ def test_cli_interactive_uses_fallback_model_and_forwards_modes(monkeypatch, tmp
             "9",
             "--permission-mode",
             "acceptEdits",
+            "--disable-slash-commands",
         ],
         env={"HOME": str(tmp_path)},
     )
@@ -288,6 +409,7 @@ def test_cli_interactive_uses_fallback_model_and_forwards_modes(monkeypatch, tmp
     assert captured["model"] == "backup-model"
     assert captured["max_turns"] == 9
     assert captured["permission_mode"] == "acceptEdits"
+    assert captured["disable_slash_commands"] is True
 
 
 def test_cli_short_v_prints_version(tmp_path, monkeypatch):

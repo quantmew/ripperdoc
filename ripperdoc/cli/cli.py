@@ -6,6 +6,7 @@ import asyncio
 import click
 import sys
 import uuid
+from pathlib import Path
 from typing import Optional, cast
 
 from rich.console import Console
@@ -24,6 +25,7 @@ from ripperdoc.cli.bootstrap_cli import (
     _resolve_setup_trigger,
     _run_setup_if_needed,
     _run_stdio_mode_if_requested,
+    resolve_debug_filter_from_extra_args,
     parse_tools_option,
 )
 from ripperdoc.cli.mcp_cli import mcp_group
@@ -33,7 +35,7 @@ from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.config import get_effective_model_profile, get_project_config
 from ripperdoc.core.plugins import set_runtime_plugin_dirs
 from ripperdoc.core.tool_defaults import get_default_tools
-from ripperdoc.utils.log import enable_session_file_logging, get_logger
+from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
 from ripperdoc.utils.tasks import set_runtime_task_scope
 
 console = Console()
@@ -88,6 +90,29 @@ def _merge_append_system_prompt(
     message="%(version)s (Ripperdoc)",
 )
 @click.option("--cwd", type=click.Path(exists=True), help="Working directory")
+@click.option(
+    "-d",
+    "--debug",
+    "debug_mode",
+    is_flag=True,
+    help=(
+        'Enable debug mode with optional category filtering '
+        '(e.g., "api,hooks" or "!1p,!file").'
+    ),
+)
+@click.option(
+    "--debug-filter",
+    type=str,
+    default=None,
+    help="Debug filter categories (internal helper for --debug [filter]).",
+    hidden=True,
+)
+@click.option(
+    "--debug-file",
+    type=click.Path(),
+    default=None,
+    help="Write debug logs to a specific file path (implicitly enables debug mode).",
+)
 @click.option(
     "--yolo",
     is_flag=True,
@@ -219,6 +244,11 @@ def _merge_append_system_prompt(
     hidden=True,
 )
 @click.option(
+    "--disable-slash-commands",
+    is_flag=True,
+    help="Disable all skills.",
+)
+@click.option(
     "--plugin-dir",
     "plugin_dirs",
     multiple=True,
@@ -324,6 +354,9 @@ def _merge_append_system_prompt(
 def cli(
     ctx: click.Context,
     cwd: Optional[str],
+    debug_mode: bool,
+    debug_filter: Optional[str],
+    debug_file: Optional[str],
     yolo: bool,
     verbose: bool,
     show_full_thinking: Optional[bool],
@@ -345,6 +378,7 @@ def cli(
     agent: Optional[str],
     agents: Optional[str],
     setting_sources: Optional[str],
+    disable_slash_commands: bool,
     plugin_dirs: tuple[str, ...],
     betas: Optional[str],
     fallback_model: Optional[str],
@@ -363,11 +397,24 @@ def cli(
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
+    debug_filter = resolve_debug_filter_from_extra_args(
+        ctx=ctx,
+        debug_enabled=debug_mode or bool(debug_file),
+        explicit_debug_filter=debug_filter,
+        print_mode=print_mode,
+        print_prompt=print_prompt,
+        prompt=prompt,
+    )
     effective_permission_mode = _resolve_permission_mode(yolo, permission_mode)
     print_prompt = _resolve_root_extra_args(
         ctx=ctx, print_mode=print_mode, print_prompt=print_prompt
     )
     cwd_changed = _change_cwd_if_requested(cwd)
+    debug_log_path = configure_debug_logging(
+        enabled=debug_mode or bool(debug_file),
+        filter_spec=debug_filter,
+        debug_file=Path(debug_file) if debug_file else None,
+    )
 
     (
         project_path,
@@ -382,6 +429,7 @@ def cli(
         add_dirs=add_dirs,
         agent=agent,
         agents=agents,
+        disable_slash_commands=disable_slash_commands,
         allowed_tools_csv=allowed_tools_csv,
         disallowed_tools_csv=disallowed_tools_csv,
         permission_prompt_tool=permission_prompt_tool,
@@ -431,7 +479,10 @@ def cli(
     )
     set_runtime_task_scope(session_id=session_id, project_root=project_path)
     try:
-        log_file = enable_session_file_logging(project_path, session_id)
+        if debug_file and debug_log_path is not None:
+            log_file = debug_log_path
+        else:
+            log_file = enable_session_file_logging(project_path, session_id)
 
         if cwd_changed:
             logger.debug(
@@ -502,12 +553,18 @@ def cli(
                 "model": model,
                 "has_system_prompt": system_prompt is not None,
                 "has_append_system_prompt": effective_append_system_prompt is not None,
+                "disable_slash_commands": disable_slash_commands,
+                "debug_mode": bool(debug_mode or debug_file),
+                "debug_filter": debug_filter,
+                "debug_file": debug_file,
                 "continue_session": continue_session,
             },
         )
 
         if prompt:
             tool_list = get_default_tools(allowed_tools=allowed_tools)
+            if disable_slash_commands:
+                tool_list = [t for t in tool_list if getattr(t, "name", None) != "Skill"]
             asyncio.run(
                 run_query(
                     prompt,
@@ -524,6 +581,7 @@ def cli(
                     permission_mode=effective_permission_mode,
                     allowed_tools=allowed_tools,
                     additional_working_dirs=additional_working_dirs,
+                    disable_skills=disable_slash_commands,
                 )
             )
             return
@@ -553,6 +611,7 @@ def cli(
                 resume_messages=resume_messages,
                 initial_query=initial_query,
                 additional_working_dirs=additional_working_dirs,
+                disable_slash_commands=disable_slash_commands,
             )
             return
     finally:
@@ -571,10 +630,30 @@ def main() -> None:
     """Main entry point."""
     try:
         argv = sys.argv[1:]
+        top_level_commands = {"config", "update", "upgrade", "mcp", "agents", "version"}
         if "--print" in argv and "--" in argv:
             sep_index = argv.index("--")
             prompt = " ".join(argv[sep_index + 1 :]).strip()
             argv = argv[:sep_index] + ["--prompt", prompt]
+        rewritten_argv: list[str] = []
+        index = 0
+        while index < len(argv):
+            token = argv[index]
+            rewritten_argv.append(token)
+            if token in ("-d", "--debug"):
+                next_index = index + 1
+                if next_index < len(argv):
+                    candidate = argv[next_index].strip()
+                    if (
+                        candidate
+                        and not candidate.startswith("-")
+                        and candidate not in top_level_commands
+                        and "--debug-filter" not in argv
+                    ):
+                        rewritten_argv.extend(["--debug-filter", candidate])
+                        index += 1
+            index += 1
+        argv = rewritten_argv
         cli.main(args=argv, prog_name="ripperdoc")
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")

@@ -143,6 +143,32 @@ def parse_csv_option(raw_value: Optional[str]) -> Optional[List[str]]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def resolve_debug_filter_from_extra_args(
+    *,
+    ctx: click.Context,
+    debug_enabled: bool,
+    explicit_debug_filter: Optional[str],
+    print_mode: bool,
+    print_prompt: Optional[str],
+    prompt: Optional[str],
+) -> Optional[str]:
+    """Resolve optional --debug filter from root extra args when safe."""
+    if explicit_debug_filter is not None:
+        cleaned = explicit_debug_filter.strip()
+        return cleaned or None
+    if not debug_enabled or ctx.invoked_subcommand is not None:
+        return None
+    if print_mode and print_prompt is None and prompt is None:
+        return None
+    if not ctx.args:
+        return None
+    candidate = str(ctx.args[0] or "").strip()
+    if not candidate or candidate.startswith("-"):
+        return None
+    ctx.args = ctx.args[1:]
+    return candidate
+
+
 def _load_settings_payload(settings_value: Optional[str]) -> tuple[dict[str, Any], Path]:
     """Load settings JSON from an inline payload or a file path."""
     if not settings_value:
@@ -232,6 +258,7 @@ def _build_sdk_default_options(
     fork_session: bool,
     agent: Optional[str],
     agents: Optional[dict[str, dict[str, str]]],
+    disable_slash_commands: bool,
     setting_sources: Optional[str],
     plugin_dirs: tuple[str, ...],
     betas: Optional[str],
@@ -260,6 +287,8 @@ def _build_sdk_default_options(
         options["include_partial_messages"] = True
     if fork_session:
         options["fork_session"] = True
+    if disable_slash_commands:
+        options["disable_slash_commands"] = True
     if plugin_dirs:
         options["plugin_dirs"] = list(plugin_dirs)
     return options
@@ -477,6 +506,7 @@ def _prepare_cli_runtime_inputs(
     add_dirs: tuple[str, ...],
     agent: Optional[str],
     agents: Optional[str],
+    disable_slash_commands: bool,
     allowed_tools_csv: Optional[str],
     disallowed_tools_csv: Optional[str],
     permission_prompt_tool: Optional[str],
@@ -524,6 +554,7 @@ def _prepare_cli_runtime_inputs(
         fork_session=fork_session,
         agent=effective_agent,
         agents=effective_agents if effective_agents else None,
+        disable_slash_commands=disable_slash_commands,
         setting_sources=setting_sources,
         plugin_dirs=plugin_dirs,
         betas=betas,
@@ -591,4 +622,5 @@ __all__ = [
     "_run_setup_if_needed",
     "_run_stdio_mode_if_requested",
     "parse_tools_option",
+    "resolve_debug_filter_from_extra_args",
 ]

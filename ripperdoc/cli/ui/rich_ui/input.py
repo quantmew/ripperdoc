@@ -22,7 +22,12 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 
-def build_prompt_session(ui: object, ignore_filter: Any) -> PromptSession:
+def build_prompt_session(
+    ui: object,
+    ignore_filter: Any,
+    *,
+    disable_slash_commands: bool = False,
+) -> PromptSession:
     """Create a PromptSession with slash and file completion."""
 
     class SlashCommandCompleter(Completer):
@@ -58,9 +63,12 @@ def build_prompt_session(ui: object, ignore_filter: Any) -> PromptSession:
                     )
 
     # Merge both completers
-    slash_completer = SlashCommandCompleter(ui.project_path)
     file_completer = FileMentionCompleter(ui.project_path, ignore_filter)
-    combined_completer = merge_completers([slash_completer, file_completer])
+    if disable_slash_commands:
+        combined_completer = file_completer
+    else:
+        slash_completer = SlashCommandCompleter(ui.project_path)
+        combined_completer = merge_completers([slash_completer, file_completer])
 
     key_bindings = KeyBindings()
 
