@@ -110,7 +110,8 @@ def _select_clipboard_method() -> ClipboardMethod:
 
 def _wrap_for_tmux_or_screen(escape_seq: str) -> str:
     if os.environ.get("TMUX"):
-        return f"\x1bPtmux;{escape_seq.replace('\x1b', '\x1b\x1b')}\x1b\\"
+        doubled = escape_seq.replace("\x1b", "\x1b\x1b")
+        return f"\x1bPtmux;{doubled}\x1b\\"
     if os.environ.get("STY"):
         return f"\x1bP{escape_seq}\x1b\\"
     return escape_seq
@@ -193,4 +194,3 @@ def copy_to_clipboard(text: str) -> tuple[bool, str]:
         return False, clipboard_failure_message()
 
     return False, clipboard_failure_message()
-
