@@ -2,77 +2,94 @@
 
 from __future__ import annotations
 
-import shlex
-import shutil
-import subprocess
-import sys
-from datetime import datetime, timezone
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from rich.markup import escape
 
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice, theme_style
+from ripperdoc.utils.clipboard import copy_to_clipboard
 from ripperdoc.utils.message_formatting import render_transcript
 
 from .base import SlashCommand
 
 
 def _build_export_content(ui: Any, transcript: str) -> str:
-    session_id = str(getattr(ui, "session_id", "unknown"))
-    project_path = Path(getattr(ui, "project_path", Path.cwd())).resolve()
-    exported_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    return (
-        "# Ripperdoc Conversation Export\n\n"
-        f"- Session: {session_id}\n"
-        f"- Project: {project_path}\n"
-        f"- Exported: {exported_at}\n\n"
-        "---\n\n"
-        f"{transcript.rstrip()}\n"
-    )
+    _ = ui
+    return transcript.rstrip() + "\n"
+
+
+def _extract_first_prompt(messages: list[Any]) -> str:
+    for message in messages:
+        if getattr(message, "type", None) != "user":
+            continue
+        content = getattr(getattr(message, "message", None), "content", None)
+        first_line = ""
+        if isinstance(content, str):
+            first_line = content.strip()
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text" and block.get("text"):
+                        first_line = str(block.get("text", "")).strip()
+                        break
+                    continue
+                if getattr(block, "type", None) == "text":
+                    text = getattr(block, "text", None)
+                    if text:
+                        first_line = str(text).strip()
+                        break
+
+        first_line = (first_line.splitlines()[0] if first_line else "").strip()
+        if len(first_line) > 50:
+            first_line = first_line[:50] + "..."
+        return first_line
+    return ""
+
+
+def _sanitize_filename(text: str) -> str:
+    result = text.lower()
+    result = re.sub(r"[^a-z0-9\s-]", "", result)
+    result = re.sub(r"\s+", "-", result)
+    result = re.sub(r"-+", "-", result)
+    result = re.sub(r"^-|-$", "", result)
+    return result
+
+
+def _normalize_export_filename(raw_name: str) -> str:
+    trimmed = raw_name.strip()
+    if trimmed.endswith(".txt"):
+        return trimmed
+    return re.sub(r"\.[^.]+$", "", trimmed) + ".txt"
 
 
 def _default_export_path(ui: Any) -> Path:
-    session_id = str(getattr(ui, "session_id", "session"))
-    short_id = session_id.split("-")[0] or "session"
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return Path.cwd() / f"ripperdoc-conversation-{short_id}-{timestamp}.md"
+    messages = list(getattr(ui, "conversation_messages", []) or [])
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    first_prompt = _extract_first_prompt(messages)
+    if first_prompt:
+        slug = _sanitize_filename(first_prompt)
+        filename = f"{timestamp}-{slug}.txt" if slug else f"conversation-{timestamp}.txt"
+    else:
+        filename = f"conversation-{timestamp}.txt"
+    return Path.cwd() / filename
 
 
 def _resolve_export_path(ui: Any, raw_path: Optional[str]) -> Path:
-    if not raw_path:
+    if not raw_path or not raw_path.strip():
         return _default_export_path(ui)
-    candidate = Path(raw_path).expanduser()
+
+    normalized = _normalize_export_filename(raw_path)
+    candidate = Path(normalized).expanduser()
     if not candidate.is_absolute():
         candidate = Path.cwd() / candidate
     return candidate
 
 
 def _copy_to_clipboard(text: str) -> tuple[bool, str]:
-    if sys.platform == "darwin":
-        commands = [["pbcopy"]]
-    elif sys.platform.startswith("win"):
-        commands = [["clip"], ["clip.exe"]]
-    else:
-        commands = [
-            ["wl-copy"],
-            ["xclip", "-selection", "clipboard"],
-            ["xsel", "--clipboard", "--input"],
-        ]
-
-    for cmd in commands:
-        if shutil.which(cmd[0]) is None:
-            continue
-        try:
-            subprocess.run(cmd, input=text, text=True, check=True)
-            return True, ""
-        except (subprocess.SubprocessError, OSError):
-            continue
-
-    return (
-        False,
-        "No clipboard tool found. Install one of: pbcopy (macOS), wl-copy/xclip/xsel (Linux).",
-    )
+    return copy_to_clipboard(text)
 
 
 def _save_to_file(path: Path, content: str) -> tuple[bool, str]:
@@ -107,36 +124,6 @@ def _prompt_export_method() -> str:
     )
 
 
-def _parse_args(trimmed_arg: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Parse export command args.
-
-    Returns:
-        (action, file_path, error_message)
-    """
-    if not trimmed_arg:
-        return None, None, None
-    try:
-        parts = shlex.split(trimmed_arg)
-    except ValueError as exc:
-        return None, None, f"Invalid arguments: {exc}"
-
-    if not parts:
-        return None, None, None
-
-    action = parts[0].lower()
-    if action in {"clipboard", "copy", "clip"}:
-        if len(parts) > 1:
-            return None, None, "Usage: /export [clipboard|file [path]]"
-        return "clipboard", None, None
-
-    if action in {"file", "save"}:
-        if len(parts) > 2:
-            return None, None, "Usage: /export [clipboard|file [path]]"
-        return "file", parts[1] if len(parts) == 2 else None, None
-
-    return None, None, "Usage: /export [clipboard|file [path]]"
-
-
 def _handle(ui: Any, arg: str) -> bool:
     messages = list(getattr(ui, "conversation_messages", []) or [])
     if not messages:
@@ -148,34 +135,39 @@ def _handle(ui: Any, arg: str) -> bool:
         ui.console.print("[yellow]No exportable conversation content found.[/yellow]")
         return True
 
-    action, file_arg, parse_error = _parse_args(arg.strip())
-    if parse_error:
-        ui.console.print(f"[red]{escape(parse_error)}[/red]")
+    content = _build_export_content(ui, transcript)
+    file_arg = (arg or "").strip()
+
+    if file_arg:
+        normalized_name = _normalize_export_filename(file_arg)
+        path = _resolve_export_path(ui, file_arg)
+        ok, error = _save_to_file(path, content)
+        if ok:
+            ui.console.print(f"[green]Conversation exported to: {escape(normalized_name)}[/green]")
+        else:
+            ui.console.print(f"[red]Failed to export conversation: {escape(error)}[/red]")
         return True
 
-    if action is None:
-        action = _prompt_export_method()
-        if action == "__cancel__":
-            ui.console.print("[dim]Export cancelled.[/dim]")
-            return True
-
-    content = _build_export_content(ui, transcript)
+    action = _prompt_export_method()
+    if action == "__cancel__":
+        ui.console.print("[dim]Export cancelled.[/dim]")
+        return True
 
     if action == "clipboard":
         ok, error = _copy_to_clipboard(content)
         if ok:
-            ui.console.print("[green]✓ Copied conversation to clipboard.[/green]")
+            ui.console.print("[green]Conversation copied to clipboard[/green]")
         else:
-            ui.console.print(f"[red]Failed to copy to clipboard: {escape(error)}[/red]")
+            ui.console.print(f"[red]{escape(error)}[/red]")
         return True
 
     if action == "file":
-        path = _resolve_export_path(ui, file_arg)
+        path = _default_export_path(ui)
         ok, error = _save_to_file(path, content)
         if ok:
-            ui.console.print(f"[green]✓ Saved conversation to {escape(str(path))}[/green]")
+            ui.console.print(f"[green]Conversation exported to: {escape(path.name)}[/green]")
         else:
-            ui.console.print(f"[red]Failed to save export file: {escape(error)}[/red]")
+            ui.console.print(f"[red]Failed to export conversation: {escape(error)}[/red]")
         return True
 
     ui.console.print("[red]Unknown export action.[/red]")

@@ -56,64 +56,69 @@ def test_export_command_copy_to_clipboard_via_picker(tmp_path, monkeypatch):
     export_command.handler(ui, "")
 
     output = ui.console.export_text()
-    assert "Copied conversation to clipboard" in output
+    assert "Conversation copied to clipboard" in output
 
 
-def test_export_command_save_to_default_file(tmp_path, monkeypatch):
+def test_export_command_save_to_default_file_from_picker(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", lambda: "file")
     monkeypatch.setattr(
         "ripperdoc.cli.commands.export_cmd._default_export_path",
-        lambda _ui: tmp_path / "conversation-export.md",
+        lambda _ui: tmp_path / "conversation-export.txt",
     )
 
     export_command.handler(ui, "")
 
     output = ui.console.export_text()
-    assert "Saved conversation to" in output
-    exported = (tmp_path / "conversation-export.md").read_text(encoding="utf-8")
+    assert "Conversation exported to: conversation-export.txt" in output
+    exported = (tmp_path / "conversation-export.txt").read_text(encoding="utf-8")
     assert "User: hello" in exported
     assert "Assistant: world" in exported
 
 
-def test_export_command_save_to_explicit_file_arg(tmp_path, monkeypatch):
+def test_export_command_save_to_explicit_filename_arg(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
     monkeypatch.chdir(tmp_path)
 
-    export_command.handler(ui, "file my-export.txt")
+    export_command.handler(ui, "my-export")
 
     output = ui.console.export_text()
-    assert "Saved conversation to" in output
+    assert "Conversation exported to: my-export.txt" in output
     assert (tmp_path / "my-export.txt").exists()
 
 
-def test_export_command_clipboard_arg_bypasses_picker(tmp_path, monkeypatch):
+def test_export_command_filename_arg_bypasses_picker(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
+    monkeypatch.chdir(tmp_path)
     called = {"picker": False}
 
     def _mark_picker():
         called["picker"] = True
-        return "file"
+        return "clipboard"
 
     monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", _mark_picker)
-    monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._copy_to_clipboard", lambda _text: (True, ""))
 
-    export_command.handler(ui, "clipboard")
+    export_command.handler(ui, "notes.md")
 
     output = ui.console.export_text()
-    assert "Copied conversation to clipboard" in output
+    assert "Conversation exported to: notes.txt" in output
     assert called["picker"] is False
 
 
-def test_export_command_invalid_args(tmp_path):
+def test_export_command_clipboard_failure(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
+    monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", lambda: "clipboard")
+    monkeypatch.setattr(
+        "ripperdoc.cli.commands.export_cmd._copy_to_clipboard",
+        lambda _text: (False, "Failed to copy to clipboard."),
+    )
 
-    export_command.handler(ui, "wat")
+    export_command.handler(ui, "")
 
     output = ui.console.export_text()
-    assert "Usage: /export" in output
+    assert "Failed to copy to clipboard" in output
