@@ -30,6 +30,7 @@ from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
 from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
 from ripperdoc.tools.enter_worktree_tool import EnterWorktreeTool
 from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool
+from ripperdoc.tools.memory_tool import MemoryTool
 from ripperdoc.tools.task_tool import TaskTool
 from ripperdoc.tools.tool_search_tool import ToolSearchTool
 from ripperdoc.tools.mcp_tools import (
@@ -71,6 +72,7 @@ BUILTIN_TOOL_NAMES = [
     "EnterPlanMode",
     "EnterWorktree",
     "ExitPlanMode",
+    "Memory",
     "ToolSearch",
     "ListMcpServers",
     "ListMcpResources",
@@ -139,6 +141,7 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
         EnterPlanModeTool(),
         EnterWorktreeTool(),
         ExitPlanModeTool(),
+        MemoryTool(),
         ToolSearchTool(),
         ListMcpServersTool(),
         ListMcpResourcesTool(),

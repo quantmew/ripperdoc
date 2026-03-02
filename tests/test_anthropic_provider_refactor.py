@@ -3,15 +3,53 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import AsyncGenerator
 
 import pytest
+from pydantic import BaseModel
 
+from ripperdoc.core.message_utils import build_anthropic_tool_schemas
+from ripperdoc.core.tool import Tool, ToolOutput, ToolUseContext
 from ripperdoc.core.providers.anthropic import (
     AnthropicClient,
     _classify_anthropic_error,
     _content_blocks_from_stream_state,
 )
 from ripperdoc.core.providers.errors import ProviderMappedError, ProviderTimeoutError
+from ripperdoc.tools.memory_tool import MemoryTool
+
+
+class _DummyInput(BaseModel):
+    value: str = "ok"
+
+
+class _DummyTool(Tool[_DummyInput, str]):
+    @property
+    def name(self) -> str:
+        return "DummyTool"
+
+    async def description(self) -> str:
+        return "dummy description"
+
+    @property
+    def input_schema(self) -> type[_DummyInput]:
+        return _DummyInput
+
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
+        return ""
+
+    def render_result_for_assistant(self, output: str) -> str:
+        return output
+
+    def render_tool_use_message(self, input_data: _DummyInput, verbose: bool = False) -> str:  # noqa: ARG002
+        return f"dummy:{input_data.value}"
+
+    async def call(
+        self, input_data: _DummyInput, context: ToolUseContext  # noqa: ARG002
+    ) -> AsyncGenerator[ToolOutput, None]:
+        del input_data
+        if False:
+            yield
 
 
 def test_content_blocks_from_stream_state_includes_signature_when_available() -> None:
@@ -83,3 +121,23 @@ def test_classify_anthropic_error_accepts_provider_mapped_errors() -> None:
     )
     assert code == "rate_limit"
     assert "Rate limit exceeded" in message
+
+
+@pytest.mark.asyncio
+async def test_build_anthropic_tool_schemas_uses_standard_memory_tool_shape(tmp_path) -> None:
+    memory_tool = MemoryTool(memory_dir=tmp_path / "memory")
+    schemas = await build_anthropic_tool_schemas([memory_tool])
+    assert len(schemas) == 1
+    schema = schemas[0]
+    assert schema["name"] == "Memory"
+    assert "input_schema" in schema
+
+
+@pytest.mark.asyncio
+async def test_build_anthropic_tool_schemas_keeps_function_tool_shape() -> None:
+    schemas = await build_anthropic_tool_schemas([_DummyTool()])
+    assert len(schemas) == 1
+    schema = schemas[0]
+    assert schema["name"] == "DummyTool"
+    assert "input_schema" in schema
+    assert schema["input_schema"]["type"] == "object"

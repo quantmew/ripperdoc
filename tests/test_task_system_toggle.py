@@ -14,6 +14,7 @@ def test_default_tools_enable_task_graph_by_default(monkeypatch):
 
     assert {"TaskCreate", "TaskGet", "TaskUpdate", "TaskList"}.issubset(names)
     assert {"TeamCreate", "TeamDelete", "SendMessage"}.issubset(names)
+    assert "Memory" in names
     assert "TeamGet" not in names
     assert "TeamList" not in names
     assert "TeamMemberUpsert" not in names
@@ -29,6 +30,7 @@ def test_default_tools_fallback_to_todos_when_tasks_disabled(monkeypatch):
     names = {tool.name for tool in tools}
 
     assert {"TodoRead", "TodoWrite"}.issubset(names)
+    assert "Memory" in names
     assert "TaskCreate" not in names
     assert "TaskList" not in names
     assert "TeamCreate" not in names

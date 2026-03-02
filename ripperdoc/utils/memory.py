@@ -186,7 +186,7 @@ def generate_auto_memory_guidelines(project_path: Optional[Path] = None) -> str:
         "",
         "## How to save memories:",
         "- Organize memory semantically by topic, not chronologically",
-        "- Use the Write and Edit tools to update your memory files",
+        "- Prefer the Memory tool for memory file operations; use Write/Edit only when needed",
         f"- `{AUTO_MEMORY_FILE_NAME}` is always loaded into your conversation context — lines after {AUTO_MEMORY_LINE_LIMIT} will be truncated, so keep it concise",
         "- Create separate topic files (e.g., `debugging.md`, `patterns.md`) for detailed notes and link to them from MEMORY.md",
         "- Update or remove memories that turn out to be wrong or outdated",

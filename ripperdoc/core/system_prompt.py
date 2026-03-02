@@ -484,6 +484,10 @@ def _build_tool_usage_section(
         tool_usage_lines.append(
             "- Use the ToolSearch tool to discover and activate deferred or MCP tools. Keep searches focused and load only 3-5 relevant tools."
         )
+    if "Memory" in tool_names:
+        tool_usage_lines.append(
+            "- Use the Memory tool for persistent cross-session memory files. Prefer it over generic file tools when saving, editing, or deleting memory notes."
+        )
 
     if shell_tool_name:
         tool_usage_lines.extend(

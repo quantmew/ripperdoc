@@ -17,6 +17,20 @@ logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
 
 class StdioControlMixin:
+    def _apply_tool_input_aliases(
+        self, tool: Any, tool_input: dict[str, Any]
+    ) -> dict[str, Any]:
+        aliases = tool.input_param_aliases() if hasattr(tool, "input_param_aliases") else {}
+        if not isinstance(aliases, dict) or not aliases:
+            return tool_input
+
+        normalized = dict(tool_input)
+        for original_key, value in tool_input.items():
+            alias_key = aliases.get(original_key)
+            if alias_key and alias_key not in tool_input:
+                normalized[alias_key] = value
+        return normalized
+
     async def _handle_control_request(self, message: dict[str, Any]) -> None:
         """Handle a control request from the SDK.
 
@@ -178,6 +192,8 @@ class StdioControlMixin:
             tool_input = {"value": str(tool_input)}
         if tool_name == "Task" and isinstance(tool_input, dict):
             tool_input = self._normalize_task_tool_input(tool_input)
+        if isinstance(tool_input, dict):
+            tool_input = self._apply_tool_input_aliases(tool, tool_input)
 
         try:
             parsed_input = tool.input_schema(**tool_input)
@@ -229,6 +245,8 @@ class StdioControlMixin:
                         normalized_input = {"value": str(normalized_input)}
                     if tool_name == "Task" and isinstance(normalized_input, dict):
                         normalized_input = self._normalize_task_tool_input(normalized_input)
+                    if isinstance(normalized_input, dict):
+                        normalized_input = self._apply_tool_input_aliases(tool, normalized_input)
                     perm_response = PermissionResponseAllow(
                         updatedInput=normalized_input,
                     )

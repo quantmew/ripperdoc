@@ -641,6 +641,28 @@ def _normalize_tool_input_payload(raw_input: Any) -> Dict[str, Any]:
     return cast(Dict[str, Any], normalized)
 
 
+def _apply_tool_input_aliases(tool: Tool[Any, Any], tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply tool-declared input aliases to a normalized input dict."""
+    aliases = tool.input_param_aliases()
+    if not aliases:
+        return tool_input
+
+    normalized = dict(tool_input)
+    applied: List[str] = []
+    for original_key, value in tool_input.items():
+        alias_key = aliases.get(original_key)
+        if alias_key and alias_key not in tool_input:
+            normalized[alias_key] = value
+            applied.append(f"{original_key}->{alias_key}")
+
+    if applied:
+        logger.debug(
+            "[query] Applied tool input aliases",
+            extra={"tool": getattr(tool, "name", None), "aliases": ",".join(applied)},
+        )
+    return normalized
+
+
 def _append_changed_file_notice_if_needed(
     messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
     query_context: QueryContext,
@@ -1111,8 +1133,9 @@ async def _parse_and_validate_tool_input_for_call(
     messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
 ) -> tuple[Any, ToolUseContext, Dict[str, Any], Optional[UserMessage]]:
     """Parse tool input and run the first validation pass."""
+    normalized_input = _apply_tool_input_aliases(tool, tool_input)
     try:
-        parsed_input = tool.input_schema(**tool_input)
+        parsed_input = tool.input_schema(**normalized_input)
     except ValidationError as ve:
         detail_text = format_pydantic_errors(ve)
         return (
@@ -1260,6 +1283,7 @@ async def _apply_pre_hook_input_update(
     )
     try:
         normalized_input = _normalize_tool_input_payload(pre_result.updated_input)
+        normalized_input = _apply_tool_input_aliases(tool, normalized_input)
         parsed_input = tool.input_schema(**normalized_input)
         tool_input_dict = normalized_input
     except ValidationError as ve:
@@ -1340,6 +1364,7 @@ async def _apply_permission_updates(
 
     try:
         normalized_input = _normalize_tool_input_payload(updated_input)
+        normalized_input = _apply_tool_input_aliases(tool, normalized_input)
         parsed_input = tool.input_schema(**normalized_input)
     except ValidationError as ve:
         detail_text = format_pydantic_errors(ve)

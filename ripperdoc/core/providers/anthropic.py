@@ -47,7 +47,6 @@ from ripperdoc.utils.user_agent import build_user_agent
 
 logger = get_logger()
 
-
 def _map_anthropic_exception(exc: Exception) -> Exception:
     """Normalize Anthropic SDK exceptions into shared provider error types."""
     exc_msg = str(exc)

@@ -160,3 +160,8 @@ def test_system_prompt_prefers_task_graph_when_available() -> None:
     assert "TaskUpdate" in prompt
     assert "`subject`, `description`, and optional `activeForm` / `metadata`" in prompt
     assert "optional `owner`, and optional `blocks` / `blockedBy`" not in prompt
+
+
+def test_system_prompt_mentions_memory_tool_when_available() -> None:
+    prompt = build_system_prompt([DummyTool("Read"), DummyTool("Memory")])
+    assert "Use the Memory tool for persistent cross-session memory files." in prompt

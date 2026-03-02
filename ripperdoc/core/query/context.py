@@ -20,6 +20,7 @@ class ToolRegistry:
 
     def __init__(self, tools: List[Tool[Any, Any]]) -> None:
         self._tool_map: Dict[str, Tool[Any, Any]] = {}
+        self._tool_map_lower: Dict[str, str] = {}
         self._order: List[str] = []
         self._deferred: set[str] = set()
         self._active: List[str] = []
@@ -30,6 +31,7 @@ class ToolRegistry:
         """Replace all known tools and rebuild active/deferred lists."""
         seen = set()
         self._tool_map.clear()
+        self._tool_map_lower.clear()
         self._order.clear()
         self._deferred.clear()
         self._active.clear()
@@ -41,6 +43,9 @@ class ToolRegistry:
                 continue
             seen.add(name)
             self._tool_map[name] = tool
+            lower_name = name.lower()
+            if lower_name not in self._tool_map_lower:
+                self._tool_map_lower[lower_name] = name
             self._order.append(name)
             try:
                 deferred = tool.defer_loading()
@@ -75,7 +80,13 @@ class ToolRegistry:
 
     def get(self, name: str) -> Optional[Tool[Any, Any]]:
         """Lookup a tool by name."""
-        return self._tool_map.get(name)
+        tool = self._tool_map.get(name)
+        if tool is not None:
+            return tool
+        canonical_name = self._tool_map_lower.get((name or "").strip().lower())
+        if canonical_name:
+            return self._tool_map.get(canonical_name)
+        return None
 
     def is_active(self, name: str) -> bool:
         """Check if a tool is currently active."""
@@ -92,11 +103,15 @@ class ToolRegistry:
             name = (raw_name or "").strip()
             if not name:
                 continue
-            if name in self._active_set:
+            canonical_name = name
+            if canonical_name not in self._tool_map:
+                canonical_name = self._tool_map_lower.get(name.lower(), canonical_name)
+
+            if canonical_name in self._active_set:
                 continue
-            tool = self._tool_map.get(name)
+            tool = self._tool_map.get(canonical_name)
             if tool:
-                to_activate.append(name)
+                to_activate.append(canonical_name)
             else:
                 missing.append(name)
 

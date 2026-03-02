@@ -176,6 +176,14 @@ class Tool(ABC, Generic[TInput, TOutput]):
         """Optional examples that demonstrate correct tool usage."""
         return []
 
+    def input_param_aliases(self) -> Dict[str, str]:
+        """Optional input key aliases mapped to canonical schema keys.
+
+        If an alias key exists and its canonical key is missing, callers may map
+        the alias before validating with ``input_schema``.
+        """
+        return {}
+
     async def validate_input(
         self, input_data: TInput, context: Optional[ToolUseContext] = None
     ) -> ValidationResult:
