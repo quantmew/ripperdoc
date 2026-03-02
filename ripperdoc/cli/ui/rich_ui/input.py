@@ -136,7 +136,11 @@ def build_prompt_session(
         if current_time - ui_instance._last_ctrl_c_time < 1.5:
             # Double Ctrl+C - exit
             buf.reset()
-            raise KeyboardInterrupt()
+            # Exit via prompt_toolkit app API so the exception is delivered to
+            # the caller (session.prompt) instead of surfacing as an unhandled
+            # event-loop callback exception.
+            event.app.exit(exception=KeyboardInterrupt())
+            return
 
         # First Ctrl+C - save to history and clear
         ui_instance._last_ctrl_c_time = current_time

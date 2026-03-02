@@ -28,6 +28,46 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+
+class _AsyncReentrantLock:
+    """Task-aware asyncio lock that allows reentrant acquisition by the same task."""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._owner: Optional[asyncio.Task[Any]] = None
+        self._depth = 0
+
+    async def acquire(self) -> None:
+        current = asyncio.current_task()
+        if current is not None and self._owner is current:
+            self._depth += 1
+            return
+        await self._lock.acquire()
+        self._owner = current
+        self._depth = 1
+
+    def release(self) -> None:
+        if self._depth <= 0:
+            raise RuntimeError("Cannot release an unlocked reentrant lock")
+
+        current = asyncio.current_task()
+        if self._owner is not None and current is not self._owner:
+            raise RuntimeError("Reentrant lock release attempted by non-owner task")
+
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner = None
+            self._lock.release()
+
+    @asynccontextmanager
+    async def hold(self) -> AsyncGenerator[None, None]:
+        await self.acquire()
+        try:
+            yield
+        finally:
+            self.release()
+
+
 # Timeout for individual tool execution (can be overridden per tool if needed)
 DEFAULT_TOOL_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_TOOL_TIMEOUT", "300"))  # 5 minutes
 # Timeout for concurrent tool execution (total for all tools)
@@ -35,7 +75,7 @@ DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC = float(
     os.getenv("RIPPERDOC_CONCURRENT_TOOL_TIMEOUT", "600")
 )  # 10 minutes
 _INFINITE_TIMEOUT_TOOLS = {"AskUserQuestion"}
-_TOOL_CWD_LOCK = asyncio.Lock()
+_TOOL_CWD_LOCK = _AsyncReentrantLock()
 
 
 def _resolve_tool_timeout_sec(tool_name: str) -> Optional[float]:
@@ -83,10 +123,11 @@ async def _tool_execution_cwd(
     working_directory: Optional[str],
 ) -> AsyncGenerator[None, None]:
     """Temporarily switch cwd for one tool execution, restoring it afterwards."""
-    async with _TOOL_CWD_LOCK:
-        if not working_directory:
-            yield
-            return
+    if not working_directory:
+        yield
+        return
+
+    async with _TOOL_CWD_LOCK.hold():
         previous_cwd = os.getcwd()
         try:
             os.chdir(working_directory)

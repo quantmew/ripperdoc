@@ -1,6 +1,4 @@
 """Clipboard helpers with SSH-aware OSC52 fallback.
-
-Behavior mirrors Claude Code's clipboard routing:
 - Prefer OSC52 over SSH when terminal likely supports it
 - Use native clipboard commands when available
 - Fall back between methods on failure and cache the chosen method
