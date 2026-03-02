@@ -35,6 +35,7 @@ DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC = float(
     os.getenv("RIPPERDOC_CONCURRENT_TOOL_TIMEOUT", "600")
 )  # 10 minutes
 _INFINITE_TIMEOUT_TOOLS = {"AskUserQuestion"}
+_TOOL_CWD_LOCK = asyncio.Lock()
 
 
 def _resolve_tool_timeout_sec(tool_name: str) -> Optional[float]:
@@ -72,6 +73,44 @@ async def _queue_get_with_timeout(
     if timeout_sec is None or timeout_sec <= 0:
         return await queue.get()
     return await asyncio.wait_for(queue.get(), timeout=timeout_sec)
+
+
+@asynccontextmanager
+async def _tool_execution_cwd(
+    *,
+    tool_name: str,
+    tool_use_id: str,
+    working_directory: Optional[str],
+) -> AsyncGenerator[None, None]:
+    """Temporarily switch cwd for one tool execution, restoring it afterwards."""
+    async with _TOOL_CWD_LOCK:
+        if not working_directory:
+            yield
+            return
+        previous_cwd = os.getcwd()
+        try:
+            os.chdir(working_directory)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise RuntimeError(
+                f"Failed to enter working directory '{working_directory}' for tool '{tool_name}': {exc}"
+            ) from exc
+        try:
+            yield
+        finally:
+            try:
+                os.chdir(previous_cwd)
+            except (OSError, RuntimeError, ValueError) as exc:
+                logger.warning(
+                    "[query] Failed to restore cwd after tool execution: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={
+                        "tool_name": tool_name,
+                        "tool_use_id": tool_use_id,
+                        "previous_cwd": previous_cwd,
+                        "working_directory": working_directory,
+                    },
+                )
 
 
 def _resolve_tool(
@@ -178,32 +217,37 @@ async def _run_tool_use_generator(
         # Wrap tool execution with timeout to prevent hangs
         tool_timeout_sec = _resolve_tool_timeout_sec(tool_name)
         try:
-            async with _optional_timeout(tool_timeout_sec):
-                async for output in tool.call(parsed_input, tool_context):
-                    logger.debug(
-                        "[query] _run_tool_use_generator: tool='%s' yielded output type=%s",
-                        tool_name,
-                        type(output).__name__,
-                    )
-                    if isinstance(output, ToolProgress):
-                        yield create_progress_message(
-                            tool_use_id=tool_use_id,
-                            sibling_tool_use_ids=sibling_ids,
-                            content=output.content,
-                            progress_sender=getattr(output, "progress_sender", None),
-                            is_subagent_message=getattr(output, "is_subagent_message", False),
-                        )
+            async with _tool_execution_cwd(
+                tool_name=tool_name,
+                tool_use_id=tool_use_id,
+                working_directory=tool_context.working_directory,
+            ):
+                async with _optional_timeout(tool_timeout_sec):
+                    async for output in tool.call(parsed_input, tool_context):
                         logger.debug(
-                            f"[query] Progress from tool_use_id={tool_use_id}: {output.content}"
+                            "[query] _run_tool_use_generator: tool='%s' yielded output type=%s",
+                            tool_name,
+                            type(output).__name__,
                         )
-                    elif isinstance(output, ToolResult):
-                        tool_output = output.data
-                        result_content = output.result_for_assistant or str(output.data)
-                        pending_results.append((output.data, result_content))
-                        logger.debug(
-                            f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
-                            f"result_len={len(result_content)}"
-                        )
+                        if isinstance(output, ToolProgress):
+                            yield create_progress_message(
+                                tool_use_id=tool_use_id,
+                                sibling_tool_use_ids=sibling_ids,
+                                content=output.content,
+                                progress_sender=getattr(output, "progress_sender", None),
+                                is_subagent_message=getattr(output, "is_subagent_message", False),
+                            )
+                            logger.debug(
+                                f"[query] Progress from tool_use_id={tool_use_id}: {output.content}"
+                            )
+                        elif isinstance(output, ToolResult):
+                            tool_output = output.data
+                            result_content = output.result_for_assistant or str(output.data)
+                            pending_results.append((output.data, result_content))
+                            logger.debug(
+                                f"[query] Tool completed tool_use_id={tool_use_id} name={tool_name} "
+                                f"result_len={len(result_content)}"
+                            )
         except asyncio.TimeoutError:
             logger.error(
                 f"[query] Tool '{tool_name}' timed out after {tool_timeout_sec}s",

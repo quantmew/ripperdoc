@@ -97,10 +97,9 @@ class TaskPatch(BaseModel):
 def is_task_system_enabled() -> bool:
     """Feature flag for the new persistent task graph system.
 
-    Defaults to enabled. Set `RIPPERDOC_ENABLE_TASKS=false` to fall back to
-    the legacy TodoRead/TodoWrite workflow.
+    Defaults to enabled. Set `RIPPERDOC_ENABLE_TASKS=false` to disable
+    task graph tools and use TodoRead/TodoWrite instead.
     """
-
     return parse_boolish(os.getenv("RIPPERDOC_ENABLE_TASKS"), default=True)
 
 

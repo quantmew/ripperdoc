@@ -14,7 +14,6 @@ from ripperdoc.core.plugins import discover_plugins
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.log import get_logger
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
-from ripperdoc.tools.bash_output_tool import BashOutputTool
 from ripperdoc.tools.bash_tool import BashTool
 from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
 from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool
@@ -23,7 +22,6 @@ from ripperdoc.tools.file_read_tool import FileReadTool
 from ripperdoc.tools.file_write_tool import FileWriteTool
 from ripperdoc.tools.glob_tool import GlobTool
 from ripperdoc.tools.grep_tool import GrepTool
-from ripperdoc.tools.kill_bash_tool import KillBashTool
 from ripperdoc.tools.ls_tool import LSTool
 from ripperdoc.tools.lsp_tool import LspTool
 from ripperdoc.tools.multi_edit_tool import MultiEditTool
@@ -58,8 +56,6 @@ NOTEBOOK_EDIT_TOOL_NAME = _safe_tool_name(NotebookEditTool, "NotebookEdit")
 FILE_WRITE_TOOL_NAME = _safe_tool_name(FileWriteTool, "FileWrite")
 LS_TOOL_NAME = _safe_tool_name(LSTool, "LS")
 BASH_TOOL_NAME = _safe_tool_name(BashTool, "Bash")
-BASH_OUTPUT_TOOL_NAME = _safe_tool_name(BashOutputTool, "BashOutput")
-KILL_BASH_TOOL_NAME = _safe_tool_name(KillBashTool, "KillBash")
 TODO_READ_TOOL_NAME = _safe_tool_name(TodoReadTool, "TodoRead")
 TODO_WRITE_TOOL_NAME = _safe_tool_name(TodoWriteTool, "TodoWrite")
 ASK_USER_QUESTION_TOOL_NAME = _safe_tool_name(AskUserQuestionTool, "AskUserQuestion")

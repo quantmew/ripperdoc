@@ -317,8 +317,8 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 
 **Shell 操作:**
 - `Bash` - 执行 shell 命令
-- `KillBash` - 终止后台 shell 进程
-- `BashOutput` - 从后台任务读取输出
+- `TaskStop` - 停止后台任务
+- `TaskOutput` - 从后台任务读取输出
 
 **代理功能:**
 - `TaskCreate/Update/Get/List` - 任务图管理

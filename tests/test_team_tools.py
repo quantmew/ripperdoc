@@ -25,6 +25,7 @@ from ripperdoc.utils.teams import (
     list_team_messages,
     register_team_message_listener,
     send_team_message,
+    team_config_path,
     unregister_team_message_listener,
     upsert_team_member,
 )
@@ -307,8 +308,153 @@ def test_send_shutdown_request_writes_structured_payload(tmp_path, monkeypatch):
     assert messages
     payload = json.loads(messages[-1].content)
     assert payload.get("type") == "shutdown_request"
-    assert payload.get("request_id")
-    assert payload.get("sender") == "team-lead"
+    assert payload.get("requestId")
+    assert payload.get("from") == "team-lead"
+    assert payload.get("reason") == "Task complete, please shut down"
+
+
+def test_send_shutdown_response_uses_shutdown_approved_payload(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_tool = TeamCreateTool()
+    send_tool = SendMessageTool()
+    lead_context = ToolUseContext(agent_id="team-lead")
+
+    async def _run() -> None:
+        async for _ in create_tool.call(TeamCreateInput(team_name="alpha"), lead_context):
+            pass
+        upsert_team_member(
+            "alpha",
+            TeamMember(
+                name="dev-a",
+                agent_id="dev-a@alpha",
+                agent_type="general-purpose",
+                backend_type="in-process",
+                active=True,
+            ),
+        )
+        teammate_context = ToolUseContext(agent_id="dev-a", team_name="alpha", teammate_name="dev-a")
+        async for _ in send_tool.call(
+            SendMessageInput(
+                type="shutdown_response",
+                request_id="req_123",
+                approve=True,
+            ),
+            teammate_context,
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    messages = list_team_messages("alpha", limit=10)
+    assert messages
+    payload = json.loads(messages[-1].content)
+    assert payload.get("type") == "shutdown_approved"
+    assert payload.get("requestId") == "req_123"
+    assert payload.get("from") == "dev-a"
+    assert payload.get("backendType") == "in-process"
+
+
+def test_send_shutdown_response_uses_shutdown_rejected_payload(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_tool = TeamCreateTool()
+    send_tool = SendMessageTool()
+    lead_context = ToolUseContext(agent_id="team-lead")
+
+    async def _run() -> None:
+        async for _ in create_tool.call(TeamCreateInput(team_name="alpha"), lead_context):
+            pass
+        upsert_team_member(
+            "alpha",
+            TeamMember(name="dev-a", agent_id="dev-a@alpha", agent_type="general-purpose", active=True),
+        )
+        teammate_context = ToolUseContext(agent_id="dev-a", team_name="alpha", teammate_name="dev-a")
+        async for _ in send_tool.call(
+            SendMessageInput(
+                type="shutdown_response",
+                request_id="req_456",
+                approve=False,
+                content="Still working",
+            ),
+            teammate_context,
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    messages = list_team_messages("alpha", limit=10)
+    assert messages
+    payload = json.loads(messages[-1].content)
+    assert payload.get("type") == "shutdown_rejected"
+    assert payload.get("requestId") == "req_456"
+    assert payload.get("from") == "dev-a"
+    assert payload.get("reason") == "Still working"
+
+
+def test_send_plan_approval_response_uses_protocol_payload(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_tool = TeamCreateTool()
+    send_tool = SendMessageTool()
+    context = ToolUseContext(agent_id="team-lead")
+
+    async def _run() -> None:
+        async for _ in create_tool.call(TeamCreateInput(team_name="alpha"), context):
+            pass
+        upsert_team_member(
+            "alpha",
+            TeamMember(name="dev-a", agent_id="dev-a@alpha", agent_type="general-purpose", active=True),
+        )
+        async for _ in send_tool.call(
+            SendMessageInput(
+                type="plan_approval_response",
+                request_id="req_plan_1",
+                recipient="dev-a",
+                approve=True,
+            ),
+            context,
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    messages = list_team_messages("alpha", limit=10)
+    assert messages
+    payload = json.loads(messages[-1].content)
+    assert payload.get("type") == "plan_approval_response"
+    assert payload.get("requestId") == "req_plan_1"
+    assert payload.get("approved") is True
+    assert payload.get("permissionMode") == "default"
+
+
+def test_team_member_persistence_includes_extended_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    create_tool = TeamCreateTool()
+    context = ToolUseContext(agent_id="team-lead")
+
+    async def _run() -> None:
+        async for _ in create_tool.call(TeamCreateInput(team_name="alpha"), context):
+            pass
+
+    asyncio.run(_run())
+
+    config_payload = json.loads(team_config_path("alpha").read_text(encoding="utf-8"))
+    members = config_payload.get("members") or []
+    assert members
+    lead = members[0]
+    assert lead.get("agentId") == "team-lead@alpha"
+    assert lead.get("backendType") == "in-process"
+    assert lead.get("isActive") is True
 
 
 def test_send_message_recipient_alias_resolution(tmp_path, monkeypatch):

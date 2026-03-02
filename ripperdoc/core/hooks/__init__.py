@@ -14,6 +14,8 @@ Hook events:
 - PreCompact: Before conversation compaction
 - SessionStart: When a session starts or resumes
 - SessionEnd: When a session ends
+- WorktreeCreate: Before/when creating a hook-managed worktree
+- WorktreeRemove: Before/when removing a hook-managed worktree
 
 Configuration is stored in:
 - ~/.ripperdoc/hooks.json (user)
@@ -36,6 +38,8 @@ from ripperdoc.core.hooks.events import (
     PreCompactInput,
     SessionStartInput,
     SessionEndInput,
+    WorktreeCreateInput,
+    WorktreeRemoveInput,
     PreToolUseHookOutput,
     PermissionRequestHookOutput,
     PermissionRequestDecision,
@@ -71,6 +75,8 @@ __all__ = [
     "PreCompactInput",
     "SessionStartInput",
     "SessionEndInput",
+    "WorktreeCreateInput",
+    "WorktreeRemoveInput",
     # Hook-specific outputs
     "PreToolUseHookOutput",
     "PermissionRequestHookOutput",

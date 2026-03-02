@@ -135,7 +135,7 @@ def _list_tasks(ui: Any) -> bool:
         )
     )
     console.print(
-        "[dim]Use /tasks show <id> to view details/output, /tasks kill <id> to stop a task, or BashOutput/KillBash tools directly.[/dim]"
+        "[dim]Use /tasks show <id> to view details/output, /tasks kill <id> to stop a task, or TaskOutput/TaskStop tools directly.[/dim]"
     )
     return True
 

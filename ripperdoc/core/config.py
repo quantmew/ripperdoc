@@ -225,6 +225,8 @@ class UserConfig(BaseModel):
 
     # Statistics
     num_startups: int = 0
+    # Worktree options
+    worktree: Optional[dict[str, Any]] = None
 
 class ProjectConfig(BaseModel):
     """Project-specific configuration stored in .ripperdoc/config.json"""
@@ -259,6 +261,8 @@ class ProjectConfig(BaseModel):
     last_cost: Optional[float] = None
     last_duration: Optional[float] = None
     last_session_id: Optional[str] = None
+    # Worktree options
+    worktree: Optional[dict[str, Any]] = None
 
 class ProjectLocalConfig(BaseModel):
     """Project-local configuration stored in .ripperdoc/config.local.json (not checked into git)"""
@@ -272,6 +276,8 @@ class ProjectLocalConfig(BaseModel):
     output_style: str = Field(default="default")
     # Preferred assistant output language for this project/session context ("auto" = follow user)
     output_language: str = Field(default="auto")
+    # Worktree options
+    worktree: Optional[dict[str, Any]] = None
 
 
 class ConfigManager:

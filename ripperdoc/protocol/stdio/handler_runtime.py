@@ -19,6 +19,7 @@ from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.utils.mcp import shutdown_mcp_runtime
 from ripperdoc.utils.tasks import set_runtime_task_scope
+from ripperdoc.utils.worktree import consume_session_worktrees, list_session_worktrees
 
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC
 
@@ -199,6 +200,14 @@ class StdioRuntimeMixin:
                 await self._run_session_end("other")
             except Exception as e:
                 logger.warning(f"[cleanup] Session end hook failed: {e}")
+
+            pending_worktrees = list_session_worktrees()
+            if pending_worktrees:
+                kept = consume_session_worktrees()
+                logger.info(
+                    "[cleanup] Preserved %d worktree(s) on stdio shutdown",
+                    len(kept),
+                )
 
             cleanup_tasks = []
 

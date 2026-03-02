@@ -33,6 +33,8 @@ from ripperdoc.core.hooks.events import (
     SessionStartInput,
     SessionEndInput,
     SetupInput,
+    WorktreeCreateInput,
+    WorktreeRemoveInput,
 )
 from ripperdoc.core.hooks.executor import HookExecutor, LLMCallback, HookCallback
 from ripperdoc.core.hooks.state import (
@@ -302,6 +304,10 @@ class HookManager:
                 config = config.merge_with(scope)
         hooks = config.get_hooks_for_event(event, matcher_value)
         return self._select_hooks_for_execution(event, hooks)
+
+    def has_hooks(self, event: HookEvent, matcher_value: Optional[str] = None) -> bool:
+        """Return whether any hook is configured for the given event/matcher."""
+        return bool(self._get_hooks(event, matcher_value))
 
     def _hook_identity(self, event: HookEvent, hook: HookDefinition) -> str:
         if hook.hook_id:
@@ -1026,6 +1032,74 @@ class HookManager:
             permission_mode=self.permission_mode,
         )
 
+        outputs = await self._execute_hooks_async(hooks, input_data)
+        return HookResult(outputs)
+
+    # --- Worktree Create ---
+
+    def run_worktree_create(self, worktree_name: str) -> HookResult:
+        """Run WorktreeCreate hooks synchronously."""
+        hooks = self._get_hooks(HookEvent.WORKTREE_CREATE, worktree_name)
+        if not hooks:
+            return HookResult([])
+
+        input_data = WorktreeCreateInput(
+            name=worktree_name,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+        outputs = self._execute_hooks_sync(hooks, input_data)
+        return HookResult(outputs)
+
+    async def run_worktree_create_async(self, worktree_name: str) -> HookResult:
+        """Run WorktreeCreate hooks asynchronously."""
+        hooks = self._get_hooks(HookEvent.WORKTREE_CREATE, worktree_name)
+        if not hooks:
+            return HookResult([])
+
+        input_data = WorktreeCreateInput(
+            name=worktree_name,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+        outputs = await self._execute_hooks_async(hooks, input_data)
+        return HookResult(outputs)
+
+    # --- Worktree Remove ---
+
+    def run_worktree_remove(self, worktree_path: str) -> HookResult:
+        """Run WorktreeRemove hooks synchronously."""
+        hooks = self._get_hooks(HookEvent.WORKTREE_REMOVE, worktree_path)
+        if not hooks:
+            return HookResult([])
+
+        input_data = WorktreeRemoveInput(
+            worktree_path=worktree_path,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
+        outputs = self._execute_hooks_sync(hooks, input_data)
+        return HookResult(outputs)
+
+    async def run_worktree_remove_async(self, worktree_path: str) -> HookResult:
+        """Run WorktreeRemove hooks asynchronously."""
+        hooks = self._get_hooks(HookEvent.WORKTREE_REMOVE, worktree_path)
+        if not hooks:
+            return HookResult([])
+
+        input_data = WorktreeRemoveInput(
+            worktree_path=worktree_path,
+            session_id=self.session_id,
+            transcript_path=self.transcript_path,
+            cwd=self._get_cwd(),
+            permission_mode=self.permission_mode,
+        )
         outputs = await self._execute_hooks_async(hooks, input_data)
         return HookResult(outputs)
 

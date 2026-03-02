@@ -72,7 +72,7 @@ def _handle(ui: Any, arg: str) -> bool:
 
 command = SlashCommand(
     name="copy",
-    description="Copy Claude's last response to clipboard as markdown",
+    description="Copy last response to clipboard as markdown",
     handler=_handle,
 )
 

@@ -1,6 +1,7 @@
 """Query context and tool registry helpers."""
 
 import asyncio
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from ripperdoc.core.tool import Tool
@@ -201,6 +202,7 @@ class QueryContext:
         agent_id: Optional[str] = None,
         team_name: Optional[str] = None,
         teammate_name: Optional[str] = None,
+        working_directory: Optional[str] = None,
         file_cache_max_entries: int = 500,
         file_cache_max_memory_mb: float = 50.0,
         pending_message_queue: Optional[PendingMessageQueue] = None,
@@ -219,6 +221,7 @@ class QueryContext:
         self.agent_id = agent_id
         self.team_name = team_name
         self.teammate_name = teammate_name
+        self.working_directory = working_directory
         self.abort_controller = asyncio.Event()
         self.pending_message_queue: PendingMessageQueue = (
             pending_message_queue if pending_message_queue is not None else PendingMessageQueue()
@@ -258,6 +261,13 @@ class QueryContext:
     def all_tools(self) -> List[Tool[Any, Any]]:
         """Return all known tools (active + deferred)."""
         return self.tool_registry.all_tools
+
+    def set_working_directory(self, working_directory: Optional[str]) -> None:
+        """Update the session-level working directory used for future tool calls."""
+        if not working_directory:
+            self.working_directory = None
+            return
+        self.working_directory = str(Path(working_directory).expanduser().resolve())
 
     def add_hook_scope(self, scope_id: str, hooks: HooksConfig) -> bool:
         """Register a hook scope by id (idempotent)."""

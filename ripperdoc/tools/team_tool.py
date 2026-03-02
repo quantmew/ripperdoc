@@ -6,11 +6,12 @@ import hashlib
 import json
 import os
 import shutil
+from datetime import datetime, timezone
 from textwrap import dedent
 from typing import Any, AsyncGenerator, Callable, Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ripperdoc.core.tool import (
     Tool,
@@ -24,6 +25,7 @@ from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.tasks import task_list_dir
 from ripperdoc.utils.teams import (
     TeamMessage,
+    TeamMember,
     clear_active_team_name,
     create_team,
     delete_team,
@@ -80,7 +82,7 @@ TEAM_CREATE_PROMPT = dedent(
 
     1. **Create a team** with TeamCreate - this creates both the team and its task list
     2. **Create tasks** using the Task tools (TaskCreate, TaskList, etc.) - they automatically use the team's task list
-    3. **Spawn teammates** using the Task tool with `team_name` and `teammate_name` parameters to create teammates that join the team
+    3. **Spawn teammates** using the Task tool with `team_name` and `name` parameters to create teammates that join the team
     4. **Assign tasks** using TaskUpdate with `owner` to give tasks to idle teammates
     5. **Teammates work on assigned tasks** and mark them completed via TaskUpdate
     6. **Teammates go idle between turns** - after each turn, teammates automatically go idle and send a notification. IMPORTANT: Be patient with idle teammates! Don't comment on their idleness until it actually impacts your work.
@@ -386,11 +388,24 @@ def _color_for(name: str) -> str:
     return f"#{digest}"
 
 
+def _iso_utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 class TeamCreateInput(BaseModel):
     team_name: str
     description: Optional[str] = None
+    team_description: Optional[str] = None
+    team_lead: Optional[str] = None
     agent_type: Optional[str] = None
+    cwd: Optional[str] = None
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _normalize_compat_fields(self) -> "TeamCreateInput":
+        if not self.description and self.team_description:
+            self.description = self.team_description
+        return self
 
 
 class TeamCreateOutput(BaseModel):
@@ -506,20 +521,36 @@ class TeamCreateTool(Tool[TeamCreateInput, TeamCreateOutput]):
                 f"('{existing_active_team}'). Delete it before creating another team."
             )
 
-        metadata: dict[str, Any] = {}
+        lead_name = (input_data.team_lead or "").strip() or "team-lead"
+        lead_agent_type = (input_data.agent_type or "").strip() or "general-purpose"
+
+        metadata: dict[str, Any] = {
+            "team_lead": lead_name,
+            "cwd": input_data.cwd or os.getcwd(),
+        }
         if input_data.description is not None:
             metadata["description"] = input_data.description
-        if input_data.agent_type is not None:
-            metadata["agent_type"] = input_data.agent_type
+        metadata["agent_type"] = lead_agent_type
+
+        lead_member = TeamMember(
+            name=lead_name,
+            agent_id=f"{lead_name}@{input_data.team_name.strip()}",
+            agent_type=lead_agent_type,
+            backend_type="in-process",
+            color=_color_for(lead_name),
+            role="lead",
+            active=True,
+            metadata={"is_team_lead": True},
+        )
 
         try:
-            team = create_team(name=input_data.team_name, metadata=metadata)
+            team = create_team(name=input_data.team_name, metadata=metadata, members=[lead_member])
             set_active_team_name(team.name)
             _remember_active_team(context, team.name)
             output = TeamCreateOutput(
                 team_name=team.name,
                 team_file_path=str(team_config_path(team.name)),
-                lead_agent_id=f"team-lead@{team.name}",
+                lead_agent_id=f"{lead_name}@{team.name}",
             )
             yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
         except (ValueError, OSError, RuntimeError, KeyError, TypeError) as exc:
@@ -882,9 +913,10 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
             request_id = f"req_{uuid4().hex[:10]}"
             request_payload = {
                 "type": "shutdown_request",
-                "request_id": request_id,
-                "sender": sender,
-                "content": content or "Shutdown requested.",
+                "requestId": request_id,
+                "from": sender,
+                "reason": content or "Shutdown requested.",
+                "timestamp": _iso_utc_now(),
             }
             send_team_message(
                 team_name=team_name,
@@ -894,9 +926,12 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
                 content=json.dumps(request_payload, ensure_ascii=False),
                 metadata={
                     "request_id": request_id,
+                    "requestId": request_id,
                     "recipient": recipient,
                     "content": content or "Shutdown requested.",
+                    "reason": content or "Shutdown requested.",
                     "sender": sender,
+                    "from": sender,
                 },
             )
             output = SendMessageOutput(
@@ -913,13 +948,43 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
             approve = bool(input_data.approve)
             content = (input_data.content or "").strip()
             response_target = "team-lead"
-            response_payload = {
-                "type": "shutdown_response",
-                "request_id": request_id,
-                "approve": approve,
-                "sender": sender,
-                "content": content or ("Approved" if approve else "Rejected"),
-            }
+            sender_member = next(
+                (member for member in team.members if (member.name or "").strip().lower() == sender.lower()),
+                None,
+            )
+            sender_backend = (
+                (sender_member.backend_type or "").strip()
+                if sender_member and sender_member.backend_type
+                else "in-process"
+            )
+            sender_pane_id = sender_member.tmux_pane_id if sender_member else None
+
+            if approve:
+                response_payload: dict[str, Any] = {
+                    "type": "shutdown_approved",
+                    "requestId": request_id,
+                    "from": sender,
+                    "timestamp": _iso_utc_now(),
+                }
+                if sender_pane_id:
+                    response_payload["paneId"] = sender_pane_id
+                if sender_backend:
+                    response_payload["backendType"] = sender_backend
+                assistant_message = (
+                    f"Shutdown approved. Sent confirmation to team-lead. Agent {sender} is now exiting."
+                )
+            else:
+                reject_reason = content or "Shutdown rejected."
+                response_payload = {
+                    "type": "shutdown_rejected",
+                    "requestId": request_id,
+                    "from": sender,
+                    "reason": reject_reason,
+                    "timestamp": _iso_utc_now(),
+                }
+                assistant_message = (
+                    f'Shutdown rejected. Reason: "{reject_reason}". Continuing to work.'
+                )
             send_team_message(
                 team_name=team_name,
                 sender=sender,
@@ -928,18 +993,22 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
                 content=json.dumps(response_payload, ensure_ascii=False),
                 metadata={
                     "request_id": request_id,
+                    "requestId": request_id,
                     "approve": approve,
+                    "approved": approve,
                     "recipient": response_target,
                     "sender": sender,
+                    "from": sender,
                     "content": content or ("Approved" if approve else "Rejected"),
+                    "reason": content or ("Approved" if approve else "Rejected"),
+                    "protocol_type": response_payload.get("type"),
+                    "backendType": response_payload.get("backendType"),
+                    "paneId": response_payload.get("paneId"),
                 },
             )
             output = SendMessageOutput(
                 success=True,
-                message=(
-                    f"Shutdown response recorded for request {request_id}: "
-                    f"{'approved' if approve else 'rejected'}."
-                ),
+                message=assistant_message,
                 request_id=request_id,
             )
             yield ToolResult(
@@ -950,6 +1019,10 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
 
         request_id = (input_data.request_id or "").strip()
         approve = bool(input_data.approve)
+        if sender != "team-lead":
+            raise ValueError(
+                "Only the team lead can approve plans. Teammates cannot approve or reject plans."
+            )
         recipient, exists = _normalize_recipient_name(team, input_data.recipient or "")
         if not exists and recipient != "team-lead":
             known = sorted(
@@ -969,20 +1042,48 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
                 )
             )
         content = (input_data.content or "").strip()
+        if approve:
+            protocol_payload: dict[str, Any] = {
+                "type": "plan_approval_response",
+                "requestId": request_id,
+                "approved": True,
+                "timestamp": _iso_utc_now(),
+                "permissionMode": "default",
+            }
+            assistant_message = (
+                f"Plan approved for {recipient}. They will receive the approval and can proceed with implementation."
+            )
+        else:
+            feedback = content or "Plan needs revision"
+            protocol_payload = {
+                "type": "plan_approval_response",
+                "requestId": request_id,
+                "approved": False,
+                "feedback": feedback,
+                "timestamp": _iso_utc_now(),
+            }
+            assistant_message = (
+                f'Plan rejected for {recipient} with feedback: "{feedback}"'
+            )
         send_team_message(
             team_name=team_name,
             sender=sender,
             recipients=[recipient],
             message_type="plan_approval_response",
-            content=content or ("Approved" if approve else "Rejected"),
-            metadata={"request_id": request_id, "approve": approve},
+            content=json.dumps(protocol_payload, ensure_ascii=False),
+            metadata={
+                "request_id": request_id,
+                "requestId": request_id,
+                "approve": approve,
+                "approved": approve,
+                "recipient": recipient,
+                "permissionMode": protocol_payload.get("permissionMode"),
+                "feedback": protocol_payload.get("feedback"),
+            },
         )
         output = SendMessageOutput(
             success=True,
-            message=(
-                f"Plan approval response sent to {recipient} for request {request_id}: "
-                f"{'approved' if approve else 'rejected'}."
-            ),
+            message=assistant_message,
             request_id=request_id,
         )
         yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))

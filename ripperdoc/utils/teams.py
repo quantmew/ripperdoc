@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import hashlib
 import threading
 import tempfile
 import time
@@ -57,12 +58,32 @@ class TeamMember(BaseModel):
     """Teammate descriptor within a Team."""
 
     name: str
+    agent_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("agent_id", "agentId"),
+        serialization_alias="agentId",
+    )
     agent_type: str = Field(
         validation_alias=AliasChoices("agent_type", "agentType"),
         serialization_alias="agentType",
     )
+    tmux_pane_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("tmux_pane_id", "tmuxPaneId"),
+        serialization_alias="tmuxPaneId",
+    )
+    backend_type: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("backend_type", "backendType"),
+        serialization_alias="backendType",
+    )
+    color: Optional[str] = None
     role: str = "worker"
-    active: bool = True
+    active: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("active", "is_active", "isActive"),
+        serialization_alias="isActive",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
     joined_at: float = Field(
         default_factory=time.time,
@@ -128,6 +149,11 @@ def _normalize_team_participant(name: str) -> str:
     return (name or "").strip() or "team-lead"
 
 
+def _participant_color(name: str) -> str:
+    digest = hashlib.sha1((name or "team-lead").encode("utf-8")).hexdigest()[:6]
+    return f"#{digest}"
+
+
 def _normalize_mailbox_participant(name: str) -> str:
     # Keep mailbox path-friendly names while preserving readable participant identity.
     return sanitize_identifier(name or "", fallback="team-lead")
@@ -191,8 +217,6 @@ def _store_team_inbox_entries(
     participant: str,
     entries: list[dict[str, Any]],
 ) -> None:
-    if not entries:
-        return
     path = _team_inbox_path(team_name, participant)
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_json_atomic(path, entries)
@@ -225,6 +249,8 @@ def _resolve_inbox_recipients(
 def _build_inbox_entry(
     message: TeamMessage,
     recipient: str,
+    *,
+    read: bool = False,
 ) -> Dict[str, Any]:
     recipient_normalized = _normalize_team_participant(recipient)
     return {
@@ -236,7 +262,7 @@ def _build_inbox_entry(
         "content": message.content,
         "created_at": message.created_at,
         "metadata": _build_queue_notification_payload(message, recipient_normalized),
-        "read": False,
+        "read": bool(read),
     }
 
 
@@ -259,6 +285,76 @@ def drain_team_inbox_messages(team_name: str, participant: str) -> list[dict[str
         _store_team_inbox_entries(clean_team, clean_participant, entries)
 
         return unread
+
+
+def get_inbox_path(agent_id: str, team_name: str) -> str:
+    """Return canonical inbox file path for an agent within a team."""
+    return str(_team_inbox_path(team_name, agent_id))
+
+
+def read_mailbox(user_id: str, mailbox_path: str) -> list[dict[str, Any]]:
+    """Read all mailbox entries for a participant."""
+    clean_team = (mailbox_path or "").strip()
+    clean_user = _normalize_team_participant(user_id)
+    if not clean_team:
+        return []
+
+    with _team_lock(clean_team):
+        return [dict(item) for item in _load_team_inbox_entries(clean_team, clean_user)]
+
+
+def read_unread_messages(user_id: str, mailbox_path: str) -> list[dict[str, Any]]:
+    """Read unread mailbox entries for a participant."""
+    return [dict(item) for item in read_mailbox(user_id, mailbox_path) if not item.get("read")]
+
+
+def mark_message_as_read_by_index(agent_name: str, team_name: str, message_index: int) -> bool:
+    """Mark a single mailbox entry as read by zero-based index."""
+    clean_team = (team_name or "").strip()
+    clean_agent = _normalize_team_participant(agent_name)
+    if not clean_team:
+        return False
+
+    with _team_lock(clean_team):
+        entries = _load_team_inbox_entries(clean_team, clean_agent)
+        if message_index < 0 or message_index >= len(entries):
+            return False
+        entry = entries[message_index]
+        if not isinstance(entry, dict) or entry.get("read"):
+            return False
+        entry["read"] = True
+        _store_team_inbox_entries(clean_team, clean_agent, entries)
+        return True
+
+
+def mark_messages_as_read(agent_name: str, team_name: str) -> int:
+    """Mark all mailbox entries as read and return number of changed entries."""
+    clean_team = (team_name or "").strip()
+    clean_agent = _normalize_team_participant(agent_name)
+    if not clean_team:
+        return 0
+
+    with _team_lock(clean_team):
+        entries = _load_team_inbox_entries(clean_team, clean_agent)
+        changed = 0
+        for entry in entries:
+            if isinstance(entry, dict) and not entry.get("read"):
+                entry["read"] = True
+                changed += 1
+        if entries:
+            _store_team_inbox_entries(clean_team, clean_agent, entries)
+        return changed
+
+
+def clear_mailbox(teammate_id: str, team_name: str) -> None:
+    """Clear a participant inbox while keeping the inbox file present."""
+    clean_team = (team_name or "").strip()
+    clean_agent = _normalize_team_participant(teammate_id)
+    if not clean_team:
+        return
+
+    with _team_lock(clean_team):
+        _store_team_inbox_entries(clean_team, clean_agent, [])
 
 
 def register_team_message_listener(
@@ -358,8 +454,18 @@ def _build_queue_notification_payload(
         "team_name": message.team_name,
         "sender": message.sender,
         "recipient": recipient,
-        "request_id": message.metadata.get("request_id"),
-        "approve": message.metadata.get("approve"),
+        "request_id": message.metadata.get("request_id") or message.metadata.get("requestId"),
+        "requestId": message.metadata.get("requestId") or message.metadata.get("request_id"),
+        "approve": (
+            message.metadata.get("approve")
+            if message.metadata.get("approve") is not None
+            else message.metadata.get("approved")
+        ),
+        "approved": (
+            message.metadata.get("approved")
+            if message.metadata.get("approved") is not None
+            else message.metadata.get("approve")
+        ),
     }
     # Keep message-level metadata (e.g., summary) in the same payload so inbox
     # consumers can preserve UI hints without needing to inspect storage again.
@@ -417,7 +523,10 @@ def set_team_member_active(
             updated_members.append(
                 TeamMember(
                     name=clean_member,
+                    agent_id=f"{clean_member}@{clean_team}",
                     agent_type=default_agent_type,
+                    backend_type="in-process",
+                    color=_participant_color(clean_member),
                     role="worker",
                     active=True,
                 )
@@ -747,6 +856,11 @@ def send_team_message(
         created_at=time.time(),
     )
 
+    recipient_listener_map = _snapshot_listeners_for_recipients(team_name, message.recipients)
+    live_recipients = {
+        _normalize_team_participant(recipient) for _, recipient in recipient_listener_map.values()
+    }
+
     with _team_lock(team_name):
         path = _team_messages_path(team_name)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -759,19 +873,19 @@ def send_team_message(
         _write_json_atomic(_team_config_path(team_name), team.model_dump(by_alias=True))
 
         inbox_recipients = _resolve_inbox_recipients(team_name, team, message.recipients)
-
-    recipient_listener_map = _snapshot_listeners_for_recipients(team_name, message.recipients)
-    live_recipients = {
-        _normalize_team_participant(recipient) for _, recipient in recipient_listener_map.values()
-    }
-
-    for recipient in inbox_recipients:
-        normalized_recipient = _normalize_team_participant(recipient)
-        if normalized_recipient in live_recipients:
-            continue
-        entries = _load_team_inbox_entries(team_name, normalized_recipient)
-        entries.append(_build_inbox_entry(message, normalized_recipient))
-        _store_team_inbox_entries(team_name, normalized_recipient, entries)
+        for recipient in inbox_recipients:
+            normalized_recipient = _normalize_team_participant(recipient)
+            entries = _load_team_inbox_entries(team_name, normalized_recipient)
+            entries.append(
+                _build_inbox_entry(
+                    message,
+                    normalized_recipient,
+                    # Persist listener-delivered messages as already-read to avoid
+                    # duplicate redelivery while retaining a mailbox record.
+                    read=normalized_recipient in live_recipients,
+                )
+            )
+            _store_team_inbox_entries(team_name, normalized_recipient, entries)
 
     if recipient_listener_map:
         for _, (queue, recipient) in recipient_listener_map.items():
@@ -843,19 +957,28 @@ __all__ = [
     "TeamMember",
     "TeamMessage",
     "TeamMessageType",
+    "clear_mailbox",
     "set_team_member_active",
     "clear_active_team_name",
     "create_team",
     "delete_team",
+    "drain_team_inbox_messages",
     "find_team_by_task_list_id",
+    "get_inbox_path",
     "get_active_team_name",
     "get_team",
     "list_team_messages",
     "list_teams",
+    "mark_message_as_read_by_index",
+    "mark_messages_as_read",
+    "read_mailbox",
+    "read_unread_messages",
+    "register_team_message_listener",
     "remove_team_member",
     "send_team_message",
     "set_active_team_name",
     "team_config_path",
     "team_dir",
+    "unregister_team_message_listener",
     "upsert_team_member",
 ]

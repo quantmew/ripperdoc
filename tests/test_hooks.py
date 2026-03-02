@@ -40,6 +40,7 @@ from ripperdoc.core.hooks.events import (
     PreCompactInput,
     SessionStartInput,
     SessionEndInput,
+    WorktreeCreateInput,
 )
 from ripperdoc.core.hooks.executor import HookExecutor
 from ripperdoc.core.hooks.manager import HookManager, HookResult
@@ -228,6 +229,17 @@ class TestHookOutputParsing:
 
         assert ask_output.should_ask is True
         assert allow_output.should_ask is False
+
+
+def test_worktree_create_input_serializes_name_field():
+    payload = WorktreeCreateInput(name="feature-x").model_dump()
+    assert payload["name"] == "feature-x"
+    assert "worktree_name" not in payload
+
+
+def test_worktree_create_input_accepts_legacy_worktree_name_field():
+    payload = WorktreeCreateInput.model_validate({"worktree_name": "legacy-name"}).model_dump()
+    assert payload["name"] == "legacy-name"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

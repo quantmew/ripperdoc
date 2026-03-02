@@ -45,7 +45,7 @@ TOOL_COMMANDS: Set[str] = {
     "LS",
     "WebSearch",
     "WebFetch",
-    "BashOutput",
+    "TaskOutput",
     "ListMcpServers",
     "ListMcpResources",
     "ReadMcpResource",

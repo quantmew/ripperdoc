@@ -1,9 +1,13 @@
 """Test tools."""
 
 import asyncio
+import json
+import os
+import subprocess
 import pytest
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from pydantic import BaseModel
 
 from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
@@ -17,8 +21,19 @@ from ripperdoc.tools.multi_edit_tool import (
 from ripperdoc.tools.glob_tool import GlobTool, GlobToolInput
 from ripperdoc.tools.ls_tool import LSTool, LSToolInput
 from ripperdoc.tools.bash_tool import BashTool, BashToolInput
-from ripperdoc.tools.bash_output_tool import BashOutputTool, BashOutputInput
-from ripperdoc.tools.kill_bash_tool import KillBashTool, KillBashInput
+from ripperdoc.tools.task_output_tool import TaskOutputTool, TaskOutputInput
+from ripperdoc.tools.task_stop_tool import TaskStopTool, TaskStopInput
+from ripperdoc.tools.task_tool import AgentRunRecord, TaskTool, TaskToolInput
+from ripperdoc.tools.enter_worktree_tool import EnterWorktreeTool, EnterWorktreeToolInput
+from ripperdoc.utils.worktree import (
+    WorktreeSession,
+    cleanup_worktree_session,
+    cleanup_registered_worktrees,
+    consume_session_worktrees,
+    create_task_worktree,
+    has_worktree_changes,
+    sync_worktree_configuration,
+)
 from ripperdoc.core.tool import Tool, ToolUseContext, ToolProgress, ToolResult
 from ripperdoc.core.query import ToolRegistry
 from ripperdoc.tools.tool_search_tool import ToolSearchTool, ToolSearchInput
@@ -338,7 +353,7 @@ async def test_ls_tool_skips_heavy_directories():
 async def test_bash_tool_background_and_output():
     """Background bash commands should return a task id and stream output later."""
     bash_tool = BashTool()
-    output_tool = BashOutputTool()
+    output_tool = TaskOutputTool()
     context = ToolUseContext()
 
     # Start a short-lived command in the background.
@@ -357,21 +372,23 @@ async def test_bash_tool_background_and_output():
     # Allow the process to finish.
     await asyncio.sleep(0.3)
 
-    poll_input = BashOutputInput(task_id=task_id, consume=True)
+    poll_input = TaskOutputInput(task_id=task_id, block=True, timeout=3000)
     poll_result = None
     async for output in output_tool.call(poll_input, context):
         poll_result = output
 
     assert poll_result is not None
-    assert poll_result.data.status in ("completed", "failed")
-    assert "hi" in poll_result.data.stdout
+    assert poll_result.data.retrieval_status == "success"
+    assert poll_result.data.task is not None
+    assert poll_result.data.task.status in ("completed", "failed")
+    assert "hi" in poll_result.data.task.output
 
 
 @pytest.mark.asyncio
 async def test_bash_background_stdin_detached():
     """Background commands should not hold the controlling TTY/stdin open."""
     bash_tool = BashTool()
-    output_tool = BashOutputTool()
+    output_tool = TaskOutputTool()
     context = ToolUseContext()
 
     start_input = BashToolInput(
@@ -391,14 +408,699 @@ async def test_bash_background_stdin_detached():
     # Allow brief time for the process to exit (should not wait on stdin).
     await asyncio.sleep(0.2)
 
-    poll_input = BashOutputInput(task_id=task_id, consume=True)
+    poll_input = TaskOutputInput(task_id=task_id, block=True, timeout=3000)
     poll_result = None
     async for output in output_tool.call(poll_input, context):
         poll_result = output
 
     assert poll_result is not None
-    assert poll_result.data.status in ("completed", "failed")
-    assert "len=0" in poll_result.data.stdout
+    assert poll_result.data.retrieval_status == "success"
+    assert poll_result.data.task is not None
+    assert poll_result.data.task.status in ("completed", "failed")
+    assert "len=0" in poll_result.data.task.output
+
+
+@pytest.mark.asyncio
+async def test_task_output_background_status_and_output():
+    """TaskOutput should support non-blocking and blocking background checks."""
+    bash_tool = BashTool()
+    output_tool = TaskOutputTool()
+    context = ToolUseContext()
+
+    start_input = BashToolInput(
+        command="sleep 0.2 && echo task-output-ok",
+        run_in_background=True,
+        timeout=2000,
+    )
+
+    start_result = None
+    async for output in bash_tool.call(start_input, context):
+        start_result = output
+
+    assert start_result is not None
+    task_id = start_result.data.background_task_id
+    assert task_id
+
+    immediate = None
+    async for output in output_tool.call(
+        TaskOutputInput(task_id=task_id, block=False),
+        context,
+    ):
+        immediate = output
+
+    assert immediate is not None
+    assert immediate.data.retrieval_status in {"not_ready", "success"}
+    assert immediate.data.task is not None
+    assert immediate.data.task.task_type == "local_bash"
+
+    await asyncio.sleep(0.3)
+
+    completed = None
+    async for output in output_tool.call(
+        TaskOutputInput(task_id=task_id, block=True, timeout=3000),
+        context,
+    ):
+        completed = output
+
+    assert completed is not None
+    assert completed.data.retrieval_status == "success"
+    assert completed.data.task is not None
+    assert completed.data.task.status in {"completed", "failed"}
+    assert "task-output-ok" in completed.data.task.output
+
+
+@pytest.mark.asyncio
+async def test_task_stop_kills_background_bash():
+    """TaskStop should stop background bash tasks by task_id."""
+    bash_tool = BashTool()
+    stop_tool = TaskStopTool()
+    context = ToolUseContext()
+
+    start_input = BashToolInput(
+        command='python -c "import time; time.sleep(2)"',
+        run_in_background=True,
+        timeout=3000,
+    )
+
+    start_result = None
+    async for output in bash_tool.call(start_input, context):
+        start_result = output
+
+    assert start_result is not None
+    task_id = start_result.data.background_task_id
+    assert task_id
+
+    validation = await stop_tool.validate_input(TaskStopInput(task_id=task_id), context)
+    assert validation.result is True
+
+    stop_result = None
+    async for output in stop_tool.call(TaskStopInput(task_id=task_id), context):
+        stop_result = output
+
+    assert stop_result is not None
+    assert stop_result.data.task_type == "local_bash"
+    assert "Successfully stopped task" in stop_result.data.message
+    status = get_background_status(task_id, consume=False)
+    assert status["status"] == "killed"
+
+
+def test_task_tool_input_supports_name_alias_for_teammate() -> None:
+    """Task input should accept name field alias."""
+    parsed = TaskToolInput(
+        description="delegate auth review",
+        prompt="Do work",
+        subagent_type="general-purpose",
+        team_name="alpha",
+        name="researcher",
+    )
+    assert parsed.teammate_name == "researcher"
+    assert parsed.name == "researcher"
+
+
+def test_task_tool_input_accepts_worktree_isolation() -> None:
+    parsed = TaskToolInput(
+        description="implement feature",
+        prompt="Implement feature",
+        subagent_type="general-purpose",
+        isolation="worktree",
+    )
+    assert parsed.isolation == "worktree"
+
+
+@pytest.mark.asyncio
+async def test_task_tool_validate_input_requires_description() -> None:
+    tool = TaskTool(lambda: [])
+    payload = TaskToolInput(
+        description="desc",
+        prompt="Do work",
+        subagent_type="general-purpose",
+    )
+    payload.description = ""
+
+    validation = await tool.validate_input(payload)
+    assert validation.result is False
+    assert "description is required" in (validation.message or "")
+
+
+@pytest.mark.asyncio
+async def test_bash_tool_supports_dangerously_disable_sandbox_alias() -> None:
+    tool = BashTool()
+    parsed = BashToolInput(
+        command="touch /tmp/ripperdoc-test",
+        sandbox=True,
+        dangerouslyDisableSandbox=True,
+    )
+    assert parsed.dangerously_disable_sandbox is True
+    # Sandbox override should bypass the unconditional sandbox dict path.
+    sandbox_decision = await tool.check_permissions(BashToolInput(command="touch /tmp/x", sandbox=True), {})
+    override_decision = await tool.check_permissions(parsed, {})
+    assert isinstance(sandbox_decision, dict)
+    assert not isinstance(override_decision, dict)
+
+
+def test_create_task_worktree_creates_isolated_branch(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    session = create_task_worktree(task_id="agent_deadbeef", base_path=repo)
+    assert session.worktree_path.exists()
+    assert session.worktree_path.is_dir()
+    assert str(session.worktree_path).startswith(str(repo / ".ripperdoc" / "worktrees"))
+
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=session.worktree_path).stdout.strip()
+    assert branch == session.branch
+
+    # cleanup
+    _git("worktree", "remove", "--force", str(session.worktree_path))
+    _git("branch", "-D", session.branch)
+    consume_session_worktrees()
+
+
+def test_create_task_worktree_resumes_existing_named_worktree(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    first = create_task_worktree(task_id="agent_first", base_path=repo, requested_name="shared")
+    second = create_task_worktree(task_id="agent_second", base_path=repo, requested_name="shared")
+
+    assert first.worktree_path == second.worktree_path
+    assert second.branch == first.branch
+
+    _git("worktree", "remove", "--force", str(first.worktree_path))
+    _git("branch", "-D", first.branch)
+    consume_session_worktrees()
+
+
+def test_create_task_worktree_resumes_legacy_ripperdoc_worktree(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    legacy_path = repo / ".ripperdoc" / "worktrees" / "legacy-shared"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    _git("worktree", "add", "-b", "worktree-legacy-shared", str(legacy_path), "HEAD")
+
+    resumed = create_task_worktree(
+        task_id="agent_legacy",
+        base_path=repo,
+        requested_name="legacy-shared",
+    )
+    assert resumed.worktree_path == legacy_path.resolve()
+
+    _git("worktree", "remove", "--force", str(legacy_path))
+    _git("branch", "-D", "worktree-legacy-shared")
+    consume_session_worktrees()
+
+
+def test_create_task_worktree_requires_git_repo(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="git repository"):
+        create_task_worktree(task_id="agent_123", base_path=tmp_path)
+
+
+def test_create_task_worktree_prefers_worktree_create_hook(monkeypatch, tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    hook_worktree = tmp_path / "hook-worktree"
+    hook_worktree.mkdir()
+    captured: dict[str, str] = {}
+
+    def fake_run_worktree_create(worktree_name: str):
+        captured["name"] = worktree_name
+        output = SimpleNamespace(
+            hook_specific_output={"worktreePath": str(hook_worktree)},
+            raw_output="",
+            additional_context=None,
+            reason=None,
+        )
+        return SimpleNamespace(
+            should_block=False,
+            outputs=[output],
+        )
+
+    monkeypatch.setattr("ripperdoc.utils.worktree._has_worktree_create_hook", lambda: True)
+    monkeypatch.setattr(
+        "ripperdoc.utils.worktree.hook_manager.run_worktree_create",
+        fake_run_worktree_create,
+    )
+
+    session = create_task_worktree(
+        task_id="agent_hookpref",
+        base_path=repo,
+        requested_name="hook-pref",
+    )
+
+    assert captured["name"] == "hook-pref"
+    assert session.hook_based is True
+    assert session.worktree_path == hook_worktree.resolve()
+    assert session.repo_root == repo.resolve()
+    consume_session_worktrees()
+
+
+def test_create_task_worktree_copies_worktreeinclude_files(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("*.secret\nignored_dir/\n", encoding="utf-8")
+    (repo / ".worktreeinclude").write_text(
+        "config.secret\nignored_dir/data.txt\n",
+        encoding="utf-8",
+    )
+    _git("add", "README.md", ".gitignore", ".worktreeinclude")
+    _git("commit", "-m", "init")
+
+    (repo / "config.secret").write_text("token=abc\n", encoding="utf-8")
+    (repo / "ignored_dir").mkdir()
+    (repo / "ignored_dir" / "data.txt").write_text("cached\n", encoding="utf-8")
+    (repo / "other.secret").write_text("skip\n", encoding="utf-8")
+
+    session = create_task_worktree(task_id="agent_includes", base_path=repo)
+
+    assert (session.worktree_path / "config.secret").read_text(encoding="utf-8") == "token=abc\n"
+    assert (
+        session.worktree_path / "ignored_dir" / "data.txt"
+    ).read_text(encoding="utf-8") == "cached\n"
+    assert not (session.worktree_path / "other.secret").exists()
+
+    _git("worktree", "remove", "--force", str(session.worktree_path))
+    _git("branch", "-D", session.branch)
+    consume_session_worktrees()
+
+
+@pytest.mark.asyncio
+async def test_enter_worktree_tool_switches_session_directory(monkeypatch, tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    tool = EnterWorktreeTool()
+    captured: dict[str, str] = {}
+
+    def _set_working_directory(path: str) -> None:
+        captured["working_directory"] = path
+
+    monkeypatch.chdir(repo)
+    outputs = [
+        item
+        async for item in tool.call(
+            EnterWorktreeToolInput(name="mid-session"),
+            ToolUseContext(
+                working_directory=str(repo),
+                set_working_directory=_set_working_directory,
+                message_id="msg_123",
+            ),
+        )
+    ]
+
+    assert outputs
+    result = outputs[-1]
+    assert result.data.worktreePath.startswith(str(repo / ".ripperdoc" / "worktrees"))
+    assert captured["working_directory"] == result.data.worktreePath
+    assert os.getcwd() == result.data.worktreePath
+
+    monkeypatch.chdir(repo)
+    _git("worktree", "remove", "--force", result.data.worktreePath)
+    _git("branch", "-D", result.data.worktreeBranch)
+    consume_session_worktrees()
+
+
+@pytest.mark.asyncio
+async def test_enter_worktree_tool_rejects_when_already_in_worktree(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    session = create_task_worktree(task_id="agent_guard", base_path=repo)
+    tool = EnterWorktreeTool()
+    validation = await tool.validate_input(
+        EnterWorktreeToolInput(),
+        ToolUseContext(working_directory=str(session.worktree_path)),
+    )
+    assert validation.result is False
+    assert validation.message == "Already in a worktree session"
+
+    _git("worktree", "remove", "--force", str(session.worktree_path))
+    _git("branch", "-D", session.branch)
+    consume_session_worktrees()
+
+
+def test_create_task_worktree_supports_pr_number(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    origin = tmp_path / "origin.git"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    subprocess.run(["git", "init", "--bare", str(origin)], check=True)
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+    default_branch = _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    _git("remote", "add", "origin", str(origin))
+    _git("push", "-u", "origin", default_branch)
+
+    _git("checkout", "-b", "feature-pr")
+    (repo / "PR_ONLY.md").write_text("from pr\n", encoding="utf-8")
+    _git("add", "PR_ONLY.md")
+    _git("commit", "-m", "pr head")
+    _git("push", "origin", "HEAD:refs/pull/123/head")
+    _git("checkout", default_branch)
+
+    session = create_task_worktree(
+        task_id="agent_pr",
+        base_path=repo,
+        requested_name="pr-123",
+        pr_number=123,
+    )
+    assert (session.worktree_path / "PR_ONLY.md").exists()
+
+    _git("worktree", "remove", "--force", str(session.worktree_path))
+    _git("branch", "-D", session.branch)
+    consume_session_worktrees()
+
+
+def test_cleanup_registered_worktrees_removes_branch_and_directory(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    session = create_task_worktree(task_id="agent_cleanup", base_path=repo)
+    results = cleanup_registered_worktrees(force=True)
+    assert len(results) == 1
+    assert results[0].worktree_path == session.worktree_path
+    assert results[0].removed is True
+    assert results[0].branch_deleted is True
+    assert not session.worktree_path.exists()
+
+
+def test_cleanup_worktree_session_uses_worktree_remove_hook(monkeypatch, tmp_path: Path) -> None:
+    hook_worktree = tmp_path / "hook-worktree"
+    hook_worktree.mkdir()
+    called: dict[str, str] = {}
+
+    session = WorktreeSession(
+        repo_root=tmp_path,
+        worktree_path=hook_worktree,
+        branch="",
+        name="hooked",
+        hook_based=True,
+    )
+
+    def fake_run_worktree_remove(worktree_path: str):
+        called["path"] = worktree_path
+        return SimpleNamespace(should_block=False, has_errors=False, errors=[])
+
+    monkeypatch.setattr("ripperdoc.utils.worktree._has_worktree_remove_hook", lambda: True)
+    monkeypatch.setattr(
+        "ripperdoc.utils.worktree.hook_manager.run_worktree_remove",
+        fake_run_worktree_remove,
+    )
+
+    result = cleanup_worktree_session(session)
+
+    assert called["path"] == str(hook_worktree)
+    assert result.removed is True
+    assert result.branch_deleted is False
+    assert result.error is None
+
+
+def test_sync_worktree_configuration_syncs_settings_hooks_and_symlink(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    repo.mkdir()
+    worktree.mkdir()
+
+    (repo / "settings.local.json").write_text('{"local":true}\n', encoding="utf-8")
+    (repo / ".husky").mkdir()
+    (repo / ".ripperdoc").mkdir()
+    (repo / ".ripperdoc" / "config.json").write_text(
+        json.dumps({"worktree": {"symlinkDirectories": ["cache-dir"]}}),
+        encoding="utf-8",
+    )
+    (repo / "cache-dir").mkdir()
+    (repo / "cache-dir" / "token.txt").write_text("abc\n", encoding="utf-8")
+
+    run_git_calls: list[tuple[list[str], Path]] = []
+
+    def fake_run_git(
+        args: list[str], *, cwd: Path, timeout_sec: float = 20.0
+    ) -> subprocess.CompletedProcess[str]:
+        run_git_calls.append((args, cwd))
+        return subprocess.CompletedProcess(
+            args=["git", *args], returncode=0, stdout="", stderr=""
+        )
+
+    monkeypatch.setattr("ripperdoc.utils.worktree._run_git", fake_run_git)
+
+    sync_worktree_configuration(repo_root=repo, worktree_path=worktree)
+
+    assert (worktree / "settings.local.json").read_text(encoding="utf-8") == '{"local":true}\n'
+    assert any(
+        args[:2] == ["config", "core.hooksPath"] and cwd == worktree
+        for args, cwd in run_git_calls
+    )
+    link_path = worktree / "cache-dir"
+    assert link_path.is_symlink()
+    assert link_path.resolve() == (repo / "cache-dir").resolve()
+
+
+def test_has_worktree_changes_detects_dirty_and_committed_changes(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    session = create_task_worktree(task_id="agent_changes", base_path=repo)
+    baseline = session.head_commit or session.branch
+
+    assert has_worktree_changes(worktree_path=session.worktree_path, baseline_ref=baseline) is False
+
+    (session.worktree_path / "README.md").write_text("hello world\n", encoding="utf-8")
+    assert has_worktree_changes(worktree_path=session.worktree_path, baseline_ref=baseline) is True
+
+    _git("add", "README.md", cwd=session.worktree_path)
+    _git("commit", "-m", "change", cwd=session.worktree_path)
+    assert has_worktree_changes(worktree_path=session.worktree_path, baseline_ref=baseline) is True
+
+    _git("worktree", "remove", "--force", str(session.worktree_path))
+    _git("branch", "-D", session.branch)
+    consume_session_worktrees()
+
+
+def test_task_tool_autocleans_worktree_when_no_changes(tmp_path: Path) -> None:
+    consume_session_worktrees()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    session = create_task_worktree(task_id="agent_autoclean", base_path=repo)
+    tool = TaskTool(lambda: [])
+    record = AgentRunRecord(
+        agent_id="agent_autoclean",
+        agent_type="general-purpose",
+        tools=[],
+        system_prompt="",
+        history=[],
+        missing_tools=[],
+        model_used=None,
+        start_time=0.0,
+        status="completed",
+        result_text="done",
+        isolation_mode="worktree",
+        worktree_path=str(session.worktree_path),
+        worktree_branch=session.branch,
+        worktree_name=session.name,
+        worktree_repo_root=str(session.repo_root),
+        worktree_head_commit=session.head_commit,
+    )
+
+    tool._maybe_autocleanup_worktree(record)  # noqa: SLF001 - testing internal lifecycle behavior
+    assert record.worktree_path is None
+    assert record.worktree_branch is None
+    assert not session.worktree_path.exists()
 
 
 @pytest.mark.asyncio
@@ -458,10 +1160,10 @@ async def test_bash_tool_handles_very_long_single_line_output():
 
 
 @pytest.mark.asyncio
-async def test_kill_bash_running_task():
-    """KillBash should terminate a running background command."""
+async def test_task_stop_running_task():
+    """TaskStop should terminate a running background command."""
     bash_tool = BashTool()
-    kill_tool = KillBashTool()
+    stop_tool = TaskStopTool()
     context = ToolUseContext()
 
     start_input = BashToolInput(
@@ -478,25 +1180,26 @@ async def test_kill_bash_running_task():
     task_id = start_result.data.background_task_id
     assert task_id
 
-    kill_input = KillBashInput(task_id=task_id)
-    validation = await kill_tool.validate_input(kill_input, context)
+    stop_input = TaskStopInput(task_id=task_id)
+    validation = await stop_tool.validate_input(stop_input, context)
     assert validation.result is True
 
-    kill_result = None
-    async for output in kill_tool.call(kill_input, context):
-        kill_result = output
+    stop_result = None
+    async for output in stop_tool.call(stop_input, context):
+        stop_result = output
 
-    assert kill_result is not None
-    assert kill_result.data.success is True
+    assert stop_result is not None
+    assert stop_result.data.task_type == "local_bash"
+    assert "Successfully stopped task" in stop_result.data.message
     status = get_background_status(task_id, consume=False)
     assert status["status"] == "killed"
 
 
 @pytest.mark.asyncio
-async def test_kill_bash_completed_task():
-    """Killing a completed task should report not running."""
+async def test_task_stop_completed_task():
+    """Stopping a completed task should report not running."""
     bash_tool = BashTool()
-    kill_tool = KillBashTool()
+    stop_tool = TaskStopTool()
     context = ToolUseContext()
 
     start_input = BashToolInput(
@@ -516,25 +1219,18 @@ async def test_kill_bash_completed_task():
     # allow completion
     await asyncio.sleep(0.2)
 
-    kill_input = KillBashInput(task_id=task_id)
-    validation = await kill_tool.validate_input(kill_input, context)
-    assert validation.result is True
-
-    kill_result = None
-    async for output in kill_tool.call(kill_input, context):
-        kill_result = output
-
-    assert kill_result is not None
-    assert kill_result.data.success is False
-    assert "not running" in kill_result.data.message.lower()
+    stop_input = TaskStopInput(task_id=task_id)
+    validation = await stop_tool.validate_input(stop_input, context)
+    assert validation.result is False
+    assert "not running" in (validation.message or "").lower()
 
 
 @pytest.mark.asyncio
-async def test_kill_bash_validation_missing():
+async def test_task_stop_validation_missing():
     """Validation should fail for unknown task ids."""
-    kill_tool = KillBashTool()
+    stop_tool = TaskStopTool()
     context = ToolUseContext()
-    validation = await kill_tool.validate_input(KillBashInput(task_id="missing"), context)
+    validation = await stop_tool.validate_input(TaskStopInput(task_id="missing"), context)
     assert validation.result is False
 
 

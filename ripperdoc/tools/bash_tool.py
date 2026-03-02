@@ -68,6 +68,13 @@ class BashToolInput(BaseModel):
     """Input schema for BashTool."""
 
     command: str = Field(description="The bash command to execute")
+    description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Clear, concise description of what this command does in active voice. "
+            "Prefer 5-10 words for simple commands."
+        ),
+    )
     timeout: Optional[int] = Field(
         default=None,
         description=(
@@ -90,6 +97,12 @@ class BashToolInput(BaseModel):
     sandbox: Optional[bool] = Field(
         default=None,
         description="If true, request sandboxed execution (read-only).",
+    )
+    dangerously_disable_sandbox: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("dangerously_disable_sandbox", "dangerouslyDisableSandbox"),
+        serialization_alias="dangerouslyDisableSandbox",
+        description="If true, override sandbox mode and run without sandbox restrictions.",
     )
     model_config = ConfigDict(validate_by_alias=True, validate_by_name=True, extra="ignore")
 
@@ -271,7 +284,7 @@ build projects, run tests, and interact with the file system."""
               - You can specify an optional timeout in milliseconds (up to {MAX_BASH_TIMEOUT_MS}ms / {MAX_BASH_TIMEOUT_MS // 60000} minutes). If not specified, commands will timeout after {DEFAULT_TIMEOUT_MS}ms ({DEFAULT_TIMEOUT_MS // 60000} minutes).
               - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
               - If the output exceeds {MAX_OUTPUT_CHARS} characters, output will be truncated before being returned to you.
-              - You can use the `run_in_background` parameter to run the command in the background, which allows you to continue working while the command runs. You can monitor the output using the BashOutput tool as it becomes available. Never use `run_in_background` to run 'sleep' as it will return immediately. You do not need to use '&' at the end of the command when using this parameter.
+              - You can use the `run_in_background` parameter to run the command in the background, which allows you to continue working while the command runs. You can monitor output using TaskOutput. Never use `run_in_background` to run 'sleep' as it will return immediately. You do not need to use '&' at the end of the command when using this parameter.
               - VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. Instead use the Grep, Glob, or Task tools to search. Prefer the Read and LS tools instead of shell commands like `cat`, `head`, `tail`, or `ls` when reading files and directories.
               - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings).
               - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the user explicitly requests it.
@@ -303,7 +316,10 @@ build projects, run tests, and interact with the file system."""
         if input_data.run_in_background or auto_background:
             return True
 
-        if input_data.sandbox:
+        sandbox_requested = bool(input_data.sandbox) and not bool(
+            input_data.dangerously_disable_sandbox
+        )
+        if sandbox_requested:
             return False
         if is_command_read_only(input_data.command):
             return False
@@ -313,7 +329,10 @@ build projects, run tests, and interact with the file system."""
         self, input_data: BashToolInput, permission_context: dict[str, Any]
     ) -> Any:
         """Evaluate permissions using reference-style rules."""
-        if getattr(input_data, "sandbox", False):
+        sandbox_requested = bool(getattr(input_data, "sandbox", False)) and not bool(
+            getattr(input_data, "dangerously_disable_sandbox", False)
+        )
+        if sandbox_requested:
             return {"behavior": "allow", "updated_input": input_data}
 
         allow_rules = permission_context.get("allowed_rules") or set()
@@ -382,7 +401,10 @@ build projects, run tests, and interact with the file system."""
                 message=f"Timeout exceeds max of {MAX_BASH_TIMEOUT_MS}ms",
             )
 
-        if input_data.sandbox and not is_sandbox_available():
+        sandbox_requested = bool(input_data.sandbox) and not bool(
+            input_data.dangerously_disable_sandbox
+        )
+        if sandbox_requested and not is_sandbox_available():
             return ValidationResult(
                 result=False, message="Sandbox mode requested but not available."
             )
@@ -607,6 +629,7 @@ build projects, run tests, and interact with the file system."""
         start_time: float,
         input_data: BashToolInput,
         context: Optional[ToolUseContext] = None,
+        working_directory: Optional[str] = None,
     ) -> Optional[BashToolOutput]:
         """Run a command in background mode.
 
@@ -659,7 +682,7 @@ build projects, run tests, and interact with the file system."""
                 details = [
                     status_line,
                     f"Command: {effective_command}",
-                    "Use BashOutput with this task id to read stdout/stderr and continue.",
+                    "Use TaskOutput with this task id to read stdout/stderr and continue.",
                 ]
                 queue.enqueue_text(
                     "\n".join(details),
@@ -675,6 +698,7 @@ build projects, run tests, and interact with the file system."""
             final_command,
             timeout=bg_timeout,
             shell_executable=resolved_shell,
+            cwd=working_directory,
             completion_callbacks=completion_callbacks,  # type: ignore[arg-type]
         )
 
@@ -928,13 +952,15 @@ build projects, run tests, and interact with the file system."""
             # pragma: no cover - defensive guard
             yield ToolResult(
                 data=self._create_error_output(
-                    effective_command, f"Failed to select shell: {exc}", bool(input_data.sandbox)
+                    effective_command,
+                    f"Failed to select shell: {exc}",
+                    bool(input_data.sandbox) and not bool(input_data.dangerously_disable_sandbox),
                 ),
                 result_for_assistant=self.render_result_for_assistant(
                     self._create_error_output(
                         effective_command,
                         f"Failed to select shell: {exc}",
-                        bool(input_data.sandbox),
+                        bool(input_data.sandbox) and not bool(input_data.dangerously_disable_sandbox),
                     )
                 ),
             )
@@ -946,7 +972,9 @@ build projects, run tests, and interact with the file system."""
             timeout_ms = min(timeout_ms, MAX_BASH_TIMEOUT_MS)
         timeout_seconds = timeout_ms / 1000.0
         start = asyncio.get_running_loop().time()
-        sandbox_requested = bool(input_data.sandbox)
+        sandbox_requested = bool(input_data.sandbox) and not bool(
+            input_data.dangerously_disable_sandbox
+        )
         should_background = bool(input_data.run_in_background or auto_background)
 
         # Track read-only state
@@ -987,6 +1015,7 @@ build projects, run tests, and interact with the file system."""
                     start,
                     input_data,
                     context,
+                    working_directory=(context.working_directory if context else None),
                 )
                 if output:
                     yield ToolResult(
@@ -1003,6 +1032,7 @@ build projects, run tests, and interact with the file system."""
                 stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.DEVNULL,
                 start_new_session=False,
+                cwd=(context.working_directory if context and context.working_directory else None),
             )
 
             # Execute and collect output with progress

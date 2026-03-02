@@ -317,8 +317,8 @@ Ripperdoc provides powerful slash commands for session management:
 
 **Shell Operations:**
 - `Bash` - Execute shell commands
-- `KillBash` - Kill background shell processes
-- `BashOutput` - Read output from background tasks
+- `TaskStop` - Stop background tasks
+- `TaskOutput` - Read output from background tasks
 
 **Agent Features:**
 - `TaskCreate/Update/Get/List` - Task graph management

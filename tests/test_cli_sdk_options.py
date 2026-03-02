@@ -6,6 +6,9 @@ from click.testing import CliRunner
 import pytest
 from typing import Any
 from pathlib import Path
+import subprocess
+import re
+from types import SimpleNamespace
 
 from ripperdoc.cli import cli as cli_module
 from ripperdoc.protocol.stdio import command as stdio_command
@@ -208,6 +211,75 @@ def test_main_rewrites_debug_optional_filter(monkeypatch):
     assert "--debug-filter" in captured["args"]
     idx = captured["args"].index("--debug-filter")
     assert captured["args"][idx + 1] == "api,hooks"
+
+
+def test_main_rewrites_worktree_optional_name(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    def fake_cli_main(*, args, prog_name):
+        captured["args"] = list(args)
+        captured["prog_name"] = prog_name
+
+    monkeypatch.setattr(cli_module.cli, "main", fake_cli_main)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        ["ripperdoc", "--worktree", "feature-x", "--prompt", "hi"],
+    )
+
+    cli_module.main()
+
+    assert captured["prog_name"] == "ripperdoc"
+    assert "--worktree" in captured["args"]
+    assert "--worktree-name" in captured["args"]
+    idx = captured["args"].index("--worktree-name")
+    assert captured["args"][idx + 1] == "feature-x"
+
+
+def test_main_rewrites_worktree_equals_name(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    def fake_cli_main(*, args, prog_name):
+        captured["args"] = list(args)
+        captured["prog_name"] = prog_name
+
+    monkeypatch.setattr(cli_module.cli, "main", fake_cli_main)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        ["ripperdoc", "--worktree=feature-x", "--prompt", "hi"],
+    )
+
+    cli_module.main()
+
+    assert captured["prog_name"] == "ripperdoc"
+    assert "--worktree" in captured["args"]
+    assert "--worktree-name" in captured["args"]
+    idx = captured["args"].index("--worktree-name")
+    assert captured["args"][idx + 1] == "feature-x"
+
+
+def test_main_rewrites_worktree_short_flag_name(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    def fake_cli_main(*, args, prog_name):
+        captured["args"] = list(args)
+        captured["prog_name"] = prog_name
+
+    monkeypatch.setattr(cli_module.cli, "main", fake_cli_main)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        ["ripperdoc", "-w", "feature-x", "--prompt", "hi"],
+    )
+
+    cli_module.main()
+
+    assert captured["prog_name"] == "ripperdoc"
+    assert "-w" in captured["args"]
+    assert "--worktree-name" in captured["args"]
+    idx = captured["args"].index("--worktree-name")
+    assert captured["args"][idx + 1] == "feature-x"
 
 
 def test_cli_debug_file_implies_debug_and_skips_session_log_path(monkeypatch, tmp_path):
@@ -428,3 +500,355 @@ def test_cli_long_version_prints_version(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert f"{cli_module.__version__} (Ripperdoc)" in result.output
+
+
+def test_cli_worktree_requires_git_repository(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--worktree", "--prompt", "hi"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code != 0
+    assert (
+        f"Can only use --worktree in a git repository, but {tmp_path} is not a git repository"
+        in result.output
+    )
+
+
+def test_cli_worktree_creates_and_switches_directory(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str, cwd: Path = repo) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Ripperdoc Test")
+    _git("config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+
+    captured: dict[str, Any] = {}
+
+    async def fake_run_query(*args, **kwargs):
+        captured["cwd"] = str(Path.cwd())
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.chdir(repo)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--worktree", "--prompt", "hi"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert "Switched to worktree:" in result.output
+    assert captured["cwd"].startswith(str(repo / ".ripperdoc" / "worktrees"))
+
+
+def test_cli_tmux_requires_worktree(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--tmux", "--prompt", "hi"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code != 0
+    assert "Error: --tmux requires --worktree" in result.output
+
+
+def test_cli_worktree_pr_shorthand_hash(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    worktree = repo / ".ripperdoc" / "worktrees" / "pr-123"
+    worktree.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, Any] = {}
+
+    async def fake_run_query(*args, **kwargs):
+        captured["cwd"] = str(Path.cwd())
+
+    def fake_create_task_worktree(*, task_id, base_path, requested_name, pr_number=None):
+        captured["requested_name"] = requested_name
+        captured["pr_number"] = pr_number
+        return SimpleNamespace(worktree_path=worktree)
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr(cli_module, "get_git_root", lambda _p: repo)
+    monkeypatch.setattr(cli_module, "create_task_worktree", fake_create_task_worktree)
+    monkeypatch.chdir(repo)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--worktree", "--worktree-name", "#123", "--prompt", "hi"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert captured["requested_name"] == "pr-123"
+    assert captured["pr_number"] == 123
+    assert captured["cwd"] == str(worktree)
+
+
+def test_cli_worktree_pr_shorthand_url(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    worktree = repo / ".ripperdoc" / "worktrees" / "pr-456"
+    worktree.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, Any] = {}
+
+    async def fake_run_query(*args, **kwargs):
+        captured["cwd"] = str(Path.cwd())
+
+    def fake_create_task_worktree(*, task_id, base_path, requested_name, pr_number=None):
+        captured["requested_name"] = requested_name
+        captured["pr_number"] = pr_number
+        return SimpleNamespace(worktree_path=worktree)
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr(cli_module, "get_git_root", lambda _p: repo)
+    monkeypatch.setattr(cli_module, "create_task_worktree", fake_create_task_worktree)
+    monkeypatch.chdir(repo)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "--worktree",
+            "--worktree-name",
+            "https://github.com/org/repo/pull/456",
+            "--prompt",
+            "hi",
+        ],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert captured["requested_name"] == "pr-456"
+    assert captured["pr_number"] == 456
+    assert captured["cwd"] == str(worktree)
+
+
+def test_main_handles_tmux_worktree_fast_path(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    def fake_exec(argv):
+        captured["argv"] = list(argv)
+        return True, None
+
+    def fail_cli_main(*, args, prog_name):
+        raise AssertionError("cli.main should not be called when tmux fast path is handled")
+
+    monkeypatch.setattr(cli_module, "_exec_into_tmux_worktree", fake_exec)
+    monkeypatch.setattr(cli_module, "_has_tmux_worktree_flags", lambda _argv: True)
+    monkeypatch.setattr(cli_module.cli, "main", fail_cli_main)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        ["ripperdoc", "--tmux", "--worktree", "feature-x", "--prompt", "hi"],
+    )
+
+    cli_module.main()
+    assert captured["argv"] == ["--tmux", "--worktree", "feature-x", "--prompt", "hi"]
+
+
+def test_main_rewrites_tmux_classic(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    def fake_cli_main(*, args, prog_name):
+        captured["args"] = list(args)
+        captured["prog_name"] = prog_name
+
+    monkeypatch.setattr(cli_module, "_has_tmux_worktree_flags", lambda _argv: False)
+    monkeypatch.setattr(cli_module.cli, "main", fake_cli_main)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        ["ripperdoc", "--tmux=classic", "--prompt", "hi"],
+    )
+
+    cli_module.main()
+
+    assert captured["prog_name"] == "ripperdoc"
+    assert "--tmux" in captured["args"]
+    assert "--tmux-classic" in captured["args"]
+
+
+def test_exec_into_tmux_worktree_precreates_and_strips_args(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    worktree = repo / ".ripperdoc" / "worktrees" / "feature-x"
+    worktree.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, Any] = {"tmux_calls": []}
+
+    def fake_create_task_worktree(*, task_id, base_path, requested_name, pr_number=None):
+        captured["create"] = {
+            "task_id": task_id,
+            "base_path": base_path,
+            "requested_name": requested_name,
+            "pr_number": pr_number,
+        }
+        return SimpleNamespace(
+            repo_root=repo,
+            worktree_path=worktree,
+            branch="worktree-feature-x",
+            name=requested_name,
+            head_commit="abc123",
+            hook_based=False,
+        )
+
+    def fake_run_tmux_command(args, *, cwd=None, env=None, capture=False):  # noqa: ARG001
+        captured["tmux_calls"].append(
+            {"args": list(args), "cwd": cwd, "env": dict(env or {})}
+        )
+        if args[:1] == ["has-session"]:
+            return SimpleNamespace(returncode=1)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli_module.shutil, "which", lambda _name: "/usr/bin/tmux")
+    monkeypatch.setattr(cli_module, "get_git_root", lambda _p: repo)
+    monkeypatch.setattr(cli_module, "create_task_worktree", fake_create_task_worktree)
+    monkeypatch.setattr(cli_module, "_run_tmux_command", fake_run_tmux_command)
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.delenv("RIPPERDOC_TMUX_WORKTREE", raising=False)
+
+    handled, error = cli_module._exec_into_tmux_worktree(  # noqa: SLF001
+        [
+            "--tmux",
+            "--worktree",
+            "feature-x",
+            "--cwd",
+            str(repo),
+            "--prompt",
+            "hi",
+        ]
+    )
+
+    assert handled is True
+    assert error is None
+    assert captured["create"]["requested_name"] == "feature-x"
+    assert captured["create"]["pr_number"] is None
+    assert captured["create"]["base_path"] == repo
+
+    # has-session probe + new-session launch
+    assert len(captured["tmux_calls"]) >= 2
+    new_session_call = captured["tmux_calls"][-1]
+    assert new_session_call["args"][:4] == ["new-session", "-A", "-s", new_session_call["args"][3]]
+    assert "-c" in new_session_call["args"]
+    c_idx = new_session_call["args"].index("-c")
+    assert new_session_call["args"][c_idx + 1] == str(worktree)
+    assert new_session_call["cwd"] == worktree
+
+    cmd_tail = new_session_call["args"]
+    assert "--tmux" not in cmd_tail
+    assert "--worktree" not in cmd_tail
+    assert "--cwd" not in cmd_tail
+
+    env_payload = new_session_call["env"]
+    assert env_payload.get("RIPPERDOC_TMUX_WORKTREE") == "1"
+    assert env_payload.get("RIPPERDOC_PRECREATED_WORKTREE_PATH") == str(worktree)
+
+
+def test_exec_into_tmux_worktree_pr_shorthand(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    worktree = repo / ".ripperdoc" / "worktrees" / "pr-123"
+    worktree.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, Any] = {}
+
+    def fake_create_task_worktree(*, task_id, base_path, requested_name, pr_number=None):
+        captured["requested_name"] = requested_name
+        captured["pr_number"] = pr_number
+        return SimpleNamespace(
+            repo_root=repo,
+            worktree_path=worktree,
+            branch="worktree-pr-123",
+            name=requested_name,
+            head_commit="abc123",
+            hook_based=False,
+        )
+
+    def fake_run_tmux_command(args, *, cwd=None, env=None, capture=False):  # noqa: ARG001
+        if args[:1] == ["has-session"]:
+            return SimpleNamespace(returncode=1)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli_module.shutil, "which", lambda _name: "/usr/bin/tmux")
+    monkeypatch.setattr(cli_module, "get_git_root", lambda _p: repo)
+    monkeypatch.setattr(cli_module, "create_task_worktree", fake_create_task_worktree)
+    monkeypatch.setattr(cli_module, "_run_tmux_command", fake_run_tmux_command)
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.delenv("RIPPERDOC_TMUX_WORKTREE", raising=False)
+
+    handled, error = cli_module._exec_into_tmux_worktree(  # noqa: SLF001
+        ["--tmux", "--worktree", "#123", "--prompt", "hi"]
+    )
+
+    assert handled is True
+    assert error is None
+    assert captured["requested_name"] == "pr-123"
+    assert captured["pr_number"] == 123
+
+
+def test_register_precreated_worktree_from_env(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    repo.mkdir()
+    worktree.mkdir()
+    captured: dict[str, Any] = {}
+
+    def fake_register(session):
+        captured["session"] = session
+
+    monkeypatch.setattr(cli_module, "register_session_worktree", fake_register)
+    monkeypatch.setenv("RIPPERDOC_PRECREATED_WORKTREE_PATH", str(worktree))
+    monkeypatch.setenv("RIPPERDOC_PRECREATED_WORKTREE_REPO_ROOT", str(repo))
+    monkeypatch.setenv("RIPPERDOC_PRECREATED_WORKTREE_NAME", "feature-x")
+    monkeypatch.setenv("RIPPERDOC_PRECREATED_WORKTREE_BRANCH", "worktree-feature-x")
+    monkeypatch.setenv("RIPPERDOC_PRECREATED_WORKTREE_HEAD_COMMIT", "deadbeef")
+    monkeypatch.setenv("RIPPERDOC_PRECREATED_WORKTREE_HOOK_BASED", "0")
+
+    session = cli_module._register_precreated_worktree_from_env()  # noqa: SLF001
+
+    assert session is not None
+    assert str(session.worktree_path) == str(worktree.resolve())
+    assert str(session.repo_root) == str(repo.resolve())
+    assert session.name == "feature-x"
+    assert session.branch == "worktree-feature-x"
+    assert session.head_commit == "deadbeef"
+    assert session.hook_based is False
+    assert "session" in captured
+    assert "RIPPERDOC_PRECREATED_WORKTREE_PATH" not in cli_module.os.environ
+
+
+def test_worktree_name_generators_align_patterns():
+    cli_name = cli_module.generate_cli_worktree_name()
+    assert re.match(r"^(swift|bright|calm|keen|bold)-(fox|owl|elm|oak|ray)-[a-z0-9]{4}$", cli_name)
+
+    from ripperdoc.utils.worktree import generate_session_worktree_name
+
+    session_name = generate_session_worktree_name("session-abc")
+    assert session_name.startswith("worktree-session-abc-")
+    assert re.match(r"^worktree-session-abc-[0-9a-z]+-[a-z0-9]{6}$", session_name)

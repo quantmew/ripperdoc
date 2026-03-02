@@ -34,6 +34,10 @@ class HookEvent(str, Enum):
     SESSION_END = "SessionEnd"
     SETUP = "Setup"
 
+    # Worktree lifecycle events
+    WORKTREE_CREATE = "WorktreeCreate"
+    WORKTREE_REMOVE = "WorktreeRemove"
+
 
 class HookDecision(str, Enum):
     """Decision values that hooks can return to control flow.
@@ -261,6 +265,29 @@ class SetupInput(HookInput):
     # - init: initial setup for a repo
     # - maintenance: follow-up maintenance run
     trigger: str = "init"  # "init" or "maintenance"
+
+
+class WorktreeCreateInput(HookInput):
+    """Input data for WorktreeCreate hooks.
+
+    Runs when the runtime requests creation of an isolated worktree via hooks.
+    """
+
+    hook_event_name: str = "WorktreeCreate"
+    name: str = Field(
+        default="",
+        validation_alias=AliasChoices("name", "worktree_name"),
+    )
+
+
+class WorktreeRemoveInput(HookInput):
+    """Input data for WorktreeRemove hooks.
+
+    Runs when the runtime requests removal of an isolated worktree via hooks.
+    """
+
+    hook_event_name: str = "WorktreeRemove"
+    worktree_path: str = ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -625,4 +652,6 @@ AnyHookInput = Union[
     SessionStartInput,
     SessionEndInput,
     SetupInput,
+    WorktreeCreateInput,
+    WorktreeRemoveInput,
 ]

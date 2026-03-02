@@ -85,6 +85,8 @@ TEXT_MATCHER_EVENTS = {
     HookEvent.USER_PROMPT_SUBMIT.value,
     HookEvent.SUBAGENT_START.value,
     HookEvent.SUBAGENT_STOP.value,
+    HookEvent.WORKTREE_CREATE.value,
+    HookEvent.WORKTREE_REMOVE.value,
 }
 
 # Hook events where matchers are accepted but ignored (always match).

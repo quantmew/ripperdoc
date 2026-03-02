@@ -7,8 +7,8 @@ from typing import Any, List, Optional
 from ripperdoc.core.tool import Tool
 
 from ripperdoc.tools.bash_tool import BashTool
-from ripperdoc.tools.bash_output_tool import BashOutputTool
-from ripperdoc.tools.kill_bash_tool import KillBashTool
+from ripperdoc.tools.task_output_tool import TaskOutputTool
+from ripperdoc.tools.task_stop_tool import TaskStopTool
 from ripperdoc.tools.file_read_tool import FileReadTool
 from ripperdoc.tools.file_edit_tool import FileEditTool
 from ripperdoc.tools.multi_edit_tool import MultiEditTool
@@ -28,6 +28,7 @@ from ripperdoc.tools.team_tool import (
 )
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
 from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
+from ripperdoc.tools.enter_worktree_tool import EnterWorktreeTool
 from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool
 from ripperdoc.tools.task_tool import TaskTool
 from ripperdoc.tools.tool_search_tool import ToolSearchTool
@@ -45,8 +46,8 @@ logger = get_logger()
 # Canonical tool names for --tools filtering
 BUILTIN_TOOL_NAMES = [
     "Bash",
-    "BashOutput",
-    "KillBash",
+    "TaskOutput",
+    "TaskStop",
     "Read",
     "Edit",
     "MultiEdit",
@@ -68,6 +69,7 @@ BUILTIN_TOOL_NAMES = [
     "SendMessage",
     "AskUserQuestion",
     "EnterPlanMode",
+    "EnterWorktree",
     "ExitPlanMode",
     "ToolSearch",
     "ListMcpServers",
@@ -121,8 +123,8 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
     tasks_enabled = is_task_system_enabled()
     base_tools: List[Tool[Any, Any]] = [
         BashTool(),
-        BashOutputTool(),
-        KillBashTool(),
+        TaskOutputTool(),
+        TaskStopTool(),
         FileReadTool(),
         FileEditTool(),
         MultiEditTool(),
@@ -135,6 +137,7 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
         SkillTool(),
         AskUserQuestionTool(),
         EnterPlanModeTool(),
+        EnterWorktreeTool(),
         ExitPlanModeTool(),
         ToolSearchTool(),
         ListMcpServersTool(),

@@ -49,9 +49,9 @@ def test_resolve_task_list_id_uses_env_session_when_runtime_scope_not_bound(
     assert "sdk-session" in resolved
 
 
-def test_claude_code_task_list_env_is_ignored(tmp_path, monkeypatch) -> None:
+def test_unknown_task_list_env_is_ignored(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("CLAUDE_CODE_TASK_LIST_ID", "legacy-shared-list")
+    monkeypatch.setenv("UNKNOWN_TASK_LIST_ID", "legacy-shared-list")
     monkeypatch.delenv("RIPPERDOC_TASK_LIST_ID", raising=False)
     monkeypatch.delenv("RIPPERDOC_SESSION_ID", raising=False)
 

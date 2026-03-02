@@ -43,6 +43,11 @@ class ToolUseContext(BaseModel):
     agent_id: Optional[str] = None
     team_name: Optional[str] = None
     teammate_name: Optional[str] = None
+    working_directory: Optional[str] = None
+    set_working_directory: Optional[Any] = Field(
+        default=None,
+        description="Callback to update the session working directory for subsequent tool calls",
+    )
     yolo_mode: bool = False
     verbose: bool = False
     permission_checker: Optional[Any] = None

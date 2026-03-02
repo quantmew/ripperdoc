@@ -66,6 +66,7 @@ from ripperdoc.utils.mcp import (
 )
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.tools.background_shell import shutdown_background_shell
+from ripperdoc.tools.task_tool import list_running_agent_worktree_paths
 from ripperdoc.tools.dynamic_mcp_tool import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
@@ -84,6 +85,12 @@ from ripperdoc.cli.ui.tips import get_random_tip
 from ripperdoc.utils.message_formatting import stringify_message_content
 from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.session_usage import rebuild_session_usage
+from ripperdoc.utils.worktree import (
+    cleanup_worktree_sessions,
+    consume_session_worktrees,
+    list_session_worktrees,
+    register_session_worktree,
+)
 from ripperdoc.utils.working_directories import normalize_directory_inputs
 
 from ripperdoc.cli.ui.rich_ui.commands import handle_slash_command as _handle_slash_command
@@ -477,7 +484,7 @@ class RichUI:
                 "<question>Ready to code?</question>\n\n"
                 "Here is the proposed plan:\n"
                 f"<value>{plan_preview}</value>\n\n"
-                "Claude has written up a plan and is ready to execute. "
+                "Ripperdoc has written up a plan and is ready to execute. "
                 "Would you like to proceed?\n"
                 f"<dim>Current execution mode: {mode_title}. Press Shift+Tab to cycle mode.</dim>"
             )
@@ -733,6 +740,71 @@ class RichUI:
                 extra={"session_id": self.session_id, "reason": reason},
             )
         self._session_end_sent = True
+
+    def _handle_session_worktree_cleanup(self) -> None:
+        sessions = list_session_worktrees()
+        if not sessions:
+            return
+        running_paths = list_running_agent_worktree_paths()
+        removable = [session for session in sessions if str(session.worktree_path) not in running_paths]
+        pinned = [session for session in sessions if str(session.worktree_path) in running_paths]
+
+        selection = "keep"
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            listed_paths = "\n".join(f"- {session.worktree_path}" for session in sessions[:5])
+            remainder = ""
+            if len(sessions) > 5:
+                remainder = f"\n- ... and {len(sessions) - 5} more"
+            running_note = (
+                f"\n\n<dim>{len(pinned)} worktree(s) are in use by running subagents and cannot be removed now.</dim>"
+                if pinned
+                else ""
+            )
+            message = (
+                "<question>Worktree cleanup before exit?</question>\n\n"
+                "The following Task worktrees were created in this session:\n"
+                f"<value>{listed_paths}{remainder}</value>"
+                f"{running_note}"
+            )
+            try:
+                selection = self._run_async(
+                    prompt_choice_async(
+                        message=message,
+                        options=[
+                            ChoiceOption("keep", "<yes-option>Keep worktrees</yes-option>"),
+                            ChoiceOption("remove", "<no-option>Remove worktrees</no-option>"),
+                        ],
+                        title="Worktree Cleanup",
+                        allow_esc=True,
+                        esc_value="keep",
+                    )
+                )
+            except (EOFError, KeyboardInterrupt, RuntimeError, ValueError, OSError):
+                selection = "keep"
+
+        if selection != "remove":
+            kept = consume_session_worktrees()
+            self.console.print(f"[dim]Preserved {len(kept)} worktree(s).[/dim]")
+            return
+
+        consume_session_worktrees()
+        results = cleanup_worktree_sessions(removable, force=True)
+        for session in pinned:
+            register_session_worktree(session)
+        removed_count = sum(1 for result in results if result.removed)
+        failed_count = len(results) - removed_count
+        self.console.print(f"[dim]Removed {removed_count}/{len(results)} removable worktree(s).[/dim]")
+        if pinned:
+            self.console.print(f"[dim]Kept {len(pinned)} running worktree(s).[/dim]")
+        if failed_count:
+            for result in results:
+                if result.removed:
+                    continue
+                self.console.print(
+                    "[yellow]"
+                    + f"Failed to remove worktree: {result.worktree_path} ({result.error or 'unknown error'})"
+                    + "[/yellow]"
+                )
 
     def _log_message(self, message: Any) -> None:
         """Best-effort persistence of a message to the session log."""
@@ -1828,6 +1900,7 @@ class RichUI:
                 self.console.print(f"[dim]ripperdoc --resume {self.session_id}[/dim]")
 
             self._run_session_end(exit_reason)
+            self._handle_session_worktree_cleanup()
 
             # Suppress async generator cleanup errors during shutdown
             original_hook = sys.unraisablehook

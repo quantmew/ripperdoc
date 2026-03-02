@@ -1,8 +1,8 @@
 """Lightweight background shell manager for BashTool.
 
 Allows starting shell commands that keep running while the caller continues.
-Output can be polled via the BashOutput tool and commands can be terminated
-via the KillBash tool.
+Output can be polled via the TaskOutput tool and commands can be terminated
+via the TaskStop tool.
 """
 
 import asyncio
@@ -408,6 +408,7 @@ async def _start_background_command(
     command: str,
     timeout: Optional[float] = None,
     shell_executable: Optional[str] = None,
+    cwd: Optional[str] = None,
     completion_callbacks: Optional[List[Callable[["BackgroundTask"], None]]] = None,
 ) -> str:
     """Launch a background shell command on the dedicated loop."""
@@ -419,6 +420,7 @@ async def _start_background_command(
         stderr=asyncio.subprocess.PIPE,
         stdin=asyncio.subprocess.DEVNULL,
         start_new_session=False,
+        cwd=cwd,
     )
 
     task_id = f"bash_{uuid.uuid4().hex[:8]}"
@@ -451,12 +453,17 @@ async def start_background_command(
     command: str,
     timeout: Optional[float] = None,
     shell_executable: Optional[str] = None,
+    cwd: Optional[str] = None,
     completion_callbacks: Optional[List[Callable[["BackgroundTask"], None]]] = None,
 ) -> str:
     """Launch a background shell command and return its task id."""
     future = _submit_to_background_loop(
         _start_background_command(
-            command, timeout, shell_executable, completion_callbacks=completion_callbacks
+            command,
+            timeout,
+            shell_executable,
+            cwd,
+            completion_callbacks=completion_callbacks,
         )
     )
     return await asyncio.wrap_future(future)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import click
+import os
+import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -13,6 +15,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from ripperdoc import __version__
+from ripperdoc.cli import worktree_tmux
 from ripperdoc.cli.agents_cli import agents_cmd
 from ripperdoc.cli.bootstrap_cli import (
     _change_cwd_if_requested,
@@ -35,8 +38,15 @@ from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.config import get_effective_model_profile, get_project_config
 from ripperdoc.core.plugins import set_runtime_plugin_dirs
 from ripperdoc.core.tool_defaults import get_default_tools
+from ripperdoc.utils.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
 from ripperdoc.utils.tasks import set_runtime_task_scope
+from ripperdoc.utils.worktree import (
+    WorktreeSession,
+    create_task_worktree,
+    generate_cli_worktree_name,
+    register_session_worktree,
+)
 
 console = Console()
 logger = get_logger()
@@ -77,6 +87,58 @@ def _merge_append_system_prompt(
     if not append_system_prompt:
         return session_agent_prompt
     return f"{session_agent_prompt}\n\n{append_system_prompt}"
+
+
+_PR_WORKTREE_URL_RE = worktree_tmux._PR_WORKTREE_URL_RE
+_PR_WORKTREE_HASH_RE = worktree_tmux._PR_WORKTREE_HASH_RE
+_TMUX_PREFIX_ENV = worktree_tmux._TMUX_PREFIX_ENV
+_PRECREATED_WORKTREE_ENV = worktree_tmux._PRECREATED_WORKTREE_ENV
+_PRECREATED_WORKTREE_REPO_ENV = worktree_tmux._PRECREATED_WORKTREE_REPO_ENV
+_PRECREATED_WORKTREE_NAME_ENV = worktree_tmux._PRECREATED_WORKTREE_NAME_ENV
+_PRECREATED_WORKTREE_BRANCH_ENV = worktree_tmux._PRECREATED_WORKTREE_BRANCH_ENV
+_PRECREATED_WORKTREE_HEAD_ENV = worktree_tmux._PRECREATED_WORKTREE_HEAD_ENV
+_PRECREATED_WORKTREE_HOOK_ENV = worktree_tmux._PRECREATED_WORKTREE_HOOK_ENV
+
+_extract_pr_number_from_worktree = worktree_tmux._extract_pr_number_from_worktree
+_resolve_worktree_name_and_pr = worktree_tmux._resolve_worktree_name_and_pr
+_has_tmux_worktree_flags = worktree_tmux._has_tmux_worktree_flags
+_extract_worktree_arg = worktree_tmux._extract_worktree_arg
+_extract_cwd_arg = worktree_tmux._extract_cwd_arg
+_strip_tmux_worktree_args = worktree_tmux._strip_tmux_worktree_args
+_strip_cwd_args = worktree_tmux._strip_cwd_args
+_hash_repository_path = worktree_tmux._hash_repository_path
+_build_tmux_session_name = worktree_tmux._build_tmux_session_name
+
+
+def _run_tmux_command(
+    args: list[str],
+    *,
+    cwd: Optional[Path] = None,
+    env: Optional[dict[str, str]] = None,
+    capture: bool = False,
+):
+    return worktree_tmux._run_tmux_command(args, cwd=cwd, env=env, capture=capture)
+
+
+def _exec_into_tmux_worktree(argv: list[str]) -> tuple[bool, Optional[str]]:
+    return worktree_tmux._exec_into_tmux_worktree(
+        argv,
+        get_git_root_fn=get_git_root,
+        create_task_worktree_fn=create_task_worktree,
+        generate_cli_worktree_name_fn=generate_cli_worktree_name,
+        run_tmux_command_fn=_run_tmux_command,
+        which_fn=shutil.which,
+        environ=os.environ,
+        platform_name=sys.platform,
+        python_executable=sys.executable,
+    )
+
+
+def _register_precreated_worktree_from_env() -> Optional[WorktreeSession]:
+    return worktree_tmux._register_precreated_worktree_from_env(
+        environ=os.environ,
+        register_session_worktree_fn=register_session_worktree,
+    )
 
 
 @click.group(
@@ -350,6 +412,31 @@ def _merge_append_system_prompt(
     is_flag=True,
     help="Run maintenance hooks and exit.",
 )
+@click.option(
+    "-w",
+    "--worktree",
+    "use_worktree",
+    is_flag=True,
+    help="Create and enter a temporary worktree for this session (optionally provide a name).",
+)
+@click.option(
+    "--worktree-name",
+    type=str,
+    default=None,
+    hidden=True,
+)
+@click.option(
+    "--tmux",
+    "use_tmux",
+    is_flag=True,
+    help="Create a tmux session for the worktree (requires --worktree).",
+)
+@click.option(
+    "--tmux-classic",
+    is_flag=True,
+    default=False,
+    hidden=True,
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -394,9 +481,14 @@ def cli(
     setup_init: bool,
     setup_init_only: bool,
     setup_maintenance: bool,
+    use_worktree: bool,
+    worktree_name: Optional[str],
+    use_tmux: bool,
+    tmux_classic: bool,  # noqa: ARG001
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
     session_id = str(uuid.uuid4())
+    os.environ.setdefault("RIPPERDOC_SESSION_ID", session_id)
     debug_filter = resolve_debug_filter_from_extra_args(
         ctx=ctx,
         debug_enabled=debug_mode or bool(debug_file),
@@ -448,6 +540,39 @@ def cli(
         append_system_prompt,
         session_agent_prompt,
     )
+    precreated_worktree = _register_precreated_worktree_from_env()
+    if precreated_worktree is not None:
+        project_path = precreated_worktree.worktree_path.resolve()
+        if Path.cwd().resolve() != project_path:
+            os.chdir(project_path)
+        console.print(f"[dim]Switched to worktree: {precreated_worktree.worktree_path}[/dim]")
+
+    if use_tmux and not use_worktree:
+        raise click.ClickException("Error: --tmux requires --worktree")
+    if use_tmux and sys.platform == "win32":
+        raise click.ClickException("Error: --tmux is not supported on Windows")
+
+    if use_worktree:
+        if get_git_root(project_path) is None:
+            raise click.ClickException(
+                f"Can only use --worktree in a git repository, but {project_path} is not a git repository"
+            )
+        resolved_worktree_name, pr_number = _resolve_worktree_name_and_pr(worktree_name)
+        if resolved_worktree_name is None:
+            resolved_worktree_name = generate_cli_worktree_name()
+        try:
+            worktree_session = create_task_worktree(
+                task_id=f"session_{session_id}",
+                base_path=project_path,
+                requested_name=resolved_worktree_name,
+                pr_number=pr_number,
+            )
+        except (ValueError, RuntimeError, OSError) as exc:
+            raise click.ClickException(f"Failed to create --worktree session: {exc}") from exc
+        os.chdir(worktree_session.worktree_path)
+        project_path = Path.cwd()
+        console.print(f"[dim]Switched to worktree: {worktree_session.worktree_path}[/dim]")
+
     set_runtime_plugin_dirs(plugin_dirs, base_dir=project_path)
 
     if _run_stdio_mode_if_requested(
@@ -630,6 +755,13 @@ def main() -> None:
     """Main entry point."""
     try:
         argv = sys.argv[1:]
+        if _has_tmux_worktree_flags(argv):
+            handled, error = _exec_into_tmux_worktree(argv)
+            if handled:
+                return
+            if error:
+                console.print(f"[red]{escape(error)}[/red]")
+                sys.exit(1)
         top_level_commands = {"config", "update", "upgrade", "mcp", "agents", "version"}
         if "--print" in argv and "--" in argv:
             sep_index = argv.index("--")
@@ -639,6 +771,18 @@ def main() -> None:
         index = 0
         while index < len(argv):
             token = argv[index]
+            if token.startswith("--worktree="):
+                rewritten_argv.append("--worktree")
+                value = token.split("=", 1)[1].strip()
+                if value:
+                    rewritten_argv.extend(["--worktree-name", value])
+                index += 1
+                continue
+            if token == "--tmux=classic":
+                rewritten_argv.extend(["--tmux", "--tmux-classic"])
+                index += 1
+                continue
+
             rewritten_argv.append(token)
             if token in ("-d", "--debug"):
                 next_index = index + 1
@@ -651,6 +795,13 @@ def main() -> None:
                         and "--debug-filter" not in argv
                     ):
                         rewritten_argv.extend(["--debug-filter", candidate])
+                        index += 1
+            if token in ("-w", "--worktree"):
+                next_index = index + 1
+                if next_index < len(argv):
+                    candidate = argv[next_index].strip()
+                    if candidate and not candidate.startswith("-"):
+                        rewritten_argv.extend(["--worktree-name", candidate])
                         index += 1
             index += 1
         argv = rewritten_argv

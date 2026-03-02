@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -21,7 +22,9 @@ from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.tool_defaults import filter_tools_by_names
+from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.tools.background_shell import shutdown_background_shell
+from ripperdoc.tools.task_tool import list_running_agent_worktree_paths
 from ripperdoc.tools.dynamic_mcp_tool import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
@@ -37,6 +40,12 @@ from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.messages import create_user_message
 from ripperdoc.utils.session_history import SessionHistory
 from ripperdoc.utils.tasks import set_runtime_task_scope
+from ripperdoc.utils.worktree import (
+    cleanup_worktree_sessions,
+    consume_session_worktrees,
+    list_session_worktrees,
+    register_session_worktree,
+)
 
 console = Console()
 logger = get_logger()
@@ -210,6 +219,77 @@ def _collect_assistant_text_blocks(message: Any) -> List[str]:
         if hasattr(block, "type") and block.type == "text":
             parts.append(block.text or "")
     return parts
+
+
+async def _handle_session_worktree_cleanup(*, interactive: bool) -> None:
+    sessions = list_session_worktrees()
+    if not sessions:
+        return
+    running_paths = list_running_agent_worktree_paths()
+    removable = [session for session in sessions if str(session.worktree_path) not in running_paths]
+    pinned = [session for session in sessions if str(session.worktree_path) in running_paths]
+
+    selection = "keep"
+    if interactive:
+        paths = "\n".join(f"- {session.worktree_path}" for session in sessions[:5])
+        extra = ""
+        if len(sessions) > 5:
+            extra = f"\n- ... and {len(sessions) - 5} more"
+        running_note = (
+            f"\n\n<dim>{len(pinned)} worktree(s) are in use by running subagents and cannot be removed now.</dim>"
+            if pinned
+            else ""
+        )
+        prompt_message = (
+            "<question>Worktree cleanup before exit?</question>\n\n"
+            "The following Task worktrees were created in this session:\n"
+            f"<value>{paths}{extra}</value>"
+            f"{running_note}"
+        )
+        try:
+            selection = await prompt_choice_async(
+                message=prompt_message,
+                options=[
+                    ChoiceOption("keep", "<yes-option>Keep worktrees</yes-option>"),
+                    ChoiceOption("remove", "<no-option>Remove worktrees</no-option>"),
+                ],
+                title="Worktree Cleanup",
+                allow_esc=True,
+                esc_value="keep",
+            )
+        except (EOFError, KeyboardInterrupt, RuntimeError, ValueError, OSError):
+            selection = "keep"
+
+    if selection != "remove":
+        kept = consume_session_worktrees()
+        console.print(
+            f"[dim]Preserved {len(kept)} worktree(s).[/dim]"
+        )
+        return
+
+    consume_session_worktrees()
+    results = cleanup_worktree_sessions(removable, force=True)
+    for session in pinned:
+        register_session_worktree(session)
+
+    removed_count = sum(1 for result in results if result.removed)
+    failed_count = len(results) - removed_count
+    console.print(
+        f"[dim]Removed {removed_count}/{len(results)} removable worktree(s).[/dim]"
+    )
+    if pinned:
+        console.print(
+            f"[dim]Kept {len(pinned)} running worktree(s).[/dim]"
+        )
+    if failed_count:
+        for result in results:
+            if result.removed:
+                continue
+            console.print(
+                "[yellow]"
+                + f"Failed to remove worktree: {result.worktree_path} ({result.error or 'unknown error'})"
+                + "[/yellow]"
+            )
 
 
 async def _stream_prompt_query_messages(
@@ -392,6 +472,9 @@ async def run_query(
                 exc,
                 extra={"session_id": session_id},
             )
+        await _handle_session_worktree_cleanup(
+            interactive=bool(sys.stdin.isatty() and sys.stdout.isatty())
+        )
         await shutdown_mcp_runtime()
         await shutdown_lsp_manager()
         try:
