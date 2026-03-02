@@ -76,6 +76,13 @@ class ToolUseContext(BaseModel):
         default=None,
         description="Queue for pending conversation messages (background notices or user interjections).",
     )
+    task_notification_queue: Annotated[Optional[PendingMessageQueue], SkipValidation] = Field(
+        default=None,
+        description=(
+            "Queue for structured task completion notifications. "
+            "No fallback queue is applied when unset."
+        ),
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 

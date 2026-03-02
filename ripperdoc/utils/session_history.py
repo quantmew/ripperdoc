@@ -146,7 +146,7 @@ class SessionHistory:
                     exc,
                     extra={"session_id": self.session_id, "path": str(self.path)},
                 )
-        except (OSError, IOError) as exc:
+        except (OSError, IOError, UnicodeEncodeError) as exc:
             # Avoid crashing the UI if logging fails
             logger.warning(
                 "Failed to append message to session log: %s: %s",

@@ -49,6 +49,7 @@ from ripperdoc.utils.permissions import PermissionDecision
 from ripperdoc.utils.sandbox_utils import create_sandbox_wrapper, is_sandbox_available
 from ripperdoc.utils.safe_get_cwd import get_original_cwd, safe_get_cwd
 from ripperdoc.utils.shell_utils import build_shell_command, find_suitable_shell
+from ripperdoc.utils.task_notifications import enqueue_task_notification
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import IS_WINDOWS
 
@@ -285,6 +286,8 @@ build projects, run tests, and interact with the file system."""
               - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
               - If the output exceeds {MAX_OUTPUT_CHARS} characters, output will be truncated before being returned to you.
               - You can use the `run_in_background` parameter to run the command in the background, which allows you to continue working while the command runs. You can monitor output using TaskOutput. Never use `run_in_background` to run 'sleep' as it will return immediately. You do not need to use '&' at the end of the command when using this parameter.
+              - When `run_in_background=true`, the command is detached and keeps running until completion (or TaskStop). The timeout parameter only applies to foreground execution.
+              - If a foreground command hits its timeout and can be backgrounded safely, it is automatically moved to the background and returns a task id.
               - VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. Instead use the Grep, Glob, or Task tools to search. Prefer the Read and LS tools instead of shell commands like `cat`, `head`, `tail`, or `ls` when reading files and directories.
               - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings).
               - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the user explicitly requests it.
@@ -650,49 +653,14 @@ build projects, run tests, and interact with the file system."""
                 effective_command, f"Failed to start background task: {str(e)}", sandbox_requested
             )
 
-        bg_timeout = (
-            None
-            if input_data.timeout is None
-            else (timeout_seconds if timeout_seconds > 0 else None)
+        # Claude-style behavior: background commands are detached from foreground
+        # timeout enforcement and keep running until completion or explicit stop.
+        bg_timeout = None
+
+        completion_callbacks = self._build_background_completion_callbacks(
+            context=context,
+            effective_command=effective_command,
         )
-
-        completion_callbacks = None
-        queue = getattr(context, "pending_message_queue", None) if context else None
-        if queue is not None:
-
-            def _notify_completion(task: Any) -> None:
-                # Mirror status computation from background_shell._compute_status
-                if getattr(task, "killed", False):
-                    status = "killed"
-                elif getattr(task, "timed_out", False):
-                    status = "failed"
-                else:
-                    exit_code = getattr(task, "exit_code", None)
-                    status = (
-                        "running"
-                        if exit_code is None
-                        else ("completed" if exit_code == 0 else "failed")
-                    )
-                exit_code = getattr(task, "exit_code", None)
-                status_line = (
-                    f"Background bash task {getattr(task, 'id', '')} finished with status: {status}"
-                )
-                if exit_code is not None:
-                    status_line += f" (exit code {exit_code})"
-                details = [
-                    status_line,
-                    f"Command: {effective_command}",
-                    "Use TaskOutput with this task id to read stdout/stderr and continue.",
-                ]
-                queue.enqueue_text(
-                    "\n".join(details),
-                    metadata={
-                        "source": "background_bash",
-                        "background_task_id": getattr(task, "id", None),
-                    },
-                )
-
-            completion_callbacks = [_notify_completion]  # type: ignore[assignment]
 
         task_id = await start_background_command(
             final_command,
@@ -702,19 +670,128 @@ build projects, run tests, and interact with the file system."""
             completion_callbacks=completion_callbacks,  # type: ignore[arg-type]
         )
 
+        return self._build_background_launch_output(
+            effective_command=effective_command,
+            task_id=task_id,
+            start_time=start_time,
+            sandbox_requested=sandbox_requested,
+            status_message=f"Started background task: {task_id}",
+        )
+
+    def _build_background_completion_callbacks(
+        self,
+        *,
+        context: Optional[ToolUseContext],
+        effective_command: str,
+    ) -> Optional[list[Any]]:
+        queue = getattr(context, "task_notification_queue", None) if context else None
+        if queue is None:
+            return None
+
+        def _notify_completion(task: Any) -> None:
+            if getattr(task, "notification_sent", False):
+                return
+            setattr(task, "notification_sent", True)
+            # Mirror status computation from background_shell._compute_status
+            if getattr(task, "killed", False):
+                status = "killed"
+            elif getattr(task, "timed_out", False):
+                status = "failed"
+            else:
+                exit_code = getattr(task, "exit_code", None)
+                status = "running" if exit_code is None else ("completed" if exit_code == 0 else "failed")
+            exit_code = getattr(task, "exit_code", None)
+            status_line = f"Background bash task finished with status: {status}"
+            if exit_code is not None:
+                status_line += f" (exit code {exit_code})"
+            enqueue_task_notification(
+                queue,
+                task_id=str(getattr(task, "id", "") or ""),
+                status=status,
+                summary=(
+                    f"{status_line}. "
+                    "Use TaskOutput with this task id to read stdout/stderr and continue."
+                ),
+                tool_use_id=getattr(context, "message_id", None) if context else None,
+                source="background_bash",
+                extra_metadata={
+                    "background_task_id": getattr(task, "id", None),
+                    "exit_code": exit_code,
+                    "command": effective_command,
+                },
+            )
+
+        return [_notify_completion]
+
+    def _build_background_launch_output(
+        self,
+        *,
+        effective_command: str,
+        task_id: str,
+        start_time: float,
+        sandbox_requested: bool,
+        status_message: str,
+    ) -> BashToolOutput:
         return BashToolOutput(
             stdout="",
-            stderr=f"Started background task: {task_id}",
+            stderr=status_message,
             exit_code=0,
             command=effective_command,
             duration_ms=(asyncio.get_running_loop().time() - start_time) * 1000.0,
-            timeout_ms=timeout_ms if bg_timeout is not None else 0,
+            timeout_ms=0,
             background_task_id=task_id,
             sandbox=sandbox_requested,
             return_code_interpretation=None,
             summary=f"Command running in background with ID: {task_id}",
             interrupted=False,
             is_image=False,
+        )
+
+    async def _auto_background_foreground_process(
+        self,
+        *,
+        process: asyncio.subprocess.Process,
+        effective_command: str,
+        start_time: float,
+        sandbox_requested: bool,
+        context: Optional[ToolUseContext],
+        stdout_lines: list[str],
+        stderr_lines: list[str],
+        pump_tasks: list[asyncio.Task[Any]],
+    ) -> Optional[BashToolOutput]:
+        """Register an active foreground process as a managed background task."""
+        try:
+            from ripperdoc.tools.background_shell import register_existing_process
+        except (ImportError, ModuleNotFoundError) as exc:
+            logger.warning(
+                "[bash_tool] Failed to import process adoption helper: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"command": effective_command},
+            )
+            return None
+
+        completion_callbacks = self._build_background_completion_callbacks(
+            context=context,
+            effective_command=effective_command,
+        )
+        task_id = await register_existing_process(
+            effective_command,
+            process,
+            timeout=None,
+            stdout_chunks=stdout_lines,
+            stderr_chunks=stderr_lines,
+            reader_tasks=pump_tasks,
+            completion_callbacks=completion_callbacks,  # type: ignore[arg-type]
+        )
+        return self._build_background_launch_output(
+            effective_command=effective_command,
+            task_id=task_id,
+            start_time=start_time,
+            sandbox_requested=sandbox_requested,
+            status_message=(
+                f"Foreground execution exceeded timeout and was moved to background: {task_id}"
+            ),
         )
 
     async def _execute_foreground_process(
@@ -1087,6 +1164,31 @@ build projects, run tests, and interact with the file system."""
                     last_progress_time = now
 
                 if deadline is not None and now >= deadline:
+                    auto_background_output: Optional[BashToolOutput] = None
+                    if self._is_background_allowed(input_data.command):
+                        auto_background_output = await self._auto_background_foreground_process(
+                            process=process,
+                            effective_command=effective_command,
+                            start_time=start,
+                            sandbox_requested=sandbox_requested,
+                            context=context,
+                            stdout_lines=stdout_lines,
+                            stderr_lines=stderr_lines,
+                            pump_tasks=pump_tasks,
+                        )
+                    if auto_background_output is not None:
+                        if not wait_task.done():
+                            wait_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await wait_task
+                        yield ToolResult(
+                            data=auto_background_output,
+                            result_for_assistant=self.render_result_for_assistant(
+                                auto_background_output
+                            ),
+                        )
+                        return
+
                     timed_out = True
                     await self._force_kill_process(process)
                     if not wait_task.done():

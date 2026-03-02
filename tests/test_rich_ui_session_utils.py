@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, List
 
 import pytest
 
 from pathlib import Path
 
-from ripperdoc.cli.ui.rich_ui.session import RichUI
+from ripperdoc.cli.ui.rich_ui.session import RichUI, _replace_surrogate_codepoints
+from ripperdoc.utils.pending_messages import PendingMessageQueue
 from ripperdoc.utils.messages import create_assistant_message, create_user_message
 
 
@@ -47,6 +49,11 @@ def test_build_history_candidates_skips_tool_result_only_user_message() -> None:
     assert len(candidates) == 1
     assert candidates[0]["index"] == 0
     assert "hello world" in candidates[0]["preview"]
+
+
+def test_replace_surrogate_codepoints_replaces_invalid_chars() -> None:
+    raw = "A\ud800B\udfffC"
+    assert _replace_surrogate_codepoints(raw) == "A�B�C"
 
 
 def test_resolve_turn_end_index_includes_tool_results_until_next_real_user_message() -> None:
@@ -303,3 +310,90 @@ async def test_check_and_compact_messages_warns_when_auto_compact_disabled(monke
     rendered = "\n".join(dummy_console.lines)
     assert "Context usage is 91.2%" in rendered
     assert "Auto-compaction is disabled" in rendered
+
+
+@pytest.mark.asyncio
+async def test_schedule_background_notification_response_triggers_process_query() -> None:
+    ui = _new_ui()
+    ui._loop = asyncio.get_running_loop()
+    ui._background_notification_tasks = set()
+    redraw_calls: list[str] = []
+    ui._prompt_session = type(
+        "PromptSessionStub",
+        (),
+        {"app": type("AppStub", (), {"invalidate": lambda self: redraw_calls.append("invalidate")})()},
+    )()
+
+    calls: list[tuple[str, dict[str, Any] | None, bool]] = []
+
+    async def _fake_process_query(
+        user_input: str,
+        *,
+        user_message_metadata: dict[str, Any] | None = None,
+        append_prompt_history: bool = True,
+    ) -> None:
+        calls.append((user_input, user_message_metadata, append_prompt_history))
+
+    ui.process_query = _fake_process_query  # type: ignore[assignment]
+
+    ui._schedule_background_notification_response(
+        agent_message="background finished",
+        metadata={"notification_type": "task_notification", "task_id": "bash_1"},
+    )
+
+    await asyncio.sleep(0)
+    tasks = list(ui._background_notification_tasks)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert calls == [
+        (
+            "background finished",
+            {"notification_type": "task_notification", "task_id": "bash_1"},
+            False,
+        )
+    ]
+    assert redraw_calls == ["invalidate"]
+
+
+def test_finalize_query_stream_flushes_deferred_task_notifications() -> None:
+    ui = _new_ui()
+    ui._clear_context_after_turn = False
+    ui._query_in_progress = True
+    ui._active_spinner = object()
+    ui._stop_interrupt_listener = lambda: None  # type: ignore[assignment]
+    ui.project_path = Path.cwd()
+    ui.session_id = "test-session"
+
+    queue = PendingMessageQueue()
+    queue.enqueue_text(
+        "bash_2 [completed] done",
+        metadata={
+            "notification_type": "task_notification",
+            "task_id": "bash_2",
+            "status": "completed",
+        },
+    )
+    queue.enqueue_text("keep me", metadata={"source": "manual"})
+    ui.query_context = type("Q", (), {"pending_message_queue": queue})()
+
+    scheduled: list[tuple[str, dict[str, Any]]] = []
+    ui._schedule_background_notification_response = (  # type: ignore[assignment]
+        lambda *, agent_message, metadata: scheduled.append((agent_message, dict(metadata)))
+    )
+
+    class _DummySpinner:
+        def stop(self) -> None:
+            return None
+
+    messages = [create_user_message("turn")]
+    ui._finalize_query_stream(_DummySpinner(), messages)
+
+    assert len(scheduled) == 1
+    assert scheduled[0][0] == "bash_2 [completed] done"
+    assert scheduled[0][1].get("notification_type") == "task_notification"
+
+    remaining = queue.drain()
+    assert len(remaining) == 1
+    remaining_content = getattr(getattr(remaining[0], "message", None), "content", None)
+    assert remaining_content == "keep me"

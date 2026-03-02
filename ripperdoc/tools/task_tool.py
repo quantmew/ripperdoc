@@ -58,6 +58,8 @@ from ripperdoc.utils.messages import (
     create_user_message,
 )
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.task_notifications import enqueue_task_notification
 from ripperdoc.utils.teams import (
     TeamMember,
     TeamMessageType,
@@ -115,6 +117,7 @@ class AgentRunRecord:
     output_file: Optional[str] = None
     task: Optional[asyncio.Task] = None
     is_background: bool = False
+    completion_notified: bool = False
     hook_scopes: List[HooksConfig] = field(default_factory=list)
     team_name: Optional[str] = None
     teammate_name: Optional[str] = None
@@ -1160,6 +1163,41 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 extra={"team_name": record.team_name, "message_type": message_type},
             )
 
+    def _enqueue_background_completion_notification(
+        self,
+        *,
+        record: AgentRunRecord,
+        queue: Optional[PendingMessageQueue],
+        parent_tool_use_id: Optional[str],
+    ) -> None:
+        """Forward background subagent completion to the parent notification queue."""
+        if queue is None or record.completion_notified:
+            return
+        record.completion_notified = True
+
+        status = (record.status or "completed").strip() or "completed"
+        summary_text = (record.result_text or record.error or "").strip()
+        if not summary_text:
+            summary_text = f"Subagent '{record.agent_type}' finished with status '{status}'."
+        summary = summary_text if len(summary_text) <= 800 else summary_text[:797] + "..."
+
+        enqueue_task_notification(
+            queue,
+            task_id=record.agent_id,
+            status=status,
+            summary=summary,
+            tool_use_id=parent_tool_use_id,
+            output_file=record.output_file,
+            usage=record.usage,
+            source="background_task",
+            extra_metadata={
+                "task_type": "local_agent",
+                "agent_type": record.agent_type,
+                "team_name": record.team_name,
+                "teammate_name": record.teammate_name,
+            },
+        )
+
     async def _wait_for_running_record(self, record: AgentRunRecord) -> None:
         if not record.task or record.task.done():
             return
@@ -1239,6 +1277,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         max_turns: Optional[int] = None,
         permission_mode: str = "default",
         working_directory: Optional[str] = None,
+        task_notification_queue: Optional[PendingMessageQueue] = None,
     ) -> QueryContext:
         return QueryContext(
             tools=tools,
@@ -1254,6 +1293,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             max_turns=max_turns,
             permission_mode=permission_mode,
             working_directory=working_directory,
+            task_notification_queue=task_notification_queue,
         )
 
     def _finalize_record_from_messages(
@@ -1595,6 +1635,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             max_turns=record.max_turns,
             permission_mode=record.permission_mode,
             working_directory=record.worktree_path,
+            task_notification_queue=context.task_notification_queue,
         )
         yield ToolProgress(
             content=f"Resuming subagent '{record.agent_type}'",
@@ -1795,6 +1836,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             max_turns=input_data.max_turns,
             permission_mode=selected_permission_mode,
             working_directory=record.worktree_path,
+            task_notification_queue=context.task_notification_queue,
         )
 
         if resolved_team_name and resolved_teammate_name:
@@ -1813,6 +1855,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                         subagent_context,
                         context.permission_checker,
                         hook_context,
+                        notification_queue=context.task_notification_queue,
+                        parent_tool_use_id=context.message_id,
                     )
                 )
             except Exception as exc:
@@ -2009,6 +2053,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         subagent_context: QueryContext,
         permission_checker: Any,
         hook_context: Optional[Dict[str, str]] = None,
+        *,
+        notification_queue: Optional[PendingMessageQueue] = None,
+        parent_tool_use_id: Optional[str] = None,
     ) -> None:
         assistant_messages: List[AssistantMessage] = []
         tool_use_count = 0
@@ -2078,6 +2125,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 result_text=finalize_result_text,
             )
             record.task = None
+            self._enqueue_background_completion_notification(
+                record=record,
+                queue=notification_queue,
+                parent_tool_use_id=parent_tool_use_id,
+            )
 
     def _build_agent_prompt(
         self,

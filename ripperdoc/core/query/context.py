@@ -206,6 +206,7 @@ class QueryContext:
         file_cache_max_entries: int = 500,
         file_cache_max_memory_mb: float = 50.0,
         pending_message_queue: Optional[PendingMessageQueue] = None,
+        task_notification_queue: Optional[PendingMessageQueue] = None,
         max_turns: Optional[int] = None,
         permission_mode: str = "default",
         pre_plan_mode: Optional[str] = None,
@@ -225,6 +226,11 @@ class QueryContext:
         self.abort_controller = asyncio.Event()
         self.pending_message_queue: PendingMessageQueue = (
             pending_message_queue if pending_message_queue is not None else PendingMessageQueue()
+        )
+        self.task_notification_queue: PendingMessageQueue = (
+            task_notification_queue
+            if task_notification_queue is not None
+            else PendingMessageQueue()
         )
         # Use BoundedFileCache instead of plain Dict to prevent unbounded growth
         self.file_state_cache: BoundedFileCache = BoundedFileCache(

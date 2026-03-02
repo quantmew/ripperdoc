@@ -43,6 +43,7 @@ class BackgroundTask:
     reader_tasks: List[asyncio.Task] = field(default_factory=list)
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
     completion_callbacks: List[Callable[["BackgroundTask"], None]] = field(default_factory=list)
+    notification_sent: bool = False
 
 
 DEFAULT_TASK_TTL_SEC = float(os.getenv("RIPPERDOC_BASH_TASK_TTL_SEC", "3600"))
@@ -469,6 +470,54 @@ async def start_background_command(
     return await asyncio.wrap_future(future)
 
 
+async def register_existing_process(
+    command: str,
+    process: asyncio.subprocess.Process,
+    *,
+    timeout: Optional[float] = None,
+    task_id: Optional[str] = None,
+    stdout_chunks: Optional[List[str]] = None,
+    stderr_chunks: Optional[List[str]] = None,
+    reader_tasks: Optional[List[asyncio.Task]] = None,
+    completion_callbacks: Optional[List[Callable[["BackgroundTask"], None]]] = None,
+) -> str:
+    """Register an already-running process as a background task.
+
+    This is used to auto-background a foreground command after it exceeds its
+    foreground timeout budget, without restarting the process.
+    """
+    normalized_task_id = task_id or f"bash_{uuid.uuid4().hex[:8]}"
+
+    record = BackgroundTask(
+        id=normalized_task_id,
+        command=command,
+        process=process,
+        start_time=_loop_time(),
+        timeout=timeout,
+        stdout_chunks=stdout_chunks if stdout_chunks is not None else [],
+        stderr_chunks=stderr_chunks if stderr_chunks is not None else [],
+        reader_tasks=list(reader_tasks) if reader_tasks is not None else [],
+        completion_callbacks=list(completion_callbacks or []),
+    )
+
+    with _get_tasks_lock():
+        _get_tasks()[normalized_task_id] = record
+
+    # If callers did not pass stream pumps, create them here.
+    if not record.reader_tasks:
+        if process.stdout:
+            record.reader_tasks.append(
+                asyncio.create_task(_pump_stream(process.stdout, record.stdout_chunks))
+            )
+        if process.stderr:
+            record.reader_tasks.append(
+                asyncio.create_task(_pump_stream(process.stderr, record.stderr_chunks))
+            )
+
+    asyncio.create_task(_monitor_task(record))
+    return normalized_task_id
+
+
 def _compute_status(task: BackgroundTask) -> str:
     """Return a human-friendly status string."""
     if task.killed:
@@ -533,6 +582,14 @@ async def kill_background_task(task_id: str) -> bool:
     """Attempt to kill a running background task."""
     KILL_WAIT_SECONDS = 2.0
 
+    def _resolve_task_loop(task: BackgroundTask) -> Optional[asyncio.AbstractEventLoop]:
+        for reader_task in task.reader_tasks:
+            try:
+                return reader_task.get_loop()
+            except RuntimeError:
+                continue
+        return None
+
     async def _kill(task_id: str) -> bool:
         tasks = _get_tasks()
         with _get_tasks_lock():
@@ -553,14 +610,37 @@ async def kill_background_task(task_id: str) -> bool:
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     task.process.kill()
                 await asyncio.wait_for(task.process.wait(), timeout=1.0)
+            except RuntimeError:
+                # Process is attached to another running loop; kill signal was sent.
+                pass
 
             with _get_tasks_lock():
                 task.exit_code = task.process.returncode or -1
                 task.end_time = task.end_time or _loop_time()
             return True
         finally:
-            await _finalize_reader_tasks(task.reader_tasks)
-            task.done_event.set()
+            try:
+                await _finalize_reader_tasks(task.reader_tasks)
+            except RuntimeError:
+                # Reader tasks belong to a different loop; monitor task will finalize.
+                pass
+            with contextlib.suppress(RuntimeError):
+                task.done_event.set()
+
+    with _get_tasks_lock():
+        task = _get_tasks().get(task_id)
+
+    if task is not None:
+        target_loop = _resolve_task_loop(task)
+        if target_loop is not None and target_loop.is_running():
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+            if current_loop is target_loop:
+                return await _kill(task_id)
+            future = asyncio.run_coroutine_threadsafe(_kill(task_id), target_loop)
+            return await asyncio.wrap_future(future)
 
     future = _submit_to_background_loop(_kill(task_id))
     return await asyncio.wrap_future(future)

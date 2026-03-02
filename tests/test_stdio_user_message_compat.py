@@ -57,6 +57,24 @@ def test_coerce_user_message_to_control_request() -> None:
     assert handler._coerce_user_message_to_control_request(invalid_role_message) is None
 
 
+def test_spawn_task_notification_followup_query_dispatches_control_request(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    captured_control_requests: list[dict] = []
+
+    def _fake_spawn(message: dict) -> None:
+        captured_control_requests.append(message)
+
+    monkeypatch.setattr(handler, "_spawn_control_request_task", _fake_spawn)
+
+    handler._spawn_task_notification_followup_query("background task finished")
+
+    assert len(captured_control_requests) == 1
+    dispatched = captured_control_requests[0]
+    assert dispatched["type"] == "control_request"
+    assert dispatched["request"]["subtype"] == "query"
+    assert dispatched["request"]["prompt"] == "background task finished"
+
+
 @pytest.mark.asyncio
 async def test_run_dispatches_claude_style_user_message(monkeypatch) -> None:
     handler = handler_module.StdioProtocolHandler()

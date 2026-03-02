@@ -179,6 +179,8 @@ class StdioQueryMixin:
     async def _execute_query_stage(self, prepared: _PreparedQuery, state: _QueryRuntimeState) -> None:
         """Run query stream loop and update runtime state incrementally."""
         context: dict[str, Any] = {}
+        self._query_in_progress = True
+        self._ensure_task_notification_poller()
         logger.debug(
             "[stdio] Preparing query execution",
             extra={
@@ -222,6 +224,8 @@ class StdioQueryMixin:
                 exc_info=True,
             )
             await self._send_error_result(state, str(query_error), query_error)
+        finally:
+            self._query_in_progress = False
 
     async def _summarize_query_stage(self, state: _QueryRuntimeState) -> None:
         """Build and send final success ResultMessage when execution succeeded."""

@@ -470,6 +470,170 @@ async def test_task_output_background_status_and_output():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("reset_background_shell")
+async def test_background_bash_ignores_execution_timeout() -> None:
+    """Background bash should keep running regardless of execution timeout input."""
+    bash_tool = BashTool()
+    output_tool = TaskOutputTool()
+    context = ToolUseContext()
+
+    start_input = BashToolInput(
+        command="sleep 0.25 && echo still-ran",
+        run_in_background=True,
+        timeout=10,
+    )
+
+    start_result = None
+    async for output in bash_tool.call(start_input, context):
+        start_result = output
+
+    assert start_result is not None
+    task_id = start_result.data.background_task_id
+    assert task_id
+
+    # If timeout were applied to background lifetime, this would fail before echo.
+    await asyncio.sleep(0.4)
+    status = get_background_status(task_id, consume=False)
+    assert status["status"] == "completed"
+    assert status["timed_out"] is False
+
+    poll_result = None
+    async for output in output_tool.call(
+        TaskOutputInput(task_id=task_id, block=True, timeout=1000),
+        context,
+    ):
+        poll_result = output
+
+    assert poll_result is not None
+    assert poll_result.data.retrieval_status == "success"
+    assert poll_result.data.task is not None
+    assert "still-ran" in poll_result.data.task.output
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("reset_background_shell")
+async def test_task_output_timeout_is_wait_timeout_only() -> None:
+    """TaskOutput timeout should not imply the underlying task timed out."""
+    bash_tool = BashTool()
+    output_tool = TaskOutputTool()
+    context = ToolUseContext()
+
+    start_input = BashToolInput(
+        command="sleep 0.35 && echo eventual-output",
+        run_in_background=True,
+    )
+    start_result = None
+    async for output in bash_tool.call(start_input, context):
+        start_result = output
+
+    assert start_result is not None
+    task_id = start_result.data.background_task_id
+    assert task_id
+
+    timed_wait = None
+    async for output in output_tool.call(
+        TaskOutputInput(task_id=task_id, block=True, timeout=10),
+        context,
+    ):
+        timed_wait = output
+
+    assert timed_wait is not None
+    assert timed_wait.data.retrieval_status == "timeout"
+    assert timed_wait.data.task is not None
+    assert timed_wait.data.task.status == "running"
+    assert timed_wait.data.task.error is None
+
+    await asyncio.sleep(0.45)
+    finished = None
+    async for output in output_tool.call(
+        TaskOutputInput(task_id=task_id, block=True, timeout=2000),
+        context,
+    ):
+        finished = output
+
+    assert finished is not None
+    assert finished.data.retrieval_status == "success"
+    assert finished.data.task is not None
+    assert finished.data.task.status == "completed"
+    assert "eventual-output" in finished.data.task.output
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("reset_background_shell")
+async def test_foreground_timeout_auto_backgrounds_when_allowed() -> None:
+    """Foreground timeout should auto-background eligible commands."""
+    bash_tool = BashTool()
+    output_tool = TaskOutputTool()
+    context = ToolUseContext()
+
+    result = None
+    async for output in bash_tool.call(
+        BashToolInput(
+            command="sleep 0.35 && echo auto-bg-finished",
+            timeout=50,
+        ),
+        context,
+    ):
+        if isinstance(output, ToolResult):
+            result = output
+
+    assert result is not None
+    assert result.data.background_task_id
+    assert result.data.exit_code == 0
+    assert "moved to background" in (result.data.stderr or "")
+
+    task_id = result.data.background_task_id
+    assert task_id is not None
+
+    await asyncio.sleep(0.5)
+    completed = None
+    async for output in output_tool.call(
+        TaskOutputInput(task_id=task_id, block=True, timeout=2000),
+        context,
+    ):
+        completed = output
+
+    assert completed is not None
+    assert completed.data.retrieval_status == "success"
+    assert completed.data.task is not None
+    assert completed.data.task.status == "completed"
+    assert "auto-bg-finished" in completed.data.task.output
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("reset_background_shell")
+async def test_task_stop_can_stop_auto_backgrounded_task() -> None:
+    """TaskStop should work for tasks auto-backgrounded by foreground timeout."""
+    bash_tool = BashTool()
+    stop_tool = TaskStopTool()
+    context = ToolUseContext()
+
+    result = None
+    async for output in bash_tool.call(
+        BashToolInput(
+            command='python -c "import time; time.sleep(5)"',
+            timeout=50,
+        ),
+        context,
+    ):
+        if isinstance(output, ToolResult):
+            result = output
+
+    assert result is not None
+    task_id = result.data.background_task_id
+    assert task_id
+
+    stop_result = None
+    async for output in stop_tool.call(TaskStopInput(task_id=task_id), context):
+        stop_result = output
+
+    assert stop_result is not None
+    assert "Successfully stopped task" in stop_result.data.message
+    status = get_background_status(task_id, consume=False)
+    assert status["status"] == "killed"
+
+
+@pytest.mark.asyncio
 async def test_task_stop_kills_background_bash():
     """TaskStop should stop background bash tasks by task_id."""
     bash_tool = BashTool()

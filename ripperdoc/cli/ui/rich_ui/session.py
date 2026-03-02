@@ -83,6 +83,10 @@ from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.tips import get_random_tip
 from ripperdoc.utils.message_formatting import stringify_message_content
+from ripperdoc.utils.task_notifications import (
+    format_task_notification_for_agent,
+    parse_task_notification,
+)
 from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.session_usage import rebuild_session_usage
 from ripperdoc.utils.worktree import (
@@ -152,6 +156,15 @@ def _resolve_resume_replay_limit() -> Optional[int]:
         )
         return _DEFAULT_RESUME_REPLAY_LIMIT
     return limit
+
+
+def _replace_surrogate_codepoints(text: str) -> str:
+    """Replace invalid surrogate code points so strings are UTF-8 encodable."""
+    if not text:
+        return text
+    if not any(0xD800 <= ord(ch) <= 0xDFFF for ch in text):
+        return text
+    return "".join("\uFFFD" if 0xD800 <= ord(ch) <= 0xDFFF else ch for ch in text)
 
 
 class RichUI:
@@ -242,6 +255,9 @@ class RichUI:
         self._esc_interrupt_seen = False
         self._query_in_progress = False
         self._active_spinner: Optional[ThinkingSpinner] = None
+        self._task_notification_poller: Optional[asyncio.Task[None]] = None
+        self._background_notification_tasks: set[asyncio.Task[None]] = set()
+        self._query_serial_lock: Optional[asyncio.Lock] = None
         self._permission_checker: Any = None
         self.max_turns = max_turns
         self.permission_mode = permission_mode
@@ -810,7 +826,7 @@ class RichUI:
         """Best-effort persistence of a message to the session log."""
         try:
             self._session_history.append(message)
-        except (OSError, IOError, json.JSONDecodeError) as exc:
+        except (OSError, IOError, json.JSONDecodeError, UnicodeEncodeError) as exc:
             # Logging failures should never interrupt the UI flow
             logger.warning(
                 "[ui] Failed to append message to session history: %s: %s",
@@ -841,6 +857,7 @@ class RichUI:
         """Append text to the interactive prompt history."""
         if not text or not text.strip():
             return
+        text = _replace_surrogate_codepoints(text)
         session = self.get_prompt_session()
         try:
             session.history.append_string(text)
@@ -1421,8 +1438,172 @@ class RichUI:
             self.query_context.pre_plan_mode = self._pre_plan_mode
             self.query_context.on_enter_plan_mode = self._enter_plan_mode
             self.query_context.on_exit_plan_mode = self._on_exit_plan_mode
+        self._ensure_task_notification_poller()
         self.query_context.stop_hook_active = False
         return self.query_context
+
+    def _ensure_task_notification_poller(self) -> None:
+        """Ensure one background poller is running for task notifications."""
+        if not self.query_context:
+            return
+        if self._loop.is_closed():
+            return
+        task = self._task_notification_poller
+        if task is not None and not task.done():
+            return
+        self._task_notification_poller = asyncio.create_task(
+            self._poll_task_notifications(self.query_context)
+        )
+
+    async def _stop_task_notification_poller(self) -> None:
+        """Cancel the background task-notification poller."""
+        task = self._task_notification_poller
+        self._task_notification_poller = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _stop_background_notification_tasks(self) -> None:
+        """Cancel in-flight auto-response tasks triggered by background notifications."""
+        tasks = list(self._background_notification_tasks)
+        self._background_notification_tasks.clear()
+        if not tasks:
+            return
+        for task in tasks:
+            if task.done():
+                continue
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _schedule_background_notification_response(
+        self, *, agent_message: str, metadata: Dict[str, Any]
+    ) -> None:
+        """Trigger a follow-up assistant response for an idle task notification."""
+        if self._loop.is_closed():
+            return
+
+        async def _run() -> None:
+            try:
+                await self.process_query(
+                    agent_message,
+                    user_message_metadata=metadata,
+                    append_prompt_history=False,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.debug(
+                    "[ui] Auto-response for task notification failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+            finally:
+                self._request_prompt_redraw()
+
+        task = asyncio.create_task(_run())
+        self._background_notification_tasks.add(task)
+        task.add_done_callback(self._background_notification_tasks.discard)
+
+    def _request_prompt_redraw(self) -> None:
+        """Ask prompt_toolkit to redraw the interactive prompt if it's active."""
+        session = self._prompt_session
+        if session is None:
+            return
+        app = getattr(session, "app", None)
+        if app is None:
+            return
+        try:
+            app.invalidate()
+        except (AttributeError, RuntimeError, ValueError, OSError) as exc:
+            logger.debug(
+                "[ui] Failed to invalidate prompt app: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+
+    def _flush_deferred_task_notifications_from_pending_queue(
+        self, query_context: QueryContext
+    ) -> None:
+        """Recover task notifications that landed in pending queue after query loop exit."""
+        drained_pending = query_context.pending_message_queue.drain()
+        if not drained_pending:
+            return
+
+        passthrough_messages: list[Any] = []
+        for pending in drained_pending:
+            message = getattr(pending, "message", None)
+            content = getattr(message, "content", None)
+            metadata = dict(getattr(message, "metadata", {}) or {})
+
+            if (
+                isinstance(content, str)
+                and (
+                    metadata.get("notification_type") == "task_notification"
+                    or parse_task_notification(content) is not None
+                )
+            ):
+                metadata.setdefault("notification_type", "task_notification")
+                parsed = parse_task_notification(content)
+                if parsed:
+                    metadata.setdefault("task_id", parsed.get("task_id"))
+                    metadata.setdefault("status", parsed.get("status"))
+                self._schedule_background_notification_response(
+                    agent_message=content,
+                    metadata=metadata,
+                )
+                continue
+
+            passthrough_messages.append(pending)
+
+        for message in passthrough_messages:
+            query_context.pending_message_queue.enqueue(message)
+
+    async def _poll_task_notifications(self, query_context: QueryContext) -> None:
+        """Continuously consume structured task notifications."""
+        while True:
+            drained = query_context.task_notification_queue.drain()
+            if not drained:
+                await asyncio.sleep(0.2)
+                continue
+
+            for pending in drained:
+                try:
+                    message = getattr(pending, "message", None)
+                    content = getattr(message, "content", "")
+                    if not isinstance(content, str):
+                        continue
+
+                    parsed = parse_task_notification(content)
+                    if not parsed:
+                        continue
+
+                    metadata = dict(getattr(message, "metadata", {}) or {})
+                    metadata.setdefault("notification_type", "task_notification")
+                    metadata.setdefault("task_id", parsed.get("task_id"))
+                    metadata.setdefault("status", parsed.get("status"))
+                    agent_message = format_task_notification_for_agent(content)
+
+                    if self._query_in_progress and self.query_context is not None:
+                        self.query_context.pending_message_queue.enqueue_text(
+                            agent_message,
+                            metadata=metadata,
+                        )
+                        continue
+
+                    self._schedule_background_notification_response(
+                        agent_message=agent_message,
+                        metadata=metadata,
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "[ui] Failed to consume task notification: %s: %s",
+                        type(exc).__name__,
+                        exc,
+                    )
 
     def _build_user_message_from_input(self, user_input: str) -> tuple[str, UserMessage]:
         """Convert raw user input (including images) into a conversation message."""
@@ -1539,7 +1720,17 @@ class RichUI:
                 if maybe_tool_name:
                     last_tool_name = maybe_tool_name
             elif message.type == "user" and isinstance(message, UserMessage):
-                handle_tool_result_message(self, message, tool_registry, last_tool_name, spinner)
+                user_content = getattr(getattr(message, "message", None), "content", None)
+                user_metadata = getattr(getattr(message, "message", None), "metadata", {}) or {}
+                if (
+                    isinstance(user_content, str)
+                    and user_metadata.get("notification_type") == "task_notification"
+                ):
+                    # Task notifications are injected for model context, but not rendered
+                    # as raw tool lines in the transcript UI.
+                    pass
+                else:
+                    handle_tool_result_message(self, message, tool_registry, last_tool_name, spinner)
             elif message.type == "progress" and isinstance(message, ProgressMessage):
                 output_token_est = handle_progress_message(
                     self, message, spinner, output_token_est
@@ -1552,6 +1743,7 @@ class RichUI:
         self,
         spinner: ThinkingSpinner,
         messages: List[ConversationMessage],
+        query_context: Optional[QueryContext] = None,
     ) -> None:
         """Best-effort stream cleanup and conversation state commit."""
         try:
@@ -1572,6 +1764,9 @@ class RichUI:
             self._clear_context_after_turn = False
         else:
             self.conversation_messages = messages
+        active_context = query_context or getattr(self, "query_context", None)
+        if active_context is not None:
+            self._flush_deferred_task_notifications_from_pending_queue(active_context)
         logger.info(
             "[ui] Query processing completed",
             extra={
@@ -1581,87 +1776,106 @@ class RichUI:
             },
         )
 
+    def _get_query_serial_lock(self) -> asyncio.Lock:
+        """Create one shared lock that serializes query execution."""
+        lock = self._query_serial_lock
+        if lock is None:
+            lock = asyncio.Lock()
+            self._query_serial_lock = lock
+        return lock
 
-    async def process_query(self, user_input: str) -> None:
+
+    async def process_query(
+        self,
+        user_input: str,
+        *,
+        user_message_metadata: Optional[Dict[str, Any]] = None,
+        append_prompt_history: bool = True,
+    ) -> None:
         """Process a user query and display the response."""
-        query_context = self._ensure_query_context()
+        async with self._get_query_serial_lock():
+            user_input = _replace_surrogate_codepoints(user_input)
+            query_context = self._ensure_query_context()
 
-        logger.info(
-            "[ui] Starting query processing",
-            extra={
-                "session_id": self.session_id,
-                "prompt_length": len(user_input),
-                "prompt_preview": user_input[:200],
-            },
-        )
-
-        try:
-            queue = query_context.pending_message_queue
-            with bind_pending_message_queue(queue):
-                hook_result = await hook_manager.run_user_prompt_submit_async(user_input)
-            if hook_result.should_block or not hook_result.should_continue:
-                reason = (
-                    hook_result.block_reason or hook_result.stop_reason or "Prompt blocked by hook."
-                )
-                self.console.print(f"[red]{escape(str(reason))}[/red]")
-                return
-            self._display_hook_system_message(hook_result, "UserPromptSubmit")
-            hook_instructions = self._collect_hook_contexts(hook_result)
-
-            system_prompt, context = await self._prepare_query_context(
-                user_input, hook_instructions
+            logger.info(
+                "[ui] Starting query processing",
+                extra={
+                    "session_id": self.session_id,
+                    "prompt_length": len(user_input),
+                    "prompt_preview": user_input[:200],
+                },
             )
-            processed_input, user_message = self._build_user_message_from_input(user_input)
-
-            messages: List[ConversationMessage] = self.conversation_messages + [user_message]
-            self._log_message(user_message)
-            self._append_prompt_history(processed_input)
-
-            max_context_tokens, auto_compact_enabled, protocol = self._resolve_query_runtime_settings()
-            messages = await self._check_and_compact_messages(
-                messages, max_context_tokens, auto_compact_enabled, protocol
-            )
-
-            prompt_tokens_est = estimate_conversation_tokens(messages, protocol=protocol)
-            spinner = ThinkingSpinner(console, prompt_tokens_est)
-            pause_ui, resume_ui = self._build_spinner_callbacks(spinner)
-            query_context.pause_ui = pause_ui
-            query_context.resume_ui = resume_ui
-            permission_checker = self._build_permission_checker(pause_ui, resume_ui)
 
             try:
-                await self._stream_query_messages(
-                    messages=messages,
-                    system_prompt=system_prompt,
-                    context=context,
-                    permission_checker=permission_checker,
-                    spinner=spinner,
-                    query_context=query_context,
+                queue = query_context.pending_message_queue
+                with bind_pending_message_queue(queue):
+                    hook_result = await hook_manager.run_user_prompt_submit_async(user_input)
+                if hook_result.should_block or not hook_result.should_continue:
+                    reason = (
+                        hook_result.block_reason or hook_result.stop_reason or "Prompt blocked by hook."
+                    )
+                    self.console.print(f"[red]{escape(str(reason))}[/red]")
+                    return
+                self._display_hook_system_message(hook_result, "UserPromptSubmit")
+                hook_instructions = self._collect_hook_contexts(hook_result)
+
+                system_prompt, context = await self._prepare_query_context(
+                    user_input, hook_instructions
                 )
+                processed_input, user_message = self._build_user_message_from_input(user_input)
+                if user_message_metadata:
+                    user_message.message.metadata.update(dict(user_message_metadata))
+
+                messages: List[ConversationMessage] = self.conversation_messages + [user_message]
+                self._log_message(user_message)
+                if append_prompt_history:
+                    self._append_prompt_history(processed_input)
+
+                max_context_tokens, auto_compact_enabled, protocol = self._resolve_query_runtime_settings()
+                messages = await self._check_and_compact_messages(
+                    messages, max_context_tokens, auto_compact_enabled, protocol
+                )
+
+                prompt_tokens_est = estimate_conversation_tokens(messages, protocol=protocol)
+                spinner = ThinkingSpinner(console, prompt_tokens_est)
+                pause_ui, resume_ui = self._build_spinner_callbacks(spinner)
+                query_context.pause_ui = pause_ui
+                query_context.resume_ui = resume_ui
+                permission_checker = self._build_permission_checker(pause_ui, resume_ui)
+
+                try:
+                    await self._stream_query_messages(
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        context=context,
+                        permission_checker=permission_checker,
+                        spinner=spinner,
+                        query_context=query_context,
+                    )
+
+                except asyncio.CancelledError:
+                    raise
+                except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as e:
+                    logger.warning(
+                        "[ui] Error while processing streamed query response: %s: %s",
+                        type(e).__name__,
+                        e,
+                        extra={"session_id": self.session_id},
+                    )
+                    self.display_message("System", f"Error: {str(e)}", is_tool=True)
+                finally:
+                    self._finalize_query_stream(spinner, messages, query_context)
 
             except asyncio.CancelledError:
                 raise
-            except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as e:
+            except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as exc:
                 logger.warning(
-                    "[ui] Error while processing streamed query response: %s: %s",
-                    type(e).__name__,
-                    e,
+                    "[ui] Error during query processing: %s: %s",
+                    type(exc).__name__,
+                    exc,
                     extra={"session_id": self.session_id},
                 )
-                self.display_message("System", f"Error: {str(e)}", is_tool=True)
-            finally:
-                self._finalize_query_stream(spinner, messages)
-
-        except asyncio.CancelledError:
-            raise
-        except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as exc:
-            logger.warning(
-                "[ui] Error during query processing: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"session_id": self.session_id},
-            )
-            self.display_message("System", f"Error: {str(exc)}", is_tool=True)
+                self.display_message("System", f"Error: {str(exc)}", is_tool=True)
 
     # ─────────────────────────────────────────────────────────────────────────────
     # ESC Key Interrupt Support
@@ -1894,6 +2108,12 @@ class RichUI:
                 abort_controller = getattr(self.query_context, "abort_controller", None)
                 if abort_controller is not None:
                     abort_controller.set()
+            try:
+                if not self._loop.is_closed():
+                    self._run_async(self._stop_task_notification_poller())
+                    self._run_async(self._stop_background_notification_tasks())
+            except (RuntimeError, concurrent.futures.CancelledError):
+                pass
 
             if self.session_id and self.conversation_messages:
                 self.console.print("[dim]Resume this session with:[/dim]")

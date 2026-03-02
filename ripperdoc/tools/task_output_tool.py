@@ -22,7 +22,7 @@ class TaskOutputInput(BaseModel):
         default=30_000,
         ge=0,
         le=600_000,
-        description="Maximum wait time in milliseconds when block=true",
+        description="Maximum wait time in milliseconds when block=true (does not stop the task)",
     )
     model_config = ConfigDict(extra="forbid")
 
@@ -67,6 +67,7 @@ class TaskOutputTool(Tool[TaskOutputInput, TaskOutputData]):
             "- Retrieves output from a running or completed task (background shell or subagent)\n"
             "- Takes task_id, optional block (default true), and timeout (ms)\n"
             "- Returns retrieval_status with task details\n"
+            "- timeout only limits waiting; it does not terminate the underlying task\n"
             "- Use block=false for non-blocking checks\n"
             "- Works with Bash background tasks and Task subagent runs"
         )
@@ -157,7 +158,7 @@ class TaskOutputTool(Tool[TaskOutputInput, TaskOutputData]):
                 description=status.get("command"),
                 output=self._compose_stream_output(status.get("stdout", ""), status.get("stderr", "")),
                 exit_code=status.get("exit_code"),
-                error="Task timed out" if retrieval_status == "timeout" else None,
+                error=None,
             ),
         )
 
@@ -177,8 +178,6 @@ class TaskOutputTool(Tool[TaskOutputInput, TaskOutputData]):
 
         result_text = str(snapshot.get("result_text") or "").strip()
         error = str(snapshot.get("error") or "").strip() or None
-        if retrieval_status == "timeout" and not error:
-            error = "Task timed out"
 
         return TaskOutputData(
             retrieval_status=retrieval_status,
