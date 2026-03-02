@@ -19,6 +19,7 @@ from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool import Tool
 from ripperdoc.tools.file_read_tool import detect_file_encoding
 from ripperdoc.utils.diff_rendering import build_numbered_diff_layout, format_numbered_diff_text
+from ripperdoc.utils.memory import is_auto_memory_enabled, is_auto_memory_path
 from ripperdoc.utils.permissions import PermissionDecision, ToolRule
 from ripperdoc.utils.permissions.rule_syntax import (
     ParsedPermissionRule,
@@ -40,6 +41,7 @@ _EDIT_PREVIEW_SEPARATOR = "-------------------"
 _PERMISSION_PROMPT_RESERVED_LINES = 14
 _PERMISSION_PROMPT_MIN_DIFF_LINES = 4
 _PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"}
+_AUTO_MEMORY_WRITE_TOOLS = {"Write", "Edit", "MultiEdit"}
 
 
 @dataclass
@@ -317,6 +319,50 @@ def _permission_preview_diff_line_budget() -> int:
     dynamic_budget = height - _PERMISSION_PROMPT_RESERVED_LINES
     dynamic_budget = max(_PERMISSION_PROMPT_MIN_DIFF_LINES, dynamic_budget)
     return min(_EDIT_PREVIEW_MAX_DIFF_LINES, dynamic_budget)
+
+
+def _extract_input_file_path(parsed_input: Any) -> Optional[str]:
+    """Extract a candidate file path from a tool input payload."""
+    if hasattr(parsed_input, "file_path"):
+        file_path = getattr(parsed_input, "file_path")
+        if isinstance(file_path, str) and file_path.strip():
+            return file_path
+
+    if isinstance(parsed_input, dict):
+        file_path = parsed_input.get("file_path") or parsed_input.get("path")
+        if isinstance(file_path, str) and file_path.strip():
+            return file_path
+
+    return None
+
+
+def _resolve_auto_memory_write_decision(
+    *,
+    tool_name: str,
+    parsed_input: Any,
+    project_path: Path,
+) -> Optional[PermissionDecision]:
+    """Auto-allow write/edit operations that target auto-memory files."""
+    if tool_name not in _AUTO_MEMORY_WRITE_TOOLS:
+        return None
+
+    file_path = _extract_input_file_path(parsed_input)
+    if not file_path:
+        return None
+
+    try:
+        if not is_auto_memory_enabled(project_path):
+            return None
+        if not is_auto_memory_path(file_path, project_path=project_path):
+            return None
+    except Exception:
+        return None
+
+    return PermissionDecision(
+        behavior="allow",
+        message="Auto memory files are allowed for writing.",
+        decision_reason={"type": "auto_memory", "path": file_path},
+    )
 
 
 def _compact_preview_snippet(text: str, *, max_len: int = _EDIT_PREVIEW_MATCH_SNIPPET_MAX) -> str:
@@ -818,6 +864,14 @@ async def _resolve_permission_decision(
     )
     if explicit_rule_decision is not None:
         return explicit_rule_decision
+
+    auto_memory_decision = _resolve_auto_memory_write_decision(
+        tool_name=tool.name,
+        parsed_input=parsed_input,
+        project_path=policy["project_path"],
+    )
+    if auto_memory_decision is not None:
+        return auto_memory_decision
 
     if not hasattr(tool, "check_permissions"):
         return _default_permission_decision(tool.name)

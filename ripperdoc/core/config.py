@@ -209,6 +209,8 @@ class UserConfig(BaseModel):
     auto_compact_enabled: bool = True
     context_token_limit: Optional[int] = None
     disable_bypass_permissions_mode: bool = Field(default=False)
+    # Auto-memory toggle (None means "not explicitly set")
+    auto_memory_enabled: Optional[bool] = Field(default=None, alias="autoMemoryEnabled")
     # Default thinking tokens budget when thinking mode is enabled (0 = disabled by default)
     default_thinking_tokens: int = Field(default=10240)
 

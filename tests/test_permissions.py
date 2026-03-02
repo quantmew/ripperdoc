@@ -28,6 +28,7 @@ from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
 from ripperdoc.tools.file_edit_tool import FileEditTool, FileEditToolInput
 from ripperdoc.tools.file_write_tool import FileWriteTool, FileWriteToolInput
 from ripperdoc.tools.multi_edit_tool import MultiEditTool, MultiEditToolInput
+from ripperdoc.utils.memory import auto_memory_file_path
 
 
 class DummyInput(BaseModel):
@@ -162,6 +163,56 @@ def test_yolo_mode_off_respects_read_only_tools(tmp_path: Path):
 
     result = asyncio.run(checker(tool, parsed_input))
     assert result.result is True
+
+
+def test_auto_memory_write_is_auto_allowed_without_prompt(tmp_path: Path, monkeypatch):
+    """Enabled auto-memory writes should bypass interactive permission prompts."""
+    monkeypatch.setenv("RIPPERDOC_DISABLE_AUTO_MEMORY", "false")
+    monkeypatch.setenv("RIPPERDOC_REMOTE_MEMORY_DIR", str(tmp_path / "remote-memory"))
+
+    checker = make_permission_checker(
+        tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
+    )
+    memory_target = auto_memory_file_path(project_path=tmp_path)
+    memory_target.parent.mkdir(parents=True, exist_ok=True)
+
+    result = asyncio.run(
+        checker(
+            FileWriteTool(),
+            FileWriteToolInput(file_path=str(memory_target), content="remember this"),
+        )
+    )
+
+    assert result.result is True
+    assert result.decision is not None
+    assert result.decision.behavior == "allow"
+    assert isinstance(result.decision.decision_reason, dict)
+    assert result.decision.decision_reason.get("type") == "auto_memory"
+
+
+def test_non_auto_memory_write_still_prompts(tmp_path: Path, monkeypatch):
+    """Only auto-memory paths should be auto-allowed for write/edit tools."""
+    monkeypatch.setenv("RIPPERDOC_DISABLE_AUTO_MEMORY", "false")
+    monkeypatch.setenv("RIPPERDOC_REMOTE_MEMORY_DIR", str(tmp_path / "remote-memory"))
+
+    prompt_calls = 0
+
+    def prompt_fn(_: str) -> str:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "n"
+
+    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=prompt_fn)
+    outside_target = tmp_path / "notes.md"
+    result = asyncio.run(
+        checker(
+            FileWriteTool(),
+            FileWriteToolInput(file_path=str(outside_target), content="outside auto-memory"),
+        )
+    )
+
+    assert result.result is False
+    assert prompt_calls == 1
 
 
 def test_yolo_mode_allows_without_prompt(tmp_path: Path):
