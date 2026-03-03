@@ -94,11 +94,25 @@ def build_prompt_session(
 
             run_in_terminal(_toggle)
             return
-        # Otherwise, handle completion as usual
-        if buf.complete_state and buf.complete_state.current_completion:
-            buf.apply_completion(buf.complete_state.current_completion)
-        else:
+
+        # Otherwise, handle completion as usual.
+        # If only one completion is available, apply it automatically.
+        if buf.complete_state is None:
             buf.start_completion(select_first=True)
+
+        if buf.complete_state is None:
+            return
+
+        if len(buf.complete_state.completions) == 1:
+            completion = buf.complete_state.current_completion or buf.complete_state.completions[0]
+            buf.apply_completion(completion)
+            return
+
+        if buf.complete_state.current_completion:
+            buf.apply_completion(buf.complete_state.current_completion)
+            return
+
+        buf.start_completion(select_first=True)
 
     @key_bindings.add("s-tab")
     def _(event: Any) -> None:
