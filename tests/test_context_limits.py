@@ -4,8 +4,10 @@ import pytest
 
 from ripperdoc.utils.message_compaction import (
     ContextBudgetConfigurationError,
+    get_context_usage_status,
     get_model_context_limit,
     get_remaining_context_tokens,
+    summarize_context_usage,
 )
 from ripperdoc.core.config import ModelProfile, ProtocolType
 
@@ -93,3 +95,74 @@ def test_remaining_tokens_raises_on_zero_max_output_tokens():
 
     with pytest.raises(ContextBudgetConfigurationError):
         get_remaining_context_tokens(BrokenProfile())
+
+
+def test_autocompact_pct_override_triggers_earlier(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE", "50")
+
+    before = get_context_usage_status(
+        used_tokens=99_999,
+        max_context_tokens=200_000,
+        auto_compact_enabled=True,
+    )
+    at = get_context_usage_status(
+        used_tokens=100_000,
+        max_context_tokens=200_000,
+        auto_compact_enabled=True,
+    )
+
+    assert before.should_auto_compact is False
+    assert at.should_auto_compact is True
+
+
+def test_autocompact_pct_override_cannot_delay_default_trigger(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE", "99")
+
+    before_default = get_context_usage_status(
+        used_tokens=175_999,
+        max_context_tokens=200_000,
+        auto_compact_enabled=True,
+    )
+    at_default = get_context_usage_status(
+        used_tokens=176_000,
+        max_context_tokens=200_000,
+        auto_compact_enabled=True,
+    )
+
+    assert before_default.should_auto_compact is False
+    assert at_default.should_auto_compact is True
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "101", "abc"])
+def test_autocompact_pct_override_invalid_values_are_ignored(
+    monkeypatch: pytest.MonkeyPatch, value: str
+):
+    monkeypatch.setenv("RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE", value)
+
+    before_default = get_context_usage_status(
+        used_tokens=175_999,
+        max_context_tokens=200_000,
+        auto_compact_enabled=True,
+    )
+    at_default = get_context_usage_status(
+        used_tokens=176_000,
+        max_context_tokens=200_000,
+        auto_compact_enabled=True,
+    )
+
+    assert before_default.should_auto_compact is False
+    assert at_default.should_auto_compact is True
+
+
+def test_context_breakdown_reserved_tokens_respects_autocompact_pct_override(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE", "50")
+    breakdown = summarize_context_usage(
+        messages=[],
+        tools=[],
+        system_prompt="",
+        max_context_tokens=200_000,
+        auto_compact_enabled=True,
+    )
+    assert breakdown.reserved_tokens == 100_000

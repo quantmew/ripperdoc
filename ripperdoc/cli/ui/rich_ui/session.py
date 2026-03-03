@@ -189,6 +189,9 @@ class RichUI:
         permission_mode: str = "default",
         disable_slash_commands: bool = False,
     ):
+        # Disable CPR to avoid prompt_toolkit warnings in terminals that don't respond.
+        os.environ["PROMPT_TOOLKIT_NO_CPR"] = "1"
+
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(
             target=self._run_event_loop,

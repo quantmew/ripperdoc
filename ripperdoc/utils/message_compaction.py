@@ -28,6 +28,7 @@ MAX_TOKENS_HARD = 40_000
 MAX_TOOL_USES_TO_PRESERVE = 3
 IMAGE_TOKEN_COST = 2_000
 AUTO_COMPACT_BUFFER = 24_000
+AUTO_COMPACT_PCT_OVERRIDE_ENV = "RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE"
 WARNING_THRESHOLD = 20_000
 ERROR_THRESHOLD = 20_000
 MICRO_PLACEHOLDER = "[Old tool result content cleared]"
@@ -345,6 +346,38 @@ def resolve_auto_compact_enabled(config: UserConfig) -> bool:
     return bool(config.auto_compact_enabled)
 
 
+def _resolve_auto_compact_default_limit(context_limit: int) -> int:
+    return max(MIN_CONTEXT_TOKENS, context_limit - AUTO_COMPACT_BUFFER)
+
+
+def _parse_auto_compact_pct_override() -> Optional[float]:
+    raw = os.getenv(AUTO_COMPACT_PCT_OVERRIDE_ENV)
+    if raw is None:
+        return None
+    try:
+        parsed = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0 or parsed > 100:
+        return None
+    return parsed
+
+
+def resolve_auto_compact_limit(context_limit: int) -> int:
+    """Resolve auto-compaction trigger tokens.
+
+    Supports RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE (1-100). Values above the
+    default threshold are capped so they do not delay compaction.
+    """
+    normalized_limit = max(context_limit, MIN_CONTEXT_TOKENS)
+    default_limit = _resolve_auto_compact_default_limit(normalized_limit)
+    override_pct = _parse_auto_compact_pct_override()
+    if override_pct is None:
+        return default_limit
+    override_limit = int(normalized_limit * (override_pct / 100.0))
+    return min(override_limit, default_limit)
+
+
 def get_context_usage_status(
     used_tokens: int,
     max_context_tokens: Optional[int],
@@ -352,8 +385,9 @@ def get_context_usage_status(
 ) -> ContextUsageStatus:
     """Compute usage thresholds."""
     context_limit = max(max_context_tokens or DEFAULT_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS)
+    auto_compact_limit = resolve_auto_compact_limit(context_limit)
     effective_limit = (
-        max(MIN_CONTEXT_TOKENS, context_limit - AUTO_COMPACT_BUFFER)
+        auto_compact_limit
         if auto_compact_enabled
         else context_limit
     )
@@ -366,7 +400,6 @@ def get_context_usage_status(
 
     warning_limit = max(0, effective_limit - WARNING_THRESHOLD)
     error_limit = max(0, effective_limit - ERROR_THRESHOLD)
-    auto_compact_limit = max(MIN_CONTEXT_TOKENS, context_limit - AUTO_COMPACT_BUFFER)
 
     return ContextUsageStatus(
         used_tokens=used_tokens,
@@ -398,7 +431,8 @@ def summarize_context_usage(
     tool_schema_tokens = _estimate_tool_schema_tokens(tools)
     message_tokens = estimate_conversation_tokens(messages, protocol=protocol)
     message_count = len([m for m in messages if getattr(m, "type", "") != "progress"])
-    reserved_tokens = AUTO_COMPACT_BUFFER if auto_compact_enabled else 0
+    auto_compact_limit = resolve_auto_compact_limit(max_context_tokens)
+    reserved_tokens = max(0, max_context_tokens - auto_compact_limit) if auto_compact_enabled else 0
 
     return ContextBreakdown(
         max_context_tokens=max_context_tokens,

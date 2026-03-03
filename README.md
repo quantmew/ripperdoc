@@ -126,6 +126,7 @@ ripperdoc [OPTIONS]
 - `RIPPERDOC_TEMPERATURE` - Default temperature (0.0-2.0)
 - `RIPPERDOC_API_KEY` - API key for configured provider
 - `RIPPERDOC_CONFIG_DIR` - Override where user-level Ripperdoc config/data are stored
+- `RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE` - Override auto-compaction trigger percentage (1-100, capped at default threshold)
 - `RIPPERDOC_TMPDIR` - Override internal temp root; Ripperdoc uses `<this-path>/ripperdoc/`
 
 Task Graph scope behavior:
