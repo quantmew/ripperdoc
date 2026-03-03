@@ -15,6 +15,7 @@ from ripperdoc.protocol.models import DEFAULT_PROTOCOL_VERSION, JsonRpcErrorCode
 from ripperdoc import __version__
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_control as handler_control_module
+from ripperdoc.protocol.stdio import handler_session as handler_session_module
 from ripperdoc.utils.messages import create_assistant_message, create_user_message
 
 
@@ -76,6 +77,7 @@ def test_coerce_initialize_request_defaults_from_options() -> None:
 async def test_handle_initialize_defaults_from_subtype_init_control_request(monkeypatch) -> None:
     handler = handler_module.StdioProtocolHandler()
     written: list[dict[str, Any]] = []
+    monkeypatch.setattr(handler_session_module, "get_effective_model_profile", lambda _model: object())
 
     async def fake_write_control_response(
         request_id: str,
