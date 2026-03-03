@@ -15,6 +15,7 @@ class _DummyHandler(StdioQueryMixin):
     def __init__(self) -> None:
         self.streamed_payloads: list[dict[str, Any]] = []
         self._conversation_messages: list[Any] = []
+        self._query_context = None
 
     def _build_hook_notice_stream_message(
         self,
@@ -38,6 +39,16 @@ class _DummyHandler(StdioQueryMixin):
 
     async def _write_message_stream(self, payload: dict[str, Any]) -> None:
         self.streamed_payloads.append(payload)
+
+    async def _write_control_response(
+        self,
+        request_id: str,
+        response: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        self.streamed_payloads.append(
+            {"type": "control_response", "request_id": request_id, "response": response, "error": error}
+        )
 
     def _convert_message_to_sdk(self, message: Any) -> dict[str, Any] | None:
         return {
@@ -116,3 +127,51 @@ async def test_handle_progress_stream_message_for_subagent_assistant() -> None:
     assert state.total_cache_creation_tokens == 1
     assert handler._conversation_messages and handler._conversation_messages[0] is subagent_assistant
     assert handler.streamed_payloads and handler.streamed_payloads[0]["type"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_summarize_query_stage_emits_sdk_result_fields() -> None:
+    handler = _DummyHandler()
+    handler._session_id = "session-1"
+    state = _QueryRuntimeState(start_time=0.0, num_turns=2)
+
+    state.final_result_text = "done"
+
+    await handler._summarize_query_stage("q-1", state)
+
+    assert handler.streamed_payloads
+    result = next(
+        (item for item in handler.streamed_payloads if item.get("type") == "result"),
+        None,
+    )
+    assert result is not None
+    assert result["type"] == "result"
+    assert result["subtype"] == "success"
+    assert result["result"] == "done"
+    assert result["num_turns"] == 2
+    assert result["session_id"] == "session-1"
+    assert result["is_error"] is False
+    assert isinstance(result["duration_ms"], int)
+    assert result["duration_ms"] >= 0
+    assert result["duration_api_ms"] == result["duration_ms"]
+
+
+@pytest.mark.asyncio
+async def test_summarize_query_stage_marks_error_during_execution() -> None:
+    handler = _DummyHandler()
+    handler._session_id = "session-2"
+    state = _QueryRuntimeState(start_time=0.0, is_error=True)
+
+    state.final_result_text = "error"
+
+    await handler._summarize_query_stage("q-2", state)
+
+    assert handler.streamed_payloads
+    result = next(
+        (item for item in handler.streamed_payloads if item.get("type") == "result"),
+        None,
+    )
+    assert result is not None
+    assert result["type"] == "result"
+    assert result["subtype"] == "error_during_execution"
+    assert result["is_error"] is True

@@ -59,6 +59,28 @@ def _is_stdio_mode_request(ctx: click.Context, output_format: str, print_mode: b
     )
 
 
+def _is_non_interactive_mode(
+    output_format: str,
+    print_mode: bool,
+    setup_init_only: bool,
+) -> bool:
+    """Return True when invocation is non-interactive.
+
+    Mirrors deobfuscated Claude Code behavior for current CLI surface:
+      - print mode
+      - init-only mode
+      - stdout is not a TTY
+    """
+    if print_mode or setup_init_only:
+        return True
+
+    try:
+        stdout_stream = click.get_text_stream("stdout")
+        return not stdout_stream.isatty()
+    except Exception:
+        return False
+
+
 def _collect_sdk_only_option_uses(
     *,
     allowed_tools_csv: Optional[str],
@@ -303,6 +325,8 @@ def _run_stdio_mode_if_requested(
     prompt: Optional[str],
     input_format: str,
     model: Optional[str],
+    session_id: str,
+    session_persistence: bool,
     permission_mode: str,
     max_turns: Optional[int],
     system_prompt: Optional[str],
@@ -343,6 +367,8 @@ def _run_stdio_mode_if_requested(
         default_options["tools"] = tools_list
     if additional_working_dirs:
         default_options["additional_directories"] = additional_working_dirs
+    default_options["session_persistence"] = session_persistence
+    default_options["session_id"] = session_id
     default_options.update(sdk_default_options)
 
     asyncio.run(
@@ -365,12 +391,14 @@ def _resolve_resume_state(
     *,
     project_path: Path,
     session_id: str,
+    fork_session: bool,
     resume_session: Optional[str],
     continue_session: bool,
 ) -> tuple[str, Optional[List[Any]], Any, Any]:
     resume_messages: Optional[List[Any]] = None
     resumed_summary = None
     most_recent = None
+    resumed_session_id = None
 
     if resume_session:
         summaries = list_session_summaries(project_path)
@@ -378,8 +406,8 @@ def _resolve_resume_state(
             match = next((s for s in summaries if s.session_id.startswith(resume_session)), None)
             if match:
                 resumed_summary = match
-                session_id = match.session_id
-                resume_messages = load_session_messages(project_path, session_id)
+                resumed_session_id = match.session_id
+                resume_messages = load_session_messages(project_path, resumed_session_id)
                 console.print(f"[dim]Resuming session: {match.display_title}[/dim]")
             else:
                 raise click.ClickException(f"No session found matching '{resume_session}'.")
@@ -389,11 +417,14 @@ def _resolve_resume_state(
         summaries = list_session_summaries(project_path)
         if summaries:
             most_recent = summaries[0]
-            session_id = most_recent.session_id
-            resume_messages = load_session_messages(project_path, session_id)
+            resumed_session_id = most_recent.session_id
+            resume_messages = load_session_messages(project_path, resumed_session_id)
             console.print(f"[dim]Continuing session: {most_recent.display_title}[/dim]")
         else:
             console.print("[yellow]No previous sessions found in this directory.[/yellow]")
+
+    if resumed_session_id and not fork_session:
+        session_id = resumed_session_id
 
     return session_id, resume_messages, resumed_summary, most_recent
 
@@ -450,6 +481,7 @@ def _run_setup_if_needed(
     *,
     setup_trigger: Optional[str],
     project_path: Path,
+    session_persistence: bool,
     session_id: str,
     setup_init_only: bool,
     setup_maintenance: bool,
@@ -459,7 +491,7 @@ def _run_setup_if_needed(
     hook_manager.set_project_dir(project_path)
     hook_manager.set_session_id(session_id)
     hook_manager.set_llm_callback(build_hook_llm_callback())
-    session_history = SessionHistory(project_path, session_id)
+    session_history = SessionHistory(project_path, session_id, session_persistence=session_persistence)
     hook_manager.set_transcript_path(str(session_history.path))
     hook_manager.run_setup(setup_trigger)
     if setup_trigger == "init":
@@ -520,7 +552,8 @@ def _prepare_cli_runtime_inputs(
     max_budget_usd: Optional[float],
     max_thinking_tokens: Optional[int],
     json_schema: Optional[str],
-) -> tuple[Path, List[str], dict[str, Any], Optional[str]]:
+    session_persistence: bool,
+) -> tuple[Path, List[str], dict[str, Any], Optional[str], bool]:
     """Resolve working-directory inputs and SDK default options for CLI entrypoints."""
     project_path = Path.cwd()
     additional_working_dirs = _resolve_additional_working_dirs(settings, add_dirs, project_path)
@@ -563,7 +596,13 @@ def _prepare_cli_runtime_inputs(
         max_thinking_tokens=max_thinking_tokens,
         json_schema=json_schema,
     )
-    return project_path, additional_working_dirs, sdk_default_options, effective_agent_prompt
+    return (
+        project_path,
+        additional_working_dirs,
+        sdk_default_options,
+        effective_agent_prompt,
+        session_persistence,
+    )
 
 
 def _read_initial_query_from_stdin(

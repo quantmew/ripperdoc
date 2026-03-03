@@ -14,6 +14,7 @@ from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_control
 from ripperdoc.protocol.stdio import handler_config, handler_session
+from ripperdoc.protocol.models import JsonRpcErrorCodes
 from ripperdoc.tools.task_tool import TaskTool
 
 
@@ -139,7 +140,10 @@ async def test_stdio_initialize_tool_filters(monkeypatch, tmp_path, options, exp
     await handler._handle_initialize({"options": options}, "init")
 
     assert responses["init"]["error"] is None
-    assert responses["init"]["response"]["tools"] == expected
+    assert handler._query_context is not None
+    assert sorted(tool.name for tool in handler._query_context.tools if tool.name != "Skill") == sorted(
+        expected
+    )
 
 
 @pytest.mark.asyncio
@@ -245,7 +249,8 @@ async def test_stdio_initialize_rejects_unknown_session_agent(monkeypatch, tmp_p
         "init",
     )
 
-    assert responses["init"]["error"] == "Unknown agent 'unknown'. Available agents: reviewer."
+    assert responses["init"]["error"]["message"] == "Unknown agent 'unknown'. Available agents: reviewer."
+    assert responses["init"]["error"]["code"] == int(JsonRpcErrorCodes.InvalidParams)
 
 
 @pytest.mark.asyncio
@@ -275,9 +280,8 @@ async def test_stdio_initialize_disable_slash_commands_removes_skill_tool(monkey
     )
 
     assert responses["init"]["error"] is None
-    response = responses["init"]["response"]
-    assert "Skill" not in response["tools"]
-    assert response["slash_commands"] == []
+    assert handler._query_context is not None
+    assert all(tool.name != "Skill" for tool in handler._query_context.tools)
 
 
 @pytest.mark.asyncio
@@ -309,7 +313,7 @@ async def test_stdio_can_use_tool_permission_result(monkeypatch, tmp_path):
         "req_allow",
     )
     allow_response = responses["req_allow"]["response"]
-    assert allow_response["decision"] == "allow"
+    assert allow_response["behavior"] == "allow"
     assert allow_response["updatedInput"] == {"value": "updated"}
 
     async def deny_checker(tool, parsed_input):
@@ -324,7 +328,7 @@ async def test_stdio_can_use_tool_permission_result(monkeypatch, tmp_path):
         "req_deny",
     )
     deny_response = responses["req_deny"]["response"]
-    assert deny_response["decision"] == "deny"
+    assert deny_response["behavior"] == "deny"
     assert deny_response["message"] == "nope"
 
 
@@ -347,10 +351,10 @@ async def test_stdio_sdk_can_use_tool_bridges_ask_user_question(monkeypatch, tmp
 
     requests: list[dict[str, Any]] = []
 
-    async def fake_send_control_request(request: dict[str, Any], *, timeout: float | None = None):
+    async def fake_send_control_request(request: dict[str, Any], timeout: float | None = None):
         requests.append({"request": request, "timeout": timeout})
-        assert request["subtype"] == "can_use_tool"
-        assert request["tool_name"] == "AskUserQuestion"
+        assert request["name"] == "ripperdoc.can_use_tool"
+        assert request["arguments"]["tool_name"] == "AskUserQuestion"
         return {
             "decision": "allow",
             "updatedInput": {
@@ -370,6 +374,7 @@ async def test_stdio_sdk_can_use_tool_bridges_ask_user_question(monkeypatch, tmp
     assert isinstance(result, PermissionResult)
     assert result.result is True
     assert result.updated_input == {"value": "sdk-answer"}
+    assert requests and requests[0]["request"]["arguments"]["force_prompt"] is False
     assert len(requests) == 1
     assert requests[0]["timeout"] == 0.0
 
@@ -438,10 +443,10 @@ async def test_stdio_sdk_can_use_tool_uses_preview_for_rule_level_ask(monkeypatc
 
     calls = {"sdk": 0}
 
-    async def fake_send_control_request(request: dict[str, Any], *, timeout: float | None = None):
+    async def fake_send_control_request(request: dict[str, Any], timeout: float | None = None):
         calls["sdk"] += 1
-        assert request["subtype"] == "can_use_tool"
-        assert request["tool_name"] == "Read"
+        assert request["name"] == "ripperdoc.can_use_tool"
+        assert request["arguments"]["tool_name"] == "Read"
         return {"decision": "allow", "updatedInput": {"value": "approved"}}
 
     monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
@@ -603,7 +608,8 @@ async def test_stdio_can_use_tool_requires_snake_case_tool_name(monkeypatch, tmp
         "legacy_tool_name",
     )
 
-    assert responses["legacy_tool_name"]["error"] == "Missing tool_name"
+    assert responses["legacy_tool_name"]["error"]["message"] == "Missing tool_name"
+    assert responses["legacy_tool_name"]["error"]["code"] == int(JsonRpcErrorCodes.InvalidParams)
 
 
 @pytest.mark.asyncio
@@ -671,7 +677,7 @@ async def test_stdio_initialize_uses_project_output_language(monkeypatch, tmp_pa
     await handler._handle_initialize({"options": {"cwd": str(tmp_path)}}, "init")
 
     assert captured_language["value"] == "Chinese"
-    assert responses["init"]["response"]["output_language"] == "Chinese"
+    assert handler._output_language == "Chinese"
 
 
 @pytest.mark.asyncio
@@ -709,4 +715,4 @@ async def test_stdio_initialize_output_language_option_overrides_project(monkeyp
     )
 
     assert captured_language["value"] == "Japanese"
-    assert responses["init"]["response"]["output_language"] == "Japanese"
+    assert handler._output_language == "Japanese"

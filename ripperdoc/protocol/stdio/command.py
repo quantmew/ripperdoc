@@ -6,6 +6,8 @@ import asyncio
 from typing import Any
 
 import click
+from ripperdoc import __version__
+from ripperdoc.protocol.models import DEFAULT_PROTOCOL_VERSION
 
 from .handler import StdioProtocolHandler
 
@@ -119,8 +121,7 @@ async def run_stdio(
 
     # If print mode with prompt, handle as single query
     if print_mode and prompt:
-        # This is a single-shot query mode
-        # Initialize with defaults and run query
+        # This is a single-shot query mode.
         request_options: dict[str, Any] = dict(default_options or {})
         if model is not None:
             request_options["model"] = model
@@ -133,8 +134,19 @@ async def run_stdio(
         request_options["sdk_can_use_tool"] = False
 
         request = {
-            "options": request_options,
-            "prompt": prompt,
+            "protocolVersion": DEFAULT_PROTOCOL_VERSION,
+            "capabilities": {
+                "sampling": {
+                    "tools": True,
+                }
+            },
+            "clientInfo": {
+                "name": "ripperdoc.cli",
+                "version": __version__,
+            },
+            "_meta": {
+                "ripperdoc_options": request_options,
+            },
         }
 
         # Mock request_id for print mode
@@ -145,7 +157,18 @@ async def run_stdio(
 
         # Query
         query_request = {
-            "prompt": prompt,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt,
+                        }
+                    ],
+                }
+            ],
+            "maxTokens": 1024,
         }
         await handler._handle_query(query_request, f"{request_id}_query")
         await handler.flush_output()

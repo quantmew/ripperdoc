@@ -3,22 +3,29 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-import traceback
 import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
+
+from pydantic import ValidationError
 
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
 from ripperdoc.core.query import query
 from ripperdoc.core.message_utils import estimate_cost_usd, resolve_model_profile
-from ripperdoc.protocol.models import ResultMessage, UsageInfo, model_to_dict
+from ripperdoc.protocol.models import (
+    JsonRpcErrorCodes,
+    SamplingRequest,
+    SamplingResult,
+    UsageInfo,
+    model_to_dict,
+)
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
 from ripperdoc.utils.messages import (
+    create_assistant_message,
     create_hook_notice_payload,
     create_user_message,
     is_hook_notice_payload,
@@ -30,6 +37,7 @@ from .timeouts import (
     STDIO_QUERY_TIMEOUT_SEC,
     STDIO_WATCHDOG_INTERVAL_SEC,
 )
+from .error_codes import resolve_query_initialize_error_code
 from .watchdog import OperationWatchdog
 
 logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
@@ -40,10 +48,13 @@ class _QueryRuntimeState:
     """Mutable runtime state for one stdio query."""
 
     start_time: float
-    result_message_sent: bool = False
+    result_sent: bool = False
     num_turns: int = 0
     is_error: bool = False
+    stop_reason: str = "endTurn"
     final_result_text: Optional[str] = None
+    final_result_content: list[dict[str, Any]] | str | dict[str, Any] | None = None
+    final_model: str | None = None
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cache_read_tokens: int = 0
@@ -79,6 +90,7 @@ class _PreparedQuery:
     messages: list[Any]
     session_history: SessionHistory
     system_prompt: str
+    context: dict[str, Any]
 
 
 class StdioQueryMixin:
@@ -88,30 +100,45 @@ class StdioQueryMixin:
     _clear_context_after_turn: bool
 
     async def _handle_query(self, request: dict[str, Any], request_id: str) -> None:
-        """Handle query request from SDK with comprehensive timeout and error handling."""
+        """Handle sampling/createMessage request from SDK."""
         state = _QueryRuntimeState(start_time=time.time())
 
+        prepared = await self._prepare_query_stage(request, request_id, state)
+        if prepared is None:
+            return
+
         try:
-            prepared = await self._prepare_query_stage(request, request_id, state)
-            if prepared is None:
-                return
-
             await self._execute_query_stage(prepared, state)
-            await self._summarize_query_stage(state)
+            await self._summarize_query_stage(request_id, state)
+        except asyncio.TimeoutError as e:
+            state.is_error = True
+            state.stop_reason = "maxTokens"
+            if not state.final_result_text:
+                state.final_result_text = f"Query timed out after {STDIO_QUERY_TIMEOUT_SEC}s"
+            await self._summarize_query_stage(request_id, state)
             self._finalize_query_stage(request_id, state)
+            logger.warning(
+                "[stdio] Query timed out: %s",
+                e,
+            )
+            return
         except Exception as e:
+            state.is_error = True
+            state.stop_reason = "error"
             logger.error(f"[stdio] Handle query failed: {type(e).__name__}: {e}", exc_info=True)
-            await self._write_control_response(request_id, error=str(e))
+            error_code = resolve_query_initialize_error_code(
+                e,
+                default=JsonRpcErrorCodes.InvalidParams,
+            )
+            await self._fail_query_request(
+                request_id,
+                state,
+                str(e) or "Query failed",
+                error_code=error_code,
+            )
+            return
 
-            # Ensure ResultMessage is sent even if everything else fails.
-            if not state.result_message_sent:
-                try:
-                    await self._send_error_result(state, str(e), e)
-                except Exception as send_error:
-                    logger.error(
-                        f"[stdio] Critical: Failed to send error ResultMessage: {send_error}",
-                        exc_info=True,
-                    )
+        self._finalize_query_stage(request_id, state)
 
     async def _prepare_query_stage(
         self,
@@ -119,14 +146,61 @@ class StdioQueryMixin:
         request_id: str,
         state: _QueryRuntimeState,
     ) -> _PreparedQuery | None:
-        """Prepare messages/system prompt and emit query-start stream events."""
+        """Prepare messages/system prompt and optional hook notices for this request."""
         if not self._initialized:
             await self._fail_query_request(request_id, state, "Not initialized")
             return None
 
-        prompt = request.get("prompt", "")
+        try:
+            coerce_request = self._coerce_query_request(request)
+            sampling_request = SamplingRequest.model_validate(coerce_request)
+        except ValidationError as exc:
+            error_code = resolve_query_initialize_error_code(
+                exc,
+                default=JsonRpcErrorCodes.InvalidParams,
+            )
+            await self._fail_query_request(
+                request_id,
+                state,
+                f"Invalid sampling/createMessage request: {exc}",
+                error_code=error_code,
+            )
+            return None
+        except Exception as exc:
+            error_code = resolve_query_initialize_error_code(
+                exc,
+                default=JsonRpcErrorCodes.InvalidParams,
+            )
+            await self._fail_query_request(
+                request_id,
+                state,
+                f"Invalid sampling/createMessage request: {exc}",
+                error_code=error_code,
+            )
+            return None
+
+        if not sampling_request.messages:
+            await self._fail_query_request(request_id, state, "messages is required")
+            return None
+
+        request_messages = [msg.model_dump(by_alias=True) for msg in sampling_request.messages]
+        if not self._validate_tool_message_sequence(request_messages):
+            await self._fail_query_request(
+                request_id,
+                state,
+                "Invalid sampling message sequence: tool_result must match preceding tool_use blocks",
+            )
+            return None
+
+        try:
+            messages = self._coerce_sampling_messages(request_messages)
+        except ValueError as exc:
+            await self._fail_query_request(request_id, state, str(exc))
+            return None
+
+        prompt = self._extract_latest_user_prompt(messages, request_messages)
         if not prompt:
-            await self._fail_query_request(request_id, state, "Prompt is required")
+            await self._fail_query_request(request_id, state, "No user content found in messages")
             return None
 
         logger.info(
@@ -135,7 +209,7 @@ class StdioQueryMixin:
                 "request_id": request_id,
                 "prompt_length": len(prompt),
                 "session_id": self._session_id,
-                "conversation_messages": len(self._conversation_messages),
+                "conversation_messages": len(messages),
                 "query_timeout": STDIO_QUERY_TIMEOUT_SEC,
             },
         )
@@ -143,42 +217,90 @@ class StdioQueryMixin:
         session_history = self._ensure_session_history()
         hook_manager.set_transcript_path(str(session_history.path))
 
-        # Prepare user turn and base message list.
-        user_message = create_user_message(prompt)
-        self._conversation_messages.append(user_message)
-        session_history.append(user_message)
-        messages = list(self._conversation_messages)
+        # Build base messages and context for this run.
+        conversation_messages = list(self._conversation_messages) + list(messages)
 
-        additional_instructions, hook_notices, blocked_reason = await self._collect_prepare_inputs(prompt)
+        for message in messages:
+            session_history.append(message)
+
+        self._conversation_messages = conversation_messages
+
+        additional_instructions, hook_notices, blocked_reason = await self._collect_prepare_inputs(
+            prompt
+        )
         if blocked_reason:
             await self._fail_query_request(request_id, state, str(blocked_reason))
             return None
 
         servers = await load_mcp_servers_async(self._project_path)
         mcp_instructions = format_mcp_instructions(servers)
-        system_prompt = self._resolve_system_prompt(
+        system_prompt = sampling_request.systemPrompt or self._resolve_system_prompt(
             self._query_context.tools if self._query_context else [],
             prompt,
             mcp_instructions,
             additional_instructions,
         )
 
-        await self._write_control_response(
-            request_id,
-            response={"status": "querying", "session_id": self._session_id},
-        )
         await self._emit_hook_notices(hook_notices)
+
+        request_context = dict(sampling_request.meta or {})
 
         return _PreparedQuery(
             prompt=prompt,
-            messages=messages,
+            messages=conversation_messages,
             session_history=session_history,
             system_prompt=system_prompt,
+            context=request_context,
         )
 
-    async def _execute_query_stage(self, prepared: _PreparedQuery, state: _QueryRuntimeState) -> None:
+    def _coerce_query_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Normalize query payload from JSON-RPC, control, or prompt shorthand."""
+        request_body: dict[str, Any] = {}
+        if isinstance(request, dict):
+            request_body = dict(request)
+
+        # Control-request style payload may be wrapped under `request`.
+        wrapped_request = request_body.get("request")
+        if isinstance(wrapped_request, dict):
+            request_body = {**request_body, **wrapped_request}
+
+        request_body.pop("type", None)
+        request_body.pop("subtype", None)
+        request_body.pop("method", None)
+
+        # Some callers may include a raw `prompt`.
+        prompt = request_body.get("prompt")
+        if "messages" not in request_body and isinstance(prompt, str):
+            text = prompt.strip()
+            if text:
+                request_body["messages"] = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": text,
+                            }
+                        ],
+                    }
+                ]
+                request_body.setdefault("maxTokens", request_body.get("maxTokens", 1024) or 1024)
+
+        if "messages" in request_body and not isinstance(request_body["messages"], list):
+            del request_body["messages"]
+
+        if request_body.get("maxTokens") is None:
+            request_body["maxTokens"] = 1024
+
+        return request_body
+
+    async def _execute_query_stage(
+        self,
+        prepared: _PreparedQuery,
+        state: _QueryRuntimeState,
+    ) -> None:
         """Run query stream loop and update runtime state incrementally."""
-        context: dict[str, Any] = {}
+        context: dict[str, Any] = dict(prepared.context)
         self._query_in_progress = True
         self._ensure_task_notification_poller()
         logger.debug(
@@ -211,45 +333,96 @@ class StdioQueryMixin:
                             state=state,
                         )
             logger.debug("[stdio] Query loop ended successfully")
-        except asyncio.TimeoutError:
-            logger.error(f"[stdio] Query execution timed out after {STDIO_QUERY_TIMEOUT_SEC}s")
-            await self._send_error_result(state, f"Query timed out after {STDIO_QUERY_TIMEOUT_SEC}s")
-        except asyncio.CancelledError:
-            logger.warning("[stdio] Query was cancelled")
-            await self._send_error_result(state, "Query was cancelled")
         except Exception as query_error:
             state.is_error = True
+            if isinstance(query_error, asyncio.TimeoutError):
+                state.stop_reason = "maxTokens"
+                state.final_result_text = f"Query timed out after {STDIO_QUERY_TIMEOUT_SEC}s"
+            elif isinstance(query_error, asyncio.CancelledError):
+                state.stop_reason = "error"
+                state.final_result_text = "Query was cancelled"
+            else:
+                state.stop_reason = "error"
+                state.final_result_text = str(query_error)
             logger.error(
                 f"[stdio] Query execution error: {type(query_error).__name__}: {query_error}",
                 exc_info=True,
             )
-            await self._send_error_result(state, str(query_error), query_error)
+            raise
         finally:
             self._query_in_progress = False
 
-    async def _summarize_query_stage(self, state: _QueryRuntimeState) -> None:
-        """Build and send final success ResultMessage when execution succeeded."""
-        if state.is_error or state.result_message_sent:
+    async def _summarize_query_stage(
+        self,
+        request_id: str,
+        state: _QueryRuntimeState,
+    ) -> None:
+        """Build and send SamplingResult."""
+        if state.result_sent:
             return
 
-        logger.debug("[stdio] Building usage info")
-        model_pointer = self._query_context.model if self._query_context else "main"
-        model_profile = resolve_model_profile(model_pointer)
-        total_cost_usd = estimate_cost_usd(model_profile, state.usage_tokens())
+        result_text = state.final_result_text or ""
+        content = state.final_result_content
+        if content is None:
+            content = {"type": "text", "text": result_text}
 
-        result_message = ResultMessage(
-            duration_ms=state.elapsed_ms(),
-            duration_api_ms=state.elapsed_ms(),
-            is_error=state.is_error,
-            subtype="success",
-            num_turns=state.num_turns,
-            session_id=self._session_id or "",
-            total_cost_usd=round(total_cost_usd, 8) if total_cost_usd > 0 else None,
-            usage=state.build_usage_info(),
-            result=state.final_result_text,
-            structured_output=self._coerce_structured_output(state.final_result_text),
+        if isinstance(content, str):
+            content = {"type": "text", "text": content}
+
+        if isinstance(content, list):
+            has_tool_use = any(
+                isinstance(item, dict) and item.get("type") == "tool_use" for item in content
+            )
+            if has_tool_use:
+                state.stop_reason = "toolUse"
+        elif isinstance(content, dict) and content.get("type") == "tool_use":
+            state.stop_reason = "toolUse"
+
+        model_profile = self._query_context.model if self._query_context else "main"
+        if state.final_model:
+            model = state.final_model
+        else:
+            model = model_profile
+
+        usage = state.build_usage_info()
+        total_cost_usd = 0.0
+        if usage is not None:
+            try:
+                total_cost_usd = estimate_cost_usd(resolve_model_profile(str(model)), usage.model_dump())
+            except Exception as cost_error:
+                logger.debug(
+                    "[stdio] Failed to compute query cost summary: %s",
+                    cost_error,
+                    exc_info=True,
+                )
+
+        result = SamplingResult(
+            model=str(model),
+            stopReason=state.stop_reason,
+            role="assistant",
+            content=content,
+            usage=usage,
         )
-        await self._send_final_result(state, result_message)
+
+        result_subtype = "error_during_execution" if state.is_error else "success"
+        session_id = self._session_id or str(uuid.uuid4())
+
+        await self._write_message_stream(
+            {
+                "type": "result",
+                "subtype": result_subtype,
+                "duration_ms": state.elapsed_ms(),
+                "duration_api_ms": state.elapsed_ms(),
+                "is_error": state.is_error,
+                "result": result_text,
+                "num_turns": state.num_turns,
+                "session_id": session_id,
+                "stop_reason": state.stop_reason,
+                "total_cost_usd": total_cost_usd,
+            }
+        )
+        await self._write_control_response(request_id, response=model_to_dict(result))
+        state.result_sent = True
 
     def _finalize_query_stage(self, request_id: str, state: _QueryRuntimeState) -> None:
         """Finalize request with terminal log event."""
@@ -265,7 +438,6 @@ class StdioQueryMixin:
                 "is_error": state.is_error,
                 "input_tokens": state.total_input_tokens,
                 "output_tokens": state.total_output_tokens,
-                "result_sent": state.result_message_sent,
             },
         )
 
@@ -275,6 +447,7 @@ class StdioQueryMixin:
             self._session_history = SessionHistory(
                 self._project_path,
                 self._session_id or str(uuid.uuid4()),
+                session_persistence=getattr(self, "_session_persistence_enabled", True),
             )
         return self._session_history
 
@@ -336,6 +509,153 @@ class StdioQueryMixin:
             )
             await self._write_message_stream(model_to_dict(stream_message))
 
+    def _coerce_sampling_messages(self, messages: list[dict[str, Any]]) -> list[Any]:
+        """Normalize `sampling/createMessage` message payload into internal Message models."""
+        parsed_messages: list[Any] = []
+
+        for message in messages:
+            if not isinstance(message, dict):
+                raise ValueError("Each message must be an object")
+
+            role = message.get("role")
+            if role not in {"user", "assistant"}:
+                raise ValueError(f"Unsupported message role: {role}")
+
+            raw_content = message.get("content")
+            if raw_content is None:
+                raw_content = ""
+
+            if isinstance(raw_content, list):
+                normalized_content = []
+                for item in raw_content:
+                    if isinstance(item, dict):
+                        normalized_content.append(item)
+                    else:
+                        normalized_content.append({"type": "text", "text": str(item)})
+            elif isinstance(raw_content, str):
+                normalized_content = raw_content
+            else:
+                normalized_content = {"type": "text", "text": str(raw_content)}
+
+            if role == "user":
+                parsed_messages.append(
+                    create_user_message(
+                        normalized_content,
+                        parent_tool_use_id=message.get("parent_tool_use_id"),
+                    )
+                )
+            else:
+                parsed_messages.append(
+                    create_assistant_message(
+                        normalized_content,
+                        model=str(message.get("model") or self._query_context.model if self._query_context else ""),
+                        parent_tool_use_id=message.get("parent_tool_use_id"),
+                    )
+                )
+
+        return parsed_messages
+
+    def _validate_tool_message_sequence(self, messages: list[dict[str, Any]]) -> bool:
+        """Validate tool_result/tool_use pairing across the final two messages."""
+        if len(messages) < 2:
+            return True
+
+        last_message = messages[-1]
+        previous_message = messages[-2]
+
+        last_content = self._normalize_content_list(last_message.get("content"))
+        previous_content = self._normalize_content_list(previous_message.get("content"))
+
+        if not last_content:
+            return True
+
+        has_tool_result = any(
+            item.get("type") == "tool_result" for item in last_content
+        )
+        has_tool_use = any(
+            item.get("type") == "tool_use" for item in previous_content
+        )
+
+        if not has_tool_result:
+            return True
+
+        if any(item.get("type") != "tool_result" for item in last_content):
+            return False
+
+        if not has_tool_use:
+            return False
+
+        tool_use_ids = {
+            str(item.get("id") or "")
+            for item in previous_content
+            if item.get("type") == "tool_use" and str(item.get("id") or "").strip()
+        }
+        tool_result_ids = {
+            str(item.get("toolUseId") or item.get("tool_use_id") or item.get("id") or "")
+            for item in last_content
+            if item.get("type") == "tool_result" and str(
+                item.get("toolUseId") or item.get("tool_use_id") or item.get("id") or ""
+            ).strip()
+        }
+
+        if not tool_result_ids:
+            return False
+        if len(tool_use_ids) != len(tool_result_ids):
+            return False
+        return tool_result_ids == tool_use_ids
+
+    def _extract_latest_user_prompt(self, messages: list[Any], request_messages: list[dict[str, Any]]) -> str | None:
+        for request_message in reversed(request_messages):
+            if request_message.get("role") != "user":
+                continue
+
+            content = request_message.get("content")
+            if isinstance(content, str):
+                text = content.strip()
+                if text:
+                    return text
+            if isinstance(content, list):
+                parts: list[str] = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text":
+                        text = str(block.get("text") or "").strip()
+                        if text:
+                            parts.append(text)
+                if parts:
+                    return "\n".join(parts)
+
+        for message in reversed(messages):
+            if getattr(message, "type", None) != "user":
+                continue
+            text = self._extract_text_from_user_message(message)
+            if text:
+                return text
+        return None
+
+    def _extract_text_from_user_message(self, message: Any) -> str:
+        msg_content = getattr(message, "message", None)
+        if not msg_content:
+            return ""
+        content = getattr(msg_content, "content", "")
+        if isinstance(content, str):
+            return content.strip()
+        if not isinstance(content, list):
+            return ""
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    text = str(block.get("text") or "").strip()
+                    if text:
+                        parts.append(text)
+            elif getattr(block, "type", None) == "text":
+                text = str(getattr(block, "text", "") or "").strip()
+                if text:
+                    parts.append(text)
+        return "\n".join(parts)
+
     async def _process_stream_message(
         self,
         *,
@@ -358,7 +678,10 @@ class StdioQueryMixin:
 
         if msg_type == "assistant":
             self._track_assistant_usage(message, state)
-            self._update_final_result_text(message, state)
+            self._update_final_result_content(message, state)
+            model_name = getattr(message, "model", None)
+            if model_name:
+                state.final_model = str(model_name)
 
         message_dict = self._convert_message_to_sdk(message)
         if message_dict is None:
@@ -419,8 +742,8 @@ class StdioQueryMixin:
         state.total_cache_read_tokens += getattr(assistant_message, "cache_read_tokens", 0)
         state.total_cache_creation_tokens += getattr(assistant_message, "cache_creation_tokens", 0)
 
-    def _update_final_result_text(self, assistant_message: Any, state: _QueryRuntimeState) -> None:
-        """Update final result text candidate from assistant content blocks."""
+    def _update_final_result_content(self, assistant_message: Any, state: _QueryRuntimeState) -> None:
+        """Backward-compatible state tracking for final text snippet."""
         msg_content = getattr(assistant_message, "message", None)
         if not msg_content:
             return
@@ -431,15 +754,128 @@ class StdioQueryMixin:
 
         if isinstance(content, str):
             state.final_result_text = content
+            state.final_result_content = {"type": "text", "text": content}
             return
 
         if not isinstance(content, list):
             return
 
         text_parts = self._extract_final_text_parts(content)
+        state.final_result_text = "\n".join(text_parts)
+        state.final_result_content = [
+            block
+            for block in self._convert_content_blocks_to_dict(content)
+        ]
 
-        if text_parts:
-            state.final_result_text = "\n".join(text_parts)
+        for block in content:
+            if (block.get("type") == "tool_use" if isinstance(block, dict) else getattr(block, "type", None) == "tool_use"):
+                state.stop_reason = "toolUse"
+
+    def _update_final_result_text(self, assistant_message: Any, state: _QueryRuntimeState) -> None:
+        """Backward-compatible wrapper for older callers.
+
+        The implementation keeps behavior aligned with previous method names by
+        delegating to `_update_final_result_content`.
+        """
+        self._update_final_result_content(assistant_message, state)
+
+    def _convert_content_blocks_to_dict(self, content_blocks: list[Any]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for block in content_blocks:
+            if isinstance(block, dict):
+                normalized.append(block)
+                continue
+            if getattr(block, "type", None):
+                normalized_block = self._convert_content_block(block)
+                if normalized_block:
+                    normalized.append(normalized_block)
+        return normalized
+
+    def _convert_content_block(self, block: Any) -> dict[str, Any] | None:
+        """Convert a message content block to SDK-compatible dictionary."""
+        block_type = getattr(block, "type", None)
+
+        if block_type == "text":
+            return {
+                "type": "text",
+                "text": getattr(block, "text", None) or "",
+            }
+
+        if block_type == "thinking":
+            return {
+                "type": "thinking",
+                "thinking": getattr(block, "thinking", None) or getattr(block, "text", None) or "",
+                "signature": getattr(block, "signature", None),
+            }
+
+        if block_type == "tool_use":
+            tool_id = getattr(block, "id", None) or getattr(block, "tool_use_id", None) or ""
+            name = getattr(block, "name", None) or ""
+            input_value = getattr(block, "input", None) or {}
+            if hasattr(input_value, "model_dump"):
+                input_value = input_value.model_dump()
+            elif hasattr(input_value, "dict"):
+                input_value = input_value.dict()
+            if not isinstance(input_value, dict):
+                input_value = {"value": str(input_value)}
+            return {
+                "type": "tool_use",
+                "id": tool_id,
+                "name": name,
+                "input": input_value,
+            }
+
+        if block_type == "tool_result":
+            text_value = getattr(block, "text", None)
+            if not text_value:
+                content_value = getattr(block, "content", None)
+                if isinstance(content_value, list):
+                    for item in content_value:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_value = item.get("text") or ""
+                            break
+                        if isinstance(item, str):
+                            text_value = item
+                            break
+                elif content_value is not None:
+                    text_value = content_value
+            result_block: dict[str, Any] = {
+                "type": "tool_result",
+                "tool_use_id": getattr(block, "tool_use_id", None)
+                or getattr(block, "id", None)
+                or "",
+                "content": str(text_value) if text_value is not None else "",
+            }
+            if getattr(block, "is_error", None) is not None:
+                result_block["is_error"] = getattr(block, "is_error", None)
+            return result_block
+
+        if block_type == "image":
+            return {
+                "type": "image",
+                "source": {
+                    "type": getattr(block, "source_type", None) or "base64",
+                    "media_type": getattr(block, "media_type", None) or "image/jpeg",
+                    "data": getattr(block, "image_data", None) or "",
+                },
+            }
+
+        block_dict: dict[str, Any] = {}
+        if hasattr(block, "type"):
+            block_dict["type"] = block.type
+        if hasattr(block, "text"):
+            block_dict["text"] = block.text
+        if hasattr(block, "id"):
+            block_dict["id"] = block.id
+        if hasattr(block, "name"):
+            block_dict["name"] = block.name
+        if hasattr(block, "input"):
+            block_dict["input"] = block.input
+        if hasattr(block, "content"):
+            block_dict["content"] = block.content
+        if hasattr(block, "is_error"):
+            block_dict["is_error"] = block.is_error
+        return block_dict if block_dict else None
 
     def _clear_context_messages(self, messages: list[Any]) -> list[Any]:
         retained = [msg for msg in messages if getattr(msg, "type", None) in {"user", "assistant"}]
@@ -448,11 +884,7 @@ class StdioQueryMixin:
         return retained[-4:]
 
     def _extract_final_text_parts(self, content_blocks: list[Any]) -> list[str]:
-        """Extract user-visible text for the final result summary.
-
-        A tool call resets text aggregation because pre-tool explanatory text should
-        not become the final answer text after a tool execution turn.
-        """
+        """Extract user-visible text for the final result summary."""
         text_parts: list[str] = []
         for block in content_blocks:
             block_type = getattr(block, "type", None)
@@ -470,98 +902,46 @@ class StdioQueryMixin:
                 text_parts.clear()
         return text_parts
 
-    def _coerce_structured_output(self, result_text: Optional[str]) -> Any:
-        """Best-effort JSON structured output when json_schema is configured."""
-        if not self._json_schema or not result_text:
-            return None
+    def _normalize_content_list(self, content: Any) -> list[dict[str, Any]]:
+        """Normalize message content to list[dict]."""
+        normalized: list[dict[str, Any]] = []
+        if content is None:
+            return normalized
+        if isinstance(content, str):
+            return [{"type": "text", "text": content}]
+        if isinstance(content, dict):
+            return [content]
+        if not isinstance(content, list):
+            return [{"type": "text", "text": str(content)}]
 
-        stripped = result_text.strip()
-        if not stripped:
-            return None
-
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            return None
-
-        schema_type = self._json_schema.get("type")
-        if isinstance(schema_type, str):
-            if schema_type == "integer" and isinstance(parsed, bool):
-                return None
-            if schema_type == "number" and isinstance(parsed, bool):
-                return None
-            type_checks: dict[str, tuple[type, ...]] = {
-                "object": (dict,),
-                "array": (list,),
-                "string": (str,),
-                "number": (int, float),
-                "boolean": (bool,),
-                "integer": (int,),
-            }
-            expected = type_checks.get(schema_type)
-            if expected and not isinstance(parsed, expected):
-                logger.debug(
-                    "[stdio] Structured output did not match top-level schema type",
-                    extra={"expected_type": schema_type, "actual_type": type(parsed).__name__},
-                )
-                return None
-
-        return parsed
-
-    async def _send_final_result(self, state: _QueryRuntimeState, result: ResultMessage) -> None:
-        """Send ResultMessage and mark as sent."""
-        if state.result_message_sent:
-            logger.warning("[stdio] ResultMessage already sent, skipping duplicate")
-            return
-        logger.debug("[stdio] Sending ResultMessage")
-        try:
-            await self._write_message_stream(model_to_dict(result))
-            state.result_message_sent = True
-            logger.debug("[stdio] ResultMessage sent successfully")
-        except Exception as e:
-            logger.error(f"[stdio] Failed to send ResultMessage: {e}", exc_info=True)
-            state.result_message_sent = True
-
-    async def _send_error_result(
-        self,
-        state: _QueryRuntimeState,
-        error_msg: str,
-        exc: Exception | None = None,
-    ) -> None:
-        """Send error ResultMessage with full stack trace."""
-        if exc:
-            tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-            error_detail = f"{type(exc).__name__}: {error_msg}\n\nStack trace:\n{tb_str}"
-        else:
-            error_detail = error_msg
-
-        result = ResultMessage(
-            duration_ms=state.elapsed_ms(),
-            duration_api_ms=0,
-            is_error=True,
-            subtype="error_during_execution",
-            num_turns=state.num_turns,
-            session_id=self._session_id or "",
-            total_cost_usd=None,
-            usage=None,
-            result=error_detail[:50000] if len(error_detail) > 50000 else error_detail,
-            structured_output=None,
-        )
-        await self._send_final_result(state, result)
+        for item in content:
+            if isinstance(item, dict):
+                normalized.append(item)
+            elif isinstance(item, str):
+                normalized.append({"type": "text", "text": item})
+            elif item is not None:
+                normalized.append({"type": "text", "text": str(item)})
+        return normalized
 
     async def _fail_query_request(
         self,
         request_id: str,
         state: _QueryRuntimeState,
         error_msg: str,
-        exc: Exception | None = None,
+        error_code: int = JsonRpcErrorCodes.InvalidParams,
     ) -> None:
-        """Send control error response and always follow with ResultMessage."""
+        """Send control error response."""
+        del state
         try:
-            await self._write_control_response(request_id, error=error_msg)
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": int(error_code),
+                    "message": error_msg,
+                },
+            )
         except Exception as write_error:
             logger.error(
                 f"[stdio] Failed to send control response: {write_error}",
                 exc_info=True,
             )
-        await self._send_error_result(state, error_msg, exc)

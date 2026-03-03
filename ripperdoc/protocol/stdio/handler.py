@@ -83,6 +83,7 @@ class StdioProtocolHandler(
         self._hooks: dict[str, list[dict[str, Any]]] = {}
         self._sdk_hook_scope: HooksConfig | None = None
         self._pending_requests: dict[str, Any] = {}
+        self._request_tasks: dict[str, asyncio.Task[None]] = {}
         self._request_lock = asyncio.Lock()
         self._inflight_tasks: set[asyncio.Task[None]] = set()
         self._custom_system_prompt: str | None = None
@@ -101,6 +102,9 @@ class StdioProtocolHandler(
         self._session_agents: dict[str, dict[str, str]] = {}
         self._session_agent_prompt: str | None = None
         self._disable_slash_commands: bool = False
+        self._session_persistence_enabled: bool = True
+        self._mcp_server_overrides: dict[str, Any] | None = None
+        self._mcp_disabled_servers: set[str] = set()
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []
@@ -111,6 +115,12 @@ class StdioProtocolHandler(
         self._session_history: SessionHistory | None = None
         self._query_in_progress: bool = False
         self._task_notification_task: asyncio.Task[None] | None = None
+        self._resolved_tool_use_ids: set[str] = set()
+
+        # Ensure each stdio handler starts with a clean MCP runtime override state.
+        from ripperdoc.utils.mcp import clear_mcp_runtime_overrides
+
+        clear_mcp_runtime_overrides(self._project_path)
 
 
 __all__ = ["StdioProtocolHandler"]

@@ -48,8 +48,14 @@ def _sessions_root() -> Path:
     return Path.home() / ".ripperdoc" / "sessions"
 
 
-def _session_file(project_path: Path, session_id: str) -> Path:
-    directory = project_storage_dir(_sessions_root(), project_path, ensure=True)
+def _session_file(
+    project_path: Path,
+    session_id: str,
+    ensure: bool | None = None,
+    ensure_root: bool | None = None,
+) -> Path:
+    ensure_root = bool(ensure_root) if ensure_root is not None else bool(ensure)
+    directory = project_storage_dir(_sessions_root(), project_path, ensure=ensure_root)
     return directory / f"{session_id}.jsonl"
 
 
@@ -72,12 +78,18 @@ def _deserialize_message(payload: dict) -> Optional[ConversationMessage]:
 class SessionHistory:
     """Append-only session log for a single session id."""
 
-    def __init__(self, project_path: Path, session_id: str):
+    def __init__(self, project_path: Path, session_id: str, session_persistence: bool = True):
         self.project_path = project_path
         self.session_id = session_id
-        self.path = _session_file(project_path, session_id)
+        self.session_persistence = bool(session_persistence)
+        self.path = _session_file(
+            project_path,
+            session_id,
+            ensure=self.session_persistence,
+        )
         self._seen_ids: set[str] = set()
-        self._load_seen_ids()
+        if self.session_persistence:
+            self._load_seen_ids()
 
     def _load_seen_ids(self) -> None:
         if not self.path.exists():
@@ -109,6 +121,8 @@ class SessionHistory:
 
     def append(self, message: ConversationMessage) -> None:
         """Persist a single message to the session log."""
+        if not self.session_persistence:
+            return
         # Skip progress noise
         if getattr(message, "type", None) == "progress":
             return

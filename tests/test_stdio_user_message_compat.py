@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -109,6 +110,40 @@ async def test_run_dispatches_claude_style_user_message(monkeypatch) -> None:
     assert dispatched["request_id"] == "dispatch-1"
     assert dispatched["request"]["subtype"] == "query"
     assert dispatched["request"]["prompt"] == "dispatch prompt"
+
+
+@pytest.mark.asyncio
+async def test_run_dispatches_control_request(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    captured: list[dict[str, Any]] = []
+
+    async def fake_read_messages():
+        yield {
+            "type": "control_request",
+            "request_id": "control-1",
+            "request": {"subtype": "query", "prompt": "hello from control"},
+        }
+
+    def fake_spawn_control_request_task(message: dict[str, Any]) -> None:
+        captured.append(message)
+
+    async def noop_async(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(handler, "_read_messages", fake_read_messages)
+    monkeypatch.setattr(handler, "_spawn_control_request_task", fake_spawn_control_request_task)
+    monkeypatch.setattr(handler, "flush_output", noop_async)
+    monkeypatch.setattr(handler, "_run_session_end", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_mcp_runtime", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_lsp_manager", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_background_shell", lambda force=True: None)
+
+    await handler.run()
+
+    assert len(captured) == 1
+    assert captured[0]["type"] == "control_request"
+    assert captured[0]["request"]["subtype"] == "query"
+    assert captured[0]["request"]["prompt"] == "hello from control"
 
 
 @pytest.mark.asyncio

@@ -327,6 +327,7 @@ async def run_query(
     allowed_tools: Optional[List[str]] = None,
     additional_working_dirs: Optional[List[str]] = None,
     disable_skills: bool = False,
+    session_persistence: bool = True,
 ) -> None:
     """Run a single query and print the response."""
     logger.info(
@@ -371,7 +372,11 @@ async def run_query(
     hook_manager.set_project_dir(project_path)
     hook_manager.set_session_id(session_id)
     hook_manager.set_llm_callback(build_hook_llm_callback())
-    session_history = SessionHistory(project_path, session_id or str(uuid.uuid4()))
+    session_history = SessionHistory(
+        project_path,
+        session_id or str(uuid.uuid4()),
+        session_persistence=session_persistence,
+    )
     hook_manager.set_transcript_path(str(session_history.path))
     messages: List[Any] = [create_user_message(prompt)]
     session_history.append(messages[0])

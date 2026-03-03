@@ -32,6 +32,9 @@ _MCP_CIRCUIT_BREAKER_FAILURES_DEFAULT = 2
 _MCP_CIRCUIT_BREAKER_COOLDOWN_SEC_ENV = "RIPPERDOC_MCP_CIRCUIT_BREAKER_COOLDOWN_SEC"
 _MCP_CIRCUIT_BREAKER_COOLDOWN_SEC_DEFAULT = 30.0
 
+_mcp_runtime_server_overrides: Dict[str, Dict[str, "McpServerInfo"]] = {}
+_mcp_runtime_disabled_servers: Dict[str, set[str]] = {}
+
 
 try:
     import mcp.types as mcp_types  # type: ignore[import-not-found]
@@ -213,6 +216,42 @@ def _parse_servers(data: Dict[str, Any]) -> Dict[str, McpServerInfo]:
     return servers
 
 
+def _project_scope_key(project_path: Optional[Path]) -> str:
+    path = project_path or Path.cwd()
+    try:
+        return str(path.resolve())
+    except (OSError, RuntimeError):
+        return str(path)
+
+
+def set_mcp_runtime_overrides(
+    project_path: Optional[Path] = None,
+    *,
+    servers: Optional[Dict[str, "McpServerInfo"]] = None,
+    disabled: Optional[set[str]] = None,
+) -> None:
+    """Set runtime-only MCP server overrides for a project scope."""
+    key = _project_scope_key(project_path)
+    if servers is None:
+        _mcp_runtime_server_overrides.pop(key, None)
+    else:
+        _mcp_runtime_server_overrides[key] = {
+            str(name): replace(server) for name, server in servers.items()
+        }
+
+    if disabled is None:
+        _mcp_runtime_disabled_servers.pop(key, None)
+    else:
+        _mcp_runtime_disabled_servers[key] = {str(name) for name in disabled if str(name).strip()}
+
+
+def clear_mcp_runtime_overrides(project_path: Optional[Path] = None) -> None:
+    """Clear runtime-only MCP server overrides for a project scope."""
+    key = _project_scope_key(project_path)
+    _mcp_runtime_server_overrides.pop(key, None)
+    _mcp_runtime_disabled_servers.pop(key, None)
+
+
 def _load_server_configs(project_path: Optional[Path]) -> Dict[str, McpServerInfo]:
     project_path = project_path or Path.cwd()
     candidates = [
@@ -263,7 +302,60 @@ def _load_server_configs(project_path: Optional[Path]) -> Dict[str, McpServerInf
             "candidates": [str(path) for path in candidates],
         },
     )
+    key = _project_scope_key(project_path)
+    overrides = _mcp_runtime_server_overrides.get(key)
+    if overrides is not None:
+        merged = {
+            str(name): replace(server)
+            for name, server in overrides.items()
+            if str(name).strip()
+        }
+
+    disabled = _mcp_runtime_disabled_servers.get(key)
+    if disabled:
+        for server_name in list(disabled):
+            merged.pop(server_name, None)
+
     return merged
+
+
+def load_mcp_server_configs(project_path: Optional[Path] = None) -> Dict[str, McpServerInfo]:
+    """Load effective MCP server configs (disk + plugin + runtime overrides)."""
+    return _load_server_configs(project_path)
+
+
+def parse_mcp_server_configs(raw: Any) -> Dict[str, McpServerInfo]:
+    """Parse MCP server config payloads from control requests."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        if "servers" in raw or "mcpServers" in raw:
+            return _parse_servers(raw)
+        if all(isinstance(value, dict) for value in raw.values()):
+            return _parse_servers({"servers": raw})
+        if "name" in raw and isinstance(raw.get("name"), str):
+            name = str(raw.get("name") or "").strip()
+            if not name:
+                return {}
+            entry: Dict[str, Any] = dict(raw)
+            entry.pop("name", None)
+            return {name: _parse_server(name, entry)}
+        return {}
+
+    if isinstance(raw, list):
+        parsed: Dict[str, McpServerInfo] = {}
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            entry = dict(item)
+            entry.pop("name", None)
+            parsed[name] = _parse_server(name, entry)
+        return parsed
+
+    return {}
 
 
 def _mcp_stderr_mode() -> str:
@@ -1104,6 +1196,10 @@ __all__ = [
     "McpServerInfo",
     "McpToolInfo",
     "McpResourceInfo",
+    "load_mcp_server_configs",
+    "parse_mcp_server_configs",
+    "set_mcp_runtime_overrides",
+    "clear_mcp_runtime_overrides",
     "get_existing_mcp_runtime",
     "load_mcp_servers",
     "load_mcp_servers_async",

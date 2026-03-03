@@ -341,12 +341,15 @@ class StdioConfigMixin:
         tool_input = self._sanitize_for_json(tool_input)
 
         request_payload = {
-            "subtype": "can_use_tool",
-            "tool_name": tool_name,
-            "input": tool_input,
+            "name": "ripperdoc.can_use_tool",
+            "arguments": {
+                "tool_name": tool_name,
+                "input": tool_input,
+                "force_prompt": force_prompt,
+            },
         }
         if force_prompt:
-            request_payload["force_prompt"] = True
+            request_payload["arguments"]["force_prompt"] = True
         request_timeout = 0.0 if tool_name == "AskUserQuestion" else STDIO_HOOK_TIMEOUT_SEC
 
         try:
@@ -519,10 +522,13 @@ class StdioConfigMixin:
         try:
             response = await self._send_control_request(
                 {
-                    "subtype": "hook_callback",
-                    "callback_id": callback_id,
-                    "input": safe_input,
-                    "tool_use_id": tool_use_id,
+                    "name": "ripperdoc.hook_callback",
+                    "arguments": {
+                        "callback_id": callback_id,
+                        "input": safe_input,
+                        "tool_use_id": tool_use_id,
+                        "timeout": timeout,
+                    },
                 },
                 timeout=timeout,
             )

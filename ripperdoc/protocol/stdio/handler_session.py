@@ -5,14 +5,17 @@ from __future__ import annotations
 import logging
 import asyncio
 import json
+import os
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from ripperdoc import __version__
-from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.core.agents import load_agent_definitions
+from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.core.config import (
     get_effective_model_profile,
     get_project_config,
@@ -23,21 +26,23 @@ from ripperdoc.core.session_agents import (
     parse_session_agents,
     resolve_session_agent_prompt,
 )
-from ripperdoc.core.output_styles import resolve_output_style
+from ripperdoc.core.output_styles import load_all_output_styles, resolve_output_style
 from ripperdoc.core.plugins import discover_plugins, set_runtime_plugin_dirs
 from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
 from ripperdoc.core.query import QueryContext
-from ripperdoc.core.message_utils import resolve_model_profile
 from ripperdoc.protocol.models import (
-    InitializeResponseData,
-    MCPServerInfo,
-    MCPServerStatusInfo,
-    SystemStreamMessage,
+    DEFAULT_PROTOCOL_VERSION,
+    JsonRpcErrorCodes,
+    InitializeParams,
+    InitializeResult,
+    InitializeServerInfo,
+    ProtocolCapabilities,
     model_to_dict,
 )
+from .error_codes import resolve_protocol_request_error_code
 from ripperdoc.tools.dynamic_mcp_tool import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
@@ -79,12 +84,60 @@ class StdioSessionMixin:
             request_id: The request ID.
         """
         if self._initialized:
-            await self._write_control_response(request_id, error="Already initialized")
+            await self._fail_initialize_request(
+                request_id,
+                "Already initialized",
+                JsonRpcErrorCodes.InvalidRequest,
+            )
             return
 
         try:
-            # Extract options from request
-            request_options = request.get("options", {}) or {}
+            initialize_request = self._coerce_initialize_request(request)
+            try:
+                initialize_params = InitializeParams.model_validate(initialize_request)
+            except ValidationError as exc:
+                await self._fail_initialize_request(
+                    request_id,
+                    f"Invalid initialize request: {exc}",
+                    resolve_protocol_request_error_code(
+                        exc,
+                        default=JsonRpcErrorCodes.InvalidParams,
+                    ),
+                )
+                return
+
+            requested_protocol_version = initialize_params.protocolVersion
+            protocol_version = (
+                requested_protocol_version
+                if requested_protocol_version == DEFAULT_PROTOCOL_VERSION
+                else DEFAULT_PROTOCOL_VERSION
+            )
+            if requested_protocol_version != protocol_version:
+                logger.info(
+                    "[stdio] Unsupported protocol version %s, falling back to %s",
+                    requested_protocol_version,
+                    protocol_version,
+                )
+
+            request_options: dict[str, Any] = {}
+            request_body = initialize_request
+            meta = request_body.get("_meta")
+            if isinstance(meta, dict):
+                ripperdoc_options = meta.get("ripperdoc_options")
+                if isinstance(ripperdoc_options, dict):
+                    request_options.update(ripperdoc_options)
+            legacy_options = request.get("options")
+            if isinstance(legacy_options, dict):
+                request_options.update(legacy_options)
+
+            hooks = request_body.get("hooks")
+            if isinstance(hooks, dict):
+                request_options.setdefault("hooks", hooks)
+
+            agents = request_body.get("agents")
+            if isinstance(agents, dict):
+                request_options.setdefault("agents", agents)
+
             options = {**self._default_options, **request_options}
             self._session_id = options.get("session_id") or str(uuid.uuid4())
             self._custom_system_prompt = options.get("system_prompt")
@@ -153,8 +206,8 @@ class StdioSessionMixin:
             ]
             ignored_in_use = [
                 key
-                for key in ignored_option_keys
-                if options.get(key) not in (None, "", [], (), False)
+            for key in ignored_option_keys
+            if options.get(key) not in (None, "", [], (), False)
             ]
             if ignored_in_use:
                 logger.info(
@@ -227,12 +280,17 @@ class StdioSessionMixin:
                     source="agent",
                 )
             except ValueError as exc:
-                await self._write_control_response(request_id, error=str(exc))
+                await self._fail_initialize_request(
+                    request_id,
+                    str(exc),
+                    JsonRpcErrorCodes.InvalidParams,
+                )
                 return
             self._disable_slash_commands = self._coerce_bool_option(
                 options.get("disable_slash_commands"),
                 False,
             )
+            self._session_persistence_enabled = options.get("session_persistence", True) is not False
 
             # Parse tool options
             self._allowed_tools = self._normalize_tool_list(options.get("allowed_tools"))
@@ -284,7 +342,11 @@ class StdioSessionMixin:
                     "environment variables or complete onboarding."
                 )
                 logger.error(f"[stdio] {error_msg}")
-                await self._write_control_response(request_id, error=error_msg)
+                await self._fail_initialize_request(
+                    request_id,
+                    error_msg,
+                    JsonRpcErrorCodes.InvalidParams,
+                )
                 return
 
             # Create query context
@@ -306,7 +368,9 @@ class StdioSessionMixin:
             hook_manager.set_session_id(self._session_id)
             hook_manager.set_llm_callback(build_hook_llm_callback())
             self._session_history = SessionHistory(
-                self._project_path, self._session_id or str(uuid.uuid4())
+                self._project_path,
+                self._session_id or str(uuid.uuid4()),
+                session_persistence=self._session_persistence_enabled,
             )
             hook_manager.set_transcript_path(str(self._session_history.path))
 
@@ -316,7 +380,6 @@ class StdioSessionMixin:
                 hooks = options.get("hooks", {})
             self._configure_sdk_hooks(hooks)
 
-            session_start_notices: list[str] = []
             # Run SessionStart hooks during initialize (once per session)
             queue = self._query_context.pending_message_queue if self._query_context else None
             hook_scopes = self._query_context.hook_scopes if self._query_context else []
@@ -324,8 +387,6 @@ class StdioSessionMixin:
                 try:
                     async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
                         session_start_result = await hook_manager.run_session_start_async("startup")
-                    if getattr(session_start_result, "system_message", None):
-                        session_start_notices.append(str(session_start_result.system_message))
                     self._session_hook_contexts = self._collect_hook_contexts(session_start_result)
                 except asyncio.TimeoutError:
                     logger.warning(
@@ -373,9 +434,8 @@ class StdioSessionMixin:
                 )
                 self._skill_instructions = build_skill_summary(enabled_skills)
 
-            agent_result = load_agent_definitions(project_path=self._project_path)
-            plugin_result = discover_plugins(project_path=self._project_path)
-            plugin_names = [plugin.name for plugin in plugin_result.plugins]
+            load_agent_definitions(project_path=self._project_path)
+            discover_plugins(project_path=self._project_path)
 
             system_prompt = self._resolve_system_prompt(
                 tools,
@@ -386,95 +446,178 @@ class StdioSessionMixin:
 
             # Apply permission mode to runtime state (checker + query context)
             self._apply_permission_mode(permission_mode)
-            applied_permission_mode = (
-                self._query_context.permission_mode if self._query_context else permission_mode
-            )
 
             # Mark as initialized
             self._initialized = True
 
-            # Send success response with available tools
-            # Use simple list format for Claude SDK compatibility
-            def _display_agent_name(agent_type: str) -> str:
-                if agent_type in ("explore", "plan"):
-                    return agent_type.title()
-                return agent_type
+            # Build enhanced response payload aligned with Claude Code SDK
+            slash_commands = list_slash_commands()
+            custom_commands = list_custom_commands(self._project_path)
 
-            agent_names = [
-                _display_agent_name(agent.agent_type) for agent in agent_result.active_agents
-            ]
-            skill_names = [skill.name for skill in enabled_skills] if enabled_skills else []
+            # Build commands list with name, description, argumentHint
+            commands_payload: list[dict[str, str]] = []
+            for cmd in slash_commands:
+                commands_payload.append({
+                    "name": getattr(cmd, "name", ""),
+                    "description": getattr(cmd, "description", "") or "",
+                    "argumentHint": "",  # SlashCommand doesn't have argumentHint field
+                })
+            for custom_cmd in custom_commands:
+                commands_payload.append({
+                    "name": getattr(custom_cmd, "name", ""),
+                    "description": getattr(custom_cmd, "description", "") or "",
+                    "argumentHint": "",  # CustomCommandDefinition doesn't have argumentHint
+                })
 
-            slash_commands: list[str] = []
-            if not self._disable_slash_commands:
-                slash_commands = [cmd.name for cmd in list_slash_commands()]
-                for custom_cmd in list_custom_commands(self._project_path):
-                    if custom_cmd.name not in slash_commands:
-                        slash_commands.append(custom_cmd.name)
+            # Load available output styles
+            output_style_result = load_all_output_styles(self._project_path)
+            available_styles = [style.key for style in output_style_result.styles]
 
-            resolved_model_profile = resolve_model_profile(model or "main")
-            resolved_model = (
-                resolved_model_profile.model if resolved_model_profile else (model or "main")
+            # Build models info (simplified - just current model)
+            models_payload: dict[str, Any] = {}
+            if model_profile is not None and hasattr(model_profile, "model"):
+                models_payload = {
+                    "default": getattr(model_profile, "model", model),
+                    "current": model,
+                }
+            else:
+                models_payload = {
+                    "default": model,
+                    "current": model,
+                }
+
+            # Account info placeholder (ripperdoc doesn't have account management)
+            account_payload: dict[str, Any] = {
+                "email": None,
+                "organization": None,
+                "subscriptionType": None,
+                "tokenSource": None,
+                "apiKeySource": None,
+            }
+
+            # Build enhanced response
+            init_response = InitializeResult(
+                protocolVersion=protocol_version,
+                capabilities=ProtocolCapabilities(
+                    tools={"listChanged": False},
+                    sampling={"tools": True},
+                ),
+                serverInfo=InitializeServerInfo(
+                    name="ripperdoc",
+                    title="Ripperdoc",
+                    version=__version__,
+                ),
+                instructions=system_prompt if (system_prompt or "").strip() else None,
             )
 
-            init_response = InitializeResponseData(
-                session_id=self._session_id or "",
-                system_prompt=system_prompt,
-                tools=[t.name for t in tools],
-                mcp_servers=[MCPServerInfo(name=s.name) for s in servers] if servers else [],
-                slash_commands=slash_commands,
-                ripperdoc_version=__version__,
-                output_style=self._output_style,
-                output_language=self._output_language,
-                agents=agent_names,
-                skills=skill_names,
-                plugins=plugin_names,
-            )
-
-            # Emit a system/init stream message first (Claude CLI compatibility)
-            try:
-                system_message = SystemStreamMessage(
-                    uuid=str(uuid.uuid4()),
-                    session_id=self._session_id or "",
-                    api_key_source=init_response.apiKeySource,
-                    cwd=str(self._project_path),
-                    tools=[t.name for t in tools],
-                    mcp_servers=(
-                        [
-                            MCPServerStatusInfo(name=s.name, status=getattr(s, "status", "unknown"))
-                            for s in servers
-                        ]
-                        if servers
-                        else []
-                    ),
-                    model=resolved_model,
-                    permission_mode=applied_permission_mode,
-                    slash_commands=slash_commands,
-                    ripperdoc_version=init_response.ripperdoc_version,
-                    output_style=init_response.output_style,
-                    output_language=init_response.output_language,
-                    agents=agent_names,
-                    skills=skill_names,
-                    plugins=plugin_names,
-                )
-                await self._write_message_stream(model_to_dict(system_message))
-            except Exception as e:
-                logger.warning(f"[stdio] Failed to emit system init message: {e}")
-
-            for notice_text in session_start_notices:
-                stream_message = self._build_hook_notice_stream_message(
-                    notice_text,
-                    "SessionStart",
-                    tool_name=None,
-                    level="info",
-                )
-                await self._write_message_stream(model_to_dict(stream_message))
+            # Convert to dict and add Claude Code compatible fields
+            response_dict = model_to_dict(init_response)
+            response_dict["commands"] = commands_payload
+            response_dict["output_style"] = self._output_style
+            response_dict["available_output_styles"] = available_styles
+            response_dict["models"] = models_payload
+            response_dict["account"] = account_payload
+            response_dict["pid"] = os.getpid()
 
             await self._write_control_response(
                 request_id,
-                response=model_to_dict(init_response),
+                response=response_dict,
             )
 
         except Exception as e:
             logger.error(f"Initialize failed: {e}", exc_info=True)
-            await self._write_control_response(request_id, error=str(e))
+            error_code = resolve_protocol_request_error_code(
+                e,
+                default=JsonRpcErrorCodes.InvalidParams,
+            )
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": error_code,
+                    "message": str(e),
+                },
+            )
+
+    def _coerce_initialize_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Normalize initialize payload into strict `InitializeParams` shape."""
+        request_body: dict[str, Any] = {}
+        if isinstance(request, dict):
+            request_body = dict(request)
+
+        # Control protocol variant may wrap payload in `request`.
+        nested_request = request_body.get("request")
+        if isinstance(nested_request, dict):
+            request_body = dict(nested_request) | request_body
+
+        # JSON-RPC wrapper variant may pass params.
+        params_request = request_body.get("params")
+        if isinstance(params_request, dict):
+            request_body = dict(params_request) | request_body
+
+        # Allow SDK option passthrough for direct handler usage and control-style
+        # initialize calls that currently include only a subset of required fields.
+        options = request_body.get("options")
+        if isinstance(options, dict):
+            if "protocolVersion" not in request_body or request_body.get("protocolVersion") is None:
+                request_body["protocolVersion"] = DEFAULT_PROTOCOL_VERSION
+            if "capabilities" not in request_body or request_body.get("capabilities") is None:
+                request_body["capabilities"] = {}
+            if "clientInfo" not in request_body or request_body.get("clientInfo") is None:
+                request_body["clientInfo"] = {
+                    "name": "ripperdoc",
+                    "version": __version__,
+                }
+            elif isinstance(request_body["clientInfo"], dict):
+                client_info_payload = dict(request_body["clientInfo"])
+                client_info_payload.setdefault("name", "ripperdoc")
+                client_info_payload.setdefault("version", __version__)
+                request_body["clientInfo"] = client_info_payload
+
+        # Keep only expected initialize payload keys; unknown keys are stripped to
+        # preserve strict schema behavior for `extra="forbid"` on pydantic models.
+        initialized_request = {
+            "protocolVersion": request_body.get("protocolVersion"),
+            "capabilities": request_body.get("capabilities"),
+            "clientInfo": request_body.get("clientInfo"),
+            "_meta": request_body.get("_meta"),
+        }
+
+        # Control-side initialize payloads from SDK may include only hooks/agents;
+        # fill missing required fields here to remain protocol-compatible while
+        # keeping model-level schema strictness for user-provided fields.
+        if (
+            request_body.get("subtype") == "initialize"
+            or "hooks" in request_body
+            or "agents" in request_body
+            and initialized_request["protocolVersion"] is None
+        ):
+            initialized_request["protocolVersion"] = DEFAULT_PROTOCOL_VERSION
+            initialized_request["capabilities"] = initialized_request.get("capabilities") or {}
+            client_info_payload = initialized_request.get("clientInfo")
+            if not isinstance(client_info_payload, dict):
+                client_info_payload = {
+                    "name": "ripperdoc",
+                    "version": __version__,
+                }
+            else:
+                client_info_payload = dict(client_info_payload)
+                client_info_payload.setdefault("name", "ripperdoc")
+                client_info_payload.setdefault("version", __version__)
+            initialized_request["clientInfo"] = client_info_payload
+
+        return initialized_request
+
+    async def _fail_initialize_request(
+        self,
+        request_id: str,
+        error_msg: str,
+        error_code: int = JsonRpcErrorCodes.InvalidParams,
+    ) -> None:
+        """Send a JSON-RPC error for initialize request."""
+        await self._write_control_response(
+            request_id,
+            error={
+                "code": int(error_code),
+                "message": error_msg,
+            },
+        )

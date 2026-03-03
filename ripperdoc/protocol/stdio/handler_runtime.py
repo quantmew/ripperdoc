@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from typing import Any
@@ -18,7 +19,7 @@ from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.utils.messages import create_user_message
-from ripperdoc.utils.mcp import shutdown_mcp_runtime
+from ripperdoc.utils.mcp import clear_mcp_runtime_overrides, shutdown_mcp_runtime
 from ripperdoc.utils.task_notifications import (
     format_task_notification_for_agent,
     parse_task_notification,
@@ -61,7 +62,7 @@ class StdioRuntimeMixin:
     def _coerce_user_message_to_control_request(
         self, message: dict[str, Any]
     ) -> dict[str, Any] | None:
-        """Convert incoming `type=user` stream message into a query control request."""
+        """Convert incoming `type=user` stream message into a control request."""
         try:
             validated_message = IncomingUserStreamMessage.model_validate(message)
         except ValidationError as e:
@@ -79,16 +80,42 @@ class StdioRuntimeMixin:
         return {
             "type": "control_request",
             "request_id": request_id,
-            "request": {"subtype": "query", "prompt": prompt},
+            "request": {
+                "subtype": "query",
+                "prompt": prompt,
+                "maxTokens": 1024,
+            },
         }
+
+    def _spawn_task_notification_followup_query(self, prompt: str) -> None:
+        """Spawn an internal control request for a tool notification."""
+        self._spawn_control_request_task(
+            {
+                "type": "control_request",
+                "request_id": f"task_notification_{uuid.uuid4().hex}",
+                "request": {
+                    "subtype": "query",
+                    "prompt": prompt,
+                    "maxTokens": 1024,
+                },
+            }
+        )
 
     def _spawn_control_request_task(self, message: dict[str, Any]) -> None:
         """Schedule a control request for async handling with lifecycle tracking."""
         task = asyncio.create_task(self._handle_control_request(message))
         self._inflight_tasks.add(task)
+        request_id = message.get("request_id")
+        if request_id is None:
+            request_id = message.get("id")
+        tracked_request_id = str(request_id) if request_id is not None else None
+        if tracked_request_id:
+            self._request_tasks[tracked_request_id] = task
 
         def _cleanup_task(t: asyncio.Task[None]) -> None:
             self._inflight_tasks.discard(t)
+            if tracked_request_id and self._request_tasks.get(tracked_request_id) is t:
+                self._request_tasks.pop(tracked_request_id, None)
             if t.cancelled():
                 return
             exc = t.exception()
@@ -173,9 +200,6 @@ class StdioRuntimeMixin:
                                 exc,
                             )
 
-                    message_dict = self._convert_message_to_sdk(user_message)
-                    if message_dict is not None:
-                        await self._write_message_stream(message_dict)
                     self._spawn_task_notification_followup_query(agent_message)
                 except Exception as exc:
                     logger.debug(
@@ -184,71 +208,58 @@ class StdioRuntimeMixin:
                         exc,
                     )
 
-    def _spawn_task_notification_followup_query(self, agent_message: str) -> None:
-        """Automatically trigger an assistant follow-up for idle task notifications."""
-        synthetic_user_message = {
-            "type": "user",
-            "uuid": f"task_notification_{uuid.uuid4().hex}",
-            "message": {
-                "role": "user",
-                "content": agent_message,
-            },
-        }
-        control_message = self._coerce_user_message_to_control_request(synthetic_user_message)
-        if control_message is None:
-            return
-        self._spawn_control_request_task(control_message)
-
-    async def _run_session_end(self, reason: str) -> None:
-        if self._session_end_sent or not self._session_started:
-            return
-        duration = 0.0
-        if self._session_start_time is not None:
-            duration = max(time.time() - self._session_start_time, 0.0)
-        message_count = len(self._conversation_messages)
-        hook_scopes = self._query_context.hook_scopes if self._query_context else []
-        logger.debug("[stdio] Running session end hooks")
-        try:
-            with bind_hook_scopes(hook_scopes):
-                async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
-                    await hook_manager.run_session_end_async(
-                        reason,
-                        duration_seconds=duration,
-                        message_count=message_count,
-                    )
-            logger.debug("[stdio] Session end hooks completed")
-        except asyncio.TimeoutError:
-            logger.warning(
-                f"[stdio] Session end hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s"
-            )
-        except Exception as e:
-            logger.warning(f"[stdio] Session end hook failed: {e}")
-        finally:
-            self._session_end_sent = True
-
     async def run(self) -> None:
-        """Main run loop for the stdio protocol handler with graceful shutdown.
-
-        Reads messages from stdin and handles them until EOF.
-        """
+        """Main run loop for stdio protocol handler with graceful shutdown."""
         logger.info("Stdio protocol handler starting")
         cancel_inflight_tasks = True
 
         try:
             async for message in self._read_messages():
-                msg_type = message.get("type")
+                if not isinstance(message, dict):
+                    logger.warning("[stdio] Ignoring non-dict message")
+                    continue
 
-                if msg_type == "control_response":
+                is_jsonrpc = message.get("jsonrpc") == "2.0"
+                request_id = message.get("id")
+                has_method = isinstance(message.get("method"), str)
+                is_response = is_jsonrpc and request_id is not None and not has_method
+
+                if is_response or ("result" in message or "error" in message):
                     await self._handle_control_response(message)
                     self._ensure_task_notification_poller()
                     continue
 
-                if msg_type == "control_request":
+                if message.get("type") == "keep_alive":
+                    continue
+
+                if message.get("type") == "update_environment_variables":
+                    variables = message.get("variables")
+                    if isinstance(variables, dict):
+                        for key, value in variables.items():
+                            os.environ[str(key)] = "" if value is None else str(value)
+                    else:
+                        logger.debug(
+                            "[stdio] Ignoring update_environment_variables without mapping payload: %s",
+                            type(variables).__name__,
+                        )
+                    continue
+
+                if message.get("type") == "control_request":
                     self._spawn_control_request_task(message)
                     self._ensure_task_notification_poller()
                     continue
 
-                if msg_type == "user":
+                if message.get("type") == "control_cancel_request":
+                    await self._handle_control_cancel_request(message)
+                    self._ensure_task_notification_poller()
+                    continue
+
+                if is_jsonrpc and has_method:
+                    self._spawn_control_request_task(message)
+                    self._ensure_task_notification_poller()
+                    continue
+
+                if message.get("type") == "user":
                     control_message = self._coerce_user_message_to_control_request(message)
                     if control_message is None:
                         logger.warning(
@@ -259,19 +270,18 @@ class StdioRuntimeMixin:
                     self._ensure_task_notification_poller()
                     continue
 
-                # Unknown message type
-                logger.warning(f"Unknown message type: {msg_type}")
+                logger.warning("[stdio] Unknown message format: %s", message)
 
             # stdin EOF in stream-json mode is expected after SDK finishes sending prompts.
             # Keep in-flight query tasks alive so they can finish and emit results.
             cancel_inflight_tasks = False
 
         except (OSError, IOError, json.JSONDecodeError) as e:
-            logger.error(f"Error in stdio loop: {e}", exc_info=True)
+            logger.error("Error in stdio loop: %s", e, exc_info=True)
         except asyncio.CancelledError:
             logger.info("Stdio protocol handler cancelled")
         except Exception as e:
-            logger.error(f"Unexpected error in stdio loop: {type(e).__name__}: {e}", exc_info=True)
+            logger.error("Unexpected error in stdio loop: %s: %s", type(e).__name__, e, exc_info=True)
         finally:
             set_runtime_task_scope(session_id=None)
             # Comprehensive cleanup with timeout
@@ -280,95 +290,120 @@ class StdioRuntimeMixin:
             try:
                 await self._stop_task_notification_poller()
             except Exception as e:
-                logger.debug(f"[cleanup] Failed stopping task notification poller: {e}")
+                logger.debug("[cleanup] Failed stopping task notification poller: %s", e)
 
             try:
                 await self.flush_output()
             except Exception as e:
-                logger.error(f"[cleanup] Error flushing output: {e}")
-
-            if self._inflight_tasks:
-                if cancel_inflight_tasks:
-                    for task in list(self._inflight_tasks):
-                        task.cancel()
-                    try:
-                        await asyncio.gather(*self._inflight_tasks, return_exceptions=True)
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        async with asyncio_timeout(30):
-                            await asyncio.gather(*self._inflight_tasks, return_exceptions=True)
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "[cleanup] Timed out waiting for inflight tasks; cancelling remaining tasks"
-                        )
-                        for task in list(self._inflight_tasks):
-                            task.cancel()
-                        try:
-                            await asyncio.gather(*self._inflight_tasks, return_exceptions=True)
-                        except Exception:
-                            pass
+                logger.error("[cleanup] Error flushing output: %s", e)
 
             try:
+                await self._run_shutdown_tasks(cancel_inflight_tasks)
+            finally:
                 await self._run_session_end("other")
+
+    async def _run_shutdown_tasks(self, cancel_inflight_tasks: bool) -> None:
+        """Run global daemon shutdown hooks."""
+
+        pending_worktrees = list_session_worktrees()
+        if pending_worktrees:
+            kept = consume_session_worktrees()
+            logger.info("[cleanup] Preserved %d worktree(s) on stdio shutdown", len(kept))
+
+        shutdown_jobs: list[asyncio.Task[None]] = []
+
+        async def shutdown_mcp() -> None:
+            try:
+                async with asyncio_timeout(10):
+                    await shutdown_mcp_runtime()
+                    clear_mcp_runtime_overrides(getattr(self, "_project_path", None))
+            except asyncio.TimeoutError:
+                logger.warning("[cleanup] MCP runtime shutdown timed out")
             except Exception as e:
-                logger.warning(f"[cleanup] Session end hook failed: {e}")
+                logger.error("[cleanup] Error shutting down MCP runtime: %s", e)
 
-            pending_worktrees = list_session_worktrees()
-            if pending_worktrees:
-                kept = consume_session_worktrees()
-                logger.info(
-                    "[cleanup] Preserved %d worktree(s) on stdio shutdown",
-                    len(kept),
-                )
+        async def shutdown_lsp() -> None:
+            try:
+                async with asyncio_timeout(10):
+                    await shutdown_lsp_manager()
+            except asyncio.TimeoutError:
+                logger.warning("[cleanup] LSP manager shutdown timed out")
+            except Exception as e:
+                logger.error("[cleanup] Error shutting down LSP manager: %s", e)
 
-            cleanup_tasks = []
+        async def shutdown_shell() -> None:
+            try:
+                await shutdown_background_shell()
+            except Exception as e:
+                logger.error("[cleanup] Error shutting down background shell: %s", e)
 
-            # Add MCP runtime shutdown
-            async def cleanup_mcp() -> None:
-                try:
-                    async with asyncio_timeout(10):
-                        await shutdown_mcp_runtime()
-                except asyncio.TimeoutError:
-                    logger.warning("[cleanup] MCP runtime shutdown timed out")
-                except Exception as e:
-                    logger.error(f"[cleanup] Error shutting down MCP runtime: {e}")
+        shutdown_jobs.extend(
+            [
+                asyncio.create_task(shutdown_mcp()),
+                asyncio.create_task(shutdown_lsp()),
+                asyncio.create_task(shutdown_shell()),
+            ]
+        )
 
-            cleanup_tasks.append(asyncio.create_task(cleanup_mcp()))
+        if cancel_inflight_tasks:
+            for task in list(self._inflight_tasks):
+                task.cancel()
 
-            # Add LSP manager shutdown
-            async def cleanup_lsp() -> None:
-                try:
-                    async with asyncio_timeout(10):
-                        await shutdown_lsp_manager()
-                except asyncio.TimeoutError:
-                    logger.warning("[cleanup] LSP manager shutdown timed out")
-                except Exception as e:
-                    logger.error(f"[cleanup] Error shutting down LSP manager: {e}")
-
-            cleanup_tasks.append(asyncio.create_task(cleanup_lsp()))
-
-            # Add background shell shutdown
-            async def cleanup_shell() -> None:
-                try:
-                    shutdown_background_shell(force=True)
-                except Exception:
-                    pass  # Background shell cleanup is best-effort
-
-            cleanup_tasks.append(asyncio.create_task(cleanup_shell()))
-
-            # Wait for all cleanup tasks with overall timeout
+        if cancel_inflight_tasks:
+            try:
+                await asyncio.gather(*self._inflight_tasks, return_exceptions=True)
+            except Exception:
+                pass
+        else:
             try:
                 async with asyncio_timeout(30):
-                    results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-                    # Check for any exceptions that occurred
-                    for i, result in enumerate(results):
-                        if isinstance(result, Exception):
-                            logger.error(f"[cleanup] Task {i} failed: {result}")
+                    await asyncio.gather(*self._inflight_tasks, return_exceptions=True)
             except asyncio.TimeoutError:
-                logger.warning("[cleanup] Cleanup tasks timed out after 30s")
-            except Exception as e:
-                logger.error(f"[cleanup] Error during cleanup: {e}")
+                logger.warning("[cleanup] Timed out waiting for inflight tasks; cancelling remaining")
+                for task in list(self._inflight_tasks):
+                    task.cancel()
+                try:
+                    await asyncio.gather(*self._inflight_tasks, return_exceptions=True)
+                except Exception:
+                    pass
 
-            logger.info("Stdio protocol handler shutdown complete")
+        if self._inflight_tasks:
+            self._inflight_tasks.clear()
+
+        try:
+            await asyncio.gather(*shutdown_jobs, return_exceptions=True)
+        except Exception as e:
+            logger.debug("[cleanup] Shutdown jobs failure: %s", e)
+
+        logger.debug("[cleanup] Shutdown tasks finished")
+
+    async def _run_shutdown_hook(self) -> None:
+        """Compatibility shim for external callers expecting _run_shutdown_hook."""
+        await self._run_session_end("other")
+
+    async def _run_session_end(self, reason: str) -> None:
+        """Run async session-end hook once and avoid duplicate execution."""
+        if self._session_end_sent:
+            return
+        self._session_end_sent = True
+
+        if not self._session_started:
+            return
+
+        duration_seconds = None
+        if self._session_start_time is not None:
+            duration_seconds = max(time.time() - self._session_start_time, 0.0)
+
+        message_count = len(self._conversation_messages) if self._conversation_messages else 0
+        try:
+            await hook_manager.run_session_end_async(
+                reason,
+                duration_seconds=duration_seconds,
+                message_count=message_count,
+            )
+        except Exception as e:
+            logger.warning(
+                "[stdio] Session end hook failed: %s: %s",
+                type(e).__name__,
+                e,
+            )

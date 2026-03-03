@@ -106,7 +106,8 @@ async def test_run_stdio_print_mode_merges_default_options(monkeypatch):
         default_options={"max_thinking_tokens": 128, "json_schema": '{"type":"object"}'},
     )
 
-    init_options = captured["initialize"]["request"]["options"]
+    init_request = captured["initialize"]["request"]
+    init_options = init_request["_meta"]["ripperdoc_options"]
     assert init_options["max_thinking_tokens"] == 128
     assert init_options["json_schema"] == '{"type":"object"}'
     assert init_options["sdk_can_use_tool"] is False

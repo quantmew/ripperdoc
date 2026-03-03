@@ -19,6 +19,7 @@ from ripperdoc.cli import worktree_tmux
 from ripperdoc.cli.agents_cli import agents_cmd
 from ripperdoc.cli.bootstrap_cli import (
     _change_cwd_if_requested,
+    _is_non_interactive_mode,
     _log_resume_state,
     _prepare_cli_runtime_inputs,
     _read_initial_query_from_stdin,
@@ -40,6 +41,7 @@ from ripperdoc.core.plugins import set_runtime_plugin_dirs
 from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.utils.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
+from ripperdoc.utils.session_history import SessionHistory
 from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.worktree import (
     WorktreeSession,
@@ -87,6 +89,25 @@ def _merge_append_system_prompt(
     if not append_system_prompt:
         return session_agent_prompt
     return f"{session_agent_prompt}\n\n{append_system_prompt}"
+
+
+def _coerce_session_id(session_id: Optional[str]) -> Optional[str]:
+    """Validate and normalize explicit session IDs from CLI input."""
+    if session_id is None:
+        return None
+    if not session_id.strip():
+        return None
+    try:
+        return str(uuid.UUID(session_id))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise click.ClickException("Error: --session-id must be a valid UUID.") from exc
+
+
+def _ensure_session_id_available(*, session_id: str, project_path: Path) -> None:
+    """Fail fast when an explicit session ID is already persisted on disk."""
+    session_history = SessionHistory(project_path, session_id, session_persistence=False)
+    if session_history.path.exists():
+        raise click.ClickException(f"Error: Session ID {session_id} is already in use.")
 
 
 _PR_WORKTREE_URL_RE = worktree_tmux._PR_WORKTREE_URL_RE
@@ -395,6 +416,18 @@ def _register_precreated_worktree_from_env() -> Optional[WorktreeSession]:
     help="Resume a specific session by id prefix.",
 )
 @click.option(
+    "--session-id",
+    type=str,
+    default=None,
+    help="Use a specific session ID for the conversation (must be a valid UUID).",
+)
+@click.option(
+    "--no-session-persistence",
+    is_flag=True,
+    default=False,
+    help="Disable session persistence - sessions will not be saved to disk and cannot be resumed (only works with --print mode).",
+)
+@click.option(
     "--init",
     "setup_init",
     is_flag=True,
@@ -452,6 +485,8 @@ def cli(
     output_format: str,
     print_mode: bool,
     print_prompt: Optional[str],
+    session_id: Optional[str],
+    no_session_persistence: bool,
     permission_mode: str,
     max_turns: Optional[int],
     allowed_tools_csv: Optional[str],
@@ -487,7 +522,22 @@ def cli(
     tmux_classic: bool,  # noqa: ARG001
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
-    session_id = str(uuid.uuid4())
+    explicit_session_id = _coerce_session_id(session_id)
+    if explicit_session_id and (continue_session or resume_session) and not fork_session:
+        raise click.ClickException(
+            "Error: --session-id can only be used with --continue or --resume if --fork-session is also specified."
+        )
+    if no_session_persistence and not _is_non_interactive_mode(
+        output_format=output_format,
+        print_mode=print_mode,
+        setup_init_only=setup_init_only,
+    ):
+        raise click.ClickException(
+            "Error: --no-session-persistence can only be used with --print mode."
+        )
+
+    session_persistence = not no_session_persistence
+    session_id = explicit_session_id or str(uuid.uuid4())
     os.environ.setdefault("RIPPERDOC_SESSION_ID", session_id)
     debug_filter = resolve_debug_filter_from_extra_args(
         ctx=ctx,
@@ -513,6 +563,7 @@ def cli(
         additional_working_dirs,
         sdk_default_options,
         session_agent_prompt,
+        session_persistence,
     ) = _prepare_cli_runtime_inputs(
         ctx=ctx,
         output_format=output_format,
@@ -535,6 +586,7 @@ def cli(
         max_budget_usd=max_budget_usd,
         max_thinking_tokens=max_thinking_tokens,
         json_schema=json_schema,
+        session_persistence=session_persistence,
     )
     effective_append_system_prompt = _merge_append_system_prompt(
         append_system_prompt,
@@ -546,6 +598,9 @@ def cli(
         if Path.cwd().resolve() != project_path:
             os.chdir(project_path)
         console.print(f"[dim]Switched to worktree: {precreated_worktree.worktree_path}[/dim]")
+
+    if explicit_session_id is not None:
+        _ensure_session_id_available(session_id=explicit_session_id, project_path=project_path)
 
     if use_tmux and not use_worktree:
         raise click.ClickException("Error: --tmux requires --worktree")
@@ -582,6 +637,8 @@ def cli(
         print_prompt=print_prompt,
         prompt=prompt,
         input_format=input_format,
+        session_id=session_id,
+        session_persistence=session_persistence,
         model=model,
         permission_mode=effective_permission_mode,
         max_turns=max_turns,
@@ -599,6 +656,7 @@ def cli(
     session_id, resume_messages, resumed_summary, most_recent = _resolve_resume_state(
         project_path=project_path,
         session_id=session_id,
+        fork_session=fork_session,
         resume_session=resume_session,
         continue_session=continue_session,
     )
@@ -656,6 +714,7 @@ def cli(
         if _run_setup_if_needed(
             setup_trigger=setup_trigger,
             project_path=project_path,
+            session_persistence=session_persistence,
             session_id=session_id,
             setup_init_only=setup_init_only,
             setup_maintenance=setup_maintenance,
@@ -707,6 +766,7 @@ def cli(
                     allowed_tools=allowed_tools,
                     additional_working_dirs=additional_working_dirs,
                     disable_skills=disable_slash_commands,
+                    session_persistence=session_persistence,
                 )
             )
             return
