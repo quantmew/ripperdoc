@@ -100,13 +100,6 @@ from ripperdoc.utils.working_directories import normalize_directory_inputs
 from ripperdoc.cli.ui.rich_ui.commands import handle_slash_command as _handle_slash_command
 from ripperdoc.cli.ui.rich_ui.images import process_images_in_input
 from ripperdoc.cli.ui.rich_ui.input import build_prompt_session
-from ripperdoc.cli.ui.rich_ui.prompt_suggestions import (
-    PROMPT_SUGGESTION_ENV,
-    generate_prompt_suggestion,
-    is_cache_cold,
-    resolve_prompt_suggestion_enabled,
-    suggest_initial_prompt_from_git_history,
-)
 from ripperdoc.cli.ui.rich_ui.rendering import (
     handle_assistant_message,
     handle_progress_message,
@@ -215,8 +208,6 @@ class RichUI:
         self.append_system_prompt = append_system_prompt
         self.model = model or "main"
         self.conversation_messages: List[ConversationMessage] = []
-        self._rprompt_context_cache_key: Optional[tuple[str, int, int]] = None
-        self._rprompt_context_fragment: tuple[str, str] = ("class:rprompt-off", "Ctx --")
         self._saved_conversation: Optional[List[ConversationMessage]] = None
         self._resumed_from_history = bool(resume_messages)
         self._resume_replay_max_messages = _resolve_resume_replay_limit()
@@ -233,10 +224,6 @@ class RichUI:
             self.command_list = list_slash_commands()
             self._custom_command_list = list_custom_commands()
         self._prompt_session: Optional[PromptSession] = None
-        self._prompt_suggestion_lock = threading.Lock()
-        self._prompt_suggestion_text: Optional[str] = None
-        self._prompt_suggestion_task: Optional[asyncio.Task[None]] = None
-        self._prompt_suggestion_input_epoch: int = 0
         self.project_path = Path.cwd()
         project_local_config = get_project_local_config(self.project_path)
         self.output_style = getattr(project_local_config, "output_style", "default") or "default"
@@ -314,14 +301,6 @@ class RichUI:
 
         # Get global config for display preferences
         config = get_effective_config(self.project_path)
-        interactive_prompt = bool(sys.stdout.isatty())
-        env_prompt_suggestion = os.getenv(PROMPT_SUGGESTION_ENV)
-        config_prompt_suggestion = getattr(config, "prompt_suggestion_enabled", None)
-        self._prompt_suggestion_enabled = resolve_prompt_suggestion_enabled(
-            env_value=env_prompt_suggestion,
-            config_enabled=config_prompt_suggestion,
-            interactive=interactive_prompt,
-        )
         if show_full_thinking is None:
             self.show_full_thinking = config.show_full_thinking
         else:
@@ -354,16 +333,9 @@ class RichUI:
         )
         self._run_session_start("startup")
 
-        if self._prompt_suggestion_enabled and not self._initial_query:
-            initial_suggestion = suggest_initial_prompt_from_git_history(self.project_path)
-            if initial_suggestion:
-                with self._prompt_suggestion_lock:
-                    self._prompt_suggestion_text = initial_suggestion
-
         # Handle resume_messages if provided (for --continue)
         if resume_messages:
             self.conversation_messages = list(resume_messages)
-            self._invalidate_rprompt_context_cache()
             self._rebuild_session_usage_from_messages(self.conversation_messages)
             logger.info(
                 "[ui] Resumed conversation with messages",
@@ -441,10 +413,6 @@ class RichUI:
             self._permission_checker = None
         else:
             self._permission_checker = self._create_permission_checker()
-        if normalized == "plan":
-            self._dismiss_prompt_suggestion()
-            self._cancel_prompt_suggestion_task()
-            self._request_prompt_redraw()
 
         label = self._permission_mode_label(normalized)
         if announce:
@@ -611,203 +579,12 @@ class RichUI:
         config = get_effective_config(self.project_path)
         return config.default_thinking_tokens
 
-    def _peek_prompt_suggestion(self) -> Optional[str]:
-        """Return the current prompt suggestion text, if any."""
-        lock = getattr(self, "_prompt_suggestion_lock", None)
-        if lock is None:
-            return None
-        with lock:
-            suggestion = getattr(self, "_prompt_suggestion_text", None)
-            if isinstance(suggestion, str) and suggestion.strip():
-                return suggestion
-            return None
-
-    def _take_prompt_suggestion(self) -> Optional[str]:
-        """Consume and return the current prompt suggestion text."""
-        lock = getattr(self, "_prompt_suggestion_lock", None)
-        if lock is None:
-            return None
-        with lock:
-            suggestion = getattr(self, "_prompt_suggestion_text", None)
-            self._prompt_suggestion_text = None
-            if not suggestion or not str(suggestion).strip():
-                return None
-            self._prompt_suggestion_input_epoch += 1
-            return str(suggestion)
-
-    def _dismiss_prompt_suggestion(self) -> None:
-        """Clear the currently visible prompt suggestion."""
-        lock = getattr(self, "_prompt_suggestion_lock", None)
-        if lock is None:
-            return
-        with lock:
-            self._prompt_suggestion_text = None
-
-    def _on_prompt_text_insert(self, text: str) -> None:
-        """Dismiss suggestions when user starts typing in the prompt."""
-        if not text.strip():
-            return
-        lock = getattr(self, "_prompt_suggestion_lock", None)
-        if lock is not None:
-            with lock:
-                self._prompt_suggestion_input_epoch += 1
-        self._dismiss_prompt_suggestion()
-        self._cancel_prompt_suggestion_task()
-
-    def _cancel_prompt_suggestion_task(self) -> None:
-        """Cancel any in-flight background prompt-suggestion generation."""
-        task = getattr(self, "_prompt_suggestion_task", None)
-        self._prompt_suggestion_task = None
-        if task is None or task.done():
-            return
-        try:
-            if threading.current_thread() is self._loop_thread:
-                task.cancel()
-            elif not self._loop.is_closed():
-                self._loop.call_soon_threadsafe(task.cancel)
-        except (RuntimeError, ValueError):
-            pass
-
-    def _get_prompt_placeholder(self) -> Union[str, FormattedText]:
-        """Return the dynamic placeholder text rendered in dim color."""
-        suggestion = self._peek_prompt_suggestion()
-        if not suggestion:
-            return ""
-        return FormattedText([("class:prompt-suggestion", suggestion)])
-
-    def _prompt_suggestion_skip_reason(
-        self, messages: List[ConversationMessage]
-    ) -> Optional[str]:
-        if not getattr(self, "_prompt_suggestion_enabled", False):
-            return "disabled"
-        if not sys.stdout.isatty():
-            return "non_interactive"
-        if self._normalize_permission_mode(self.permission_mode) == "plan":
-            return "plan_mode"
-
-        assistant_messages = [
-            msg
-            for msg in messages
-            if getattr(msg, "type", "") == "assistant" and isinstance(msg, AssistantMessage)
-        ]
-        if len(assistant_messages) < 2:
-            return "early_conversation"
-        last_response = assistant_messages[-1]
-        if bool(getattr(last_response, "is_api_error_message", False)):
-            return "last_response_error"
-        if is_cache_cold(last_response):
-            return "cache_cold"
-        return None
-
-    async def _generate_prompt_suggestion_async(
-        self, messages_snapshot: List[ConversationMessage], input_epoch: int
-    ) -> None:
-        try:
-            suggestion = await generate_prompt_suggestion(
-                messages=messages_snapshot,
-                model=self.model,
-            )
-        except asyncio.CancelledError:
-            raise
-        except (OSError, RuntimeError, ValueError, TypeError) as exc:
-            logger.debug(
-                "[ui] Prompt suggestion generation failed: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"session_id": self.session_id},
-            )
-            return
-        finally:
-            current_task = asyncio.current_task()
-            if self._prompt_suggestion_task is current_task:
-                self._prompt_suggestion_task = None
-
-        if not suggestion:
-            return
-        if self._query_in_progress:
-            return
-        if self._normalize_permission_mode(self.permission_mode) == "plan":
-            return
-
-        lock = getattr(self, "_prompt_suggestion_lock", None)
-        if lock is None:
-            return
-        with lock:
-            if self._prompt_suggestion_input_epoch != input_epoch:
-                return
-            self._prompt_suggestion_text = suggestion
-        self._request_prompt_redraw()
-
-    def _schedule_prompt_suggestion_generation(self) -> None:
-        """Start (or restart) prompt suggestion generation for the current conversation."""
-        messages_snapshot = list(self.conversation_messages)
-        reason = self._prompt_suggestion_skip_reason(messages_snapshot)
-        if reason:
-            self._dismiss_prompt_suggestion()
-            logger.debug(
-                "[ui] Prompt suggestion skipped",
-                extra={"session_id": self.session_id, "reason": reason},
-            )
-            return
-
-        self._dismiss_prompt_suggestion()
-        self._cancel_prompt_suggestion_task()
-        lock = getattr(self, "_prompt_suggestion_lock", None)
-        if lock is None:
-            return
-        with lock:
-            input_epoch = self._prompt_suggestion_input_epoch
-        self._prompt_suggestion_task = asyncio.create_task(
-            self._generate_prompt_suggestion_async(messages_snapshot, input_epoch)
-        )
-
     def _get_prompt(self) -> str:
         """Generate the input prompt."""
         return "> "
 
-    def _invalidate_rprompt_context_cache(self) -> None:
-        """Invalidate cached context usage fragment used by rprompt."""
-        self._rprompt_context_cache_key = None
-
-    def _get_rprompt_context_fragment(self) -> tuple[str, str]:
-        """Return a cached context usage fragment for rprompt rendering."""
-        messages = getattr(self, "conversation_messages", [])
-        last_message_id = id(messages[-1]) if messages else 0
-        cache_key = (getattr(self, "model", "main"), len(messages), last_message_id)
-        cached_key = getattr(self, "_rprompt_context_cache_key", None)
-        if cache_key == cached_key:
-            return getattr(self, "_rprompt_context_fragment", ("class:rprompt-off", "Ctx --"))
-
-        try:
-            max_context_tokens, auto_compact_enabled, protocol = self._resolve_query_runtime_settings()
-            used_tokens = estimate_used_tokens(messages, protocol=protocol)  # type: ignore[arg-type]
-            usage_status = get_context_usage_status(
-                used_tokens,
-                max_context_tokens,
-                auto_compact_enabled,
-            )
-            if usage_status.should_auto_compact:
-                style = "class:rprompt-ctx-critical"
-            elif usage_status.is_above_warning:
-                style = "class:rprompt-ctx-warn"
-            else:
-                style = "class:rprompt-ctx-ok"
-            fragment = (style, f"Ctx {usage_status.percent_used:.1f}%")
-        except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
-            logger.debug(
-                "[ui] Failed to compute rprompt context usage: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"session_id": self.session_id},
-            )
-            fragment = ("class:rprompt-off", "Ctx --")
-
-        self._rprompt_context_cache_key = cache_key
-        self._rprompt_context_fragment = fragment
-        return fragment
-
     def _get_rprompt(self) -> Union[str, FormattedText]:
-        """Generate the right prompt with permission/thinking status."""
+        """Generate the right prompt with permission/thinking mode status."""
         mode = self._normalize_permission_mode(self.permission_mode)
         mode_style = {
             "default": "class:rprompt-mode-normal",
@@ -825,10 +602,6 @@ class RichUI:
             else:
                 fragments.append(("class:rprompt-off", "Thinking: off"))
         return FormattedText(fragments)
-
-    def _get_bottom_toolbar(self) -> Union[str, FormattedText]:
-        """Generate bottom status bar text."""
-        return FormattedText([self._get_rprompt_context_fragment()])
 
     def _context_usage_lines(
         self, breakdown: Any, model_label: str, auto_compact_enabled: bool
@@ -1225,7 +998,6 @@ class RichUI:
         role = "You" if msg_type == "user" else "Ripperdoc"
         original_len = len(self.conversation_messages)
         self.conversation_messages = list(self.conversation_messages[: target_index + 1])
-        self._invalidate_rprompt_context_cache()
 
         # Fork a new session so the original transcript remains intact.
         old_session_id, new_session_id = self._fork_session()
@@ -1975,8 +1747,6 @@ class RichUI:
         spinner: ThinkingSpinner,
         messages: List[ConversationMessage],
         query_context: Optional[QueryContext] = None,
-        *,
-        schedule_prompt_suggestion: bool = True,
     ) -> None:
         """Best-effort stream cleanup and conversation state commit."""
         try:
@@ -1997,12 +1767,9 @@ class RichUI:
             self._clear_context_after_turn = False
         else:
             self.conversation_messages = messages
-        self._invalidate_rprompt_context_cache()
         active_context = query_context or getattr(self, "query_context", None)
         if active_context is not None:
             self._flush_deferred_task_notifications_from_pending_queue(active_context)
-        if schedule_prompt_suggestion:
-            self._schedule_prompt_suggestion_generation()
         logger.info(
             "[ui] Query processing completed",
             extra={
@@ -2031,12 +1798,6 @@ class RichUI:
         """Process a user query and display the response."""
         async with self._get_query_serial_lock():
             user_input = _replace_surrogate_codepoints(user_input)
-            lock = getattr(self, "_prompt_suggestion_lock", None)
-            if lock is not None:
-                with lock:
-                    self._prompt_suggestion_input_epoch += 1
-            self._dismiss_prompt_suggestion()
-            self._cancel_prompt_suggestion_task()
             query_context = self._ensure_query_context()
 
             logger.info(
@@ -2106,12 +1867,7 @@ class RichUI:
                     )
                     self.display_message("System", f"Error: {str(e)}", is_tool=True)
                 finally:
-                    self._finalize_query_stream(
-                        spinner,
-                        messages,
-                        query_context,
-                        schedule_prompt_suggestion=append_prompt_history,
-                    )
+                    self._finalize_query_stream(spinner, messages, query_context)
 
             except asyncio.CancelledError:
                 raise
@@ -2261,10 +2017,7 @@ class RichUI:
             while not self._should_exit:
                 try:
                     # Get user input with dynamic prompt
-                    user_input = session.prompt(
-                        self._get_prompt(),
-                        placeholder=self._get_prompt_placeholder,
-                    )
+                    user_input = session.prompt(self._get_prompt())
 
                     if not user_input.strip():
                         continue
@@ -2364,7 +2117,6 @@ class RichUI:
                     self._run_async(self._stop_background_notification_tasks())
             except (RuntimeError, concurrent.futures.CancelledError):
                 pass
-            self._cancel_prompt_suggestion_task()
 
             if self.session_id and self.conversation_messages:
                 self.console.print("[dim]Resume this session with:[/dim]")
@@ -2479,7 +2231,6 @@ class RichUI:
         if isinstance(result, CompactionResult):
             self._saved_conversation = original_messages
             self.conversation_messages = result.messages
-            self._invalidate_rprompt_context_cache()
             self.console.print(
                 f"[green]✓ Conversation compacted[/green] "
                 f"(saved ~{result.tokens_saved} tokens). Use /resume to restore full history."

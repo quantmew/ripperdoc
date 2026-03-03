@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from typing import Any, List
 
 import pytest
@@ -31,12 +30,7 @@ def _new_ui() -> RichUI:
     ui = RichUI.__new__(RichUI)
     ui.console = _DummyConsole()
     ui.session_id = "test-session"
-    ui.model = "main"
-    ui.project_path = Path.cwd()
     ui.conversation_messages = []
-    ui._prompt_session = None
-    ui._rprompt_context_cache_key = None
-    ui._rprompt_context_fragment = ("class:rprompt-off", "Ctx --")
     ui._saved_conversation = None
     ui._pre_plan_mode = None
     return ui
@@ -209,70 +203,6 @@ def test_get_rprompt_keeps_permission_mode_label_when_thinking_unsupported(monke
 
     fragments = list(ui._get_rprompt())
     assert fragments == [("class:rprompt-mode-plan", "⏸ plan mode on")]
-    assert ("class:rprompt-on", "⚡ Thinking") not in fragments
-
-
-def test_get_bottom_toolbar_includes_context_percent(monkeypatch: Any) -> None:
-    ui = _new_ui()
-    ui.permission_mode = "default"
-    ui._thinking_mode_enabled = False
-    ui.model = "main"
-    ui.project_path = Path.cwd()
-    ui.conversation_messages = [create_user_message("hello")]
-
-    monkeypatch.setattr(RichUI, "_supports_thinking_mode", lambda self: False)
-    monkeypatch.setattr(
-        "ripperdoc.cli.ui.rich_ui.session.estimate_used_tokens",
-        lambda messages, protocol: 123,  # noqa: ARG005
-    )
-    monkeypatch.setattr(
-        RichUI,
-        "_resolve_query_runtime_settings",
-        lambda self: (100_000, False, "openai"),
-    )
-
-    class _Usage:
-        percent_used = 12.34
-        should_auto_compact = False
-        is_above_warning = False
-
-    monkeypatch.setattr(
-        "ripperdoc.cli.ui.rich_ui.session.get_context_usage_status",
-        lambda used_tokens, max_context_tokens, auto_compact_enabled: _Usage(),  # noqa: ARG005
-    )
-
-    fragments = list(ui._get_bottom_toolbar())
-    assert fragments == [("class:rprompt-ctx-ok", "Ctx 12.3%")]
-
-
-def test_get_prompt_placeholder_returns_dimmed_suggestion() -> None:
-    ui = _new_ui()
-    ui._prompt_suggestion_lock = threading.Lock()
-    ui._prompt_suggestion_text = "run the tests"
-
-    placeholder = ui._get_prompt_placeholder()
-
-    assert list(placeholder) == [("class:prompt-suggestion", "run the tests")]
-
-
-def test_prompt_suggestion_skip_reason_detects_cache_cold(monkeypatch: Any) -> None:
-    ui = _new_ui()
-    ui._prompt_suggestion_enabled = True
-    ui.permission_mode = "default"
-    monkeypatch.setattr(
-        "ripperdoc.cli.ui.rich_ui.session.sys.stdout",
-        type("StdoutStub", (), {"isatty": lambda self: True})(),
-    )
-    first = create_assistant_message("initial response", input_tokens=10)
-    cache_cold = create_assistant_message(
-        "next response",
-        input_tokens=100,
-        cache_creation_tokens=120,
-    )
-
-    reason = ui._prompt_suggestion_skip_reason([first, cache_cold])
-
-    assert reason == "cache_cold"
 
 
 @pytest.mark.asyncio
