@@ -36,22 +36,10 @@ from ripperdoc.core.providers.errors import (
     ProviderRateLimitError,
 )
 from ripperdoc.core.providers.openai_non_oauth_strategies import (
-    _StreamAccumulator,
-    _apply_stream_reasoning_metadata,
-    _build_non_stream_content_blocks,
-    _build_non_stream_empty_or_error_response,
-    _build_openai_request_kwargs,
-    _build_stream_content_blocks,
-    _consume_stream_chunk,
     build_non_oauth_openai_strategy,
 )
-from ripperdoc.core.providers.openai_oauth_codex import call_oauth_codex
-from ripperdoc.core.providers.openai_responses import (
-    build_input_from_normalized_messages as _build_codex_responses_input,
-    convert_chat_function_tools_to_responses_tools as _build_codex_oauth_tools,
-    extract_content_blocks_from_output as _extract_content_blocks_from_responses_payload,
-    extract_text_usage_from_sse_events as _extract_from_codex_sse_events,
-    parse_sse_json_events as _parse_sse_json_events,
+from ripperdoc.core.providers.openai_oauth_codex import (
+    call_oauth_codex,
 )
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger

@@ -525,6 +525,7 @@ class StdioQueryMixin:
             if raw_content is None:
                 raw_content = ""
 
+            normalized_content: list[dict[str, Any]]
             if isinstance(raw_content, list):
                 normalized_content = []
                 for item in raw_content:
@@ -533,9 +534,9 @@ class StdioQueryMixin:
                     else:
                         normalized_content.append({"type": "text", "text": str(item)})
             elif isinstance(raw_content, str):
-                normalized_content = raw_content
+                normalized_content = [{"type": "text", "text": raw_content}]
             else:
-                normalized_content = {"type": "text", "text": str(raw_content)}
+                normalized_content = [{"type": "text", "text": str(raw_content)}]
 
             if role == "user":
                 parsed_messages.append(

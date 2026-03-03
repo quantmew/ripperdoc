@@ -2,23 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from ripperdoc.utils.teams import (
-    TeamMember,
     create_team,
     list_team_messages,
-    upsert_team_member,
 )
 from ripperdoc.utils.teammate_state import (
     IdleReason,
     TeammateStatus,
-    InProcessTeammateState,
     _TEAMMATE_STATES,
     _TEAMMATE_STATES_LOCK,
     create_teammate_state,
@@ -33,7 +27,6 @@ from ripperdoc.utils.teammate_state import (
     add_idle_callback,
     complete_teammate,
     cleanup_teammate_state,
-    has_running_teammates,
     has_active_teammates,
     format_teammate_message,
 )

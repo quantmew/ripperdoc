@@ -15,16 +15,20 @@ from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
 from ripperdoc.core.providers.errors import ProviderMappedError
 from ripperdoc.core.providers.openai import (
     OpenAIClient,
+    _run_with_provider_error_mapping,
+)
+from ripperdoc.core.providers.openai_non_oauth_strategies import (
     _StreamAccumulator,
+    _build_non_stream_empty_or_error_response,
+    _build_stream_content_blocks,
+    _consume_stream_chunk,
+)
+from ripperdoc.core.providers.openai_oauth_codex import (
     _build_codex_oauth_tools,
     _build_codex_responses_input,
     _extract_content_blocks_from_responses_payload,
     _extract_from_codex_sse_events,
-    _build_non_stream_empty_or_error_response,
     _parse_sse_json_events,
-    _build_stream_content_blocks,
-    _consume_stream_chunk,
-    _run_with_provider_error_mapping,
 )
 from ripperdoc.core.providers.openai_responses import (
     build_input_from_normalized_messages,

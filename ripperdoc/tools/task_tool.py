@@ -1621,7 +1621,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             record.max_turns = input_data.max_turns
         record.task_description = input_data.description
 
-        self._reset_record_for_resume_prompt(record, input_data.prompt)
+        self._reset_record_for_resume_prompt(record, input_data.prompt or record.task_prompt or "")
         subagent_context = self._build_subagent_query_context(
             tools=record.tools,
             yolo_mode=context.yolo_mode,

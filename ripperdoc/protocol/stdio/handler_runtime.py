@@ -13,7 +13,6 @@ from typing import Any
 from pydantic import ValidationError
 
 from ripperdoc.core.hooks.manager import hook_manager
-from ripperdoc.core.hooks.state import bind_hook_scopes
 from ripperdoc.protocol.models import IncomingUserStreamMessage
 from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
@@ -27,7 +26,6 @@ from ripperdoc.utils.task_notifications import (
 from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.worktree import consume_session_worktrees, list_session_worktrees
 
-from .timeouts import STDIO_HOOK_TIMEOUT_SEC
 
 logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
@@ -338,7 +336,7 @@ class StdioRuntimeMixin:
 
         async def shutdown_shell() -> None:
             try:
-                await shutdown_background_shell()
+                await asyncio.to_thread(shutdown_background_shell)
             except Exception as e:
                 logger.error("[cleanup] Error shutting down background shell: %s", e)
 

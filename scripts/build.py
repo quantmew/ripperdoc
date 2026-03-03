@@ -113,7 +113,7 @@ Examples:
         return 1
 
     try:
-        import PyInstaller
+        import PyInstaller  # type: ignore[import-untyped]
 
         print(f"Using PyInstaller version: {PyInstaller.__version__}")
     except ImportError:

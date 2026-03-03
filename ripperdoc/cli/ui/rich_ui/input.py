@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import sys
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, merge_completers
@@ -65,10 +65,10 @@ def build_prompt_session(
     # Merge both completers
     file_completer = FileMentionCompleter(ui.project_path, ignore_filter)
     if disable_slash_commands:
-        combined_completer = file_completer
+        combined_completer: Completer = file_completer
     else:
         slash_completer = SlashCommandCompleter(ui.project_path)
-        combined_completer = merge_completers([slash_completer, file_completer])
+        combined_completer = cast(Completer, merge_completers([slash_completer, file_completer]))
 
     key_bindings = KeyBindings()
 

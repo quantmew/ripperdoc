@@ -622,19 +622,19 @@ class OAuthApp(App[None]):
                 self._set_status(f"Device code used: {code}")
             elif result.provider == "gitlab":
                 instance_url = (result.endpoint or GITLAB_DEFAULT_INSTANCE_URL).strip()
-                context = await asyncio.to_thread(
+                gitlab_context = await asyncio.to_thread(
                     start_gitlab_browser_auth,
                     instance_url=instance_url,
                     notify=_notify,
                 )
                 self._set_status("Paste callback URL to complete login.")
-                callback_url = await self._prompt_callback_url(context.auth_url)
+                callback_url = await self._prompt_callback_url(gitlab_context.auth_url)
                 if not callback_url:
                     self._set_status("Login cancelled.")
                     return
                 token = await asyncio.to_thread(
                     complete_gitlab_browser_auth_from_callback_url,
-                    context,
+                    gitlab_context,
                     callback_url,
                 )
             else:

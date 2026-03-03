@@ -919,14 +919,17 @@ def build_non_oauth_openai_strategy(
 ) -> NonOAuthOpenAIStrategy:
     """Construct the appropriate non-OAuth strategy for a model profile."""
     name = _resolve_strategy_name(model_profile)
-    base_kwargs = {
-        "build_thinking_kwargs": build_thinking_kwargs,
-        "run_with_provider_error_mapping": run_with_provider_error_mapping,
-        "safe_emit_progress": safe_emit_progress,
-    }
     if name == "responses":
-        return OpenAIResponsesStrategy(**base_kwargs)
-    return OpenAIChatStrategy(**base_kwargs)
+        return OpenAIResponsesStrategy(
+            build_thinking_kwargs=build_thinking_kwargs,
+            run_with_provider_error_mapping=run_with_provider_error_mapping,
+            safe_emit_progress=safe_emit_progress,
+        )
+    return OpenAIChatStrategy(
+        build_thinking_kwargs=build_thinking_kwargs,
+        run_with_provider_error_mapping=run_with_provider_error_mapping,
+        safe_emit_progress=safe_emit_progress,
+    )
 
 
 __all__ = [

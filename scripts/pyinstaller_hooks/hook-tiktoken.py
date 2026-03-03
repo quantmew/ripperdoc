@@ -1,6 +1,6 @@
 """PyInstaller hook for tiktoken"""
 
-from PyInstaller.utils.hooks import collect_data_files, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, copy_metadata  # type: ignore[import-untyped]
 
 # Collect tiktoken data files and metadata.
 datas = collect_data_files("tiktoken") + copy_metadata("tiktoken")

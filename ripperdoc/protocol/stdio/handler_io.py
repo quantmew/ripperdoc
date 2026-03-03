@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import importlib
 import logging
 import random
 import os
@@ -14,29 +15,32 @@ import uuid
 from collections import deque
 from collections.abc import AsyncIterator
 from urllib.parse import urlparse, urlunparse
-from typing import Any, Callable
-
-try:
-    import httpx
-except Exception:  # pragma: no cover - optional dependency for hybrid send mode
-    httpx = None
-
-try:
-    import websockets
-except Exception:  # pragma: no cover - compatibility fallback for missing optional dependency
-    websockets = None
+from typing import Any, Callable, cast
 
 from ripperdoc.protocol.models import (
-    DEFAULT_PROTOCOL_VERSION,
     JsonRpcError,
     JsonRpcErrorCodes,
-    JsonRpcResponse,
     JsonRpcResponseError,
     model_to_dict,
 )
 from ripperdoc.utils.coerce import parse_boolish
 
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC, STDIO_READ_TIMEOUT_SEC
+
+_httpx_module: Any | None
+try:
+    _httpx_module = importlib.import_module("httpx")
+except Exception:  # pragma: no cover - optional dependency for hybrid send mode
+    _httpx_module = None
+
+_websockets_module: Any | None
+try:
+    _websockets_module = importlib.import_module("websockets")
+except Exception:  # pragma: no cover - compatibility fallback for missing optional dependency
+    _websockets_module = None
+
+_httpx: Any | None = _httpx_module
+_websockets: Any | None = _websockets_module
 
 logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
@@ -73,13 +77,13 @@ class _SDKWebSocketTransport:
         self._refresh_headers = refresh_headers
         self.auto_reconnect = auto_reconnect
         self._state = "idle"
-        self._ws = None
+        self._ws: Any | None = None
         self._running = False
         self._loop_task: asyncio.Task[None] | None = None
         self._ping_task: asyncio.Task[None] | None = None
         self._keepalive_task: asyncio.Task[None] | None = None
         self._incoming_queue: asyncio.Queue[str | None] = asyncio.Queue()
-        self._outgoing_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        self._outgoing_queue: asyncio.Queue[dict[str, Any] | object | None] = asyncio.Queue()
         self._last_sent_id: str | None = None
         self._last_confirmed_id: str | None = None
         self._message_buffer = deque[dict[str, Any]](maxlen=_SDK_MESSAGE_BUFFER_MAX)
@@ -93,7 +97,7 @@ class _SDKWebSocketTransport:
     async def start(self) -> None:
         if self._running:
             return
-        if websockets is None:
+        if _websockets is None:
             raise RuntimeError("websockets package is required for --sdk-url support.")
         self._running = True
         self._state = "idle"
@@ -208,7 +212,10 @@ class _SDKWebSocketTransport:
         logger.info("[stdio-sdk] Connecting to SDK WebSocket endpoint: %s", self.url)
 
         try:
-            ws = await websockets.connect(
+            websockets_client = _websockets
+            if websockets_client is None:
+                raise RuntimeError("websockets package is required for --sdk-url support.")
+            ws = await websockets_client.connect(
                 self.url,
                 extra_headers=self._collect_connect_headers(),
                 ping_interval=None,
@@ -266,16 +273,18 @@ class _SDKWebSocketTransport:
         await self._close_socket()
         return delay
 
-    async def _sender_loop(self, ws) -> None:
+    async def _sender_loop(self, ws: Any) -> None:
         while self._running:
             item = await self._outgoing_queue.get()
             if item is self._stop_sentinel:
                 break
             if item is None:
                 break
-            await self._send_message(ws, item)
+            if not isinstance(item, dict):
+                continue
+            await self._send_message(ws, cast(dict[str, Any], item))
 
-    async def _receiver_loop(self, ws) -> None:
+    async def _receiver_loop(self, ws: Any) -> None:
         while self._running and self._state == "connected":
             payload = await ws.recv()
             if isinstance(payload, bytes):
@@ -287,14 +296,14 @@ class _SDKWebSocketTransport:
                 self._process_incoming_ack(line)
                 await self._incoming_queue.put(line)
 
-    async def _send_message(self, ws, message: dict[str, Any]) -> None:
+    async def _send_message(self, ws: Any, message: dict[str, Any]) -> None:
         data = json.dumps(message, ensure_ascii=False) + "\n"
         await ws.send(data)
 
-    async def _send_frame(self, ws, frame: str) -> None:
+    async def _send_frame(self, ws: Any, frame: str) -> None:
         await ws.send(frame)
 
-    async def _ping_loop(self, ws) -> None:
+    async def _ping_loop(self, ws: Any) -> None:
         self._pong_received = True
         while self._running:
             await asyncio.sleep(_SDK_PING_INTERVAL_SEC)
@@ -318,7 +327,7 @@ class _SDKWebSocketTransport:
                 logger.debug("[stdio-sdk] WebSocket ping failed: %s", exc)
                 raise
 
-    async def _keepalive_loop(self, ws) -> None:
+    async def _keepalive_loop(self, ws: Any) -> None:
         if parse_boolish(os.getenv("CLAUDE_CODE_REMOTE"), default=False):
             return
         while self._running:
@@ -440,6 +449,8 @@ class _SDKWebSocketTransport:
                     return
 
         self._message_buffer = deque(messages, maxlen=_SDK_MESSAGE_BUFFER_MAX)
+        if self._ws is None:
+            return
         for message in self._message_buffer:
             await self._send_message(self._ws, message)
 
@@ -500,10 +511,15 @@ class _SDKWebSocketTransport:
             self._last_sent_id = None
 
     def _reconnect_delay(self, attempt: int) -> float:
-        delay = _SDK_RECONNECT_BASE_DELAY_SEC * (2 ** (attempt - 1))
+        delay: float = float(_SDK_RECONNECT_BASE_DELAY_SEC) * (2 ** (attempt - 1))
         jitter = delay * random.uniform(-0.25, 0.25)
-        delay = min(_SDK_RECONNECT_MAX_DELAY_SEC, delay + jitter)
-        return max(0.0, delay)
+        max_delay: float = float(_SDK_RECONNECT_MAX_DELAY_SEC)
+        delay = delay + jitter
+        if delay > max_delay:
+            delay = max_delay
+        if delay < 0.0:
+            return 0.0
+        return delay
 
 
 class _SDKHybridWebSocketTransport(_SDKWebSocketTransport):
@@ -548,12 +564,12 @@ class _SDKHybridWebSocketTransport(_SDKWebSocketTransport):
             (scheme, parsed.netloc, path, parsed.params, parsed.query, parsed.fragment),
         )
 
-    async def _send_message(self, ws, message: dict[str, Any]) -> None:
+    async def _send_message(self, ws: Any, message: dict[str, Any]) -> None:
         event_type = message.get("type", "message")
         await self._post_events([message], event_type=event_type)
 
     async def _post_events(self, events: list[dict[str, Any]], event_type: str) -> None:
-        if httpx is None:
+        if _httpx is None:
             raise RuntimeError("httpx package is required for SDK hybrid transport mode.")
 
         request_headers = self._collect_connect_headers(include_last_request_id=False)
@@ -565,7 +581,7 @@ class _SDKHybridWebSocketTransport(_SDKWebSocketTransport):
 
         for attempt in range(1, _SDK_HYBRID_POST_RETRY_COUNT + 1):
             try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                async with _httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.post(
                         self._post_url,
                         json={"events": events},
@@ -587,7 +603,7 @@ class _SDKHybridWebSocketTransport(_SDKWebSocketTransport):
                     attempt,
                     _SDK_HYBRID_POST_RETRY_COUNT,
                 )
-            except (httpx.RequestError, OSError) as exc:
+            except (_httpx.RequestError, OSError) as exc:
                 logger.debug(
                     "[stdio-sdk] Hybrid POST for %s failed (attempt %d/%d): %s",
                     event_type,
@@ -612,6 +628,8 @@ class _SDKHybridWebSocketTransport(_SDKWebSocketTransport):
 
 class StdioIOMixin:
     _resolved_tool_use_ids: set[str]
+    _sdk_transport: _SDKWebSocketTransport | None
+    _mcp_server_overrides: dict[str, Any] | None
 
     def _is_sdk_transport_enabled(self) -> bool:
         return bool(getattr(self, "_sdk_url", None))
@@ -767,7 +785,10 @@ class StdioIOMixin:
 
         if self._is_sdk_transport_enabled():
             await self._start_sdk_transport()
-            await self._sdk_transport.write(message)
+            transport = self._sdk_transport
+            if transport is None:
+                raise RuntimeError("SDK transport is not available")
+            await transport.write(message)
             return
 
         msg_type = message.get("type", "json-rpc")
@@ -1010,16 +1031,25 @@ class StdioIOMixin:
 
         if self._is_sdk_transport_enabled():
             await self._start_sdk_transport()
-            return await self._sdk_transport.read_line()
+            transport = self._sdk_transport
+            if transport is None:
+                return None
+            return await transport.read_line()
 
         while True:
             try:
                 if STDIO_READ_TIMEOUT_SEC <= 0:
-                    line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
+                    line = cast(
+                        str,
+                        await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
+                    )
                 else:
-                    line = await asyncio.wait_for(
-                        asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
-                        timeout=STDIO_READ_TIMEOUT_SEC,
+                    line = cast(
+                        str,
+                        await asyncio.wait_for(
+                            asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
+                            timeout=STDIO_READ_TIMEOUT_SEC,
+                        ),
                     )
                 if not line:
                     return None

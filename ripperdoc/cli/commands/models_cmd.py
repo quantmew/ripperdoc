@@ -1,6 +1,6 @@
 import sys
 import textwrap
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 from rich import box
 from rich.layout import Layout
@@ -56,9 +56,9 @@ def _default_openai_mode(profile: Optional[ModelProfile]) -> str:
 
 
 def _prompt_openai_mode(console: Any, default_value: str) -> str:
-    raw = console.input(
+    raw = cast(str, console.input(
         f"OpenAI mode [{default_value}] (legacy/responses): "
-    ).strip().lower()
+    ).strip().lower())
     if not raw:
         return default_value
     if raw in {"legacy", "responses"}:

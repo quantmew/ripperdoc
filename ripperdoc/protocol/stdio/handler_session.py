@@ -9,7 +9,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -59,6 +59,7 @@ logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
 
 class StdioSessionMixin:
+    _pre_plan_mode: str | None
     _query_context: QueryContext | None
     _session_id: str | None
     _custom_system_prompt: str | None
@@ -584,7 +585,7 @@ class StdioSessionMixin:
                     "version": __version__,
                 }
             elif isinstance(request_body["clientInfo"], dict):
-                client_info_payload = dict(request_body["clientInfo"])
+                client_info_payload = cast(dict[str, Any], dict(request_body["clientInfo"]))
                 client_info_payload.setdefault("name", "ripperdoc")
                 client_info_payload.setdefault("version", __version__)
                 request_body["clientInfo"] = client_info_payload
@@ -609,14 +610,14 @@ class StdioSessionMixin:
         ):
             initialized_request["protocolVersion"] = DEFAULT_PROTOCOL_VERSION
             initialized_request["capabilities"] = initialized_request.get("capabilities") or {}
-            client_info_payload = initialized_request.get("clientInfo")
-            if not isinstance(client_info_payload, dict):
+            fallback_client_info = initialized_request.get("clientInfo")
+            if not isinstance(fallback_client_info, dict):
                 client_info_payload = {
                     "name": "ripperdoc",
                     "version": __version__,
                 }
             else:
-                client_info_payload = dict(client_info_payload)
+                client_info_payload = cast(dict[str, Any], dict(fallback_client_info))
                 client_info_payload.setdefault("name", "ripperdoc")
                 client_info_payload.setdefault("version", __version__)
             initialized_request["clientInfo"] = client_info_payload

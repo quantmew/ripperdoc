@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 import uuid
+import subprocess
 from pathlib import Path
 from typing import Optional, cast
 
@@ -143,7 +144,7 @@ def _run_tmux_command(
     cwd: Optional[Path] = None,
     env: Optional[dict[str, str]] = None,
     capture: bool = False,
-):
+) -> subprocess.CompletedProcess[str]:
     return worktree_tmux._run_tmux_command(args, cwd=cwd, env=env, capture=capture)
 
 

@@ -345,11 +345,9 @@ class StdioConfigMixin:
             "arguments": {
                 "tool_name": tool_name,
                 "input": tool_input,
-                "force_prompt": force_prompt,
+                "force_prompt": bool(force_prompt),
             },
         }
-        if force_prompt:
-            request_payload["arguments"]["force_prompt"] = True
         request_timeout = 0.0 if tool_name == "AskUserQuestion" else STDIO_HOOK_TIMEOUT_SEC
 
         try:

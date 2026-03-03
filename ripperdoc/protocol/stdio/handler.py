@@ -10,6 +10,7 @@ from typing import Any
 from ripperdoc.core.hooks.config import HooksConfig
 from ripperdoc.core.query import QueryContext
 from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.mcp import McpServerInfo
 
 from .handler_config import StdioConfigMixin
 from .handler_control import StdioControlMixin
@@ -18,6 +19,7 @@ from .handler_message import StdioMessageMixin
 from .handler_query import StdioQueryMixin
 from .handler_runtime import StdioRuntimeMixin
 from .handler_session import StdioSessionMixin
+from .handler_io import _SDKWebSocketTransport
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +110,7 @@ class StdioProtocolHandler(
         self._session_agent_prompt: str | None = None
         self._disable_slash_commands: bool = False
         self._session_persistence_enabled: bool = True
-        self._mcp_server_overrides: dict[str, Any] | None = None
+        self._mcp_server_overrides: dict[str, McpServerInfo] | None = None
         self._mcp_disabled_servers: set[str] = set()
 
         # Conversation history for multi-turn queries

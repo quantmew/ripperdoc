@@ -6,7 +6,7 @@ import inspect
 import logging
 import asyncio
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -46,6 +46,8 @@ class _UnknownControlMethodError(RuntimeError):
 
 
 class StdioControlMixin:
+    _mcp_server_overrides: dict[str, McpServerInfo] | None
+
     def _coerce_tool_request(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Normalize JSON-RPC payload into (name, arguments)."""
         name = str(request.get("name") or "").strip()
@@ -746,11 +748,15 @@ class StdioControlMixin:
             return None
         # Check for explicit blocked_path attribute
         if hasattr(decision, "blocked_path"):
-            return decision.blocked_path
+            blocked_path = getattr(decision, "blocked_path")
+            if isinstance(blocked_path, str):
+                return blocked_path.strip() or None
         # Check decision_reason for path info
         decision_reason = getattr(decision, "decision_reason", None)
         if isinstance(decision_reason, dict):
-            return decision_reason.get("path") or decision_reason.get("blocked_path")
+            blocked_path = decision_reason.get("path") or decision_reason.get("blocked_path")
+            if isinstance(blocked_path, str):
+                return blocked_path.strip() or None
         return None
 
     def _serialize_decision_reason(self, decision: Any) -> dict[str, Any] | None:
@@ -769,6 +775,7 @@ class StdioControlMixin:
             # Build a default decision reason
             behavior = getattr(decision, "behavior", "unknown")
             message = getattr(decision, "message", None)
+            message = str(message) if message is not None else None
             return {
                 "type": "permission_decision",
                 "behavior": behavior,
@@ -777,7 +784,7 @@ class StdioControlMixin:
         if isinstance(decision_reason, dict):
             return decision_reason
         if hasattr(decision_reason, "model_dump"):
-            return decision_reason.model_dump()
+            return cast(dict[str, Any], decision_reason.model_dump())
         return {"type": str(decision_reason)}
 
     async def _run_permission_hook_race(
@@ -992,7 +999,6 @@ class StdioControlMixin:
             return
 
         permission_checker = self._can_use_tool or self._local_can_use_tool
-        force_prompt = bool(request.get("force_prompt"))
         tool_use_id = request.get("tool_use_id")
         agent_id = request.get("agent_id")
 
@@ -1059,19 +1065,27 @@ class StdioControlMixin:
                     normalized_input = {"value": str(normalized_input)}
                 if tool_name == "Task" and isinstance(normalized_input, dict):
                     normalized_input = self._apply_tool_input_aliases(tool, normalized_input)
-                perm_response = PermissionResponseAllow(
-                    updatedInput=normalized_input,
-                    toolUseID=tool_use_id,
-                    decisionReason=self._serialize_decision_reason(decision),
+                await self._write_control_response(
+                    request_id,
+                    response=model_to_dict(
+                        PermissionResponseAllow(
+                            updatedInput=normalized_input,
+                            toolUseID=tool_use_id,
+                            decisionReason=self._serialize_decision_reason(decision),
+                        )
+                    ),
                 )
-                await self._write_control_response(request_id, response=model_to_dict(perm_response))
             else:
-                perm_response = PermissionResponseDeny(
-                    message=message or "",
-                    toolUseID=tool_use_id,
-                    decisionReason=self._serialize_decision_reason(decision),
+                await self._write_control_response(
+                    request_id,
+                    response=model_to_dict(
+                        PermissionResponseDeny(
+                            message=message or "",
+                            toolUseID=tool_use_id,
+                            decisionReason=self._serialize_decision_reason(decision),
+                        )
+                    ),
                 )
-                await self._write_control_response(request_id, response=model_to_dict(perm_response))
         except Exception as e:
             logger.error("Error in permission check: %s", e)
             await self._write_control_response(

@@ -1,6 +1,6 @@
 """PyInstaller hook for ripperdoc package"""
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules  # type: ignore[import-untyped]
 
 # Collect all ripperdoc submodules.
 hiddenimports = collect_submodules("ripperdoc")

@@ -272,14 +272,12 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 oauth_token_options = self._oauth_token_select_options(
                     self._existing_profile.oauth_token_name if self._existing_profile else None
                 )
-                oauth_token_value = oauth_token_options[0][1] if oauth_token_options else Select.BLANK
+                oauth_token_value: str = oauth_token_options[0][1] if oauth_token_options else ""
                 if self._existing_profile and self._existing_profile.oauth_token_name:
                     existing_name = self._existing_profile.oauth_token_name
                     if any(value == existing_name for _label, value in oauth_token_options):
                         oauth_token_value = existing_name
-                selected_oauth_token = list_oauth_tokens().get(
-                    oauth_token_value if isinstance(oauth_token_value, str) else ""
-                )
+                selected_oauth_token = list_oauth_tokens().get(oauth_token_value)
                 selected_oauth_token_type = (
                     selected_oauth_token.type
                     if selected_oauth_token is not None
@@ -296,10 +294,10 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 oauth_model_default = (
                     model_default
                     if any(value == model_default for _label, value in oauth_model_options)
-                    else (oauth_model_options[0][1] if oauth_model_options else Select.BLANK)
+                    else (oauth_model_options[0][1] if oauth_model_options else "")
                 )
                 yield Select(
-                    oauth_model_options if oauth_model_options else [("No OAuth models", Select.BLANK)],
+                    oauth_model_options if oauth_model_options else [("No OAuth models", "")],
                     value=oauth_model_default,
                     id="oauth_model_select",
                 )
@@ -351,7 +349,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
 
                 yield Static("OAuth token", classes="field_label", id="oauth_token_label")
                 yield Select(
-                    oauth_token_options if oauth_token_options else [("No OAuth tokens", Select.BLANK)],
+                    oauth_token_options if oauth_token_options else [("No OAuth tokens", "")],
                     value=oauth_token_value,
                     id="oauth_token_select",
                 )
