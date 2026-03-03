@@ -125,6 +125,7 @@ ripperdoc [OPTIONS]
 - `RIPPERDOC_MODEL` - Default model to use
 - `RIPPERDOC_TEMPERATURE` - Default temperature (0.0-2.0)
 - `RIPPERDOC_API_KEY` - API key for configured provider
+- `RIPPERDOC_TMPDIR` - Override internal temp root; Ripperdoc uses `<this-path>/ripperdoc/`
 
 Task Graph scope behavior:
 - By default, task lists are session-scoped (new session starts clean; resume/continue keeps the same tasks)

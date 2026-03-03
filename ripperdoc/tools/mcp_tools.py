@@ -6,7 +6,6 @@ import base64
 import binascii
 import json
 import os
-import tempfile
 from typing import Any, AsyncGenerator, List, Optional
 
 from pydantic import BaseModel, Field
@@ -27,6 +26,7 @@ from ripperdoc.utils.mcp import (
     format_mcp_instructions,
     load_mcp_servers_async,
 )
+from ripperdoc.utils.temp_paths import ripperdoc_mkstemp
 from ripperdoc.tools.mcp_output_limits import evaluate_mcp_output_size
 
 
@@ -444,7 +444,7 @@ class ReadMcpResourceTool(BaseMcpTool, Tool[ReadMcpResourceInput, ReadMcpResourc
                             mime = getattr(item, "mimeType", None) or ""
                             if "/" in mime:
                                 suffix = "." + mime.split("/")[-1]
-                            fd, path = tempfile.mkstemp(prefix="ripperdoc_mcp_", suffix=suffix)
+                            fd, path = ripperdoc_mkstemp(prefix="ripperdoc_mcp_", suffix=suffix)
                             with os.fdopen(fd, "wb") as handle:
                                 handle.write(raw_bytes)
                             saved_path = path

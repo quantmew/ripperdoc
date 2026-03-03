@@ -7,13 +7,13 @@ import platform
 import shutil
 import subprocess
 import sys
-import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, Tuple, cast
 
+from ripperdoc.utils.temp_paths import ripperdoc_temporary_directory
 from ripperdoc.utils.user_agent import build_user_agent
 
 PACKAGE_NAME = "ripperdoc"
@@ -224,7 +224,7 @@ def _run_binary_upgrade() -> Tuple[bool, str, str]:
     """Run installer script fetched from GitHub to upgrade binary install."""
     is_windows = platform.system().lower().startswith("win")
     script_url = GITHUB_INSTALL_PS1 if is_windows else GITHUB_INSTALL_SH
-    installer_path = Path(tempfile.gettempdir()) / ("ripperdoc-install.ps1" if is_windows else "ripperdoc-install.sh")
+    installer_name = "ripperdoc-install.ps1" if is_windows else "ripperdoc-install.sh"
 
     script_text = _download_text(script_url)
     if not script_text:
@@ -234,8 +234,8 @@ def _run_binary_upgrade() -> Tuple[bool, str, str]:
             "Failed to download binary installer script.",
         )
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        installer_path = Path(temp_dir) / installer_path.name
+    with ripperdoc_temporary_directory(prefix="ripperdoc-update-") as temp_dir:
+        installer_path = Path(temp_dir) / installer_name
         installer_path.write_text(script_text, encoding="utf-8")
 
         if is_windows:

@@ -14,7 +14,6 @@ import asyncio
 import json
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Callable, Dict, Optional, Awaitable, Any
 
@@ -34,6 +33,7 @@ from ripperdoc.tools.ls_tool import LSTool
 from ripperdoc.tools.lsp_tool import LspTool
 from ripperdoc.utils.messages import AssistantMessage, create_user_message
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.temp_paths import ripperdoc_mkstemp
 
 logger = get_logger()
 
@@ -131,7 +131,7 @@ class HookExecutor:
         """
         if self._env_file is None:
             # Create a temporary file that persists for the session
-            fd, path = tempfile.mkstemp(prefix="ripperdoc_env_", suffix=".json")
+            fd, path = ripperdoc_mkstemp(prefix="ripperdoc_env_", suffix=".json")
             os.close(fd)
             self._env_file = Path(path)
             # Initialize with empty JSON object

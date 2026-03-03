@@ -7,7 +7,6 @@ import json
 import re
 import shutil
 import subprocess
-import tempfile
 import time
 import urllib.request
 import zipfile
@@ -26,6 +25,7 @@ from ripperdoc.core.plugins import (
 from ripperdoc.core.managed_settings import get_managed_setting
 from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.temp_paths import ripperdoc_temporary_directory
 from ripperdoc.utils.user_agent import build_user_agent
 
 logger = get_logger()
@@ -1020,7 +1020,7 @@ def install_marketplace_plugin(
             shutil.rmtree(target)
 
         clone_url = f"https://github.com/{entry.github_repo}.git"
-        with tempfile.TemporaryDirectory(prefix="ripperdoc-plugin-") as temp_dir:
+        with ripperdoc_temporary_directory(prefix="ripperdoc-plugin-") as temp_dir:
             repo_dir = Path(temp_dir) / "repo"
             subprocess.run(
                 [
@@ -1065,7 +1065,7 @@ def install_marketplace_plugin(
         if clone_url:
             if target.exists():
                 shutil.rmtree(target)
-            with tempfile.TemporaryDirectory(prefix="ripperdoc-plugin-") as temp_dir:
+            with ripperdoc_temporary_directory(prefix="ripperdoc-plugin-") as temp_dir:
                 repo_dir = Path(temp_dir) / "repo"
                 clone_cmd = ["git", "clone", "--depth", "1"]
                 if entry.github_ref:
