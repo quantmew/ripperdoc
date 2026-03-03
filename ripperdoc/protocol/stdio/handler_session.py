@@ -141,6 +141,22 @@ class StdioSessionMixin:
             options = {**self._default_options, **request_options}
             self._session_id = options.get("session_id") or str(uuid.uuid4())
             self._custom_system_prompt = options.get("system_prompt")
+            raw_sdk_url = options.get("sdk_url")
+            self._sdk_url = (
+                raw_sdk_url.strip()
+                if isinstance(raw_sdk_url, str) and raw_sdk_url.strip()
+                else None
+            )
+            if self._sdk_url and (
+                self._input_format != "stream-json"
+                or self._output_format != "stream-json"
+            ):
+                await self._fail_initialize_request(
+                    request_id,
+                    "Error: --sdk-url requires both --input-format=stream-json and --output-format=stream-json.",
+                    JsonRpcErrorCodes.InvalidParams,
+                )
+                return
             raw_max_turns = options.get("max_turns")
             raw_max_thinking_tokens = options.get("max_thinking_tokens")
             max_turns: int | None = None

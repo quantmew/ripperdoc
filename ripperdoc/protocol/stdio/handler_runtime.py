@@ -293,6 +293,11 @@ class StdioRuntimeMixin:
                 logger.debug("[cleanup] Failed stopping task notification poller: %s", e)
 
             try:
+                await self._stop_sdk_transport()
+            except Exception as e:
+                logger.debug("[cleanup] Failed stopping SDK transport: %s", e)
+
+            try:
                 await self.flush_output()
             except Exception as e:
                 logger.error("[cleanup] Error flushing output: %s", e)

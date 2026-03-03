@@ -18,9 +18,7 @@ def append_cwd_reset_message(message: str) -> str:
 
 
 def reset_cwd_if_needed(allowed_directories: set[str] | None = None) -> bool:
-    """Placeholder that mirrors the reference contract.
-
-    In this environment we simply report whether the current cwd is outside the
+    """In this environment we simply report whether the current cwd is outside the
     provided allowed set and reset to the original cwd if so.
     """
     allowed_directories = allowed_directories or set()

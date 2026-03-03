@@ -91,12 +91,18 @@ def _merge_append_system_prompt(
     return f"{session_agent_prompt}\n\n{append_system_prompt}"
 
 
-def _coerce_session_id(session_id: Optional[str]) -> Optional[str]:
+def _coerce_session_id(
+    session_id: Optional[str],
+    *,
+    sdk_url: Optional[str],
+) -> Optional[str]:
     """Validate and normalize explicit session IDs from CLI input."""
     if session_id is None:
         return None
     if not session_id.strip():
         return None
+    if sdk_url:
+        return str(session_id)
     try:
         return str(uuid.UUID(session_id))
     except (ValueError, TypeError, AttributeError) as exc:
@@ -422,10 +428,31 @@ def _register_precreated_worktree_from_env() -> Optional[WorktreeSession]:
     help="Use a specific session ID for the conversation (must be a valid UUID).",
 )
 @click.option(
+    "--resume-session-at",
+    type=str,
+    default=None,
+    help="When resuming, only messages up to and including the message id.",
+    hidden=True,
+)
+@click.option(
+    "--rewind-files",
+    type=str,
+    default=None,
+    help="Restore files to state at a specific user message and exit (requires --resume).",
+    hidden=True,
+)
+@click.option(
     "--no-session-persistence",
     is_flag=True,
     default=False,
     help="Disable session persistence - sessions will not be saved to disk and cannot be resumed (only works with --print mode).",
+)
+@click.option(
+    "--sdk-url",
+    type=str,
+    default=None,
+    help="Use remote WebSocket endpoint for SDK I/O streaming (only with -p and stream-json).",
+    hidden=True,
 )
 @click.option(
     "--init",
@@ -486,6 +513,7 @@ def cli(
     print_mode: bool,
     print_prompt: Optional[str],
     session_id: Optional[str],
+    sdk_url: Optional[str],
     no_session_persistence: bool,
     permission_mode: str,
     max_turns: Optional[int],
@@ -513,6 +541,8 @@ def cli(
     model: Optional[str],
     continue_session: bool,
     resume_session: Optional[str],
+    resume_session_at: Optional[str],
+    rewind_files: Optional[str],
     setup_init: bool,
     setup_init_only: bool,
     setup_maintenance: bool,
@@ -522,7 +552,7 @@ def cli(
     tmux_classic: bool,  # noqa: ARG001
 ) -> None:
     """Ripperdoc - AI-powered coding agent"""
-    explicit_session_id = _coerce_session_id(session_id)
+    explicit_session_id = _coerce_session_id(session_id, sdk_url=sdk_url)
     if explicit_session_id and (continue_session or resume_session) and not fork_session:
         raise click.ClickException(
             "Error: --session-id can only be used with --continue or --resume if --fork-session is also specified."
@@ -531,9 +561,20 @@ def cli(
         output_format=output_format,
         print_mode=print_mode,
         setup_init_only=setup_init_only,
+        sdk_url=sdk_url,
     ):
         raise click.ClickException(
             "Error: --no-session-persistence can only be used with --print mode."
+        )
+    if resume_session_at and not resume_session:
+        raise click.ClickException(
+            "Error: --resume-session-at requires --resume."
+        )
+    if rewind_files and not resume_session:
+        raise click.ClickException("Error: --rewind-files requires --resume")
+    if rewind_files and (print_prompt or prompt):
+        raise click.ClickException(
+            "Error: --rewind-files is a standalone operation and cannot be used with a prompt"
         )
 
     session_persistence = not no_session_persistence
@@ -586,6 +627,7 @@ def cli(
         max_budget_usd=max_budget_usd,
         max_thinking_tokens=max_thinking_tokens,
         json_schema=json_schema,
+        sdk_url=sdk_url,
         session_persistence=session_persistence,
     )
     effective_append_system_prompt = _merge_append_system_prompt(
@@ -599,7 +641,7 @@ def cli(
             os.chdir(project_path)
         console.print(f"[dim]Switched to worktree: {precreated_worktree.worktree_path}[/dim]")
 
-    if explicit_session_id is not None:
+    if explicit_session_id is not None and not sdk_url:
         _ensure_session_id_available(session_id=explicit_session_id, project_path=project_path)
 
     if use_tmux and not use_worktree:
@@ -637,7 +679,6 @@ def cli(
         print_prompt=print_prompt,
         prompt=prompt,
         input_format=input_format,
-        session_id=session_id,
         session_persistence=session_persistence,
         model=model,
         permission_mode=effective_permission_mode,
@@ -646,10 +687,17 @@ def cli(
         verbose=verbose,
         allowed_tools_csv=allowed_tools_csv,
         disallowed_tools_csv=disallowed_tools_csv,
+        continue_session=continue_session,
+        resume_session=resume_session,
+        resume_session_at=resume_session_at,
+        rewind_files=rewind_files,
+        fork_session=fork_session,
+        session_id=session_id,
         tools=tools,
         project_path=project_path,
         additional_working_dirs=additional_working_dirs,
         sdk_default_options=sdk_default_options,
+        sdk_url=sdk_url,
     ):
         return
 

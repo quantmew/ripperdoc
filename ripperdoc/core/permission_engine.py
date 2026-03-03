@@ -1269,9 +1269,6 @@ def make_permission_checker(
         tool: Tool[Any, Any], parsed_input: Any, *, force_prompt: bool = False
     ) -> PermissionPreview:
         """Preview permission outcome without hooks or interactive prompt.
-
-        This mirrors rule evaluation logic used by _evaluate_permission and is
-        intended for SDK bridges that must decide whether user input is needed.
         """
         return await _compute_permission_preview(
             tool,

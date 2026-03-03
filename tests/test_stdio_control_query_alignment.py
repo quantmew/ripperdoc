@@ -4,20 +4,39 @@ from __future__ import annotations
 
 from pathlib import Path
 import asyncio
+from functools import lru_cache
 from typing import Any
 
 import pytest
 
-from claude_agent_sdk import ClaudeAgentOptions
-from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 from ripperdoc.utils.mcp import McpServerInfo
 
 from ripperdoc.protocol.models import DEFAULT_PROTOCOL_VERSION, JsonRpcErrorCodes
 from ripperdoc import __version__
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_control as handler_control_module
-from claude_agent_sdk._internal.query import Query
 from ripperdoc.utils.messages import create_assistant_message, create_user_message
+
+
+@lru_cache(maxsize=1)
+def _load_claude_sdk_symbols() -> tuple[type[Any], type[Any], type[Any]]:
+    sdk_module = pytest.importorskip(
+        "claude_agent_sdk",
+        reason="claude_agent_sdk is required for SDK alignment tests",
+    )
+    transport_module = pytest.importorskip(
+        "claude_agent_sdk._internal.transport.subprocess_cli",
+        reason="claude_agent_sdk transport internals are required for SDK alignment tests",
+    )
+    query_module = pytest.importorskip(
+        "claude_agent_sdk._internal.query",
+        reason="claude_agent_sdk query internals are required for SDK alignment tests",
+    )
+    return (
+        sdk_module.ClaudeAgentOptions,
+        transport_module.SubprocessCLITransport,
+        query_module.Query,
+    )
 
 
 def test_coerce_initialize_request_applies_strict_defaults() -> None:
@@ -353,6 +372,7 @@ async def test_control_request_interrupt_cancels_other_tasks(monkeypatch) -> Non
 
 
 def test_sdk_transport_builds_command_with_cli_path() -> None:
+    ClaudeAgentOptions, SubprocessCLITransport, _ = _load_claude_sdk_symbols()
     cli_path = "ripperdoc"
     options = ClaudeAgentOptions(cli_path=Path(cli_path))
     transport = SubprocessCLITransport(prompt="", options=options)
@@ -365,6 +385,7 @@ def test_sdk_transport_builds_command_with_cli_path() -> None:
 
 
 def test_sdk_transport_respects_cli_path_option_as_str_or_path() -> None:
+    ClaudeAgentOptions, SubprocessCLITransport, _ = _load_claude_sdk_symbols()
     for cli_path in ("ripperdoc", Path("ripperdoc")):
         options = ClaudeAgentOptions(cli_path=cli_path)
         transport = SubprocessCLITransport(prompt="", options=options)
@@ -376,16 +397,14 @@ def test_sdk_transport_respects_cli_path_option_as_str_or_path() -> None:
 
 @pytest.mark.asyncio
 async def test_sdk_query_controls_payload_shape_for_setters_and_initialize(monkeypatch) -> None:
+    _, _, Query = _load_claude_sdk_symbols()
     captured: list[dict[str, Any]] = []
 
     async def fake_send_control_request(self, request: dict[str, Any], timeout: float = 60.0) -> dict[str, Any]:
         captured.append(dict(request))
         return {"status": "ok"}
 
-    monkeypatch.setattr(
-        "claude_agent_sdk._internal.query.Query._send_control_request",
-        fake_send_control_request,
-    )
+    monkeypatch.setattr(Query, "_send_control_request", fake_send_control_request)
 
     query = Query(
         transport=object(),

@@ -3,12 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import random
+import os
 import sys
+import time
 import uuid
+from collections import deque
 from collections.abc import AsyncIterator
-from typing import Any
+from urllib.parse import urlparse, urlunparse
+from typing import Any, Callable
+
+try:
+    import httpx
+except Exception:  # pragma: no cover - optional dependency for hybrid send mode
+    httpx = None
+
+try:
+    import websockets
+except Exception:  # pragma: no cover - compatibility fallback for missing optional dependency
+    websockets = None
 
 from ripperdoc.protocol.models import (
     DEFAULT_PROTOCOL_VERSION,
@@ -18,6 +34,7 @@ from ripperdoc.protocol.models import (
     JsonRpcResponseError,
     model_to_dict,
 )
+from ripperdoc.utils.coerce import parse_boolish
 
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC, STDIO_READ_TIMEOUT_SEC
 
@@ -26,9 +43,647 @@ logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 # Maximum number of resolved tool_use_ids to track for duplicate detection
 _MAX_RESOLVED_TOOL_USE_IDS = 1000
 
+_SDK_RECONNECT_BASE_DELAY_SEC = 1.0
+_SDK_RECONNECT_MAX_DELAY_SEC = 30.0
+_SDK_RECONNECT_BUDGET_SEC = 600.0
+_SDK_PING_INTERVAL_SEC = 10.0
+_SDK_PING_TIMEOUT_SEC = 5.0
+_SDK_KEEPALIVE_INTERVAL_SEC = 300.0
+_SDK_MESSAGE_BUFFER_MAX = 1000
+_SDK_PERMANENT_CLOSE_CODES = {1002, 4001, 4003}
+_SDK_RECONNECT_SLEEP_GAP_RESET_SEC = 60.0
+_SDK_HYBRID_POST_RETRY_COUNT = 10
+_SDK_HYBRID_POST_RETRY_BASE_SEC = 0.5
+_SDK_HYBRID_POST_RETRY_MAX_SEC = 8.0
+
+
+class _SDKWebSocketTransport:
+    """Minimal async websocket transport with reconnect, keepalive, and replay buffer."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        auto_reconnect: bool = True,
+        refresh_headers: Callable[[], dict[str, str] | None] | None = None,
+    ) -> None:
+        self.url = url
+        self.headers = headers or {}
+        self._refresh_headers = refresh_headers
+        self.auto_reconnect = auto_reconnect
+        self._state = "idle"
+        self._ws = None
+        self._running = False
+        self._loop_task: asyncio.Task[None] | None = None
+        self._ping_task: asyncio.Task[None] | None = None
+        self._keepalive_task: asyncio.Task[None] | None = None
+        self._incoming_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self._outgoing_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        self._last_sent_id: str | None = None
+        self._last_confirmed_id: str | None = None
+        self._message_buffer = deque[dict[str, Any]](maxlen=_SDK_MESSAGE_BUFFER_MAX)
+        self._stop_sentinel: object = object()
+        self._last_reconnect_attempt_time: float | None = None
+        self._reconnect_start_time: float | None = None
+        self._reconnect_attempts = 0
+        self._on_close_callback: Callable[[int | None], None] | None = None
+        self._pong_received = True
+
+    async def start(self) -> None:
+        if self._running:
+            return
+        if websockets is None:
+            raise RuntimeError("websockets package is required for --sdk-url support.")
+        self._running = True
+        self._state = "idle"
+        self._loop_task = asyncio.create_task(self._run_loop())
+
+    async def close(self) -> None:
+        self._running = False
+        self._state = "closing"
+        await self._stop_ping_loop()
+        await self._stop_keepalive_loop()
+        await self._close_socket()
+        await self._outgoing_queue.put(self._stop_sentinel)
+
+        if self._loop_task is not None:
+            self._loop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._loop_task
+            self._loop_task = None
+
+        # Ensure any readers stop.
+        await self._incoming_queue.put(None)
+        self._state = "closed"
+
+    async def write(self, message: dict[str, Any]) -> None:
+        if not self._running:
+            await self.start()
+
+        tracked_id = self._extract_tracking_id(message)
+        if tracked_id:
+            self._message_buffer.append(message)
+            self._last_sent_id = tracked_id
+
+        await self._outgoing_queue.put(message)
+
+    async def read_line(self) -> str | None:
+        line = await self._incoming_queue.get()
+        if line is None:
+            return None
+        return line
+
+    def setOnClose(self, callback: Callable[[int | None], None] | None) -> None:
+        self._on_close_callback = callback
+
+    def _collect_connect_headers(self, *, include_last_request_id: bool = True) -> dict[str, str]:
+        headers = dict(self.headers)
+        if self._refresh_headers:
+            try:
+                refreshed = self._refresh_headers() or {}
+                if isinstance(refreshed, dict):
+                    headers.update(refreshed)
+                    self.headers.update(refreshed)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[stdio-sdk] Failed refreshing SDK headers", exc_info=exc)
+
+        if include_last_request_id and self._last_sent_id:
+            headers["X-Last-Request-Id"] = self._last_sent_id
+            self.headers["X-Last-Request-Id"] = self._last_sent_id
+
+        return headers
+
+    def _refresh_headers_if_needed(self, *, force: bool = False) -> bool:
+        if not self._refresh_headers:
+            return False
+
+        refreshed = self._refresh_headers() or {}
+        if not isinstance(refreshed, dict):
+            return False
+
+        previous_auth_snapshot = (
+            self.headers.get("Authorization"),
+            self.headers.get("Cookie"),
+            self.headers.get("X-Organization-Uuid"),
+        )
+        self.headers.update(refreshed)
+        if force:
+            return (
+                self.headers.get("Authorization") is not None
+                or self.headers.get("Cookie") is not None
+            )
+        if "Authorization" in refreshed or "Cookie" in refreshed:
+            current_auth_snapshot = (
+                self.headers.get("Authorization"),
+                self.headers.get("Cookie"),
+                self.headers.get("X-Organization-Uuid"),
+            )
+            return current_auth_snapshot != previous_auth_snapshot
+        return False
+
+    async def _run_loop(self) -> None:
+        self._reconnect_attempts = 0
+        self._reconnect_start_time = None
+        try:
+            while self._running:
+                delay = await self._connect_and_run()
+                if not self._running:
+                    return
+                if delay is None:
+                    return
+                await asyncio.sleep(delay)
+        finally:
+            await self._incoming_queue.put(None)
+
+    async def _connect_and_run(self) -> float | None:
+        if self._state not in {"idle", "reconnecting"}:
+            logger.error(
+                "[stdio-sdk] WebSocket connect rejected; current state is %s",
+                self._state,
+            )
+            return None
+
+        self._state = "reconnecting"
+        logger.info("[stdio-sdk] Connecting to SDK WebSocket endpoint: %s", self.url)
+
+        try:
+            ws = await websockets.connect(
+                self.url,
+                extra_headers=self._collect_connect_headers(),
+                ping_interval=None,
+                ping_timeout=None,
+            )
+        except Exception as exc:
+            return await self._handle_connection_close(None, exc)
+
+        self._ws = ws
+        self._state = "connected"
+        logger.info("[stdio-sdk] WebSocket transport connected")
+        self._last_reconnect_attempt_time = None
+        self._reconnect_attempts = 0
+        self._reconnect_start_time = None
+        self._pong_received = True
+
+        await self._replay_buffer(self._last_confirmed_id)
+
+        ping_task = asyncio.create_task(self._ping_loop(ws))
+        self._ping_task = ping_task
+        keepalive_task = asyncio.create_task(self._keepalive_loop(ws))
+        self._keepalive_task = keepalive_task
+        receiver_task = asyncio.create_task(self._receiver_loop(ws))
+        sender_task = asyncio.create_task(self._sender_loop(ws))
+
+        done, pending = await asyncio.wait(
+            [ping_task, keepalive_task, receiver_task, sender_task],
+            return_when=asyncio.FIRST_EXCEPTION,
+        )
+
+        for task in pending:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        self._ping_task = None
+        self._keepalive_task = None
+
+        if not self._running:
+            await self._close_socket()
+            return None
+
+        exception: BaseException | None = None
+        close_code = getattr(ws, "close_code", None)
+        for task in done:
+            if task.cancelled():
+                continue
+            task_exception = task.exception()
+            if task_exception is not None:
+                exception = task_exception
+                close_code = getattr(task_exception, "code", close_code)
+                break
+
+        delay = await self._handle_connection_close(close_code, exception)
+        await self._close_socket()
+        return delay
+
+    async def _sender_loop(self, ws) -> None:
+        while self._running:
+            item = await self._outgoing_queue.get()
+            if item is self._stop_sentinel:
+                break
+            if item is None:
+                break
+            await self._send_message(ws, item)
+
+    async def _receiver_loop(self, ws) -> None:
+        while self._running and self._state == "connected":
+            payload = await ws.recv()
+            if isinstance(payload, bytes):
+                payload = payload.decode("utf-8", errors="replace")
+            for raw_line in str(payload).splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                self._process_incoming_ack(line)
+                await self._incoming_queue.put(line)
+
+    async def _send_message(self, ws, message: dict[str, Any]) -> None:
+        data = json.dumps(message, ensure_ascii=False) + "\n"
+        await ws.send(data)
+
+    async def _send_frame(self, ws, frame: str) -> None:
+        await ws.send(frame)
+
+    async def _ping_loop(self, ws) -> None:
+        self._pong_received = True
+        while self._running:
+            await asyncio.sleep(_SDK_PING_INTERVAL_SEC)
+            if self._state != "connected" or ws is None:
+                continue
+
+            if not self._pong_received:
+                logger.error("[stdio-sdk] No pong received, connection appears dead")
+                raise RuntimeError("No pong received")
+
+            self._pong_received = False
+            try:
+                ping_result = ws.ping()
+                if hasattr(ping_result, "__await__"):
+                    await asyncio.wait_for(ping_result, timeout=_SDK_PING_TIMEOUT_SEC)
+                self._pong_received = True
+            except asyncio.TimeoutError:
+                logger.error("[stdio-sdk] WebSocket ping timeout")
+                raise
+            except OSError as exc:
+                logger.debug("[stdio-sdk] WebSocket ping failed: %s", exc)
+                raise
+
+    async def _keepalive_loop(self, ws) -> None:
+        if parse_boolish(os.getenv("CLAUDE_CODE_REMOTE"), default=False):
+            return
+        while self._running:
+            await asyncio.sleep(_SDK_KEEPALIVE_INTERVAL_SEC)
+            if self._state != "connected" or ws is None:
+                continue
+            await self._send_frame(
+                ws,
+                json.dumps({"type": "keep_alive"}) + "\n",
+            )
+
+    async def _stop_ping_loop(self) -> None:
+        if self._ping_task is None:
+            return
+        self._ping_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._ping_task
+        self._ping_task = None
+
+    async def _stop_keepalive_loop(self) -> None:
+        if self._keepalive_task is None:
+            return
+        self._keepalive_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._keepalive_task
+        self._keepalive_task = None
+
+    async def _handle_connection_close(
+        self,
+        close_code: int | None,
+        exception: BaseException | None,
+    ) -> float | None:
+        await self._stop_ping_loop()
+        await self._stop_keepalive_loop()
+        if self._state in {"closing", "closed"}:
+            return None
+
+        if exception is not None:
+            logger.debug("[stdio-sdk] WebSocket session ended with error", exc_info=exception)
+
+        if close_code is not None:
+            logger.info("[stdio-sdk] Disconnected from %s (code %s)", self.url, close_code)
+
+        headers_refreshed = False
+        if close_code == 4003 and self._refresh_headers:
+            headers_refreshed = self._refresh_headers_if_needed(force=True)
+            if headers_refreshed:
+                logger.debug("[stdio-sdk] 4003 received but headers refreshed; scheduling reconnect")
+
+        if close_code in _SDK_PERMANENT_CLOSE_CODES and not headers_refreshed:
+            logger.error("[stdio-sdk] Permanent close code %s, not reconnecting", close_code)
+            self.auto_reconnect = False
+            self._state = "closed"
+            if self._on_close_callback is not None:
+                self._on_close_callback(close_code)
+            return None
+
+        if not self.auto_reconnect:
+            self._state = "closed"
+            if self._on_close_callback is not None:
+                self._on_close_callback(close_code)
+            return None
+
+        now = time.monotonic()
+        if self._reconnect_start_time is None:
+            self._reconnect_start_time = now
+
+        if (
+            self._last_reconnect_attempt_time is not None
+            and now - self._last_reconnect_attempt_time > _SDK_RECONNECT_SLEEP_GAP_RESET_SEC
+        ):
+            logger.info("[stdio-sdk] System sleep gap detected; reset reconnect budget")
+            self._reconnect_start_time = now
+            self._reconnect_attempts = 0
+
+        self._last_reconnect_attempt_time = now
+        elapsed = now - self._reconnect_start_time
+        if elapsed >= _SDK_RECONNECT_BUDGET_SEC:
+            logger.error("[stdio-sdk] Reconnect budget exhausted; stopping transport")
+            self._state = "closed"
+            if self._on_close_callback is not None:
+                self._on_close_callback(close_code)
+            return None
+
+        if not headers_refreshed and self._refresh_headers:
+            self._refresh_headers_if_needed()
+
+        self._state = "reconnecting"
+        self._reconnect_attempts += 1
+        delay = self._reconnect_delay(self._reconnect_attempts)
+        logger.warning(
+            "[stdio-sdk] Reconnecting in %.2fs (attempt %d, %.2fs elapsed)",
+            delay,
+            self._reconnect_attempts,
+            elapsed,
+        )
+        return delay
+
+    async def _replay_buffer(self, last_request_id: str | None = None) -> None:
+        if not self._message_buffer:
+            return
+
+        messages = list(self._message_buffer)
+        if last_request_id:
+            start_index = 0
+            for index, message in enumerate(messages):
+                if self._extract_tracking_id(message) == last_request_id:
+                    start_index = index + 1
+                    break
+            if start_index > 0:
+                messages = messages[start_index:]
+                if not messages:
+                    logger.debug(
+                        "[stdio-sdk] All buffered messages confirmed by %s; clearing buffer",
+                        last_request_id,
+                    )
+                    self._message_buffer.clear()
+                    self._last_sent_id = None
+                    return
+
+        self._message_buffer = deque(messages, maxlen=_SDK_MESSAGE_BUFFER_MAX)
+        for message in self._message_buffer:
+            await self._send_message(self._ws, message)
+
+    async def _close_socket(self) -> None:
+        if self._ws is None:
+            return
+        try:
+            await self._ws.close()
+        finally:
+            self._ws = None
+            self._state = "closed"
+
+    def _extract_tracking_id(self, message: dict[str, Any]) -> str | None:
+        for key in ("uuid", "request_id", "id"):
+            value = message.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    def _process_incoming_ack(self, raw_line: str) -> None:
+        try:
+            message = json.loads(raw_line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(message, dict):
+            return
+
+        request_id = None
+        if message.get("type") == "control_response":
+            response = message.get("response")
+            if isinstance(response, dict):
+                request_id = response.get("request_id")
+        elif message.get("jsonrpc") == "2.0":
+            request_id = message.get("id")
+
+        if not isinstance(request_id, str):
+            return
+        self._acknowledge(request_id)
+
+    def _acknowledge(self, request_id: str) -> None:
+        if not self._message_buffer:
+            return
+
+        messages = list(self._message_buffer)
+        confirmed_index = None
+        for index, message in enumerate(messages):
+            if self._extract_tracking_id(message) == request_id:
+                confirmed_index = index
+                break
+        if confirmed_index is None:
+            return
+
+        remaining_messages = messages[confirmed_index + 1 :]
+        self._message_buffer = deque(remaining_messages, maxlen=_SDK_MESSAGE_BUFFER_MAX)
+
+        self._last_confirmed_id = request_id
+        if not remaining_messages:
+            self._last_sent_id = None
+
+    def _reconnect_delay(self, attempt: int) -> float:
+        delay = _SDK_RECONNECT_BASE_DELAY_SEC * (2 ** (attempt - 1))
+        jitter = delay * random.uniform(-0.25, 0.25)
+        delay = min(_SDK_RECONNECT_MAX_DELAY_SEC, delay + jitter)
+        return max(0.0, delay)
+
+
+class _SDKHybridWebSocketTransport(_SDKWebSocketTransport):
+    """HTTP relay variant for session ingress while retaining websocket read path."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        auto_reconnect: bool = True,
+        refresh_headers: Callable[[], dict[str, str] | None] | None = None,
+    ) -> None:
+        super().__init__(
+            url,
+            headers=headers,
+            auto_reconnect=auto_reconnect,
+            refresh_headers=refresh_headers,
+        )
+        self._post_url = self._resolve_post_url(url)
+
+    @staticmethod
+    def _resolve_post_url(url: str) -> str:
+        parsed = urlparse(url)
+        scheme = parsed.scheme
+        if scheme == "wss":
+            scheme = "https"
+        elif scheme == "ws":
+            scheme = "http"
+        path = parsed.path
+        if not path.startswith("/"):
+            path = f"/{path}"
+
+        if "/session_ingress/ws/" in path:
+            path = path.replace("/session_ingress/ws/", "/session_ingress/session/", 1)
+        elif "/session_ingress/session/" not in path:
+            path = path.replace("/ws/", "/session/")
+
+        if not path.endswith("/events"):
+            path = path.rstrip("/") + "/events"
+        return urlunparse(
+            (scheme, parsed.netloc, path, parsed.params, parsed.query, parsed.fragment),
+        )
+
+    async def _send_message(self, ws, message: dict[str, Any]) -> None:
+        event_type = message.get("type", "message")
+        await self._post_events([message], event_type=event_type)
+
+    async def _post_events(self, events: list[dict[str, Any]], event_type: str) -> None:
+        if httpx is None:
+            raise RuntimeError("httpx package is required for SDK hybrid transport mode.")
+
+        request_headers = self._collect_connect_headers(include_last_request_id=False)
+        if not request_headers.get("Authorization") and not request_headers.get("Cookie"):
+            logger.debug("[stdio-sdk] Hybrid transport skipped: no session auth header")
+            return
+
+        request_headers.setdefault("Content-Type", "application/json")
+
+        for attempt in range(1, _SDK_HYBRID_POST_RETRY_COUNT + 1):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        self._post_url,
+                        json={"events": events},
+                        headers=request_headers,
+                    )
+                if response.status_code in {200, 201}:
+                    return
+                if 400 <= response.status_code < 500 and response.status_code != 429:
+                    logger.debug(
+                        "[stdio-sdk] Hybrid POST returned %s for %s (client error, stop retrying)",
+                        response.status_code,
+                        event_type,
+                    )
+                    return
+                logger.debug(
+                    "[stdio-sdk] Hybrid POST returned %s for %s (attempt %d/%d)",
+                    response.status_code,
+                    event_type,
+                    attempt,
+                    _SDK_HYBRID_POST_RETRY_COUNT,
+                )
+            except (httpx.RequestError, OSError) as exc:
+                logger.debug(
+                    "[stdio-sdk] Hybrid POST for %s failed (attempt %d/%d): %s",
+                    event_type,
+                    attempt,
+                    _SDK_HYBRID_POST_RETRY_COUNT,
+                    exc,
+                )
+
+            if attempt == _SDK_HYBRID_POST_RETRY_COUNT:
+                logger.debug(
+                    "[stdio-sdk] Hybrid POST failed after %d attempts",
+                    _SDK_HYBRID_POST_RETRY_COUNT,
+                )
+                return
+
+            delay = min(
+                _SDK_HYBRID_POST_RETRY_BASE_SEC * (2 ** (attempt - 1)),
+                _SDK_HYBRID_POST_RETRY_MAX_SEC,
+            )
+            await asyncio.sleep(delay)
+
 
 class StdioIOMixin:
     _resolved_tool_use_ids: set[str]
+
+    def _is_sdk_transport_enabled(self) -> bool:
+        return bool(getattr(self, "_sdk_url", None))
+
+    @staticmethod
+    def _readable_stripped_env(*env_keys: str) -> str | None:
+        for env_key in env_keys:
+            value = os.getenv(env_key, "")
+            if value:
+                value = value.strip()
+                if value:
+                    return value
+        return None
+
+    def _build_sdk_transport_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+
+        session_access_token = self._readable_stripped_env(
+            "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+            "RIPPERDOC_AUTH_TOKEN",
+            "RIPPERDOC_API_KEY",
+        )
+        if session_access_token:
+            if session_access_token.startswith("sk-ant-sid"):
+                headers["Cookie"] = f"sessionKey={session_access_token}"
+                if organization_uuid := self._readable_stripped_env(
+                    "CLAUDE_CODE_ORGANIZATION_UUID"
+                ):
+                    headers["X-Organization-Uuid"] = organization_uuid
+            else:
+                headers["Authorization"] = f"Bearer {session_access_token}"
+
+        if runner_version := self._readable_stripped_env(
+            "CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION"
+        ):
+            headers["x-environment-runner-version"] = runner_version
+
+        if session_id := getattr(self, "_session_id", None):
+            headers["x-ripperdoc-session-id"] = str(session_id)
+
+        return headers
+
+    async def _start_sdk_transport(self) -> None:
+        if not self._is_sdk_transport_enabled():
+            return
+
+        if getattr(self, "_sdk_transport", None) is not None:
+            return
+
+        transport_cls = _SDKWebSocketTransport
+        if parse_boolish(os.getenv("CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2"), default=False):
+            transport_cls = _SDKHybridWebSocketTransport
+
+        transport = transport_cls(
+            str(getattr(self, "_sdk_url")),
+            headers=self._build_sdk_transport_headers(),
+            auto_reconnect=True,
+            refresh_headers=self._build_sdk_transport_headers,
+        )
+        self._sdk_transport = transport
+        await transport.start()
+
+    async def _stop_sdk_transport(self) -> None:
+        transport = getattr(self, "_sdk_transport", None)
+        if transport is None:
+            return
+
+        self._sdk_transport = None
+        try:
+            await transport.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[stdio] Failed to stop SDK transport: %s", exc)
 
     def _track_resolved_tool_use_id(self, tool_use_id: str) -> None:
         """Track a resolved tool_use_id with LRU-style cleanup when exceeding limit."""
@@ -109,6 +764,11 @@ class StdioIOMixin:
 
     async def _write_message(self, message: dict[str, Any]) -> None:
         """Write a JSON message to stdout."""
+
+        if self._is_sdk_transport_enabled():
+            await self._start_sdk_transport()
+            await self._sdk_transport.write(message)
+            return
 
         msg_type = message.get("type", "json-rpc")
         if self._output_format == "stream-json":
@@ -347,6 +1007,10 @@ class StdioIOMixin:
 
     async def _read_line(self) -> str | None:
         """Read a single line from stdin with timeout."""
+
+        if self._is_sdk_transport_enabled():
+            await self._start_sdk_transport()
+            return await self._sdk_transport.read_line()
 
         while True:
             try:

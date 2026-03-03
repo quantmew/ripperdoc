@@ -35,7 +35,7 @@ IGNORED_COMMANDS: tuple[str, ...] = ("sleep",)
 MAX_PREVIEW_LINES = 2
 MAX_PREVIEW_CHARS = 160
 
-# Heuristic command classification list (mirrors the reference set).
+# Heuristic command classification list.
 COMMON_COMMANDS: tuple[str, ...] = (
     "npm",
     "yarn",

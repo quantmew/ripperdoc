@@ -44,6 +44,7 @@ _SDK_ONLY_OPTION_FLAGS: tuple[tuple[str, str], ...] = (
     ("betas", "--betas"),
     ("max_budget_usd", "--max-budget-usd"),
     ("json_schema", "--json-schema"),
+    ("sdk_url", "--sdk-url"),
 )
 
 
@@ -52,10 +53,15 @@ def _resolve_permission_mode(yolo: bool, permission_mode: str) -> str:
     return "bypassPermissions" if yolo else permission_mode
 
 
-def _is_stdio_mode_request(ctx: click.Context, output_format: str, print_mode: bool) -> bool:
+def _is_stdio_mode_request(
+    ctx: click.Context,
+    output_format: str,
+    print_mode: bool,
+    sdk_url: Optional[str],
+) -> bool:
     """Return True when invocation should run through stdio mode."""
     return ctx.invoked_subcommand is None and (
-        output_format in ("json", "stream-json") or print_mode
+        output_format in ("json", "stream-json") or print_mode or bool(sdk_url)
     )
 
 
@@ -63,15 +69,15 @@ def _is_non_interactive_mode(
     output_format: str,
     print_mode: bool,
     setup_init_only: bool,
+    sdk_url: Optional[str],
 ) -> bool:
     """Return True when invocation is non-interactive.
-
-    Mirrors deobfuscated Claude Code behavior for current CLI surface:
       - print mode
       - init-only mode
+      - sdk-url mode
       - stdout is not a TTY
     """
-    if print_mode or setup_init_only:
+    if print_mode or setup_init_only or bool(sdk_url):
         return True
 
     try:
@@ -94,6 +100,7 @@ def _collect_sdk_only_option_uses(
     betas: Optional[str],
     max_budget_usd: Optional[float],
     json_schema: Optional[str],
+    sdk_url: Optional[str],
 ) -> List[str]:
     """Collect SDK-only option flags that were explicitly provided."""
     values: dict[str, Any] = {
@@ -108,6 +115,7 @@ def _collect_sdk_only_option_uses(
         "betas": betas,
         "max_budget_usd": max_budget_usd,
         "json_schema": json_schema,
+        "sdk_url": sdk_url,
     }
     provided: List[str] = []
     for key, option_name in _SDK_ONLY_OPTION_FLAGS:
@@ -288,6 +296,7 @@ def _build_sdk_default_options(
     max_budget_usd: Optional[float],
     max_thinking_tokens: Optional[int],
     json_schema: Optional[str],
+    sdk_url: Optional[str],
 ) -> dict[str, Any]:
     options: dict[str, Any] = {}
     value_options: dict[str, Any] = {
@@ -313,6 +322,8 @@ def _build_sdk_default_options(
         options["disable_slash_commands"] = True
     if plugin_dirs:
         options["plugin_dirs"] = list(plugin_dirs)
+    if sdk_url:
+        options["sdk_url"] = sdk_url
     return options
 
 
@@ -331,25 +342,53 @@ def _run_stdio_mode_if_requested(
     max_turns: Optional[int],
     system_prompt: Optional[str],
     verbose: bool,
+    continue_session: bool,
+    resume_session: Optional[str],
+    resume_session_at: Optional[str],
+    rewind_files: Optional[str],
+    fork_session: bool,
     allowed_tools_csv: Optional[str],
     disallowed_tools_csv: Optional[str],
     tools: Optional[str],
     project_path: Path,
     additional_working_dirs: List[str],
     sdk_default_options: dict[str, Any],
+    sdk_url: Optional[str],
 ) -> bool:
     if ctx.invoked_subcommand is not None:
         return False
-    if output_format not in ("json", "stream-json") and not print_mode:
+    if output_format not in ("json", "stream-json") and not print_mode and not sdk_url:
         return False
 
     from ripperdoc.protocol.stdio import run_stdio
 
     effective_prompt = print_prompt or prompt
-    stdio_output_format = "stream-json" if output_format == "text" else output_format
+    effective_print_mode = bool(print_mode or sdk_url)
+    if sdk_url:
+        input_format = "stream-json"
+        if output_format == "text":
+            output_format = "stream-json"
+        if output_format != "stream-json":
+            raise click.ClickException(
+                "Error: --sdk-url requires both --input-format=stream-json and --output-format=stream-json."
+            )
+        stdio_output_format = "stream-json"
+        effective_verbose = True
+    else:
+        stdio_output_format = "stream-json" if output_format == "text" else output_format
+        effective_verbose = verbose
     allowed_tools = parse_csv_option(allowed_tools_csv)
     disallowed_tools = parse_csv_option(disallowed_tools_csv)
     tools_list = parse_tools_option(tools)
+
+    if effective_print_mode:
+        stdin_prompt = _read_stdin_prompt_for_headless(
+            base_prompt=effective_prompt,
+            input_format=input_format,
+            session_id=session_id,
+        )
+        if stdin_prompt is not None:
+            effective_prompt = stdin_prompt
 
     default_options: dict[str, Any] = {
         "cwd": str(project_path),
@@ -357,7 +396,7 @@ def _run_stdio_mode_if_requested(
         "permission_mode": permission_mode,
         "max_turns": max_turns,
         "system_prompt": system_prompt,
-        "verbose": verbose,
+        "verbose": effective_verbose,
     }
     if allowed_tools is not None:
         default_options["allowed_tools"] = allowed_tools
@@ -379,12 +418,58 @@ def _run_stdio_mode_if_requested(
             permission_mode=permission_mode,
             max_turns=max_turns,
             system_prompt=system_prompt,
-            print_mode=bool(effective_prompt),
+            session_id=session_id,
+            resume_session=resume_session,
+            continue_session=continue_session,
+            resume_session_at=resume_session_at,
+            rewind_files=rewind_files,
+            fork_session=fork_session,
+            project_path=str(project_path),
+            print_mode=effective_print_mode,
             prompt=effective_prompt,
             default_options=default_options,
         )
     )
     return True
+
+
+def _read_stdin_prompt_for_headless(
+    *,
+    base_prompt: Optional[str],
+    input_format: str,
+    session_id: str,
+) -> Optional[str]:
+    if input_format == "stream-json":
+        return base_prompt
+
+    stdin_stream = click.get_text_stream("stdin")
+    try:
+        stdin_is_tty = stdin_stream.isatty()
+    except Exception:
+        stdin_is_tty = True
+
+    if stdin_is_tty:
+        return base_prompt
+
+    try:
+        stdin_data = stdin_stream.read()
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "[cli] Failed to read stdin for print query merge: %s: %s",
+            type(exc).__name__,
+            exc,
+            extra={"session_id": session_id},
+        )
+        return base_prompt
+
+    merged_input = stdin_data.rstrip("\n")
+    if not merged_input and not base_prompt:
+        return ""
+    if not merged_input:
+        return base_prompt
+    if not base_prompt:
+        return merged_input
+    return f"{base_prompt}\n{merged_input}"
 
 
 def _resolve_resume_state(
@@ -552,6 +637,7 @@ def _prepare_cli_runtime_inputs(
     max_budget_usd: Optional[float],
     max_thinking_tokens: Optional[int],
     json_schema: Optional[str],
+    sdk_url: Optional[str],
     session_persistence: bool,
 ) -> tuple[Path, List[str], dict[str, Any], Optional[str], bool]:
     """Resolve working-directory inputs and SDK default options for CLI entrypoints."""
@@ -562,7 +648,12 @@ def _prepare_cli_runtime_inputs(
         agent=agent,
         agents=agents,
     )
-    stdio_mode_request = _is_stdio_mode_request(ctx, output_format, print_mode)
+    stdio_mode_request = _is_stdio_mode_request(
+        ctx=ctx,
+        output_format=output_format,
+        print_mode=print_mode,
+        sdk_url=sdk_url,
+    )
     provided_sdk_only_options = _collect_sdk_only_option_uses(
         allowed_tools_csv=allowed_tools_csv,
         disallowed_tools_csv=disallowed_tools_csv,
@@ -575,6 +666,7 @@ def _prepare_cli_runtime_inputs(
         betas=betas,
         max_budget_usd=max_budget_usd,
         json_schema=json_schema,
+        sdk_url=sdk_url,
     )
     _validate_sdk_only_options_usage(
         using_stdio_mode=stdio_mode_request,
@@ -595,6 +687,7 @@ def _prepare_cli_runtime_inputs(
         max_budget_usd=max_budget_usd,
         max_thinking_tokens=max_thinking_tokens,
         json_schema=json_schema,
+        sdk_url=sdk_url,
     )
     return (
         project_path,

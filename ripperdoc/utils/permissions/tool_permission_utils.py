@@ -167,7 +167,7 @@ def _is_command_read_only(
     command: str,
     injection_check: Callable[[str], bool],
 ) -> bool:
-    """Heuristic read-only detector mirroring the reference intent."""
+    """Heuristic read-only detector."""
     validation = validate_shell_command(command)
     if validation.behavior != "passthrough":
         return False

@@ -692,7 +692,6 @@ build projects, run tests, and interact with the file system."""
             if getattr(task, "notification_sent", False):
                 return
             setattr(task, "notification_sent", True)
-            # Mirror status computation from background_shell._compute_status
             if getattr(task, "killed", False):
                 status = "killed"
             elif getattr(task, "timed_out", False):

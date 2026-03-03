@@ -55,7 +55,7 @@ def _is_redirection_token(token: str) -> bool:
 
 
 def parse_and_clean_shell_tokens(raw_shell_string: str) -> List[str]:
-    """Parse tokens and strip benign redirections to mirror reference cleaning."""
+    """Parse tokens and strip benign redirections."""
     tokens = parse_shell_tokens(raw_shell_string)
     if not tokens:
         return []

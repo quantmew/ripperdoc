@@ -78,6 +78,10 @@ class StdioProtocolHandler(
         self._local_can_use_tool: Any | None = None
         self._sdk_can_use_tool_enabled: bool = False
         self._sdk_can_use_tool_supported: bool = True
+        raw_sdk_url = self._default_options.get("sdk_url")
+        self._sdk_url: str | None = (
+            raw_sdk_url.strip() if isinstance(raw_sdk_url, str) and raw_sdk_url.strip() else None
+        )
         self._pre_plan_mode: str | None = None
         self._clear_context_after_turn: bool = False
         self._hooks: dict[str, list[dict[str, Any]]] = {}
@@ -93,6 +97,7 @@ class StdioProtocolHandler(
         self._output_buffer: list[dict[str, Any]] = []
         self._allowed_tools: list[str] | None = None
         self._disallowed_tools: list[str] | None = None
+        self._sdk_transport: _SDKWebSocketTransport | None = None
         self._tools_list: list[str] | None = None
         self._session_additional_working_dirs: set[str] = set()
         self._fallback_model: str | None = None
