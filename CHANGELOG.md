@@ -5,6 +5,44 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-03
+
+### Added
+- **JSON-RPC 2.0 Protocol** - Refactored stdio protocol to JSON-RPC 2.0 format with enhanced session management and improved message handling
+- **Remote WebSocket SDK transport** - Added `--sdk-url` option for remote WebSocket SDK transport enabling distributed agent architectures
+- **Git worktree isolation for Task tool** - Task tool now runs in isolated git worktrees with unified task management for safer multi-agent operations
+- **Structured task notification system** - New notification system with auto-response support for inter-agent communication and coordination
+- **Auto-memory system** - Persistent auto-memory system with permission bypass for improved context retention across sessions
+- **Memory tool with aliases** - New Memory tool for persistent knowledge storage with convenient tool input aliases
+- **Clipboard enhancements** - New `/copy` command for conversation export and improved tmux clipboard handling
+- **Custom session agents** - Added `--agent` and `--agents` options for selecting and managing custom session agents
+- **CLI debugging options** - New `--debug` and `--disable-slash-commands` flags for development and troubleshooting
+- **Permission diff preview** - Write tool permission prompts now show unified diff previews before applying changes
+- **Interactive plan-mode exit** - Plan mode now includes interactive exit confirmation with mode cycling support
+- **Runtime permission mode cycling** - Real-time permission mode switching with status display in UI
+- **MCP server management subcommands** - Dedicated MCP subcommands for server lifecycle management
+- **OpenAI mode for models** - Added `openai_mode` option to explicitly select API endpoint for model compatibility
+- **Model profile actions** - Copy and rename actions for model profiles in management TUI
+- **Version output customization** - New `-v` short option for version with customizable output format
+
+### Changed
+- **CLI modularization** - Refactored CLI into separate components with new agents subcommand for better maintainability
+- **Code cleanup and type safety** - Comprehensive code quality improvements with enhanced type annotations and safety checks
+- **Tmux escape sequence handling** - Improved readability and reliability of tmux escape sequences
+- **CLI tips documentation** - Updated CLI tips with new features and commands
+- **Permission management** - Enhanced permission system with better UI feedback and mode visibility
+- **Model management** - Improved model profile management with copy and rename capabilities
+
+### Fixed
+- **Background task status repair** - Added fallback logic to repair stale running states when monitor misses completion events, ensuring completion callbacks are always dispatched
+- **Tool execution deadlock** - Added reentrant lock to prevent deadlocks during parallel tool execution
+- **AskUserQuestion timeout** - Disabled timeout for AskUserQuestion tool to allow unlimited user response time
+- **Model profile alignment test** - Added monkeypatch for `get_effective_model_profile` in test suite
+
+### Changed
+- **Protocol refactoring** - Major stdio protocol refactoring to JSON-RPC 2.0 with improved session state management
+- **Task isolation architecture** - Task tool now uses git worktree isolation for safer concurrent operations
+
 ## [0.4.5] - 2026-02-26
 
 ### Added
@@ -436,6 +474,7 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.5.0]: https://github.com/quantmew/Ripperdoc/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/quantmew/Ripperdoc/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/quantmew/Ripperdoc/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/quantmew/Ripperdoc/compare/v0.4.2...v0.4.3
