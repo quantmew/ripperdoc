@@ -544,6 +544,9 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
     """
     now = _loop_time()
     tasks = _get_tasks()
+    should_dispatch_callbacks = False
+
+    status = {}
     with _get_tasks_lock():
         if task_id not in tasks:
             raise KeyError(f"No background task found with id '{task_id}'")
@@ -551,6 +554,15 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
         task = tasks[task_id]
         stdout = "".join(task.stdout_chunks)
         stderr = "".join(task.stderr_chunks)
+
+        # If the monitor task missed the completion event, repair status from the
+        # underlying process return code so callers never observe a stale running
+        # state for an already-finished background command.
+        if task.exit_code is None and task.process.returncode is not None:
+            task.exit_code = task.process.returncode
+            task.end_time = task.end_time or now
+            task.done_event.set()
+            should_dispatch_callbacks = True
 
         finished = task.exit_code is not None or task.killed or task.timed_out
         if finished and task.end_time is None:
@@ -564,7 +576,7 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
             task.stdout_chunks.clear()
             task.stderr_chunks.clear()
 
-        return {
+        status = {
             "id": task.id,
             "command": task.command,
             "status": _compute_status(task),
@@ -576,6 +588,14 @@ def get_background_status(task_id: str, consume: bool = True) -> dict:
             "duration_ms": duration_ms,
             "age_ms": age_ms,
         }
+
+    if should_dispatch_callbacks:
+        # Completion callbacks are usually triggered by the monitor task, but if that
+        # path is missed, run them here as a fallback to guarantee task notifications.
+        _run_completion_callbacks(task)
+        return status
+
+    return status
 
 
 async def kill_background_task(task_id: str) -> bool:
