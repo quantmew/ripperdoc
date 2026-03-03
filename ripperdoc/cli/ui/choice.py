@@ -577,7 +577,7 @@ async def prompt_choice_async(
         default_esc_value = esc_value or (choice_options[0].value if choice_options else "")
         result_on_esc = default_esc_value
 
-        @key_bindings.add("escape", eager=False)
+        @key_bindings.add("escape", eager=True)
         def _esc_handler(event: Any) -> None:  # noqa: ANN001 (called by key_binding)
             event.app.exit(result=result_on_esc, style="class:aborting")
 
@@ -919,7 +919,7 @@ async def prompt_checkbox_async(
     if external_header:
         print(external_header)
 
-    @kb.add("escape", eager=False)
+    @kb.add("escape", eager=True)
     def _cancel(event: Any) -> None:  # noqa: ANN401
         event.app.exit(result=None, style="class:aborting")
 
