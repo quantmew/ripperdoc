@@ -14,6 +14,8 @@ from ripperdoc.core.config import (
     ModelProfile,
     ProtocolType,
     ConfigManager,
+    get_ripperdoc_storage_env_status,
+    has_ripperdoc_storage_env_overrides,
 )
 
 
@@ -80,6 +82,24 @@ def test_config_manager_uses_directory_user_config_path():
     manager = ConfigManager()
     assert manager.global_config_path.name == "config.json"
     assert manager.global_config_path.parent.name == ".ripperdoc"
+
+
+def test_storage_env_override_status_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RIPPERDOC_CONFIG_DIR", raising=False)
+    assert has_ripperdoc_storage_env_overrides() is False
+    assert get_ripperdoc_storage_env_status() == {}
+
+
+def test_storage_env_override_status_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    override = tmp_path / "custom-config"
+    monkeypatch.setenv("RIPPERDOC_CONFIG_DIR", str(override))
+
+    assert has_ripperdoc_storage_env_overrides() is True
+    status = get_ripperdoc_storage_env_status()
+    assert status["CONFIG_DIR"] == str(override)
+    assert status["EFFECTIVE_USER_CONFIG_DIR"] == str(override)
 
 
 def test_effective_config_respects_local_project_user_precedence(tmp_path: Path):

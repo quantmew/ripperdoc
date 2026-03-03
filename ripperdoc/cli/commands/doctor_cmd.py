@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple, cast
 
@@ -15,7 +16,9 @@ from ripperdoc.core.config import (
     get_effective_config,
     get_project_config,
     get_ripperdoc_env_status,
+    get_ripperdoc_storage_env_status,
     has_ripperdoc_env_overrides,
+    has_ripperdoc_storage_env_overrides,
 )
 from ripperdoc.core.oauth import get_oauth_token
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
@@ -42,8 +45,6 @@ def _status_row(label: str, status: str, detail: str = "") -> Tuple[str, str, st
 
 def _api_key_status(profile: Any) -> Tuple[str, str]:
     """Check API key presence and source."""
-    import os
-
     protocol = cast(ProtocolType, getattr(profile, "protocol", ProtocolType.OPENAI_COMPATIBLE))
     if protocol == ProtocolType.OAUTH:
         token_name = str(getattr(profile, "oauth_token_name", "") or "")
@@ -211,14 +212,17 @@ def _project_status(project_path: Path) -> Tuple[str, str, str]:
 def _ripperdoc_env_status() -> List[Tuple[str, str, str]]:
     """Check RIPPERDOC_* environment variable overrides."""
     rows: List[Tuple[str, str, str]] = []
+    model_env_override = has_ripperdoc_env_overrides()
+    storage_env_override = has_ripperdoc_storage_env_overrides()
 
-    if not has_ripperdoc_env_overrides():
+    if not model_env_override and not storage_env_override:
         rows.append(_status_row("Env overrides", "ok", "No RIPPERDOC_* overrides active"))
         return rows
 
     rows.append(_status_row("Env overrides", "ok", "RIPPERDOC_* variables detected"))
 
     status = get_ripperdoc_env_status()
+    status.update(get_ripperdoc_storage_env_status())
     for key, value in status.items():
         rows.append(_status_row("", "ok", f"  {key}: {value}"))
 

@@ -13,7 +13,13 @@ from enum import Enum
 
 from ripperdoc.core.managed_settings import load_managed_settings_snapshot
 from ripperdoc.core.oauth import OAuthTokenType
-from ripperdoc.utils.config_paths import CONFIG_DIR_NAME, config_dir_for_scope, config_file_for_scope
+from ripperdoc.utils.config_paths import (
+    CONFIG_DIR_NAME,
+    RIPPERDOC_CONFIG_DIR_ENV,
+    config_dir_for_scope,
+    config_file_for_scope,
+    user_config_dir,
+)
 from ripperdoc.utils.log import get_logger
 
 
@@ -834,6 +840,7 @@ RIPPERDOC_MODEL = "RIPPERDOC_MODEL"
 RIPPERDOC_SMALL_FAST_MODEL = "RIPPERDOC_SMALL_FAST_MODEL"
 RIPPERDOC_API_KEY = "RIPPERDOC_API_KEY"
 RIPPERDOC_PROTOCOL = "RIPPERDOC_PROTOCOL"
+RIPPERDOC_CONFIG_DIR = RIPPERDOC_CONFIG_DIR_ENV
 
 
 def _infer_protocol_from_url_and_model(base_url: str, model_name: str = "") -> ProtocolType:
@@ -994,4 +1001,18 @@ def get_ripperdoc_env_status() -> Dict[str, str]:
     if auth_token := os.getenv(RIPPERDOC_AUTH_TOKEN):
         masked = auth_token[:4] + "…" if len(auth_token) > 4 else "set"
         status["AUTH_TOKEN"] = f"{masked} (${RIPPERDOC_AUTH_TOKEN})"
+    return status
+
+
+def has_ripperdoc_storage_env_overrides() -> bool:
+    """Check if storage-related RIPPERDOC_* env overrides are set."""
+    return bool(os.getenv(RIPPERDOC_CONFIG_DIR))
+
+
+def get_ripperdoc_storage_env_status() -> Dict[str, str]:
+    """Get storage-related RIPPERDOC_* environment overrides for diagnostics."""
+    status: Dict[str, str] = {}
+    if config_dir := os.getenv(RIPPERDOC_CONFIG_DIR):
+        status["CONFIG_DIR"] = config_dir
+        status["EFFECTIVE_USER_CONFIG_DIR"] = str(user_config_dir())
     return status

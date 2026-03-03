@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 CONFIG_DIR_NAME = ".ripperdoc"
+RIPPERDOC_CONFIG_DIR_ENV = "RIPPERDOC_CONFIG_DIR"
 ConfigScope = Literal["user", "project", "local", "managed"]
 
 
@@ -16,7 +17,7 @@ def user_config_dir(home: Optional[Path] = None) -> Path:
     if home is not None:
         return home.expanduser() / CONFIG_DIR_NAME
 
-    raw = os.getenv("RIPPERDOC_CONFIG_DIR")
+    raw = os.getenv(RIPPERDOC_CONFIG_DIR_ENV)
     if raw and raw.strip():
         return Path(raw).expanduser()
 
