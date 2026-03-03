@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.file_editing import file_lock
 from ripperdoc.utils.log import get_logger
@@ -114,10 +115,7 @@ def should_show_completed_tasks_in_ui() -> bool:
 
 
 def _config_root() -> Path:
-    raw = os.getenv("RIPPERDOC_CONFIG_DIR")
-    if raw and raw.strip():
-        return Path(raw).expanduser()
-    return Path.home() / ".ripperdoc"
+    return user_config_dir()
 
 
 def sanitize_identifier(value: str, *, fallback: str) -> str:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import click
+from ripperdoc.utils.config_paths import config_dir_for_scope, config_file_for_scope
 
 _PROJECT_SCOPE = "project"
 _USER_SCOPE = "user"
@@ -16,36 +17,51 @@ _SUPPORTED_TRANSPORTS = ("stdio", "sse", "http", "streamable-http")
 
 def _config_path_for_scope(project_path: Path, scope: str) -> Path:
     if scope == _USER_SCOPE:
-        return Path.home().expanduser() / ".ripperdoc" / "mcp.json"
-    return project_path / ".ripperdoc" / "mcp.json"
+        return config_file_for_scope("user", "mcp.json")
+    return config_file_for_scope("project", "mcp.json", project_path=project_path)
 
 
-def _candidate_paths(project_path: Path, scope: str = "all") -> list[Path]:
+def _candidate_paths(
+    project_path: Path,
+    scope: str = "all",
+    *,
+    include_managed: bool = False,
+) -> list[Path]:
+    managed_paths = [
+        config_file_for_scope("managed", "managed-mcp.json", project_path=project_path).resolve(),
+    ]
     user_paths = [
-        (Path.home().expanduser() / ".ripperdoc" / "mcp.json").resolve(),
+        config_file_for_scope("user", "mcp.json").resolve(),
         (Path.home().expanduser() / ".mcp.json").resolve(),
     ]
     project_paths = [
-        (project_path / ".ripperdoc" / "mcp.json").resolve(),
+        config_file_for_scope("project", "mcp.json", project_path=project_path).resolve(),
         (project_path / ".mcp.json").resolve(),
     ]
     if scope == _USER_SCOPE:
         return user_paths
     if scope == _PROJECT_SCOPE:
         return project_paths
+    if include_managed:
+        return [*managed_paths, *user_paths, *project_paths]
     return [*user_paths, *project_paths]
 
 
 def _scope_for_path(project_path: Path, path: Path) -> str:
+    managed_paths = {
+        config_file_for_scope("managed", "managed-mcp.json", project_path=project_path).resolve(),
+    }
     project_paths = {
-        (project_path / ".ripperdoc" / "mcp.json").resolve(),
+        config_file_for_scope("project", "mcp.json", project_path=project_path).resolve(),
         (project_path / ".mcp.json").resolve(),
     }
     user_paths = {
-        (Path.home().expanduser() / ".ripperdoc" / "mcp.json").resolve(),
+        config_file_for_scope("user", "mcp.json").resolve(),
         (Path.home().expanduser() / ".mcp.json").resolve(),
     }
     resolved = path.resolve()
+    if resolved in managed_paths:
+        return "managed"
     if resolved in project_paths:
         return _PROJECT_SCOPE
     if resolved in user_paths:
@@ -178,7 +194,7 @@ def _entry_transport(entry: dict[str, Any]) -> str:
 
 def _load_merged_servers(project_path: Path) -> dict[str, tuple[dict[str, Any], Path]]:
     merged: dict[str, tuple[dict[str, Any], Path]] = {}
-    for path in _candidate_paths(project_path, scope="all"):
+    for path in _candidate_paths(project_path, scope="all", include_managed=True):
         if not path.exists():
             continue
         data, servers_key = _load_mcp_json(path)
@@ -453,10 +469,11 @@ def remove_server(scope: str, name: str) -> None:
 @mcp_group.command(name="reset-project-choices")
 def reset_project_choices() -> None:
     project_path = Path.cwd()
+    project_config_dir = config_dir_for_scope("project", project_path=project_path)
     candidates = [
-        project_path / ".ripperdoc" / "mcp_choices.json",
-        project_path / ".ripperdoc" / "mcp_project_choices.json",
-        project_path / ".ripperdoc" / "mcp_server_choices.json",
+        project_config_dir / "mcp_choices.json",
+        project_config_dir / "mcp_project_choices.json",
+        project_config_dir / "mcp_server_choices.json",
     ]
     deleted: list[Path] = []
     for path in candidates:

@@ -27,6 +27,7 @@ import yaml
 
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.core.plugins import discover_plugins
+from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.coerce import parse_boolish, parse_optional_int
 from ripperdoc.utils.log import get_logger
 
@@ -288,11 +289,11 @@ def skill_directories(
     project_path: Optional[Path] = None, home: Optional[Path] = None
 ) -> List[Tuple[Path, SkillLocation]]:
     """Return the standard skill directories for user and project scopes."""
-    home_dir = (home or Path.home()).expanduser()
-    project_dir = (project_path or Path.cwd()).resolve()
+    home_dir = user_config_dir(home=home)
+    project_dir = project_config_dir(project_path)
     return [
-        (home_dir / ".ripperdoc" / SKILL_DIR_NAME, SkillLocation.USER),
-        (project_dir / ".ripperdoc" / SKILL_DIR_NAME, SkillLocation.PROJECT),
+        (home_dir / SKILL_DIR_NAME, SkillLocation.USER),
+        (project_dir / SKILL_DIR_NAME, SkillLocation.PROJECT),
     ]
 
 

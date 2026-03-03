@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.path_utils import project_storage_dir
 from ripperdoc.utils.tasks import is_task_system_enabled, list_tasks
@@ -54,7 +55,7 @@ def _normalize_todo_priority(value: object) -> TodoPriority:
 def _storage_path(project_root: Optional[Path], ensure_dir: bool) -> Path:
     """Return the todo storage path, optionally ensuring the directory exists."""
     root = project_root or Path.cwd()
-    base_dir = Path.home() / ".ripperdoc" / "todos"
+    base_dir = user_config_dir() / "todos"
     storage_dir = project_storage_dir(base_dir, root, ensure=ensure_dir)
     return storage_dir / "todos.json"
 

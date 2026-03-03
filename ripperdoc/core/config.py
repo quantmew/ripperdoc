@@ -11,13 +11,15 @@ from typing import Any, Dict, Optional, Literal, TYPE_CHECKING, cast
 from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
+from ripperdoc.core.managed_settings import load_managed_settings_snapshot
 from ripperdoc.core.oauth import OAuthTokenType
+from ripperdoc.utils.config_paths import CONFIG_DIR_NAME, config_dir_for_scope, config_file_for_scope
 from ripperdoc.utils.log import get_logger
 
 
 logger = get_logger()
 
-USER_CONFIG_DIR_NAME = ".ripperdoc"
+USER_CONFIG_DIR_NAME = CONFIG_DIR_NAME
 USER_CONFIG_FILE_NAME = "config.json"
 
 if TYPE_CHECKING:
@@ -284,8 +286,7 @@ class ConfigManager:
     """Manages user and project-specific configuration."""
 
     def __init__(self) -> None:
-        home = Path.home()
-        self.global_config_path = home / USER_CONFIG_DIR_NAME / USER_CONFIG_FILE_NAME
+        self.global_config_path = config_file_for_scope("user", USER_CONFIG_FILE_NAME)
         self.current_project_path: Optional[Path] = None
         self._global_config: Optional[UserConfig] = None
         self._project_config: Optional[ProjectConfig] = None
@@ -384,11 +385,15 @@ class ConfigManager:
         return self._global_config
 
     def get_effective_config(self, project_path: Optional[Path] = None) -> UserConfig:
-        """Return effective config merged as local > project > user."""
+        """Return effective config merged as managed > local > project > user."""
         merged: Dict[str, Any] = self.get_global_config().model_dump()
         resolved_project_path = project_path or self.current_project_path or Path.cwd()
 
-        project_config_path = resolved_project_path / ".ripperdoc" / "config.json"
+        project_config_path = config_file_for_scope(
+            "project",
+            "config.json",
+            project_path=resolved_project_path,
+        )
         if project_config_path.exists():
             project_data = self._read_json_file(project_config_path)
             if project_data is not None:
@@ -396,13 +401,23 @@ class ConfigManager:
                     merged, self._filter_user_config_fields(project_data)
                 )
 
-        local_config_path = resolved_project_path / ".ripperdoc" / "config.local.json"
+        local_config_path = config_file_for_scope(
+            "local",
+            "config.local.json",
+            project_path=resolved_project_path,
+        )
         if local_config_path.exists():
             local_data = self._read_json_file(local_config_path)
             if local_data is not None:
                 merged = self._merge_dict_layers(
                     merged, self._filter_user_config_fields(local_data)
                 )
+
+        managed_snapshot = load_managed_settings_snapshot()
+        if managed_snapshot.data:
+            managed_config_fields = self._filter_user_config_fields(managed_snapshot.data)
+            if managed_config_fields:
+                merged = self._merge_dict_layers(merged, managed_config_fields)
 
         try:
             return UserConfig(**merged)
@@ -440,7 +455,11 @@ class ConfigManager:
         if self.current_project_path is None:
             return ProjectConfig()
 
-        config_path = self.current_project_path / ".ripperdoc" / "config.json"
+        config_path = config_file_for_scope(
+            "project",
+            "config.json",
+            project_path=self.current_project_path,
+        )
 
         if self._project_config is None:
             if config_path.exists():
@@ -492,7 +511,7 @@ class ConfigManager:
         if self.current_project_path is None:
             return
 
-        config_dir = self.current_project_path / ".ripperdoc"
+        config_dir = config_dir_for_scope("project", project_path=self.current_project_path)
         config_dir.mkdir(exist_ok=True)
 
         config_path = config_dir / "config.json"
@@ -517,7 +536,11 @@ class ConfigManager:
         if self.current_project_path is None:
             return ProjectLocalConfig()
 
-        config_path = self.current_project_path / ".ripperdoc" / "config.local.json"
+        config_path = config_file_for_scope(
+            "local",
+            "config.local.json",
+            project_path=self.current_project_path,
+        )
 
         if self._project_local_config is None:
             if config_path.exists():
@@ -561,7 +584,7 @@ class ConfigManager:
         if self.current_project_path is None:
             return
 
-        config_dir = self.current_project_path / ".ripperdoc"
+        config_dir = config_dir_for_scope("local", project_path=self.current_project_path)
         config_dir.mkdir(exist_ok=True)
 
         config_path = config_dir / "config.local.json"
@@ -584,7 +607,11 @@ class ConfigManager:
         if self.current_project_path is None:
             return False
 
-        gitignore_path = self.current_project_path / ".ripperdoc" / ".gitignore"
+        gitignore_path = config_file_for_scope(
+            "project",
+            ".gitignore",
+            project_path=self.current_project_path,
+        )
         try:
             text = ""
             if gitignore_path.exists():

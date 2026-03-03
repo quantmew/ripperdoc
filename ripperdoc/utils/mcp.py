@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, TextIO
 
 from ripperdoc import __version__
 from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
+from ripperdoc.utils.config_paths import config_dir_for_scope, config_file_for_scope
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.path_utils import sanitize_project_path
 from ripperdoc.utils.token_estimation import estimate_tokens
@@ -254,10 +255,11 @@ def clear_mcp_runtime_overrides(project_path: Optional[Path] = None) -> None:
 
 def _load_server_configs(project_path: Optional[Path]) -> Dict[str, McpServerInfo]:
     project_path = project_path or Path.cwd()
+    managed_mcp_path = config_file_for_scope("managed", "managed-mcp.json", project_path=project_path)
     candidates = [
-        Path.home() / ".ripperdoc" / "mcp.json",
+        config_file_for_scope("user", "mcp.json"),
         Path.home() / ".mcp.json",
-        project_path / ".ripperdoc" / "mcp.json",
+        config_file_for_scope("project", "mcp.json", project_path=project_path),
         project_path / ".mcp.json",
     ]
 
@@ -294,12 +296,18 @@ def _load_server_configs(project_path: Optional[Path]) -> Dict[str, McpServerInf
             if isinstance(expanded_inline, dict):
                 merged.update(_parse_servers(expanded_inline))
 
+    # Managed MCP has highest precedence and cannot be overridden by user/project/plugin scopes.
+    managed_payload = _load_json_file(managed_mcp_path)
+    if managed_payload:
+        merged.update(_parse_servers(managed_payload))
+
     logger.debug(
         "[mcp] Loaded MCP server configs",
         extra={
             "project_path": str(project_path),
             "server_count": len(merged),
             "candidates": [str(path) for path in candidates],
+            "managed_mcp_path": str(managed_mcp_path),
         },
     )
     key = _project_scope_key(project_path)
@@ -373,7 +381,7 @@ def _sanitize_server_filename(server_name: str) -> str:
 
 def _mcp_stderr_log_path(project_path: Path, server_name: str) -> Path:
     safe_project = sanitize_project_path(project_path)
-    base_dir = Path.home() / ".ripperdoc" / "logs" / "mcp_stderr" / safe_project
+    base_dir = config_dir_for_scope("user") / "logs" / "mcp_stderr" / safe_project
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / f"{_sanitize_server_filename(server_name)}.log"
 

@@ -24,6 +24,7 @@ from ripperdoc.core.custom_commands import (
     render_command_markdown,
     validate_command_name,
 )
+from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -65,13 +66,13 @@ def _print_usage(console: Any) -> None:
 
 
 def _get_targets(project_path: Path) -> List[CommandConfigTarget]:
-    project_dir = project_path.resolve()
-    user_dir = Path.home().expanduser() / ".ripperdoc" / COMMAND_DIR_NAME
+    project_dir = project_config_dir(project_path)
+    user_dir = user_config_dir() / COMMAND_DIR_NAME
     return [
         CommandConfigTarget(
             key="project",
             label="Project (.ripperdoc/commands)",
-            path=project_dir / ".ripperdoc" / COMMAND_DIR_NAME,
+            path=project_dir / COMMAND_DIR_NAME,
             description="Shared commands committed to the repo",
             location=CommandLocation.PROJECT,
         ),

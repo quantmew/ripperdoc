@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -124,11 +125,11 @@ def output_style_directories(
     home: Optional[Path] = None,
 ) -> List[Tuple[Path, OutputStyleLocation]]:
     """Return user/project output-style directories in precedence order."""
-    home_dir = (home or Path.home()).expanduser()
-    project_dir = (project_path or Path.cwd()).resolve()
+    home_dir = user_config_dir(home=home)
+    project_dir = project_config_dir(project_path)
     return [
-        (home_dir / ".ripperdoc" / OUTPUT_STYLE_DIR_NAME, OutputStyleLocation.USER),
-        (project_dir / ".ripperdoc" / OUTPUT_STYLE_DIR_NAME, OutputStyleLocation.PROJECT),
+        (home_dir / OUTPUT_STYLE_DIR_NAME, OutputStyleLocation.USER),
+        (project_dir / OUTPUT_STYLE_DIR_NAME, OutputStyleLocation.PROJECT),
     ]
 
 

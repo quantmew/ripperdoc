@@ -23,6 +23,8 @@ from ripperdoc.core.plugins import (
     get_plugin_storage_root,
     remove_enabled_plugin_for_scope,
 )
+from ripperdoc.core.managed_settings import get_managed_setting
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.user_agent import build_user_agent
 
@@ -113,8 +115,7 @@ def _known_marketplaces_path(
 
 
 def _legacy_marketplace_config_path(home: Optional[Path] = None) -> Path:
-    home_dir = (home or Path.home()).expanduser()
-    return home_dir / ".ripperdoc" / MARKETPLACE_CONFIG_FILE
+    return user_config_dir(home=home) / MARKETPLACE_CONFIG_FILE
 
 
 def _marketplaces_dir(
@@ -125,8 +126,7 @@ def _marketplaces_dir(
 
 
 def _cache_dir(home: Optional[Path] = None) -> Path:
-    home_dir = (home or Path.home()).expanduser()
-    return home_dir / ".ripperdoc" / "cache" / MARKETPLACE_CACHE_DIR
+    return user_config_dir(home=home) / "cache" / MARKETPLACE_CACHE_DIR
 
 
 def normalize_marketplace_source(raw: str) -> str:
@@ -169,6 +169,26 @@ def _canonical_marketplace_id(source: str) -> str:
         base = Path(normalized).name or "marketplace"
     base = re.sub(r"[^a-zA-Z0-9_-]+", "-", base).strip("-").lower()
     return base or "marketplace"
+
+
+def _strict_known_marketplace_sources() -> Optional[set[str]]:
+    raw = get_managed_setting("strictKnownMarketplaces")
+    if raw is None:
+        raw = get_managed_setting("strict_known_marketplaces")
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        logger.warning(
+            "[marketplace] managed strictKnownMarketplaces is not a list; ignoring policy"
+        )
+        return None
+    normalized: set[str] = set()
+    for item in raw:
+        value = str(item or "").strip()
+        if not value:
+            continue
+        normalized.add(normalize_marketplace_source(value))
+    return normalized
 
 
 def _normalize_source_record(raw: Any) -> Optional[str]:
@@ -435,6 +455,13 @@ def add_marketplace(
     )
     if existing:
         return existing, _known_marketplaces_path(home=home)
+
+    strict_sources = _strict_known_marketplace_sources()
+    if strict_sources is not None and normalized not in strict_sources:
+        raise ValueError(
+            f"Marketplace source '{source}' is blocked by managed settings policy "
+            "(strictKnownMarketplaces)."
+        )
 
     local_path: Optional[Path] = None
     if _is_git_source(source, normalized):

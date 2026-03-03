@@ -15,6 +15,7 @@ from ripperdoc.core.plugin_marketplaces import (
     normalize_marketplace_source,
     remove_marketplace,
 )
+from ripperdoc.core.managed_settings import reset_managed_settings_cache
 from ripperdoc.core.plugins import PluginSettingsScope
 
 
@@ -155,3 +156,21 @@ def test_install_marketplace_plugin_user_scope_uses_user_plugin_root(tmp_path: P
     assert settings_path == home / ".ripperdoc" / "plugins.json"
     assert (home / ".ripperdoc" / "plugins" / "demo").exists()
     assert (home / ".ripperdoc" / "plugins" / "installed_plugins.json").exists()
+
+
+def test_add_marketplace_blocked_by_strict_known_marketplaces_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    managed_dir = tmp_path / "managed"
+    managed_dir.mkdir(parents=True, exist_ok=True)
+    (managed_dir / "managed-settings.json").write_text(
+        json.dumps({"strictKnownMarketplaces": ["github:anthropics/allowed-marketplace"]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RIPPERDOC_MANAGED_CONFIG_DIR", str(managed_dir))
+    reset_managed_settings_cache()
+
+    with pytest.raises(ValueError, match="strictKnownMarketplaces"):
+        add_marketplace("github:someone/blocked-marketplace", home=tmp_path / "home")
+
+    reset_managed_settings_cache()

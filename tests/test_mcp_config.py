@@ -1,7 +1,10 @@
 import asyncio
 import pytest
+import json
+from pathlib import Path
 
 from ripperdoc.utils import mcp
+from ripperdoc.core.managed_settings import reset_managed_settings_cache
 
 
 @pytest.mark.parametrize(
@@ -108,3 +111,35 @@ async def test_mcp_timeout_marks_failed_and_opens_circuit_breaker(monkeypatch, t
     finally:
         await mcp.shutdown_mcp_runtime()
         mcp._mcp_circuit_states.clear()
+
+
+def test_managed_mcp_has_highest_precedence(monkeypatch, tmp_path: Path):
+    user_dir = tmp_path / "user"
+    managed_dir = tmp_path / "managed"
+    project_dir = tmp_path / "project"
+    project_cfg = project_dir / ".ripperdoc"
+
+    monkeypatch.setenv("RIPPERDOC_CONFIG_DIR", str(user_dir))
+    monkeypatch.setenv("RIPPERDOC_MANAGED_CONFIG_DIR", str(managed_dir))
+    reset_managed_settings_cache()
+
+    user_dir.mkdir(parents=True, exist_ok=True)
+    managed_dir.mkdir(parents=True, exist_ok=True)
+    project_cfg.mkdir(parents=True, exist_ok=True)
+
+    (user_dir / "mcp.json").write_text(
+        json.dumps({"servers": {"same": {"command": "user-cmd"}}}),
+        encoding="utf-8",
+    )
+    (project_cfg / "mcp.json").write_text(
+        json.dumps({"servers": {"same": {"command": "project-cmd"}}}),
+        encoding="utf-8",
+    )
+    (managed_dir / "managed-mcp.json").write_text(
+        json.dumps({"servers": {"same": {"command": "managed-cmd"}}}),
+        encoding="utf-8",
+    )
+
+    loaded = mcp.load_mcp_server_configs(project_path=project_dir)
+    assert "same" in loaded
+    assert loaded["same"].command == "managed-cmd"

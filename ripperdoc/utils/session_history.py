@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messages import (
     AssistantMessage,
@@ -45,7 +46,7 @@ class SessionSummary:
 
 
 def _sessions_root() -> Path:
-    return Path.home() / ".ripperdoc" / "sessions"
+    return user_config_dir() / "sessions"
 
 
 def _session_file(

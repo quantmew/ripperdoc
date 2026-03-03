@@ -9,11 +9,12 @@ from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
 
+from ripperdoc.utils.config_paths import CONFIG_DIR_NAME, config_file_for_scope
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
-USER_CONFIG_DIR_NAME = ".ripperdoc"
+USER_CONFIG_DIR_NAME = CONFIG_DIR_NAME
 USER_OAUTH_FILE_NAME = "oauth_tokens.json"
 
 
@@ -227,7 +228,7 @@ OAUTH_MODEL_OPTIONS: Dict[OAuthTokenType, tuple[OAuthModelOption, ...]] = {
 
 def get_oauth_tokens_path() -> Path:
     """Return the OAuth token storage path."""
-    return Path.home() / USER_CONFIG_DIR_NAME / USER_OAUTH_FILE_NAME
+    return config_file_for_scope("user", USER_OAUTH_FILE_NAME)
 
 
 def _safe_read_store(path: Path) -> OAuthTokenStore:

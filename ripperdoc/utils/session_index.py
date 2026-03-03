@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.path_utils import project_storage_dir
 
@@ -65,7 +66,7 @@ class SessionIndex:
 
 
 def _sessions_root() -> Path:
-    return Path.home() / ".ripperdoc" / "sessions"
+    return user_config_dir() / "sessions"
 
 
 def _session_dir(project_path: Path, ensure: bool = False) -> Path:

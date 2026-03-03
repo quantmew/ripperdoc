@@ -19,6 +19,7 @@ from ripperdoc.utils.memory import (
     collect_all_memory_files,
 )
 from ripperdoc.utils.platform import is_windows
+from ripperdoc.utils.config_paths import user_config_dir
 
 from .base import SlashCommand
 
@@ -41,7 +42,7 @@ def _shorten_path(path: Path, project_path: Path) -> str:
 def _preferred_user_memory_path() -> Path:
     """Pick the user-level memory path, preferring ~/.ripperdoc/AGENTS.md."""
     home = Path.home()
-    preferred_dir = home / ".ripperdoc"
+    preferred_dir = user_config_dir()
     preferred_path = preferred_dir / MEMORY_FILE_NAME
     fallback_path = home / MEMORY_FILE_NAME
 

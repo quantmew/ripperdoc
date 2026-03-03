@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Optional, 
 from ripperdoc.cli.ui.choice import prompt_choice
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.managed_settings import get_managed_setting
 from ripperdoc.core.tool import Tool
 from ripperdoc.tools.file_read_tool import detect_file_encoding
 from ripperdoc.utils.diff_rendering import build_numbered_diff_layout, format_numbered_diff_text
@@ -42,6 +43,27 @@ _PERMISSION_PROMPT_RESERVED_LINES = 14
 _PERMISSION_PROMPT_MIN_DIFF_LINES = 4
 _PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"}
 _AUTO_MEMORY_WRITE_TOOLS = {"Write", "Edit", "MultiEdit"}
+
+
+def _as_str_set(raw: Any) -> Set[str]:
+    if isinstance(raw, str):
+        value = raw.strip()
+        return {value} if value else set()
+    if not isinstance(raw, (list, tuple, set)):
+        return set()
+    out: Set[str] = set()
+    for item in raw:
+        value = str(item or "").strip()
+        if value:
+            out.add(value)
+    return out
+
+
+def _managed_permissions_only_enabled() -> bool:
+    raw = get_managed_setting("managedPermissionsOnly")
+    if raw is None:
+        raw = get_managed_setting("managed_permissions_only")
+    return bool(raw)
 
 
 @dataclass
@@ -771,25 +793,47 @@ def _build_permission_policy(
     session_working_dirs: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Build merged permission policy inputs for tool-level evaluation."""
-    raw_allow_rules = (
-        set(config.bash_allow_rules or [])
-        | set(global_config.user_allow_rules or [])
-        | set(local_config.local_allow_rules or [])
+    managed_permissions_only = _managed_permissions_only_enabled()
+    managed_allow_rules = (
+        _as_str_set(get_managed_setting("managedAllowRules"))
+        | _as_str_set(get_managed_setting("user_allow_rules"))
     )
-    for tool_name, tool_rules in session_tool_rules.items():
-        for rule in tool_rules:
-            raw_allow_rules.add(_session_rule_to_raw(tool_name, rule))
+    managed_deny_rules = (
+        _as_str_set(get_managed_setting("managedDenyRules"))
+        | _as_str_set(get_managed_setting("user_deny_rules"))
+    )
+    managed_ask_rules = (
+        _as_str_set(get_managed_setting("managedAskRules"))
+        | _as_str_set(get_managed_setting("user_ask_rules"))
+    )
 
-    raw_deny_rules = (
-        set(config.bash_deny_rules or [])
-        | set(global_config.user_deny_rules or [])
-        | set(local_config.local_deny_rules or [])
-    )
-    raw_ask_rules = (
-        set(config.bash_ask_rules or [])
-        | set(global_config.user_ask_rules or [])
-        | set(local_config.local_ask_rules or [])
-    )
+    if managed_permissions_only:
+        raw_allow_rules = set(managed_allow_rules)
+        raw_deny_rules = set(managed_deny_rules)
+        raw_ask_rules = set(managed_ask_rules)
+    else:
+        raw_allow_rules = (
+            set(config.bash_allow_rules or [])
+            | set(global_config.user_allow_rules or [])
+            | set(local_config.local_allow_rules or [])
+            | managed_allow_rules
+        )
+        for tool_name, tool_rules in session_tool_rules.items():
+            for rule in tool_rules:
+                raw_allow_rules.add(_session_rule_to_raw(tool_name, rule))
+
+        raw_deny_rules = (
+            set(config.bash_deny_rules or [])
+            | set(global_config.user_deny_rules or [])
+            | set(local_config.local_deny_rules or [])
+            | managed_deny_rules
+        )
+        raw_ask_rules = (
+            set(config.bash_ask_rules or [])
+            | set(global_config.user_ask_rules or [])
+            | set(local_config.local_ask_rules or [])
+            | managed_ask_rules
+        )
 
     parsed_allow_rules = _parse_rule_collection(raw_allow_rules)
     parsed_deny_rules = _parse_rule_collection(raw_deny_rules)
@@ -830,6 +874,7 @@ def _build_permission_policy(
         "parsed_ask_rules": parsed_ask_rules,
         "allowed_working_dirs": allowed_working_dirs,
         "project_path": project_path,
+        "managed_permissions_only": managed_permissions_only,
     }
 
 
@@ -1134,7 +1179,10 @@ def make_permission_checker(
             session_tool_rules=session_tool_rules,
             session_working_dirs=session_working_dirs,
         )
-        is_preapproved = tool.name in allowed_tools or tool.name in session_allowed_tools
+        if policy.get("managed_permissions_only"):
+            is_preapproved = False
+        else:
+            is_preapproved = tool.name in allowed_tools or tool.name in session_allowed_tools
         decision = None if is_preapproved else await _resolve_permission_decision(
             tool,
             parsed_input,

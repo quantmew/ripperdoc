@@ -11,6 +11,7 @@ import yaml
 
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.core.plugins import discover_plugins
+from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.log import get_logger
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
@@ -344,8 +345,8 @@ def _built_in_agents() -> List[AgentDefinition]:
 def _agent_dirs(
     project_path: Optional[Path] = None, home: Optional[Path] = None
 ) -> List[Tuple[Path, AgentLocation]]:
-    home_dir = (home or Path.home()) / ".ripperdoc" / AGENT_DIR_NAME
-    project_dir = (project_path or Path.cwd()).resolve() / ".ripperdoc" / AGENT_DIR_NAME
+    home_dir = user_config_dir(home=home) / AGENT_DIR_NAME
+    project_dir = project_config_dir(project_path) / AGENT_DIR_NAME
     return [
         (home_dir, AgentLocation.USER),
         (project_dir, AgentLocation.PROJECT),

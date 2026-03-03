@@ -12,7 +12,9 @@ from ripperdoc.core.config import (
     get_effective_config,
     get_global_config_path,
 )
+from ripperdoc.core.managed_settings import has_managed_settings
 from ripperdoc.core.oauth import get_oauth_token
+from ripperdoc.utils.config_paths import config_file_for_scope
 from ripperdoc.utils.memory import MAX_CONTENT_LENGTH, MemoryFile, collect_all_memory_files
 
 from .base import SlashCommand
@@ -91,12 +93,22 @@ def _setting_sources_summary(
     if get_global_config_path().exists():
         sources.append("User settings")
 
-    project_config_path = project_path / ".ripperdoc" / "config.json"
+    project_config_path = config_file_for_scope(
+        "project",
+        "config.json",
+        project_path=project_path,
+    )
     if project_config_path.exists():
         sources.append("Project settings")
-    local_config_path = project_path / ".ripperdoc" / "config.local.json"
+    local_config_path = config_file_for_scope(
+        "local",
+        "config.local.json",
+        project_path=project_path,
+    )
     if local_config_path.exists():
         sources.append("Local settings")
+    if has_managed_settings():
+        sources.append("Managed settings")
 
     if any(memory.type == "Local" for memory in memory_files):
         sources.append("Local memory")

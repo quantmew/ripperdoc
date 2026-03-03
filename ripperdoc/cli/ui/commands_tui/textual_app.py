@@ -36,6 +36,7 @@ from ripperdoc.core.custom_commands import (
     render_command_markdown,
     validate_command_name,
 )
+from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
 
 KNOWN_FRONTMATTER_KEYS = {
     "description",
@@ -587,8 +588,8 @@ class CommandsApp(App):
 
 def _command_dir(project_path: Path, location: CommandLocation) -> Path:
     if location == CommandLocation.USER:
-        return Path.home().expanduser() / ".ripperdoc" / "commands"
-    return project_path.resolve() / ".ripperdoc" / "commands"
+        return user_config_dir() / "commands"
+    return project_config_dir(project_path) / "commands"
 
 
 def _location_rank(location: CommandLocation) -> int:

@@ -27,6 +27,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from ripperdoc.utils.config_paths import (
+    CONFIG_DIR_NAME,
+    project_config_dir,
+    user_config_dir,
+)
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -88,12 +93,12 @@ class PluginLoadResult:
 def _settings_paths(
     project_path: Optional[Path], home: Optional[Path]
 ) -> Dict[PluginSettingsScope, Path]:
-    home_dir = (home or Path.home()).expanduser()
-    project_dir = (project_path or Path.cwd()).resolve()
+    home_dir = user_config_dir(home=home)
+    project_dir = project_config_dir(project_path)
     return {
-        PluginSettingsScope.USER: home_dir / ".ripperdoc" / PLUGIN_SETTINGS_FILE,
-        PluginSettingsScope.PROJECT: project_dir / ".ripperdoc" / PLUGIN_SETTINGS_FILE,
-        PluginSettingsScope.LOCAL: project_dir / ".ripperdoc" / PLUGIN_SETTINGS_LOCAL_FILE,
+        PluginSettingsScope.USER: home_dir / PLUGIN_SETTINGS_FILE,
+        PluginSettingsScope.PROJECT: project_dir / PLUGIN_SETTINGS_FILE,
+        PluginSettingsScope.LOCAL: project_dir / PLUGIN_SETTINGS_LOCAL_FILE,
     }
 
 
@@ -108,11 +113,11 @@ def get_plugin_storage_root(
     - user: ~/.ripperdoc/plugins
     - project/local: <project>/.ripperdoc/plugins
     """
-    home_dir = (home or Path.home()).expanduser()
-    project_dir = (project_path or Path.cwd()).resolve()
+    home_dir = user_config_dir(home=home)
+    project_dir = project_config_dir(project_path)
     if scope == PluginSettingsScope.USER:
-        return home_dir / ".ripperdoc" / PLUGIN_STORAGE_DIR
-    return project_dir / ".ripperdoc" / PLUGIN_STORAGE_DIR
+        return home_dir / PLUGIN_STORAGE_DIR
+    return project_dir / PLUGIN_STORAGE_DIR
 
 
 def get_installed_plugins_path(
@@ -127,11 +132,11 @@ def get_installed_plugins_path(
 def _entry_base_dir_for_scope(scope: PluginSettingsScope, settings_path: Path) -> Path:
     if scope in (PluginSettingsScope.PROJECT, PluginSettingsScope.LOCAL):
         parent = settings_path.parent
-        if parent.name == ".ripperdoc":
+        if parent.name == CONFIG_DIR_NAME:
             return parent.parent
     if scope == PluginSettingsScope.USER:
         parent = settings_path.parent
-        if parent.name == ".ripperdoc":
+        if parent.name == CONFIG_DIR_NAME:
             return parent.parent
     return settings_path.parent
 

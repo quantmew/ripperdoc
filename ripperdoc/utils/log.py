@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional
 
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.path_utils import sanitize_project_path
 
 
@@ -253,7 +254,7 @@ def get_logger() -> RipperdocLogger:
 def _normalize_path_for_logs(project_path: Path) -> Path:
     """Return the directory for log files for a given project."""
     safe_name = sanitize_project_path(project_path)
-    return Path.home() / ".ripperdoc" / "logs" / safe_name
+    return user_config_dir() / "logs" / safe_name
 
 
 def session_log_path(project_path: Path, session_id: str, when: Optional[datetime] = None) -> Path:

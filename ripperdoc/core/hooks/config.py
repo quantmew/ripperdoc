@@ -44,7 +44,9 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from ripperdoc.core.hooks.events import HookEvent
+from ripperdoc.core.managed_settings import load_managed_settings
 from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
+from ripperdoc.utils.config_paths import config_file_for_scope
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -408,17 +410,17 @@ def _load_hooks_config_from_data(data: Dict[str, Any], *, source: str) -> HooksC
 
 def get_global_hooks_path() -> Path:
     """Get the path to the user-level hooks configuration."""
-    return Path.home() / ".ripperdoc" / "hooks.json"
+    return config_file_for_scope("user", "hooks.json")
 
 
 def get_project_hooks_path(project_path: Path) -> Path:
     """Get the path to the project hooks configuration."""
-    return project_path / ".ripperdoc" / "hooks.json"
+    return config_file_for_scope("project", "hooks.json", project_path=project_path)
 
 
 def get_project_local_hooks_path(project_path: Path) -> Path:
     """Get the path to the local (git-ignored) project hooks configuration."""
-    return project_path / ".ripperdoc" / "hooks.local.json"
+    return config_file_for_scope("local", "hooks.local.json", project_path=project_path)
 
 
 def get_merged_hooks_config(project_path: Optional[Path] = None) -> HooksConfig:
@@ -428,12 +430,19 @@ def get_merged_hooks_config(project_path: Optional[Path] = None) -> HooksConfig:
     1. User config (~/.ripperdoc/hooks.json)
     2. Project config (.ripperdoc/hooks.json)
     3. Local project config (.ripperdoc/hooks.local.json)
+    4. Plugin hooks
+    5. Managed settings hooks (highest)
+
+    If managed setting `managedHooksOnly` is enabled, only managed hooks are loaded.
     """
-    # Start with user config
-    config = load_hooks_config(get_global_hooks_path())
+    managed_payload = load_managed_settings()
+    managed_hooks_only = bool(managed_payload.get("managedHooksOnly"))
+
+    # Start with user config unless managed policy limits hooks to managed scope only.
+    config = HooksConfig() if managed_hooks_only else load_hooks_config(get_global_hooks_path())
 
     # Merge project config if available
-    if project_path:
+    if project_path and not managed_hooks_only:
         project_config = load_hooks_config(get_project_hooks_path(project_path))
         config = config.merge_with(project_config)
 
@@ -441,46 +450,50 @@ def get_merged_hooks_config(project_path: Optional[Path] = None) -> HooksConfig:
         local_config = load_hooks_config(get_project_local_hooks_path(project_path))
         config = config.merge_with(local_config)
 
-    plugin_result = discover_plugins(project_path=project_path)
-    for plugin_error in plugin_result.errors:
-        logger.warning(
-            "[hooks] Plugin discovery warning: %s (%s)",
-            plugin_error.path,
-            plugin_error.reason,
-        )
+    if not managed_hooks_only:
+        plugin_result = discover_plugins(project_path=project_path)
+        for plugin_error in plugin_result.errors:
+            logger.warning(
+                "[hooks] Plugin discovery warning: %s (%s)",
+                plugin_error.path,
+                plugin_error.reason,
+            )
 
-    for plugin in plugin_result.plugins:
-        for hooks_path in plugin.hooks_paths:
-            resolved_path = hooks_path
-            if resolved_path.is_dir():
-                resolved_path = resolved_path / "hooks.json"
-            if not resolved_path.exists() or not resolved_path.is_file():
-                continue
-            try:
-                raw = json.loads(resolved_path.read_text(encoding="utf-8"))
-            except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                logger.warning(
-                    "[hooks] Failed to load plugin hooks config %s: %s: %s",
-                    resolved_path,
-                    type(exc).__name__,
-                    exc,
+        for plugin in plugin_result.plugins:
+            for hooks_path in plugin.hooks_paths:
+                resolved_path = hooks_path
+                if resolved_path.is_dir():
+                    resolved_path = resolved_path / "hooks.json"
+                if not resolved_path.exists() or not resolved_path.is_file():
+                    continue
+                try:
+                    raw = json.loads(resolved_path.read_text(encoding="utf-8"))
+                except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    logger.warning(
+                        "[hooks] Failed to load plugin hooks config %s: %s: %s",
+                        resolved_path,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                expanded = expand_plugin_root_vars(raw, plugin.root)
+                plugin_config = _load_hooks_config_from_data(
+                    expanded, source=f"{plugin.name}:{resolved_path}"
                 )
-                continue
-            if not isinstance(raw, dict):
-                continue
-            expanded = expand_plugin_root_vars(raw, plugin.root)
-            plugin_config = _load_hooks_config_from_data(
-                expanded, source=f"{plugin.name}:{resolved_path}"
-            )
-            config = config.merge_with(plugin_config)
+                config = config.merge_with(plugin_config)
 
-        for inline_entry in plugin.hooks_inline:
-            expanded_inline = expand_plugin_root_vars(inline_entry, plugin.root)
-            if not isinstance(expanded_inline, dict):
-                continue
-            inline_config = _load_hooks_config_from_data(
-                expanded_inline, source=f"{plugin.name}:inline-hooks"
-            )
-            config = config.merge_with(inline_config)
+            for inline_entry in plugin.hooks_inline:
+                expanded_inline = expand_plugin_root_vars(inline_entry, plugin.root)
+                if not isinstance(expanded_inline, dict):
+                    continue
+                inline_config = _load_hooks_config_from_data(
+                    expanded_inline, source=f"{plugin.name}:inline-hooks"
+                )
+                config = config.merge_with(inline_config)
+
+    managed_hooks_config = parse_hooks_config(managed_payload)
+    config = config.merge_with(managed_hooks_config)
 
     return config

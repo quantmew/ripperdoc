@@ -24,6 +24,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import yaml
 
 from ripperdoc.core.plugins import discover_plugins
+from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -305,11 +306,11 @@ def command_directories(
     project_path: Optional[Path] = None, home: Optional[Path] = None
 ) -> List[Tuple[Path, CommandLocation]]:
     """Return the standard command directories for user and project scopes."""
-    home_dir = (home or Path.home()).expanduser()
-    project_dir = (project_path or Path.cwd()).resolve()
+    home_dir = user_config_dir(home=home)
+    project_dir = project_config_dir(project_path)
     return [
-        (home_dir / ".ripperdoc" / COMMAND_DIR_NAME, CommandLocation.USER),
-        (project_dir / ".ripperdoc" / COMMAND_DIR_NAME, CommandLocation.PROJECT),
+        (home_dir / COMMAND_DIR_NAME, CommandLocation.USER),
+        (project_dir / COMMAND_DIR_NAME, CommandLocation.PROJECT),
     ]
 
 

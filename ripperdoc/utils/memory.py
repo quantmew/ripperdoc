@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Set
 
 from ripperdoc.core.config import get_effective_config, get_global_config_path
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.git_utils import get_git_root
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.path_utils import sanitize_project_path
@@ -432,7 +433,7 @@ def collect_all_memory_files(force_include_external: bool = False) -> List[Memor
 
     # Global/user-level memories live in home and ~/.ripperdoc.
     user_memory_paths = [
-        Path.home() / ".ripperdoc" / MEMORY_FILE_NAME,
+        user_config_dir() / MEMORY_FILE_NAME,
         Path.home() / MEMORY_FILE_NAME,
     ]
     for user_memory_path in user_memory_paths:

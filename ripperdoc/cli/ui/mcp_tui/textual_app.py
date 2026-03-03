@@ -23,6 +23,7 @@ from textual.widgets import Button, Input, OptionList, Select, Static
 from textual.widgets.option_list import Option
 from textual.worker import Worker, WorkerState
 
+from ripperdoc.utils.config_paths import config_file_for_scope
 from ripperdoc.utils.mcp import (
     McpServerInfo,
     get_mcp_stderr_log_path,
@@ -89,13 +90,13 @@ def _format_time(timestamp: float) -> str:
 
 def _config_path_for_scope(project_path: Path, scope: str) -> Path:
     if scope == _USER_SCOPE:
-        return Path.home().expanduser() / ".ripperdoc" / "mcp.json"
-    return project_path / ".ripperdoc" / "mcp.json"
+        return config_file_for_scope("user", "mcp.json")
+    return config_file_for_scope("project", "mcp.json", project_path=project_path)
 
 
 def _scope_for_path(project_path: Path, path: Path) -> str:
     user_paths = {
-        (Path.home().expanduser() / ".ripperdoc" / "mcp.json").resolve(),
+        config_file_for_scope("user", "mcp.json").resolve(),
         (Path.home().expanduser() / ".mcp.json").resolve(),
     }
     return _USER_SCOPE if path.resolve() in user_paths else _PROJECT_SCOPE
@@ -103,9 +104,9 @@ def _scope_for_path(project_path: Path, path: Path) -> str:
 
 def _candidate_edit_paths(project_path: Path) -> list[Path]:
     return [
-        (project_path / ".ripperdoc" / "mcp.json").resolve(),
+        config_file_for_scope("project", "mcp.json", project_path=project_path).resolve(),
         (project_path / ".mcp.json").resolve(),
-        (Path.home().expanduser() / ".ripperdoc" / "mcp.json").resolve(),
+        config_file_for_scope("user", "mcp.json").resolve(),
         (Path.home().expanduser() / ".mcp.json").resolve(),
     ]
 

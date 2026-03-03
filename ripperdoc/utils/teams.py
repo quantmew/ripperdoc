@@ -21,6 +21,7 @@ from weakref import WeakSet
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.file_editing import file_lock
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.pending_messages import PendingMessageQueue
@@ -544,10 +545,7 @@ def set_team_member_active(
 
 
 def _config_root() -> Path:
-    raw = os.getenv("RIPPERDOC_CONFIG_DIR")
-    if raw and raw.strip():
-        return Path(raw).expanduser()
-    return Path.home() / ".ripperdoc"
+    return user_config_dir()
 
 
 def _teams_root(*, ensure: bool = False) -> Path:

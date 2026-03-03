@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
+from ripperdoc.utils.config_paths import config_file_for_scope
 from ripperdoc.utils.git_utils import get_git_root, is_git_repository
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import is_windows
@@ -311,9 +312,9 @@ def _parse_servers(data: Dict[str, Any]) -> Dict[str, LspServerConfig]:
 def load_lsp_server_configs(project_path: Optional[Path] = None) -> Dict[str, LspServerConfig]:
     project_path = project_path or Path.cwd()
     candidates = [
-        Path.home() / ".ripperdoc" / "lsp.json",
+        config_file_for_scope("user", "lsp.json"),
         Path.home() / ".lsp.json",
-        project_path / ".ripperdoc" / "lsp.json",
+        config_file_for_scope("project", "lsp.json", project_path=project_path),
         project_path / ".lsp.json",
     ]
 

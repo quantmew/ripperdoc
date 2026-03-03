@@ -22,6 +22,7 @@ from ripperdoc.core.config import (
     save_project_config,
     save_project_local_config,
 )
+from ripperdoc.utils.config_paths import config_file_for_scope
 from ripperdoc.utils.permissions.rule_syntax import normalize_permission_rule
 
 from .base import SlashCommand
@@ -50,9 +51,13 @@ def _get_scope_info(scope: ScopeType, project_path: Path) -> tuple[str, str]:
     if scope == "user":
         return "User settings", str(get_global_config_path())
     elif scope == "project":
-        return "Project (shared)", str(project_path / ".ripperdoc" / "config.json")
+        return "Project (shared)", str(
+            config_file_for_scope("project", "config.json", project_path=project_path)
+        )
     else:  # local
-        return "Local (private)", str(project_path / ".ripperdoc" / "config.local.json")
+        return "Local (private)", str(
+            config_file_for_scope("local", "config.local.json", project_path=project_path)
+        )
 
 
 def _get_rules_for_scope(

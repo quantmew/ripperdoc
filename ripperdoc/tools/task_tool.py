@@ -51,6 +51,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ValidationResult,
 )
+from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.messages import (
     AssistantMessage,
     UserMessage,
@@ -159,11 +160,7 @@ def _new_agent_id() -> str:
 
 
 def _task_output_root() -> Path:
-    raw = os.getenv("RIPPERDOC_CONFIG_DIR")
-    if raw and raw.strip():
-        base = Path(raw).expanduser()
-    else:
-        base = Path.home() / ".ripperdoc"
+    base = user_config_dir()
     root = base / "tasks" / "outputs"
     root.mkdir(parents=True, exist_ok=True)
     return root

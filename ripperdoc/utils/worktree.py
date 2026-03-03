@@ -22,6 +22,7 @@ from ripperdoc.core.config import (
 )
 from ripperdoc.core.hooks.events import HookEvent
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
+from ripperdoc.utils.config_paths import project_config_dir
 from ripperdoc.utils.git_utils import get_git_root
 from ripperdoc.utils.log import get_logger
 
@@ -206,7 +207,7 @@ def consume_session_worktrees() -> list[WorktreeSession]:
 
 def _worktrees_root(repo_root: Path) -> Path:
     """Worktree storage path for this repository."""
-    return repo_root / ".ripperdoc" / "worktrees"
+    return project_config_dir(repo_root) / "worktrees"
 
 
 def _pick_unique_name(
