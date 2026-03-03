@@ -30,6 +30,20 @@ def build_prompt_session(
 ) -> PromptSession:
     """Create a PromptSession with slash and file completion."""
 
+    def _peek_prompt_suggestion() -> str | None:
+        getter = getattr(ui, "_peek_prompt_suggestion", None)
+        if not callable(getter):
+            return None
+        value = getter()
+        return value if isinstance(value, str) and value.strip() else None
+
+    def _take_prompt_suggestion() -> str | None:
+        getter = getattr(ui, "_take_prompt_suggestion", None)
+        if not callable(getter):
+            return None
+        value = getter()
+        return value if isinstance(value, str) and value.strip() else None
+
     class SlashCommandCompleter(Completer):
         """Autocomplete for slash commands including custom commands."""
 
@@ -79,12 +93,27 @@ def build_prompt_session(
         if buf.complete_state and buf.complete_state.current_completion:
             buf.apply_completion(buf.complete_state.current_completion)
             return
+        if not buf.text.strip():
+            suggestion = _peek_prompt_suggestion()
+            if suggestion:
+                accepted = _take_prompt_suggestion() or suggestion
+                buf.text = accepted
+                buf.cursor_position = len(accepted)
+                buf.validate_and_handle()
+                return
         buf.validate_and_handle()
 
     @key_bindings.add("tab")
     def _(event: Any) -> None:
         """Toggle thinking mode when input is empty; otherwise handle completion."""
         buf = event.current_buffer
+        if not buf.text.strip():
+            suggestion = _peek_prompt_suggestion()
+            if suggestion:
+                accepted = _take_prompt_suggestion() or suggestion
+                buf.text = accepted
+                buf.cursor_position = len(accepted)
+                return
         # If input is empty, toggle thinking mode
         if not buf.text.strip():
             from prompt_toolkit.application import run_in_terminal
@@ -244,9 +273,13 @@ def build_prompt_session(
             "rprompt-mode-accept": "fg:ansiyellow bold",
             "rprompt-mode-plan": "fg:ansiblue bold",
             "rprompt-mode-bypass": "fg:ansired bold",
+            "rprompt-ctx-ok": "fg:ansibrightblack",
+            "rprompt-ctx-warn": "fg:ansiyellow",
+            "rprompt-ctx-critical": "fg:ansired bold",
+            "prompt-suggestion": "fg:ansibrightblack italic",
         }
     )
-    return PromptSession(
+    prompt_session = PromptSession(
         completer=combined_completer,
         complete_style=CompleteStyle.COLUMN,
         complete_while_typing=True,
@@ -256,5 +289,13 @@ def build_prompt_session(
         input=input_obj,
         style=prompt_style,
         rprompt=ui._get_rprompt,
-        lexer=SimpleLexer('bg:#444444 #ffffff')
+        bottom_toolbar=ui._get_bottom_toolbar,
+        lexer=SimpleLexer("bg:#444444 #ffffff"),
     )
+    on_text_insert = getattr(ui, "_on_prompt_text_insert", None)
+    if callable(on_text_insert):
+        def _notify_text_insert(_buf: Any) -> None:
+            on_text_insert(getattr(_buf, "text", ""))
+
+        prompt_session.default_buffer.on_text_insert += _notify_text_insert
+    return prompt_session

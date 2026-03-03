@@ -25,6 +25,12 @@ def test_user_config_creation():
     assert not config.has_completed_onboarding
     assert config.theme == "dark"
     assert not config.verbose
+    assert config.prompt_suggestion_enabled is None
+
+
+def test_user_config_prompt_suggestion_alias() -> None:
+    config = UserConfig(**{"promptSuggestionEnabled": False})
+    assert config.prompt_suggestion_enabled is False
 
 
 def test_model_profile_creation():

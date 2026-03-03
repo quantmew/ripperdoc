@@ -214,6 +214,11 @@ class UserConfig(BaseModel):
     verbose: bool = False
     yolo_mode: bool = Field(default=False)
     show_full_thinking: bool = Field(default=False)
+    # Enable/disable interactive prompt suggestions in Rich UI.
+    # None means enabled by default unless overridden by env var.
+    prompt_suggestion_enabled: Optional[bool] = Field(
+        default=None, alias="promptSuggestionEnabled"
+    )
     auto_compact_enabled: bool = True
     context_token_limit: Optional[int] = None
     disable_bypass_permissions_mode: bool = Field(default=False)

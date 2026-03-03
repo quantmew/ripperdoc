@@ -20,6 +20,9 @@ def _handle(ui: Any, _: str) -> bool:
     ui.console.print(f"[bold]Yolo Mode:[/bold] {escape(str(ui.yolo_mode))}")
     ui.console.print(f"[bold]Verbose:[/bold] {escape(str(ui.verbose))}")
     ui.console.print(
+        f"[bold]Prompt Suggestion:[/bold] {escape(str(getattr(ui, '_prompt_suggestion_enabled', True)))}"
+    )
+    ui.console.print(
         f"[bold]Output Style:[/bold] {escape(str(getattr(project_local_config, 'output_style', 'default')))}"
     )
     ui.console.print(
