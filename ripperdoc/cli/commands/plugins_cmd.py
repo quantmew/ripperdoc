@@ -12,6 +12,12 @@ from rich.markup import escape
 from rich.table import Table
 
 from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.plugin_marketplaces import (
+    add_marketplace,
+    load_marketplaces,
+    remove_marketplace,
+    update_marketplace,
+)
 from ripperdoc.core.plugins import (
     PluginSettingsScope,
     add_enabled_plugin_for_scope,
@@ -60,6 +66,10 @@ def _print_usage(console: Any) -> None:
     )
     console.print("[bold]/plugins entries [scope][/bold] — show raw configured entries")
     console.print("[bold]/plugins reload[/bold] — reload plugin-driven hooks/commands")
+    console.print("[bold]/plugin marketplace list[/bold] — list configured marketplaces")
+    console.print("[bold]/plugin marketplace add <source>[/bold] — add marketplace source")
+    console.print("[bold]/plugin marketplace remove <id-or-source>[/bold] — remove marketplace")
+    console.print("[bold]/plugin marketplace update <id>[/bold] — update marketplace from source")
     console.print("[dim]Scopes: project (default), local, user[/dim]")
 
 
@@ -151,6 +161,100 @@ def _render_entries(ui: Any, scope: Optional[PluginSettingsScope]) -> bool:
     return True
 
 
+def _render_marketplaces(ui: Any) -> bool:
+    console = ui.console
+    marketplaces = load_marketplaces()
+    console.print("\n[bold]Configured Marketplaces[/bold]")
+    if not marketplaces:
+        console.print("  • None")
+        return True
+
+    table = Table(box=box.SIMPLE_HEAVY)
+    table.add_column("ID", style="cyan")
+    table.add_column("Source")
+    table.add_column("Enabled", style="dim")
+    table.add_column("Updated", style="dim")
+    table.add_column("Path", style="dim")
+    for item in marketplaces:
+        table.add_row(
+            item.marketplace_id,
+            escape(item.source),
+            "yes" if item.enabled else "no",
+            item.updated_at or "-",
+            escape(str(item.local_path)) if item.local_path else "-",
+        )
+    console.print(table)
+    return True
+
+
+def _handle_marketplace(ui: Any, tokens: list[str]) -> bool:
+    console = ui.console
+    if not tokens:
+        return _render_marketplaces(ui)
+
+    action = tokens[0].strip().lower()
+    if action in ("list", "ls"):
+        return _render_marketplaces(ui)
+
+    if action in ("add", "enable"):
+        if len(tokens) < 2:
+            console.print("[red]Usage: /plugin marketplace add <source>[/red]")
+            return True
+        source = tokens[1].strip()
+        if not source:
+            console.print("[red]Marketplace source is required.[/red]")
+            return True
+        try:
+            created, settings_path = add_marketplace(source)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[red]Failed to add marketplace: {escape(str(exc))}[/red]")
+            return True
+        console.print(
+            f"[green]Marketplace configured[/green] {escape(created.marketplace_id)} "
+            f"[dim]({escape(created.source)} | {escape(str(settings_path))})[/dim]"
+        )
+        return True
+
+    if action in ("remove", "rm", "delete", "del"):
+        if len(tokens) < 2:
+            console.print("[red]Usage: /plugin marketplace remove <id-or-source>[/red]")
+            return True
+        identifier = tokens[1].strip()
+        if not identifier:
+            console.print("[red]Marketplace id/source is required.[/red]")
+            return True
+        removed, settings_path = remove_marketplace(identifier)
+        if removed:
+            console.print(
+                f"[green]Removed marketplace[/green] {escape(identifier)} "
+                f"[dim]({escape(str(settings_path))})[/dim]"
+            )
+        else:
+            console.print(f"[yellow]Marketplace not found or protected:[/yellow] {escape(identifier)}")
+        return True
+
+    if action in ("update", "refresh"):
+        if len(tokens) < 2:
+            console.print("[red]Usage: /plugin marketplace update <id>[/red]")
+            return True
+        marketplace_id = tokens[1].strip()
+        if not marketplace_id:
+            console.print("[red]Marketplace id is required.[/red]")
+            return True
+        ok, message, _ = update_marketplace(marketplace_id)
+        if ok:
+            console.print(f"[green]{escape(message)}[/green]")
+        else:
+            console.print(f"[red]{escape(message)}[/red]")
+        return True
+
+    console.print(f"[red]Unknown marketplace action: {escape(action)}[/red]")
+    console.print(
+        "[dim]Available: list, add <source>, remove <id-or-source>, update <id>[/dim]"
+    )
+    return True
+
+
 def _handle_add(ui: Any, tokens: list[str]) -> bool:
     console = ui.console
     if not tokens:
@@ -232,6 +336,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
     if subcmd in ("help", "-h", "--help"):
         _print_usage(ui.console)
         return True
+    if subcmd in ("marketplace", "marketplaces") and len(args) > 1:
+        return _handle_marketplace(ui, args[1:])
     if subcmd in ("", "tui", "ui", "discover", "installed", "marketplaces"):
         if not sys.stdin.isatty():
             ui.console.print(

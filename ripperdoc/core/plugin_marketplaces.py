@@ -133,6 +133,12 @@ def normalize_marketplace_source(raw: str) -> str:
     source = raw.strip()
     if not source:
         return source
+    if source.startswith("github:"):
+        remainder = source.removeprefix("github:").strip().strip("/")
+        remainder = remainder.removesuffix(".git")
+        if _OWNER_REPO_RE.match(remainder):
+            return f"github:{remainder}"
+        return source
     if _OWNER_REPO_RE.match(source) and not source.startswith((".", "/", "~")):
         return f"github:{source}"
     if source.startswith("https://github.com/"):
@@ -378,8 +384,14 @@ def _clone_or_copy_marketplace(
         shutil.rmtree(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
+    github_ref: Optional[str] = None
     if normalized.startswith("github:"):
-        clone_url = f"https://github.com/{normalized.removeprefix('github:')}.git"
+        github_ref = normalized.removeprefix("github:")
+    elif source.startswith("github:"):
+        github_ref = source.removeprefix("github:")
+
+    if github_ref:
+        clone_url = f"https://github.com/{github_ref}.git"
         subprocess.run(
             ["git", "clone", "--depth", "1", clone_url, str(destination)],
             check=True,
@@ -687,6 +699,37 @@ def _parse_plugin_entries_from_json(
         name = str(item.get("name") or "").strip()
         if not name:
             continue
+        raw_source = item.get("source")
+        plugin_source = ""
+        github_repo: Optional[str] = None
+        github_ref: Optional[str] = None
+        github_subdir: Optional[str] = None
+
+        if isinstance(raw_source, dict):
+            plugin_source = str(_normalize_source_record(raw_source) or "").strip()
+            raw_ref = raw_source.get("ref")
+            if raw_ref is not None:
+                ref_value = str(raw_ref).strip()
+                github_ref = ref_value or None
+            raw_subdir = raw_source.get("subdir")
+            if raw_subdir is None:
+                raw_subdir = raw_source.get("plugin_subdir")
+            if raw_subdir is not None:
+                subdir_value = str(raw_subdir).strip().strip("/")
+                github_subdir = subdir_value or None
+        elif raw_source is not None:
+            plugin_source = str(raw_source).strip()
+
+        if plugin_source:
+            normalized_source = normalize_marketplace_source(plugin_source)
+            if normalized_source.startswith("github:"):
+                github_repo = normalized_source.removeprefix("github:")
+                if (
+                    plugin_source == normalized_source
+                    or _OWNER_REPO_RE.match(plugin_source)
+                ):
+                    plugin_source = f"https://github.com/{github_repo}.git"
+
         entries.append(
             PluginCatalogEntry(
                 name=name,
@@ -695,12 +738,15 @@ def _parse_plugin_entries_from_json(
                 marketplace_id=marketplace.marketplace_id,
                 marketplace_source=marketplace.source,
                 source_label=str(item.get("source_label") or marketplace.source),
-                plugin_source=str(item.get("source") or ""),
+                plugin_source=plugin_source,
                 installs=str(item.get("installs")) if item.get("installs") is not None else None,
                 community_managed=bool(item.get("community_managed", False)),
                 updated_at=(
                     str(item.get("updated_at")) if item.get("updated_at") is not None else None
                 ),
+                github_repo=github_repo,
+                github_ref=github_ref,
+                github_subdir=github_subdir,
             )
         )
     return entries
@@ -867,7 +913,14 @@ def update_marketplace(
 
     normalized = normalize_marketplace_source(target.source)
     destination = _marketplaces_dir(home=home) / marketplace_id
-    checked_path = _clone_or_copy_marketplace(target.source, normalized, destination)
+    try:
+        checked_path = _clone_or_copy_marketplace(target.source, normalized, destination)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        reason = stderr.splitlines()[-1] if stderr else str(exc)
+        return False, f"Failed to update marketplace '{marketplace_id}': {reason}", None
+    except (OSError, IOError, RuntimeError, ValueError) as exc:
+        return False, f"Failed to update marketplace '{marketplace_id}': {exc}", None
     ok, reason = _validate_marketplace_dir(checked_path)
     if not ok:
         try:
@@ -916,12 +969,12 @@ def install_marketplace_plugin(
     project_path = project_path.resolve()
     plugins_root = get_plugin_storage_root(scope, project_path=project_path, home=home)
     plugins_root.mkdir(parents=True, exist_ok=True)
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", entry.name).strip("-").lower() or "plugin"
+    if slug in {INSTALLED_PLUGINS_FILE, KNOWN_MARKETPLACES_FILE, MARKETPLACES_DIR}:
+        slug = f"{slug}-plugin"
+    target = plugins_root / slug
 
     if entry.local_path and entry.local_path.exists():
-        slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", entry.name).strip("-").lower() or "plugin"
-        if slug in {INSTALLED_PLUGINS_FILE, KNOWN_MARKETPLACES_FILE, MARKETPLACES_DIR}:
-            slug = f"{slug}-plugin"
-        target = plugins_root / slug
         source = entry.local_path.resolve()
         if target.exists():
             shutil.rmtree(target)
@@ -936,10 +989,6 @@ def install_marketplace_plugin(
         return True, f"Installed {entry.name} into {target}", settings_path
 
     if entry.github_repo and entry.github_subdir:
-        slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", entry.name).strip("-").lower() or "plugin"
-        if slug in {INSTALLED_PLUGINS_FILE, KNOWN_MARKETPLACES_FILE, MARKETPLACES_DIR}:
-            slug = f"{slug}-plugin"
-        target = plugins_root / slug
         if target.exists():
             shutil.rmtree(target)
 
@@ -973,6 +1022,65 @@ def install_marketplace_plugin(
             home=home,
         )
         return True, f"Installed {entry.name} into {target}", settings_path
+
+    source_value = (entry.plugin_source or "").strip()
+    if source_value:
+        clone_url: Optional[str] = None
+        normalized_source = normalize_marketplace_source(source_value)
+        if normalized_source.startswith("github:"):
+            clone_url = f"https://github.com/{normalized_source.removeprefix('github:')}.git"
+        elif (
+            source_value.startswith(("http://", "https://", "git@"))
+            or source_value.endswith(".git")
+        ):
+            clone_url = source_value
+
+        if clone_url:
+            if target.exists():
+                shutil.rmtree(target)
+            with tempfile.TemporaryDirectory(prefix="ripperdoc-plugin-") as temp_dir:
+                repo_dir = Path(temp_dir) / "repo"
+                clone_cmd = ["git", "clone", "--depth", "1"]
+                if entry.github_ref:
+                    clone_cmd.extend(["--branch", entry.github_ref])
+                clone_cmd.extend([clone_url, str(repo_dir)])
+                subprocess.run(
+                    clone_cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                source_dir = repo_dir
+                if entry.github_subdir:
+                    source_dir = (repo_dir / entry.github_subdir).resolve()
+                if not source_dir.exists() or not source_dir.is_dir():
+                    return False, f"Plugin source directory not found: {source_dir}", None
+                shutil.copytree(source_dir, target)
+
+            settings_path = add_enabled_plugin_for_scope(
+                target.resolve(),
+                scope=scope,
+                project_path=project_path,
+                home=home,
+            )
+            return True, f"Installed {entry.name} into {target}", settings_path
+
+        try:
+            source_path = Path(source_value).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            source_path = None
+        if source_path is not None and source_path.exists() and source_path.is_dir():
+            if target.exists():
+                shutil.rmtree(target)
+            if source_path != target:
+                shutil.copytree(source_path, target)
+            settings_path = add_enabled_plugin_for_scope(
+                target.resolve(),
+                scope=scope,
+                project_path=project_path,
+                home=home,
+            )
+            return True, f"Installed {entry.name} into {target}", settings_path
 
     return False, "This marketplace entry does not provide an installable source.", None
 
