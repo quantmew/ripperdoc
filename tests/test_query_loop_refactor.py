@@ -2,15 +2,84 @@
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, AsyncGenerator, List
 
 import pytest
+from pydantic import BaseModel
 
 from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.providers.base import ProviderResponse
+from ripperdoc.core.tool import Tool, ToolOutput, ToolResult, ToolUseContext
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.query import loop as loop_module
 from ripperdoc.utils.messages import create_assistant_message, create_user_message
+
+
+class _ToolInput(BaseModel):
+    payload: str = ""
+
+
+class _ActiveTool(Tool[_ToolInput, str]):
+    @property
+    def name(self) -> str:
+        return "ActiveTool"
+
+    async def description(self) -> str:
+        return "active"
+
+    @property
+    def input_schema(self) -> type[_ToolInput]:
+        return _ToolInput
+
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
+        return ""
+
+    def render_result_for_assistant(self, output: str) -> str:
+        return output
+
+    def render_tool_use_message(self, input_data: _ToolInput, verbose: bool = False) -> str:  # noqa: ARG002
+        return "active"
+
+    async def call(  # type: ignore[override]
+        self,
+        input_data: _ToolInput,  # noqa: ARG002
+        context: ToolUseContext,  # noqa: ARG002
+    ) -> AsyncGenerator[ToolOutput, None]:
+        yield ToolResult(data="ok", result_for_assistant="ok")
+
+
+class _DeferredMcpTool(Tool[_ToolInput, str]):
+    is_mcp = True
+
+    @property
+    def name(self) -> str:
+        return "mcp__demo__heavy_tool"
+
+    async def description(self) -> str:
+        return "deferred mcp"
+
+    @property
+    def input_schema(self) -> type[_ToolInput]:
+        return _ToolInput
+
+    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
+        return ""
+
+    def defer_loading(self) -> bool:
+        return True
+
+    def render_result_for_assistant(self, output: str) -> str:
+        return output
+
+    def render_tool_use_message(self, input_data: _ToolInput, verbose: bool = False) -> str:  # noqa: ARG002
+        return "deferred"
+
+    async def call(  # type: ignore[override]
+        self,
+        input_data: _ToolInput,  # noqa: ARG002
+        context: ToolUseContext,  # noqa: ARG002
+    ) -> AsyncGenerator[ToolOutput, None]:
+        yield ToolResult(data="ok", result_for_assistant="ok")
 
 
 def test_infer_thinking_mode_respects_explicit_disable() -> None:
@@ -102,6 +171,112 @@ async def test_query_llm_uses_reasoning_mode_for_reasoner_models(monkeypatch: An
     assert isinstance(result.message.content, list)
     assert result.message.content[0].type == "text"
     assert result.message.content[0].text == "ok"
+
+
+def test_build_iteration_plan_enable_tool_search_true_hides_deferred_mcp(monkeypatch: Any) -> None:
+    query_context = QueryContext(tools=[_ActiveTool(), _DeferredMcpTool()])
+    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "true")
+    monkeypatch.setattr(
+        loop_module,
+        "resolve_model_profile",
+        lambda _model: ModelProfile(
+            protocol=ProtocolType.ANTHROPIC,
+            model="claude-sonnet-4-20250514",
+            max_input_tokens=1000,
+        ),
+    )
+    monkeypatch.setattr(loop_module, "determine_tool_mode", lambda _profile: "native")
+
+    plan = loop_module._build_iteration_plan(
+        system_prompt="system",
+        context={},
+        query_context=query_context,
+    )
+
+    names = {tool.name for tool in plan.tools_for_model}
+    assert "ActiveTool" in names
+    assert "mcp__demo__heavy_tool" not in names
+
+
+def test_build_iteration_plan_enable_tool_search_false_keeps_deferred_mcp(monkeypatch: Any) -> None:
+    query_context = QueryContext(tools=[_ActiveTool(), _DeferredMcpTool()])
+    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "false")
+    monkeypatch.setattr(
+        loop_module,
+        "resolve_model_profile",
+        lambda _model: ModelProfile(
+            protocol=ProtocolType.ANTHROPIC,
+            model="claude-sonnet-4-20250514",
+            max_input_tokens=1000,
+        ),
+    )
+    monkeypatch.setattr(loop_module, "determine_tool_mode", lambda _profile: "native")
+
+    plan = loop_module._build_iteration_plan(
+        system_prompt="system",
+        context={},
+        query_context=query_context,
+    )
+
+    names = {tool.name for tool in plan.tools_for_model}
+    assert "mcp__demo__heavy_tool" in names
+
+
+def test_build_iteration_plan_enable_tool_search_auto_uses_threshold(monkeypatch: Any) -> None:
+    query_context = QueryContext(tools=[_ActiveTool(), _DeferredMcpTool()])
+    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "auto:50")
+    monkeypatch.setattr(
+        loop_module,
+        "resolve_model_profile",
+        lambda _model: ModelProfile(
+            protocol=ProtocolType.ANTHROPIC,
+            model="claude-sonnet-4-20250514",
+            max_input_tokens=4000,
+        ),
+    )
+    monkeypatch.setattr(loop_module, "determine_tool_mode", lambda _profile: "native")
+
+    plan = loop_module._build_iteration_plan(
+        system_prompt="system",
+        context={},
+        query_context=query_context,
+    )
+    names = {tool.name for tool in plan.tools_for_model}
+    assert "mcp__demo__heavy_tool" in names
+
+    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "auto:0")
+    plan_on = loop_module._build_iteration_plan(
+        system_prompt="system",
+        context={},
+        query_context=query_context,
+    )
+    names_on = {tool.name for tool in plan_on.tools_for_model}
+    assert "mcp__demo__heavy_tool" not in names_on
+
+
+def test_build_iteration_plan_enable_tool_search_invalid_value_falls_back_auto(monkeypatch: Any) -> None:
+    query_context = QueryContext(tools=[_ActiveTool(), _DeferredMcpTool()])
+    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "auto:not-a-number")
+    monkeypatch.setattr(
+        loop_module,
+        "resolve_model_profile",
+        lambda _model: ModelProfile(
+            protocol=ProtocolType.ANTHROPIC,
+            model="claude-sonnet-4-20250514",
+            max_input_tokens=1000,
+        ),
+    )
+    monkeypatch.setattr(loop_module, "determine_tool_mode", lambda _profile: "native")
+
+    plan = loop_module._build_iteration_plan(
+        system_prompt="system",
+        context={},
+        query_context=query_context,
+    )
+
+    # auto:10 fallback, and this small tool payload stays below threshold.
+    names = {tool.name for tool in plan.tools_for_model}
+    assert "mcp__demo__heavy_tool" in names
 
 
 @pytest.mark.asyncio

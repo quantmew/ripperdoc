@@ -40,6 +40,10 @@ from ripperdoc.core.message_utils import (
 from ripperdoc.core.tool import Tool, ToolUseContext
 from ripperdoc.utils.context_length_errors import detect_context_length_error
 from ripperdoc.utils.file_watch import detect_changed_files
+from ripperdoc.utils.message_compaction import (
+    estimate_tokens_from_text,
+    get_model_context_limit,
+)
 from ripperdoc.utils.teams import (
     get_active_team_name,
     list_teams,
@@ -378,6 +382,8 @@ async def query_llm(
 
 
 MAX_QUERY_ITERATIONS = int(os.getenv("RIPPERDOC_MAX_QUERY_ITERATIONS", "1024"))
+_ENABLE_TOOL_SEARCH_ENV = "ENABLE_TOOL_SEARCH"
+_DEFAULT_AUTO_TOOL_SEARCH_THRESHOLD_PCT = 10
 
 
 @dataclass
@@ -417,6 +423,118 @@ class _AssistantWaitState:
 
     assistant_message: Optional[AssistantMessage] = None
     aborted: bool = False
+
+
+def _is_mcp_tool(tool: Tool[Any, Any]) -> bool:
+    """Return whether a tool belongs to MCP namespace."""
+    if bool(getattr(tool, "is_mcp", False)):
+        return True
+    name = str(getattr(tool, "name", "") or "")
+    return name.startswith("mcp__")
+
+
+def _parse_auto_tool_search_threshold(raw_value: str) -> int:
+    """Parse auto threshold from ENABLE_TOOL_SEARCH, defaulting to 10."""
+    normalized = (raw_value or "").strip().lower()
+    if not normalized or normalized == "auto":
+        return _DEFAULT_AUTO_TOOL_SEARCH_THRESHOLD_PCT
+    if not normalized.startswith("auto:"):
+        return _DEFAULT_AUTO_TOOL_SEARCH_THRESHOLD_PCT
+
+    suffix = normalized[5:]
+    try:
+        parsed = int(suffix, 10)
+    except (TypeError, ValueError):
+        logger.warning(
+            "[query] Invalid %s value %r; expected auto:N, using auto:%d",
+            _ENABLE_TOOL_SEARCH_ENV,
+            raw_value,
+            _DEFAULT_AUTO_TOOL_SEARCH_THRESHOLD_PCT,
+        )
+        return _DEFAULT_AUTO_TOOL_SEARCH_THRESHOLD_PCT
+    return max(0, min(100, parsed))
+
+
+def _estimate_deferred_mcp_schema_tokens(tools: Sequence[Tool[Any, Any]]) -> int:
+    """Estimate token footprint of deferred MCP tool schemas."""
+    total_tokens = 0
+    for tool in tools:
+        name = str(getattr(tool, "name", "") or "")
+        user_facing = ""
+        try:
+            user_facing = str(tool.user_facing_name() or "")
+        except (TypeError, ValueError, RuntimeError):
+            user_facing = ""
+        schema_text = ""
+        try:
+            schema_text = json.dumps(tool.input_schema.model_json_schema(), sort_keys=True)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            schema_text = ""
+
+        combined = "\n".join(part for part in (name, user_facing, schema_text) if part)
+        if combined:
+            total_tokens += estimate_tokens_from_text(combined)
+    return total_tokens
+
+
+def _resolve_mcp_tool_search_enabled(
+    model_profile: ModelProfile,
+    all_tools: Sequence[Tool[Any, Any]],
+    deferred_tool_names: set[str],
+) -> tuple[bool, set[str], str]:
+    """Resolve whether deferred MCP tools should stay hidden behind ToolSearch."""
+    deferred_mcp_names: set[str] = set()
+    deferred_mcp_tools: list[Tool[Any, Any]] = []
+    for tool in all_tools:
+        name = str(getattr(tool, "name", "") or "")
+        if name not in deferred_tool_names:
+            continue
+        if not _is_mcp_tool(tool):
+            continue
+        deferred_mcp_names.add(name)
+        deferred_mcp_tools.append(tool)
+
+    if not deferred_mcp_names:
+        return False, set(), "no_deferred_mcp_tools"
+
+    raw_env = os.getenv(_ENABLE_TOOL_SEARCH_ENV)
+    normalized = (raw_env or "").strip().lower()
+
+    # Explicit true/false always win.
+    if normalized in {"true", "1", "yes", "on"}:
+        return True, deferred_mcp_names, "forced_on"
+    if normalized in {"false", "0", "no", "off"}:
+        return False, deferred_mcp_names, "forced_off"
+
+    # Default mode is auto (10%), and supports auto:N.
+    if not normalized or normalized == "auto" or normalized.startswith("auto:"):
+        threshold_pct = _parse_auto_tool_search_threshold(normalized or "auto")
+        context_limit = max(get_model_context_limit(model_profile), 1)
+        threshold_tokens = int(context_limit * (threshold_pct / 100.0))
+        deferred_tokens = _estimate_deferred_mcp_schema_tokens(deferred_mcp_tools)
+        enabled = deferred_tokens >= threshold_tokens
+        reason = (
+            f"auto:{threshold_pct} deferred_tokens={deferred_tokens} "
+            f"threshold_tokens={threshold_tokens}"
+        )
+        return enabled, deferred_mcp_names, reason
+
+    # Unknown values fall back to auto:10 for compatibility.
+    logger.warning(
+        "[query] Invalid %s value %r; expected auto, auto:N, true, or false. Using auto:%d",
+        _ENABLE_TOOL_SEARCH_ENV,
+        raw_env,
+        _DEFAULT_AUTO_TOOL_SEARCH_THRESHOLD_PCT,
+    )
+    context_limit = max(get_model_context_limit(model_profile), 1)
+    threshold_tokens = int(context_limit * (_DEFAULT_AUTO_TOOL_SEARCH_THRESHOLD_PCT / 100.0))
+    deferred_tokens = _estimate_deferred_mcp_schema_tokens(deferred_mcp_tools)
+    enabled = deferred_tokens >= threshold_tokens
+    reason = (
+        f"auto:{_DEFAULT_AUTO_TOOL_SEARCH_THRESHOLD_PCT} deferred_tokens={deferred_tokens} "
+        f"threshold_tokens={threshold_tokens}"
+    )
+    return enabled, deferred_mcp_names, reason
 
 
 def _compose_next_iteration_messages(
@@ -682,9 +800,34 @@ def _build_iteration_plan(
     """Resolve model/tool mode and build the full system prompt for one iteration."""
     model_profile = resolve_model_profile(query_context.model)
     tool_mode = determine_tool_mode(model_profile)
-    tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else query_context.all_tools()
+    all_tools = query_context.all_tools()
+    tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else all_tools
+
+    if tool_mode != "text":
+        enabled, deferred_mcp_names, reason = _resolve_mcp_tool_search_enabled(
+            model_profile,
+            all_tools,
+            query_context.tool_registry.deferred_names,
+        )
+        if enabled and deferred_mcp_names:
+            tools_for_model = [
+                tool
+                for tool in all_tools
+                if str(getattr(tool, "name", "") or "") not in deferred_mcp_names
+            ]
+        logger.debug(
+            "[query] MCP tool search decision",
+            extra={
+                "enabled": enabled,
+                "reason": reason,
+                "deferred_mcp_count": len(deferred_mcp_names),
+                "tools_before": len(all_tools),
+                "tools_after": len(tools_for_model),
+            },
+        )
+
     full_system_prompt = build_full_system_prompt(
-        system_prompt, context, tool_mode, query_context.all_tools()
+        system_prompt, context, tool_mode, tools_for_model
     )
     logger.debug(
         "[query] Built system prompt",
