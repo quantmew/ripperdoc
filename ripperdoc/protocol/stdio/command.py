@@ -262,6 +262,14 @@ async def _read_stream_json_messages_from_stdin() -> list[dict[str, Any]]:
     hidden=True,
 )
 @click.option(
+    "--replay-user-messages",
+    is_flag=True,
+    help=(
+        "Re-emit user messages from stdin back on stdout for acknowledgment "
+        "(only works with --input-format=stream-json and --output-format=stream-json)."
+    ),
+)
+@click.option(
     "--",
     "prompt",
     type=str,
@@ -279,6 +287,7 @@ def stdio_cmd(
     resume_session_at: str | None,
     rewind_files: str | None,
     sdk_url: str | None,
+    replay_user_messages: bool,
     prompt: str | None,
 ) -> None:
     """Stdio mode for SDK subprocess communication.
@@ -308,6 +317,7 @@ def stdio_cmd(
             resume_session_at=resume_session_at,
             rewind_files=rewind_files,
             sdk_url=sdk_url,
+            replay_user_messages=replay_user_messages,
             prompt=prompt,
         )
     )
@@ -329,6 +339,7 @@ async def run_stdio(
     fork_session: bool = False,
     project_path: str | Path | None = None,
     sdk_url: str | None = None,
+    replay_user_messages: bool = False,
     prompt: str | None = None,
     default_options: dict[str, Any] | None = None,
 ) -> None:
@@ -341,12 +352,20 @@ async def run_stdio(
         raise click.ClickException(
             "Error: --sdk-url requires both --input-format=stream-json and --output-format=stream-json."
         )
+    if replay_user_messages and (
+        input_format != "stream-json" or output_format != "stream-json"
+    ):
+        raise click.ClickException(
+            "Error: --replay-user-messages requires both --input-format=stream-json and --output-format=stream-json."
+        )
 
     request_default_options = dict(default_options or {})
     if session_id is not None:
         request_default_options["session_id"] = session_id
     if sdk_url is not None:
         request_default_options["sdk_url"] = sdk_url
+    if replay_user_messages:
+        request_default_options["replay_user_messages"] = True
 
     handler = StdioProtocolHandler(
         input_format=input_format,

@@ -232,9 +232,26 @@ def test_api_headers_include_bridge_metadata() -> None:
     headers = client._headers()
 
     assert headers["Authorization"] == "Bearer token-1"
+    assert headers["x-ripperdoc-version"] == "2023-06-01"
+    assert headers["x-ripperdoc-beta"] == "environments-2025-11-01"
+    assert "anthropic-version" not in headers
+    assert "anthropic-beta" not in headers
+    assert headers["x-environment-runner-version"] == "test-version"
+
+
+def test_api_headers_support_legacy_compat_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RIPPERDOC_REMOTE_CONTROL_LEGACY_HEADERS", "1")
+    client = remote_control_cli.RemoteControlApiClient(
+        base_url="https://example.com",
+        access_token="token-1",
+        runner_version="test-version",
+    )
+    headers = client._headers()
+
+    assert headers["x-ripperdoc-version"] == "2023-06-01"
+    assert headers["x-ripperdoc-beta"] == "environments-2025-11-01"
     assert headers["anthropic-version"] == "2023-06-01"
     assert headers["anthropic-beta"] == "environments-2025-11-01"
-    assert headers["x-environment-runner-version"] == "test-version"
 
 
 def test_poll_for_work_rejects_unsafe_environment_id() -> None:
@@ -247,14 +264,14 @@ def test_poll_for_work_rejects_unsafe_environment_id() -> None:
         client.poll_for_work("env/unsafe", "secret")
 
 
-def test_build_connect_url_defaults_to_claude_ai() -> None:
+def test_build_connect_url_defaults_to_base_origin() -> None:
     url = remote_control_cli._build_connect_url("https://api.example.com", "bridge-1")
-    assert url == "https://claude.ai/code?bridge=bridge-1"
+    assert url == "https://example.com/code?bridge=bridge-1"
 
 
-def test_build_connect_url_uses_staging_origin() -> None:
-    url = remote_control_cli._build_connect_url("https://api_staging_example.com", "bridge-1")
-    assert url == "https://claude-ai.staging.ant.dev/code?bridge=bridge-1"
+def test_build_connect_url_strips_common_api_prefixes() -> None:
+    url = remote_control_cli._build_connect_url("https://api-staging.example.com", "bridge-1")
+    assert url == "https://staging.example.com/code?bridge=bridge-1"
 
 
 def test_process_spawner_sets_bridge_compat_env(monkeypatch, tmp_path) -> None:

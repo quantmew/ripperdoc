@@ -60,6 +60,10 @@ class StdioRuntimeMixin:
     _idle_exit_task: asyncio.Task[None] | None
     _runtime_task: asyncio.Task[Any] | None
     _idle_exit_triggered: bool
+    _replay_user_messages: bool
+    _session_id: str | None
+    _conversation_messages: list[Any]
+    _seen_user_message_ids: set[str]
 
     def _is_runtime_idle(self) -> bool:
         """True when there are no active query/control operations."""
@@ -167,6 +171,57 @@ class StdioRuntimeMixin:
                 "maxTokens": 1024,
             },
         }
+
+    def _build_user_replay_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
+        """Build a replay/ack user payload from inbound stream message."""
+        try:
+            validated_message = IncomingUserStreamMessage.model_validate(message)
+        except ValidationError:
+            return None
+
+        prompt = self._extract_prompt_from_user_content(validated_message.message.content)
+        if not prompt:
+            return None
+
+        replay_uuid = validated_message.uuid
+        if isinstance(replay_uuid, str):
+            replay_uuid = replay_uuid.strip() or None
+
+        return {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": validated_message.message.content,
+            },
+            "session_id": self._session_id,
+            "parent_tool_use_id": None,
+            "uuid": replay_uuid,
+            "isReplay": True,
+        }
+
+    def _mark_duplicate_user_message(self, message: dict[str, Any]) -> bool:
+        """Return True when inbound user message UUID has already been seen."""
+        raw_uuid = message.get("uuid")
+        if not isinstance(raw_uuid, str):
+            return False
+
+        message_uuid = raw_uuid.strip()
+        if not message_uuid:
+            return False
+
+        if message_uuid in self._seen_user_message_ids:
+            return True
+
+        if any(
+            getattr(existing, "type", None) == "user"
+            and str(getattr(existing, "uuid", "")).strip() == message_uuid
+            for existing in self._conversation_messages
+        ):
+            self._seen_user_message_ids.add(message_uuid)
+            return True
+
+        self._seen_user_message_ids.add(message_uuid)
+        return False
 
     def _spawn_task_notification_followup_query(self, prompt: str) -> None:
         """Spawn an internal control request for a tool notification."""
@@ -317,6 +372,13 @@ class StdioRuntimeMixin:
                     if message_type not in {"keep_alive", "update_environment_variables"}:
                         self._cancel_idle_exit_timer()
 
+                    if message_type == "control_response":
+                        await self._handle_control_response(message)
+                        if self._replay_user_messages:
+                            await self._write_message_stream(message)
+                        self._ensure_task_notification_poller()
+                        continue
+
                     if is_response or ("result" in message or "error" in message):
                         await self._handle_control_response(message)
                         self._ensure_task_notification_poller()
@@ -352,6 +414,11 @@ class StdioRuntimeMixin:
                         self._ensure_task_notification_poller()
                         continue
 
+                    if message_type in {"assistant", "system"}:
+                        if self._replay_user_messages and message_type == "assistant":
+                            await self._write_message_stream(message)
+                        continue
+
                     if message_type == "user":
                         control_message = self._coerce_user_message_to_control_request(message)
                         if control_message is None:
@@ -359,6 +426,20 @@ class StdioRuntimeMixin:
                                 "[stdio] Ignoring user message without text prompt content"
                             )
                             continue
+                        if self._mark_duplicate_user_message(message):
+                            logger.info(
+                                "[stdio] Skipping duplicate user message: %s",
+                                str(message.get("uuid") or "").strip() or "<missing>",
+                            )
+                            if self._replay_user_messages:
+                                replay_message = self._build_user_replay_message(message)
+                                if replay_message is not None:
+                                    await self._write_message_stream(replay_message)
+                            continue
+                        if self._replay_user_messages:
+                            replay_message = self._build_user_replay_message(message)
+                            if replay_message is not None:
+                                await self._write_message_stream(replay_message)
                         self._spawn_control_request_task(control_message)
                         self._ensure_task_notification_poller()
                         continue

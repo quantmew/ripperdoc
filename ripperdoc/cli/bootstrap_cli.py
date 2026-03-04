@@ -39,6 +39,7 @@ _SDK_ONLY_OPTION_FLAGS: tuple[tuple[str, str], ...] = (
     ("permission_prompt_tool", "--permission-prompt-tool"),
     ("mcp_config", "--mcp-config"),
     ("include_partial_messages", "--include-partial-messages"),
+    ("replay_user_messages", "--replay-user-messages"),
     ("fork_session", "--fork-session"),
     ("setting_sources", "--setting-sources"),
     ("betas", "--betas"),
@@ -94,6 +95,7 @@ def _collect_sdk_only_option_uses(
     permission_prompt_tool: Optional[str],
     mcp_config: Optional[str],
     include_partial_messages: bool,
+    replay_user_messages: bool,
     fork_session: bool,
     setting_sources: Optional[str],
     plugin_dirs: tuple[str, ...],
@@ -109,6 +111,7 @@ def _collect_sdk_only_option_uses(
         "permission_prompt_tool": permission_prompt_tool,
         "mcp_config": mcp_config,
         "include_partial_messages": include_partial_messages,
+        "replay_user_messages": replay_user_messages,
         "fork_session": fork_session,
         "setting_sources": setting_sources,
         "plugin_dirs": plugin_dirs,
@@ -285,6 +288,7 @@ def _build_sdk_default_options(
     permission_prompt_tool: Optional[str],
     mcp_config: Optional[str],
     include_partial_messages: bool,
+    replay_user_messages: bool,
     fork_session: bool,
     agent: Optional[str],
     agents: Optional[dict[str, dict[str, str]]],
@@ -316,6 +320,8 @@ def _build_sdk_default_options(
             options[key] = value
     if include_partial_messages:
         options["include_partial_messages"] = True
+    if replay_user_messages:
+        options["replay_user_messages"] = True
     if fork_session:
         options["fork_session"] = True
     if disable_slash_commands:
@@ -347,6 +353,7 @@ def _run_stdio_mode_if_requested(
     resume_session_at: Optional[str],
     rewind_files: Optional[str],
     fork_session: bool,
+    replay_user_messages: bool,
     allowed_tools_csv: Optional[str],
     disallowed_tools_csv: Optional[str],
     tools: Optional[str],
@@ -428,6 +435,7 @@ def _run_stdio_mode_if_requested(
             project_path=str(project_path),
             print_mode=effective_print_mode,
             prompt=effective_prompt,
+            replay_user_messages=replay_user_messages,
             default_options=default_options,
         )
     )
@@ -630,6 +638,7 @@ def _prepare_cli_runtime_inputs(
     permission_prompt_tool: Optional[str],
     mcp_config: Optional[str],
     include_partial_messages: bool,
+    replay_user_messages: bool,
     fork_session: bool,
     setting_sources: Optional[str],
     plugin_dirs: tuple[str, ...],
@@ -661,6 +670,7 @@ def _prepare_cli_runtime_inputs(
         permission_prompt_tool=permission_prompt_tool,
         mcp_config=mcp_config,
         include_partial_messages=include_partial_messages,
+        replay_user_messages=replay_user_messages,
         fork_session=fork_session,
         setting_sources=setting_sources,
         plugin_dirs=plugin_dirs,
@@ -677,6 +687,7 @@ def _prepare_cli_runtime_inputs(
         permission_prompt_tool=permission_prompt_tool,
         mcp_config=mcp_config,
         include_partial_messages=include_partial_messages,
+        replay_user_messages=replay_user_messages,
         fork_session=fork_session,
         agent=effective_agent,
         agents=effective_agents if effective_agents else None,

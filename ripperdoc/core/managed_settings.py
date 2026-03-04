@@ -18,9 +18,9 @@ from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
-_WIN_POLICY_KEY = r"SOFTWARE\Policies\ClaudeCode"
+_WIN_POLICY_KEY = r"SOFTWARE\Policies\Ripperdoc"
 _WIN_POLICY_VALUE_NAME = "Settings"
-_MACOS_MDM_DOMAIN = "com.anthropic.claudecode"
+_MACOS_MDM_DOMAIN = "com.ripperdoc.agent"
 
 
 @dataclass(frozen=True)
@@ -256,4 +256,3 @@ def has_managed_settings() -> bool:
 def reset_managed_settings_cache() -> None:
     """Clear managed settings cache (for tests/runtime refresh)."""
     _load_managed_settings_snapshot.cache_clear()
-

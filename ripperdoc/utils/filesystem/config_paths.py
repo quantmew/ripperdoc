@@ -46,9 +46,9 @@ def managed_config_dir(
     """Return the managed/system-level config directory.
 
     Default locations:
-    - macOS: /Library/Application Support/ClaudeCode
-    - Linux/WSL: /etc/claude-code
-    - Windows: C:\\Program Files\\ClaudeCode
+    - macOS: /Library/Application Support/Ripperdoc
+    - Linux/WSL: /etc/ripperdoc
+    - Windows: C:\\Program Files\\Ripperdoc
 
     Override via RIPPERDOC_MANAGED_CONFIG_DIR.
     """
@@ -59,11 +59,11 @@ def managed_config_dir(
         return Path(override).expanduser()
 
     if sys.platform == "darwin":
-        return Path("/Library/Application Support/ClaudeCode")
+        return Path("/Library/Application Support/Ripperdoc")
     if sys.platform == "win32":
         program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
-        return Path(program_files) / "ClaudeCode"
-    return Path("/etc/claude-code")
+        return Path(program_files) / "Ripperdoc"
+    return Path("/etc/ripperdoc")
 
 
 def config_dir_for_scope(

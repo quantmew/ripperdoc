@@ -18,7 +18,7 @@ def test_scope_dirs_default_layout(tmp_path: Path) -> None:
     assert project_config_dir(project) == project.resolve() / ".ripperdoc"
     assert local_config_dir(project) == project.resolve() / ".ripperdoc"
     managed = managed_config_dir(project, home=home)
-    assert managed.name in {"claude-code", "ClaudeCode"}
+    assert managed.name in {"ripperdoc", "Ripperdoc"}
 
 
 def test_scope_file_helper(tmp_path: Path) -> None:

@@ -76,6 +76,7 @@ class StdioSessionMixin:
     _session_agents: dict[str, dict[str, str]]
     _session_agent_prompt: str | None
     _disable_slash_commands: bool
+    _replay_user_messages: bool
 
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
@@ -155,6 +156,20 @@ class StdioSessionMixin:
                 await self._fail_initialize_request(
                     request_id,
                     "Error: --sdk-url requires both --input-format=stream-json and --output-format=stream-json.",
+                    JsonRpcErrorCodes.InvalidParams,
+                )
+                return
+            self._replay_user_messages = self._coerce_bool_option(
+                options.get("replay_user_messages"),
+                getattr(self, "_replay_user_messages", False),
+            )
+            if self._replay_user_messages and (
+                self._input_format != "stream-json"
+                or self._output_format != "stream-json"
+            ):
+                await self._fail_initialize_request(
+                    request_id,
+                    "Error: --replay-user-messages requires both --input-format=stream-json and --output-format=stream-json.",
                     JsonRpcErrorCodes.InvalidParams,
                 )
                 return
@@ -467,7 +482,7 @@ class StdioSessionMixin:
             # Mark as initialized
             self._initialized = True
 
-            # Build enhanced response payload aligned with Claude Code SDK
+            # Build enhanced response payload aligned with SDK conventions
             slash_commands = list_slash_commands()
             custom_commands = list_custom_commands(self._project_path)
 
@@ -527,7 +542,7 @@ class StdioSessionMixin:
                 instructions=system_prompt if (system_prompt or "").strip() else None,
             )
 
-            # Convert to dict and add Claude Code compatible fields
+            # Convert to dict and add compatibility fields used by SDK clients
             response_dict = model_to_dict(init_response)
             response_dict["commands"] = commands_payload
             response_dict["output_style"] = self._output_style

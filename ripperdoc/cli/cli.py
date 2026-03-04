@@ -307,6 +307,14 @@ def _register_precreated_worktree_from_env() -> Optional[WorktreeSession]:
     hidden=True,
 )
 @click.option(
+    "--replay-user-messages",
+    is_flag=True,
+    help=(
+        "Re-emit user messages from stdin back on stdout for acknowledgment "
+        "(only works with --input-format=stream-json and --output-format=stream-json)."
+    ),
+)
+@click.option(
     "--fork-session",
     is_flag=True,
     help="Fork session on resume (SDK only).",
@@ -526,6 +534,7 @@ def cli(
     add_dirs: tuple[str, ...],
     mcp_config: Optional[str],
     include_partial_messages: bool,
+    replay_user_messages: bool,
     fork_session: bool,
     agent: Optional[str],
     agents: Optional[str],
@@ -621,6 +630,7 @@ def cli(
         permission_prompt_tool=permission_prompt_tool,
         mcp_config=mcp_config,
         include_partial_messages=include_partial_messages,
+        replay_user_messages=replay_user_messages,
         fork_session=fork_session,
         setting_sources=setting_sources,
         plugin_dirs=plugin_dirs,
@@ -694,6 +704,7 @@ def cli(
         resume_session_at=resume_session_at,
         rewind_files=rewind_files,
         fork_session=fork_session,
+        replay_user_messages=replay_user_messages,
         session_id=session_id,
         tools=tools,
         project_path=project_path,

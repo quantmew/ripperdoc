@@ -1,6 +1,6 @@
 """Hooks system for Ripperdoc.
 
-This module provides a hook system similar to Claude Code CLI's hooks,
+This module provides a hook system for coding-agent workflows,
 allowing users to execute custom scripts at various points in the workflow.
 
 Hook events:

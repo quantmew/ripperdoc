@@ -1,7 +1,7 @@
 """Pydantic models for stdio protocol messages.
 
 The protocol is now expressed as JSON-RPC 2.0 request/response envelopes with
-`initialize` and `sampling/createMessage` flows aligned to Claude Code MCP.
+`initialize` and `sampling/createMessage` flows aligned to MCP-style clients.
 """
 
 from __future__ import annotations
@@ -416,7 +416,7 @@ class UsageInfo(BaseModel):
     cache_read_input_tokens: int = 0
     output_tokens: int = 0
 
-    # Claude-compatible optional fields
+    # SDK-compatible optional fields
     server_tool_use: dict[str, int] = Field(
         default_factory=lambda: {"web_search_requests": 0, "web_fetch_requests": 0}
     )
@@ -532,7 +532,7 @@ class PermissionResponseDeny(BaseModel):
 class PermissionRequestPayload(BaseModel):
     """Payload for SDK can_use_tool permission requests.
 
-    Aligned with Claude Code SDK protocol for permission suggestions,
+    Aligned with SDK protocol conventions for permission suggestions,
     blocked path, and decision reason tracking.
     """
 

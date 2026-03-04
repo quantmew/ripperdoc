@@ -240,3 +240,131 @@ async def test_run_idle_exit_waits_for_inflight_completion(monkeypatch) -> None:
     await handler.run()
 
     assert completed == ["done"]
+
+
+@pytest.mark.asyncio
+async def test_run_replays_user_messages_when_enabled(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    handler._replay_user_messages = True
+    captured_control_requests: list[dict[str, Any]] = []
+    captured_stream: list[dict[str, Any]] = []
+
+    async def fake_read_messages():
+        yield {
+            "type": "user",
+            "uuid": "replay-user-1",
+            "message": {"role": "user", "content": "dispatch prompt"},
+        }
+
+    def fake_spawn_control_request_task(message: dict[str, Any]) -> None:
+        captured_control_requests.append(message)
+
+    async def capture_stream(message: dict[str, Any]) -> None:
+        captured_stream.append(message)
+
+    async def noop_async(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(handler, "_read_messages", fake_read_messages)
+    monkeypatch.setattr(handler, "_spawn_control_request_task", fake_spawn_control_request_task)
+    monkeypatch.setattr(handler, "_write_message_stream", capture_stream)
+    monkeypatch.setattr(handler, "flush_output", noop_async)
+    monkeypatch.setattr(handler, "_run_session_end", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_mcp_runtime", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_lsp_manager", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_background_shell", lambda force=True: None)
+
+    await handler.run()
+
+    assert len(captured_control_requests) == 1
+    assert captured_control_requests[0]["request_id"] == "replay-user-1"
+    replay_payload = next((item for item in captured_stream if item.get("type") == "user"), None)
+    assert replay_payload is not None
+    assert replay_payload["uuid"] == "replay-user-1"
+    assert replay_payload["isReplay"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_replays_control_response_and_assistant_when_enabled(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    handler._replay_user_messages = True
+    captured_stream: list[dict[str, Any]] = []
+
+    async def fake_read_messages():
+        yield {
+            "type": "control_response",
+            "response": {
+                "request_id": "missing-pending",
+                "subtype": "success",
+                "response": {},
+            },
+        }
+        yield {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hello"}],
+                "model": "main",
+            },
+        }
+
+    async def capture_stream(message: dict[str, Any]) -> None:
+        captured_stream.append(message)
+
+    async def noop_async(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(handler, "_read_messages", fake_read_messages)
+    monkeypatch.setattr(handler, "_write_message_stream", capture_stream)
+    monkeypatch.setattr(handler, "flush_output", noop_async)
+    monkeypatch.setattr(handler, "_run_session_end", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_mcp_runtime", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_lsp_manager", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_background_shell", lambda force=True: None)
+
+    await handler.run()
+
+    assert any(item.get("type") == "control_response" for item in captured_stream)
+    assert any(item.get("type") == "assistant" for item in captured_stream)
+
+
+@pytest.mark.asyncio
+async def test_run_skips_duplicate_user_message_and_replays_ack(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    handler._replay_user_messages = True
+    captured_control_requests: list[dict[str, Any]] = []
+    captured_stream: list[dict[str, Any]] = []
+
+    async def fake_read_messages():
+        payload = {
+            "type": "user",
+            "uuid": "dup-user-1",
+            "message": {"role": "user", "content": "same prompt"},
+        }
+        yield payload
+        yield payload
+
+    def fake_spawn_control_request_task(message: dict[str, Any]) -> None:
+        captured_control_requests.append(message)
+
+    async def capture_stream(message: dict[str, Any]) -> None:
+        captured_stream.append(message)
+
+    async def noop_async(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(handler, "_read_messages", fake_read_messages)
+    monkeypatch.setattr(handler, "_spawn_control_request_task", fake_spawn_control_request_task)
+    monkeypatch.setattr(handler, "_write_message_stream", capture_stream)
+    monkeypatch.setattr(handler, "flush_output", noop_async)
+    monkeypatch.setattr(handler, "_run_session_end", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_mcp_runtime", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_lsp_manager", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_background_shell", lambda force=True: None)
+
+    await handler.run()
+
+    assert len(captured_control_requests) == 1
+    replay_messages = [item for item in captured_stream if item.get("type") == "user"]
+    assert len(replay_messages) == 2
+    assert all(item.get("isReplay") is True for item in replay_messages)

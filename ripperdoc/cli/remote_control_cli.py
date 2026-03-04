@@ -1,6 +1,6 @@
 """Remote Control bridge command.
 
-This command mirrors Claude Code's `remote-control` bridge shape:
+This command implements a remote-control bridge flow:
 - Register a bridge environment with a control-plane API.
 - Poll for work assignments.
 - Spawn a local `ripperdoc --print --sdk-url ...` child session per remote work item.
@@ -45,6 +45,7 @@ _INGRESS_URL_ENV = "RIPPERDOC_REMOTE_CONTROL_INGRESS_URL"
 _TOKEN_ENV = "RIPPERDOC_REMOTE_CONTROL_ACCESS_TOKEN"
 _ALLOW_HTTP_ENV = "RIPPERDOC_REMOTE_CONTROL_ALLOW_INSECURE_HTTP"
 _CONNECT_TEMPLATE_ENV = "RIPPERDOC_REMOTE_CONTROL_CONNECT_URL_TEMPLATE"
+_LEGACY_HEADERS_ENV = "RIPPERDOC_REMOTE_CONTROL_LEGACY_HEADERS"
 _DEFAULT_SESSION_TIMEOUT_SEC = 86_400
 
 _CONNECTION_RETRY_INITIAL_SEC = 2.0
@@ -56,8 +57,10 @@ _GENERAL_RETRY_MAX_SEC = 30.0
 _GENERAL_GIVEUP_SEC = 600.0
 
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
-_ANTHROPIC_VERSION = "2023-06-01"
-_ANTHROPIC_BETA = "environments-2025-11-01"
+_REMOTE_CONTROL_API_VERSION = "2023-06-01"
+_REMOTE_CONTROL_API_BETA = "environments-2025-11-01"
+_REMOTE_CONTROL_VERSION_HEADER = "x-ripperdoc-version"
+_REMOTE_CONTROL_BETA_HEADER = "x-ripperdoc-beta"
 
 
 class BridgeFatalError(RuntimeError):
@@ -136,10 +139,13 @@ class RemoteControlApiClient:
         headers: dict[str, str] = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "anthropic-version": _ANTHROPIC_VERSION,
-            "anthropic-beta": _ANTHROPIC_BETA,
+            _REMOTE_CONTROL_VERSION_HEADER: _REMOTE_CONTROL_API_VERSION,
+            _REMOTE_CONTROL_BETA_HEADER: _REMOTE_CONTROL_API_BETA,
             "x-environment-runner-version": self.runner_version,
         }
+        if parse_boolish(os.getenv(_LEGACY_HEADERS_ENV), default=False):
+            headers["anthropic-version"] = _REMOTE_CONTROL_API_VERSION
+            headers["anthropic-beta"] = _REMOTE_CONTROL_API_BETA
         token = bearer_token or self.access_token
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -891,7 +897,7 @@ def decode_work_secret(encoded_secret: str) -> WorkSecret:
 
 
 def build_session_ingress_ws_url(base_url: str, session_id: str) -> str:
-    """Build session ingress websocket URL following Claude bridge URL shape."""
+    """Build session ingress websocket URL using the bridge ingress URL shape."""
     normalized = base_url.strip()
     parsed = urlparse(normalized)
     hostname = (parsed.hostname or "").strip().lower()
@@ -965,12 +971,25 @@ def _build_connect_url(base_url: str, bridge_id: str) -> str:
             return template.format(base_url=base_url.rstrip("/"), bridge_id=bridge_id)
         except Exception:
             logger.debug("[bridge] Invalid connect URL template: %s", template)
-    lowered = base_url.lower()
-    if "_staging_" in lowered or "staging" in lowered:
-        app_origin = "https://claude-ai.staging.ant.dev"
-    else:
-        app_origin = "https://claude.ai"
-    return f"{app_origin}/code?bridge={bridge_id}"
+
+    parsed = urlparse(base_url.strip())
+    scheme = parsed.scheme or "https"
+    hostname = (parsed.hostname or "").strip()
+    if not hostname:
+        return f"{base_url.rstrip('/')}/code?bridge={bridge_id}"
+
+    # Prefer a human-facing app origin by trimming common API host prefixes.
+    app_host = hostname
+    for prefix in ("api.", "api-", "gateway."):
+        if app_host.startswith(prefix):
+            app_host = app_host[len(prefix) :]
+            break
+
+    default_port = 443 if scheme == "https" else 80
+    if parsed.port and parsed.port != default_port:
+        app_host = f"{app_host}:{parsed.port}"
+
+    return f"{scheme}://{app_host}/code?bridge={bridge_id}"
 
 
 def _get_git_remote_url(cwd: Path) -> str | None:

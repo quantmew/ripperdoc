@@ -799,7 +799,7 @@ class StdioControlMixin:
     ) -> dict[str, Any] | None:
         """Run PermissionRequest hooks concurrently with SDK request.
 
-        Implements Claude Code's Promise.race pattern where hooks and
+        Implements a Promise.race-style pattern where hooks and
         SDK permission requests compete. First decisive result wins.
 
         Args:
@@ -817,7 +817,7 @@ class StdioControlMixin:
         if not self._sdk_can_use_tool_enabled:
             return None
 
-        # Create abort controller pattern like Claude Code
+        # Create an abort-controller-style coordination event
         abort_event = asyncio.Event()
 
         async def run_hook_decision() -> dict[str, Any] | None:

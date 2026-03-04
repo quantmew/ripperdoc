@@ -109,12 +109,14 @@ class StdioProtocolHandler(
         self._session_agents: dict[str, dict[str, str]] = {}
         self._session_agent_prompt: str | None = None
         self._disable_slash_commands: bool = False
+        self._replay_user_messages: bool = False
         self._session_persistence_enabled: bool = True
         self._mcp_server_overrides: dict[str, McpServerInfo] | None = None
         self._mcp_disabled_servers: set[str] = set()
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []
+        self._seen_user_message_ids: set[str] = set()
         self._session_started = False
         self._session_start_time: float | None = None
         self._session_end_sent = False

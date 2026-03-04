@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
+import click
 import pytest
 from typing import Any
 from pathlib import Path
@@ -38,6 +39,7 @@ def test_cli_forwards_hidden_sdk_options_to_stdio_defaults(monkeypatch, tmp_path
             "--json-schema",
             '{"type":"object"}',
             "--include-partial-messages",
+            "--replay-user-messages",
             "--fork-session",
             "--agent",
             "reviewer",
@@ -60,6 +62,7 @@ def test_cli_forwards_hidden_sdk_options_to_stdio_defaults(monkeypatch, tmp_path
     assert default_options["max_thinking_tokens"] == 512
     assert default_options["json_schema"] == '{"type":"object"}'
     assert default_options["include_partial_messages"] is True
+    assert default_options["replay_user_messages"] is True
     assert default_options["fork_session"] is True
     assert default_options["agent"] == "reviewer"
     assert default_options["agents"]["reviewer"]["prompt"] == "You are a code reviewer"
@@ -113,6 +116,24 @@ async def test_run_stdio_print_mode_merges_default_options(monkeypatch):
     assert init_options["sdk_can_use_tool"] is False
 
 
+@pytest.mark.asyncio
+async def test_run_stdio_replay_user_messages_requires_stream_json_modes():
+    with pytest.raises(
+        click.ClickException,
+        match="--replay-user-messages requires both --input-format=stream-json and --output-format=stream-json",
+    ):
+        await stdio_command.run_stdio(
+            input_format="auto",
+            output_format="stream-json",
+            model=None,
+            permission_mode="default",
+            max_turns=None,
+            system_prompt=None,
+            print_mode=False,
+            replay_user_messages=True,
+        )
+
+
 def test_cli_rejects_sdk_only_options_outside_stdio(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
@@ -126,6 +147,21 @@ def test_cli_rejects_sdk_only_options_outside_stdio(monkeypatch, tmp_path):
     assert result.exit_code != 0
     assert "SDK-only" in result.output
     assert "--json-schema" in result.output
+
+
+def test_cli_rejects_replay_user_messages_outside_stdio(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--prompt", "hi", "--replay-user-messages"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code != 0
+    assert "SDK-only" in result.output
+    assert "--replay-user-messages" in result.output
 
 
 def test_cli_sdk_url_without_print_runs_stdio_loop_mode(monkeypatch, tmp_path):
