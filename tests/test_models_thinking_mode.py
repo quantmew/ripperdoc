@@ -379,3 +379,27 @@ def test_collect_add_profile_input_oauth_supports_non_codex_token(monkeypatch) -
     assert profile.oauth_token_name == "gitlab-main"
     assert profile.oauth_token_type == OAuthTokenType.GITLAB
     assert profile.model == "duo-chat-sonnet-4-5"
+
+
+def test_models_tui_provider_model_options_include_custom_entry() -> None:
+    screen = ModelFormScreen("add")
+
+    options = screen._provider_model_select_options("openrouter")
+    labels = [label for label, _value in options]
+    values = [value for _label, value in options]
+
+    assert values
+    assert values[-1].startswith("__provider_model_")
+    assert labels[-1] == "Custom model..."
+    assert "google/gemini-3.1-pro-preview" in values
+
+
+def test_models_tui_infer_provider_key_by_api_base() -> None:
+    screen = ModelFormScreen("add")
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="gpt-5.2-2025-12-11",
+        api_base="https://api.openai.com/v1",
+    )
+
+    assert screen._infer_provider_key_for_profile(profile) == "openai"

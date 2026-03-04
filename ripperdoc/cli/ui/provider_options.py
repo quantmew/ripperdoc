@@ -194,7 +194,7 @@ KNOWN_PROVIDERS = ProviderRegistry(
                 "openai/gpt-5.2-chat",
                 "openai/gpt-5.3-codex",
                 "anthropic/claude-sonnet-4.6",
-                "anthropic/claude-opus-4.6"
+                "anthropic/claude-opus-4.6",
                 "google/gemini-3.1-pro-preview",
                 "meta-llama/llama-3.1-70b-instruct",
             ),

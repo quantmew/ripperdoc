@@ -39,6 +39,7 @@ from ripperdoc.core.oauth import (
     oauth_models_for_type,
 )
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
+from ripperdoc.cli.ui.provider_options import KNOWN_PROVIDERS, ProviderOption
 
 _KNOWN_THINKING_MODES = {
     "deepseek",
@@ -54,6 +55,15 @@ _OPENAI_MODE_OPTIONS: list[tuple[str, str]] = [
     ("legacy (/v1/chat/completions)", "legacy"),
     ("responses (/v1/responses)", "responses"),
 ]
+_ADD_MODE_PROVIDER = "provider"
+_ADD_MODE_CUSTOM = "custom"
+_ADD_MODE_OAUTH = "oauth"
+_ADD_MODE_OPTIONS: list[tuple[str, str]] = [
+    ("Provider preset (recommended)", _ADD_MODE_PROVIDER),
+    ("Custom (manual)", _ADD_MODE_CUSTOM),
+    ("OAuth token", _ADD_MODE_OAUTH),
+]
+_PROVIDER_MODEL_CUSTOM = "__provider_model_custom__"
 
 
 def _next_copied_profile_name(source_name: str, existing_names: set[str]) -> str:
@@ -157,6 +167,170 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         self._default_set_main = default_set_main
         self._default_set_quick = default_set_quick
         self._error_text: Optional[str] = None
+        self._last_provider_api_base_default: Optional[str] = None
+
+    def _api_base_normalized(self, value: Optional[str]) -> str:
+        return (value or "").strip().rstrip("/")
+
+    def _provider_select_options(self) -> list[tuple[str, str]]:
+        return [(option.label, option.key) for option in KNOWN_PROVIDERS.providers]
+
+    def _provider_model_select_options(self, provider_key: str) -> list[tuple[str, str]]:
+        provider_option = KNOWN_PROVIDERS.get(provider_key)
+        if provider_option is None:
+            return [("Custom model...", _PROVIDER_MODEL_CUSTOM)]
+        options = [(model_name, model_name) for model_name in provider_option.model_suggestions]
+        options.append(("Custom model...", _PROVIDER_MODEL_CUSTOM))
+        return options
+
+    def _infer_provider_key_for_profile(self, profile: Optional[ModelProfile]) -> str:
+        if profile is None:
+            return KNOWN_PROVIDERS.default_choice.key
+
+        profile_api_base = self._api_base_normalized(profile.api_base)
+        for option in KNOWN_PROVIDERS.providers:
+            if option.protocol != profile.protocol:
+                continue
+            option_api_base = self._api_base_normalized(option.default_api_base)
+            if profile_api_base and option_api_base and profile_api_base == option_api_base:
+                return option.key
+            if (
+                not profile_api_base
+                and not option_api_base
+                and profile.model in option.model_suggestions
+            ):
+                return option.key
+        return KNOWN_PROVIDERS.default_choice.key
+
+    def _default_add_mode(self) -> str:
+        current_profile = get_profile_for_pointer("main")
+        if current_profile and current_profile.protocol == ProtocolType.OAUTH:
+            return _ADD_MODE_OAUTH
+        return _ADD_MODE_PROVIDER
+
+    def _selected_add_mode(self) -> str:
+        if self._mode != "add":
+            return _ADD_MODE_CUSTOM
+        try:
+            setup_mode_select = self.query_one("#setup_mode_select", Select)
+        except Exception:
+            return self._default_add_mode()
+        setup_raw = setup_mode_select.value
+        setup_value = setup_raw.strip() if isinstance(setup_raw, str) else ""
+        if setup_value in {_ADD_MODE_PROVIDER, _ADD_MODE_CUSTOM, _ADD_MODE_OAUTH}:
+            return setup_value
+        return _ADD_MODE_CUSTOM
+
+    def _selected_provider_option(self) -> Optional[ProviderOption]:
+        if self._mode != "add":
+            return None
+        default_key = self._infer_provider_key_for_profile(get_profile_for_pointer("main"))
+        try:
+            provider_select = self.query_one("#provider_preset_select", Select)
+        except Exception:
+            return KNOWN_PROVIDERS.get(default_key)
+        provider_raw = provider_select.value
+        provider_key = provider_raw.strip() if isinstance(provider_raw, str) else ""
+        return KNOWN_PROVIDERS.get(provider_key) or KNOWN_PROVIDERS.get(default_key)
+
+    def _selected_provider_model_value(self) -> str:
+        if self._mode != "add":
+            return ""
+        try:
+            provider_model_select = self.query_one("#provider_model_select", Select)
+        except Exception:
+            return ""
+        model_raw = provider_model_select.value
+        return model_raw.strip() if isinstance(model_raw, str) else ""
+
+    def _effective_protocol(self) -> ProtocolType:
+        if self._mode == "add":
+            setup_mode = self._selected_add_mode()
+            if setup_mode == _ADD_MODE_OAUTH:
+                return ProtocolType.OAUTH
+            if setup_mode == _ADD_MODE_PROVIDER:
+                provider = self._selected_provider_option()
+                if provider is not None:
+                    return provider.protocol
+
+        try:
+            provider_select = self.query_one("#provider_select", Select)
+        except Exception:
+            if self._existing_profile:
+                return self._existing_profile.protocol
+            return ProtocolType.OPENAI_COMPATIBLE
+        provider_raw = provider_select.value
+        provider_value = provider_raw.strip() if isinstance(provider_raw, str) else ""
+        try:
+            return ProtocolType(provider_value)
+        except ValueError:
+            return ProtocolType.OPENAI_COMPATIBLE
+
+    def _apply_provider_defaults(self, provider_option: Optional[ProviderOption]) -> None:
+        if self._mode != "add" or provider_option is None:
+            return
+
+        try:
+            provider_select = self.query_one("#provider_select", Select)
+            provider_select.value = provider_option.protocol.value
+        except Exception:
+            pass
+
+        try:
+            api_base_input = self.query_one("#api_base_input", Input)
+        except Exception:
+            return
+
+        current_api_base = (api_base_input.value or "").strip()
+        new_default = (provider_option.default_api_base or "").strip()
+        last_default = (self._last_provider_api_base_default or "").strip()
+        if not current_api_base or (last_default and current_api_base == last_default):
+            api_base_input.value = new_default
+        self._last_provider_api_base_default = new_default or None
+
+    def _sync_model_input_with_provider_model(self, *, keep_manual_when_custom: bool = True) -> None:
+        if self._mode != "add":
+            return
+        try:
+            model_input = self.query_one("#model_input", Input)
+        except Exception:
+            return
+
+        provider_model_value = self._selected_provider_model_value()
+        provider_option = self._selected_provider_option()
+        if provider_model_value and provider_model_value != _PROVIDER_MODEL_CUSTOM:
+            model_input.value = provider_model_value
+            return
+        if keep_manual_when_custom and (model_input.value or "").strip():
+            return
+        if provider_option is not None:
+            model_input.value = provider_option.default_model
+
+    def _refresh_provider_model_options(self) -> None:
+        if self._mode != "add":
+            return
+        try:
+            provider_model_select = self.query_one("#provider_model_select", Select)
+        except Exception:
+            return
+
+        provider_option = self._selected_provider_option()
+        provider_key = provider_option.key if provider_option else ""
+        options = self._provider_model_select_options(provider_key)
+        current_raw = provider_model_select.value
+        current_value = current_raw.strip() if isinstance(current_raw, str) else ""
+        allowed_values = {value for _label, value in options}
+
+        if current_value in allowed_values:
+            selected_value = current_value
+        elif provider_option and provider_option.default_model in allowed_values:
+            selected_value = provider_option.default_model
+        else:
+            selected_value = options[0][1]
+
+        provider_model_select.set_options(options)
+        provider_model_select.value = selected_value
+        self._sync_model_input_with_provider_model()
 
     def _oauth_token_select_options(
         self, selected_name: Optional[str]
@@ -260,13 +434,50 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                         else ProtocolType.ANTHROPIC.value
                     )
                 )
+                add_mode_default = self._default_add_mode()
+                provider_default_key = self._infer_provider_key_for_profile(current_profile)
+                provider_preset_options = self._provider_select_options()
+                provider_model_options = self._provider_model_select_options(provider_default_key)
+                provider_default_option = KNOWN_PROVIDERS.get(provider_default_key)
+
+                if self._mode == "add":
+                    yield Static("Add mode", classes="field_label", id="setup_mode_label")
+                    yield Select(
+                        _ADD_MODE_OPTIONS,
+                        value=add_mode_default,
+                        id="setup_mode_select",
+                    )
+                    yield Static("Provider preset", classes="field_label", id="provider_preset_label")
+                    yield Select(
+                        provider_preset_options,
+                        value=provider_default_key,
+                        id="provider_preset_select",
+                    )
+                    provider_model_default = (
+                        provider_default_option.default_model
+                        if provider_default_option is not None
+                        else _PROVIDER_MODEL_CUSTOM
+                    )
+                    yield Static("Provider model", classes="field_label", id="provider_model_label")
+                    yield Select(
+                        provider_model_options,
+                        value=provider_model_default,
+                        id="provider_model_select",
+                    )
+
                 provider_options = [(p.value, p.value) for p in ProtocolType]
-                yield Static("Protocol", classes="field_label")
+                yield Static("Protocol", classes="field_label", id="protocol_label")
                 yield Select(provider_options, value=protocol_default, id="provider_select")
 
                 model_default = (
                     self._existing_profile.model if self._existing_profile else ""
                 )
+                if (
+                    self._mode == "add"
+                    and not model_default
+                    and provider_default_option is not None
+                ):
+                    model_default = provider_default_option.default_model
                 yield Static("Model name", classes="field_label", id="model_input_label")
                 yield Input(value=model_default, placeholder="Model name", id="model_input")
                 oauth_token_options = self._oauth_token_select_options(
@@ -479,13 +690,27 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 yield Button("Cancel", id="form_cancel")
 
     def on_mount(self) -> None:
+        self._refresh_provider_model_options()
         self._refresh_provider_fields()
         self._refresh_oauth_model_options()
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "setup_mode_select":
+            self._refresh_provider_fields()
+            if self._effective_protocol() == ProtocolType.OAUTH:
+                self._refresh_oauth_model_options()
+            return
+        if event.select.id == "provider_preset_select":
+            self._refresh_provider_model_options()
+            self._refresh_provider_fields()
+            return
+        if event.select.id == "provider_model_select":
+            self._sync_model_input_with_provider_model()
+            self._refresh_provider_fields()
+            return
         if event.select.id == "provider_select":
             self._refresh_provider_fields()
-            if isinstance(event.value, str) and event.value == ProtocolType.OAUTH.value:
+            if self._effective_protocol() == ProtocolType.OAUTH:
                 self._refresh_oauth_model_options()
             return
         if event.select.id == "oauth_token_select":
@@ -505,19 +730,33 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 pass
 
     def _refresh_provider_fields(self) -> None:
-        provider_select = self.query_one("#provider_select", Select)
-        provider_raw = provider_select.value
-        provider_value = provider_raw.strip() if isinstance(provider_raw, str) else ""
-        try:
-            protocol = ProtocolType(provider_value)
-        except ValueError:
-            protocol = ProtocolType.OPENAI_COMPATIBLE
+        add_mode = self._selected_add_mode()
+        is_provider_preset_mode = self._mode == "add" and add_mode == _ADD_MODE_PROVIDER
+        is_custom_mode = self._mode != "add" or add_mode == _ADD_MODE_CUSTOM
+        provider_option = self._selected_provider_option() if is_provider_preset_mode else None
+        if provider_option is not None:
+            self._apply_provider_defaults(provider_option)
 
+        protocol = self._effective_protocol()
         is_oauth = protocol == ProtocolType.OAUTH
         is_anthropic = protocol == ProtocolType.ANTHROPIC
         is_openai_compatible = protocol == ProtocolType.OPENAI_COMPATIBLE
+        provider_model_is_custom = self._selected_provider_model_value() == _PROVIDER_MODEL_CUSTOM
+        show_manual_model = (not is_oauth) and (
+            not is_provider_preset_mode or provider_model_is_custom
+        )
+        show_protocol = is_custom_mode
 
-        self._set_widget_visible("#model_input", not is_oauth)
+        self._set_widget_visible("#setup_mode_label", self._mode == "add")
+        self._set_widget_visible("#setup_mode_select", self._mode == "add")
+        self._set_widget_visible("#provider_preset_label", is_provider_preset_mode)
+        self._set_widget_visible("#provider_preset_select", is_provider_preset_mode)
+        self._set_widget_visible("#provider_model_label", is_provider_preset_mode)
+        self._set_widget_visible("#provider_model_select", is_provider_preset_mode)
+        self._set_widget_visible("#protocol_label", show_protocol)
+        self._set_widget_visible("#provider_select", show_protocol)
+
+        self._set_widget_visible("#model_input", show_manual_model)
         self._set_widget_visible("#oauth_model_select", is_oauth)
         self._set_widget_visible("#oauth_token_label", is_oauth)
         self._set_widget_visible("#oauth_token_select", is_oauth)
@@ -533,7 +772,14 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
 
         try:
             model_label = self.query_one("#model_input_label", Static)
-            model_label.update("Model (OAuth preset)" if is_oauth else "Model name")
+            if is_oauth:
+                model_label.update("Model (OAuth preset)")
+            elif is_provider_preset_mode and not provider_model_is_custom:
+                model_label.update("Model (provider preset)")
+            elif is_provider_preset_mode and provider_model_is_custom:
+                model_label.update("Model name (custom)")
+            else:
+                model_label.update("Model name")
         except Exception:
             pass
 
@@ -545,7 +791,12 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             return
 
         name_input = self.query_one("#name_input", Input) if self._mode == "add" else None
-        provider_select = self.query_one("#provider_select", Select)
+        add_mode = self._selected_add_mode()
+        provider_model_select = (
+            self.query_one("#provider_model_select", Select)
+            if self._mode == "add"
+            else None
+        )
         model_input = self.query_one("#model_input", Input)
         oauth_model_select = self.query_one("#oauth_model_select", Select)
         oauth_token_select = self.query_one("#oauth_token_select", Select)
@@ -571,13 +822,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 self._set_error("Profile name is required.")
                 return
 
-        protocol_raw = provider_select.value
-        protocol_value = protocol_raw.strip() if isinstance(protocol_raw, str) else ""
-        try:
-            protocol = ProtocolType(protocol_value)
-        except ValueError:
-            self._set_error("Invalid protocol.")
-            return
+        protocol = self._effective_protocol()
 
         oauth_token_name: Optional[str] = None
         oauth_token_type: Optional[OAuthTokenType] = None
@@ -599,6 +844,21 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 self._set_error("Select a valid OAuth token first.")
                 return
             oauth_token_type = token.type
+        elif (
+            self._mode == "add"
+            and add_mode == _ADD_MODE_PROVIDER
+            and provider_model_select is not None
+        ):
+            provider_model_raw = provider_model_select.value
+            provider_model_value = (
+                provider_model_raw.strip()
+                if isinstance(provider_model_raw, str)
+                else ""
+            )
+            if provider_model_value and provider_model_value != _PROVIDER_MODEL_CUSTOM:
+                model_name = provider_model_value
+            else:
+                model_name = (model_input.value or "").strip()
         else:
             model_name = (model_input.value or "").strip()
         if not model_name:
