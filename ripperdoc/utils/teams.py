@@ -24,7 +24,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 from ripperdoc.utils.config_paths import user_config_dir
 from ripperdoc.utils.file_editing import file_lock
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.tasks import ensure_task_list_dir, sanitize_identifier
 
 

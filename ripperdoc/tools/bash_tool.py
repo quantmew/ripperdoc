@@ -21,18 +21,18 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
-from ripperdoc.utils.bash_constants import (
+from ripperdoc.utils.shell.bash_constants import (
     get_bash_default_timeout_ms,
     get_bash_max_output_length,
     get_bash_max_timeout_ms,
 )
-from ripperdoc.utils.exit_code_handlers import (
+from ripperdoc.utils.shell.exit_code_handlers import (
     MAX_PREVIEW_CHARS,
     MAX_PREVIEW_LINES,
     IGNORED_COMMANDS,
     interpret_exit_code,
 )
-from ripperdoc.utils.output_utils import (
+from ripperdoc.utils.shell.output_utils import (
     format_duration,
     get_last_n_lines,
     is_output_large,
@@ -46,9 +46,9 @@ from ripperdoc.utils.permissions.tool_permission_utils import (
     is_command_read_only,
 )
 from ripperdoc.utils.permissions import PermissionDecision
-from ripperdoc.utils.sandbox_utils import create_sandbox_wrapper, is_sandbox_available
+from ripperdoc.utils.shell.sandbox_utils import create_sandbox_wrapper, is_sandbox_available
 from ripperdoc.utils.safe_get_cwd import get_original_cwd, safe_get_cwd
-from ripperdoc.utils.shell_utils import build_shell_command, find_suitable_shell
+from ripperdoc.utils.shell.shell_utils import build_shell_command, find_suitable_shell
 from ripperdoc.utils.task_notifications import enqueue_task_notification
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import IS_WINDOWS

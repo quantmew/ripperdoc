@@ -1,6 +1,6 @@
 """Tests for output truncation helpers."""
 
-from ripperdoc.utils.output_utils import truncate_output
+from ripperdoc.utils.shell.output_utils import truncate_output
 
 
 def test_truncate_output_respects_max_length():

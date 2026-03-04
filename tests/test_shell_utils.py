@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ripperdoc.utils.shell_utils import (
+from ripperdoc.utils.shell.shell_utils import (
     find_suitable_shell,
     build_shell_command,
     _is_executable,
@@ -196,7 +196,7 @@ class TestFindGitBashWindows:
             return None
 
         monkeypatch.setattr("shutil.which", mock_which)
-        with patch("ripperdoc.utils.shell_utils._is_executable", return_value=True):
+        with patch("ripperdoc.utils.shell.shell_utils._is_executable", return_value=True):
             result = _find_git_bash_windows()
             assert result == git_bash
 
@@ -211,7 +211,7 @@ class TestFindGitBashWindows:
         def mock_which(cmd):
             return None
 
-        monkeypatch.setattr("ripperdoc.utils.shell_utils._is_executable", mock_is_executable)
+        monkeypatch.setattr("ripperdoc.utils.shell.shell_utils._is_executable", mock_is_executable)
         monkeypatch.setattr("shutil.which", mock_which)
 
         _find_git_bash_windows()
@@ -235,7 +235,7 @@ class TestFindGitBashWindows:
             return False
 
         monkeypatch.setattr("shutil.which", mock_which)
-        monkeypatch.setattr("ripperdoc.utils.shell_utils._is_executable", mock_is_executable)
+        monkeypatch.setattr("ripperdoc.utils.shell.shell_utils._is_executable", mock_is_executable)
         result = _find_git_bash_windows()
         assert result is None
 
@@ -249,7 +249,7 @@ class TestWindowsCmdPath:
         cmd_exe.write_text("dummy")
 
         monkeypatch.setenv("ComSpec", str(cmd_exe))
-        with patch("ripperdoc.utils.shell_utils._is_executable", return_value=True):
+        with patch("ripperdoc.utils.shell.shell_utils._is_executable", return_value=True):
             result = _windows_cmd_path()
             assert str(cmd_exe) in result
 
@@ -267,7 +267,7 @@ class TestWindowsCmdPath:
             return path and "cmd.exe" in path
 
         monkeypatch.setattr("shutil.which", mock_which)
-        monkeypatch.setattr("ripperdoc.utils.shell_utils._is_executable", mock_is_executable)
+        monkeypatch.setattr("ripperdoc.utils.shell.shell_utils._is_executable", mock_is_executable)
         result = _windows_cmd_path()
         assert result == r"C:\Windows\System32\cmd.exe"
 
@@ -288,7 +288,7 @@ class TestWindowsCmdPath:
 
         monkeypatch.setattr("shutil.which", mock_which)
         monkeypatch.setattr("os.environ.get", mock_get_env)
-        monkeypatch.setattr("ripperdoc.utils.shell_utils._is_executable", mock_is_executable)
+        monkeypatch.setattr("ripperdoc.utils.shell.shell_utils._is_executable", mock_is_executable)
 
         result = _windows_cmd_path()
         # The result should be the System32 cmd.exe path
@@ -365,7 +365,7 @@ class TestFindSuitableShell:
 
         monkeypatch.setattr("os.name", "posix")
         monkeypatch.setattr("shutil.which", mock_which)
-        monkeypatch.setattr("ripperdoc.utils.shell_utils._is_executable", mock_is_executable)
+        monkeypatch.setattr("ripperdoc.utils.shell.shell_utils._is_executable", mock_is_executable)
 
         with pytest.raises(RuntimeError) as exc_info:
             find_suitable_shell()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ripperdoc.core.message_utils import tool_result_message
 from ripperdoc.tools.task_tool import TaskTool
-from ripperdoc.utils.messages import create_assistant_message
+from ripperdoc.utils.messaging.messages import create_assistant_message
 
 
 def test_extract_approved_shutdown_response_from_tool_result() -> None:

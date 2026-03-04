@@ -10,7 +10,7 @@ from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 from ripperdoc.utils.file_watch import FileCacheType
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 
 
 logger = get_logger()

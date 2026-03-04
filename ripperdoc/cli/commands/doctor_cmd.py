@@ -25,7 +25,7 @@ from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.mcp import load_mcp_servers_async
 from ripperdoc.utils.self_update import get_install_metadata
-from ripperdoc.utils.sandbox_utils import is_sandbox_available
+from ripperdoc.utils.shell.sandbox_utils import is_sandbox_available
 
 from .base import SlashCommand
 

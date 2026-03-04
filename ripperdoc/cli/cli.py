@@ -42,7 +42,7 @@ from ripperdoc.core.plugins import set_runtime_plugin_dirs
 from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.utils.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
-from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.worktree import (
     WorktreeSession,

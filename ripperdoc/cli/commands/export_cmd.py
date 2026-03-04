@@ -11,7 +11,7 @@ from rich.markup import escape
 
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice, theme_style
 from ripperdoc.utils.clipboard import copy_to_clipboard
-from ripperdoc.utils.message_formatting import render_transcript
+from ripperdoc.utils.messaging.message_formatting import render_transcript
 
 from .base import SlashCommand
 

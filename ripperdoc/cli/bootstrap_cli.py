@@ -20,7 +20,7 @@ from ripperdoc.core.session_agents import (
 )
 from ripperdoc.core.tool_defaults import BUILTIN_TOOL_NAMES
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.session_history import (
+from ripperdoc.utils.sessions.session_history import (
     SessionHistory,
     list_session_summaries,
     load_session_messages,

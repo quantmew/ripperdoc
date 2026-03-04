@@ -2,7 +2,7 @@
 
 import pytest
 
-from ripperdoc.utils.message_compaction import (
+from ripperdoc.utils.messaging.message_compaction import (
     ContextBudgetConfigurationError,
     get_context_usage_status,
     get_model_context_limit,

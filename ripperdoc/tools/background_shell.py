@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import atexit
 
-from ripperdoc.utils.shell_utils import build_shell_command, find_suitable_shell
+from ripperdoc.utils.shell.shell_utils import build_shell_command, find_suitable_shell
 from ripperdoc.utils.log import get_logger
 
 

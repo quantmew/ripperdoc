@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from ripperdoc.utils.message_compaction import ContextBreakdown
+from ripperdoc.utils.messaging.message_compaction import ContextBreakdown
 
 
 def format_tokens(tokens: int) -> str:

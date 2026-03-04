@@ -9,7 +9,7 @@ from typing import Any
 
 from ripperdoc.core.hooks.config import HooksConfig
 from ripperdoc.core.query import QueryContext
-from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.mcp import McpServerInfo
 
 from .handler_config import StdioConfigMixin

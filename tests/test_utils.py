@@ -242,7 +242,7 @@ class TestSafeGetCwd:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.bash_constants import (  # noqa: E402
+from ripperdoc.utils.shell.bash_constants import (  # noqa: E402
     get_bash_max_output_length,
     get_bash_default_timeout_ms,
     get_bash_max_timeout_ms,
@@ -353,7 +353,7 @@ class TestTokenEstimation:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.shell_token_utils import (  # noqa: E402
+from ripperdoc.utils.shell.shell_token_utils import (  # noqa: E402
     parse_shell_tokens,
     filter_valid_tokens,
     parse_and_clean_shell_tokens,
@@ -465,7 +465,7 @@ class TestParseAndCleanShellTokens:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.exit_code_handlers import (  # noqa: E402
+from ripperdoc.utils.shell.exit_code_handlers import (  # noqa: E402
     ExitCodeResult,
     default_handler,
     grep_handler,
@@ -697,7 +697,7 @@ class TestCreateExitResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.output_utils import (  # noqa: E402
+from ripperdoc.utils.shell.output_utils import (  # noqa: E402
     trim_blank_lines,
     is_image_data,
     truncate_output,
@@ -920,7 +920,7 @@ class TestSanitizeOutput:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.message_formatting import (  # noqa: E402
+from ripperdoc.utils.messaging.message_formatting import (  # noqa: E402
     stringify_message_content,
     format_tool_use_detail,
     format_tool_result_detail,

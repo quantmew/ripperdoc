@@ -7,7 +7,7 @@ from typing import Optional
 from ripperdoc.core.hooks.executor import LLMCallback
 from ripperdoc.core.query import query_llm
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messages import AssistantMessage, create_user_message
+from ripperdoc.utils.messaging.messages import AssistantMessage, create_user_message
 
 logger = get_logger()
 

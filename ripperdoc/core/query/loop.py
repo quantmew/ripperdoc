@@ -40,7 +40,7 @@ from ripperdoc.core.message_utils import (
 from ripperdoc.core.tool import Tool, ToolUseContext
 from ripperdoc.utils.context_length_errors import detect_context_length_error
 from ripperdoc.utils.file_watch import detect_changed_files
-from ripperdoc.utils.message_compaction import (
+from ripperdoc.utils.messaging.message_compaction import (
     estimate_tokens_from_text,
     get_model_context_limit,
 )
@@ -51,9 +51,9 @@ from ripperdoc.utils.teams import (
     register_team_message_listener,
     unregister_team_message_listener,
 )
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messages import (
+from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     MessageContent,
     ProgressMessage,

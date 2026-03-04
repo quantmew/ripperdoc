@@ -37,8 +37,8 @@ from ripperdoc.utils.mcp import (
     shutdown_mcp_runtime,
 )
 from ripperdoc.utils.memory import build_memory_instructions
-from ripperdoc.utils.messages import create_user_message
-from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.messaging.messages import create_user_message
+from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.worktree import (
     cleanup_worktree_sessions,
@@ -193,7 +193,7 @@ def _build_effective_system_prompt(
 
 def _print_hook_notice_from_progress(message: Any) -> None:
     content = getattr(message, "content", None)
-    from ripperdoc.utils.messages import is_hook_notice_payload
+    from ripperdoc.utils.messaging.messages import is_hook_notice_payload
 
     if not (is_hook_notice_payload(content) and isinstance(content, dict)):
         return

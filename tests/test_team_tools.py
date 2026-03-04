@@ -17,7 +17,7 @@ from ripperdoc.tools.team_tool import (
     TeamDeleteInput,
     TeamDeleteTool,
 )
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.teams import (
     TeamMember,
     clear_active_team_name,

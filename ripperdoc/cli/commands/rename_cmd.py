@@ -4,7 +4,7 @@ from typing import Any
 
 from rich.markup import escape
 
-from ripperdoc.utils.session_index import set_session_index_title
+from ripperdoc.utils.sessions.session_index import set_session_index_title
 
 from .base import SlashCommand
 

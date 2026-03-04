@@ -13,7 +13,7 @@ from ripperdoc.core.tool import Tool, ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.utils.log import get_logger
 from ripperdoc.core.message_utils import tool_result_message
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
-from ripperdoc.utils.messages import (
+from ripperdoc.utils.messaging.messages import (
     ProgressMessage,
     UserMessage,
     create_hook_notice_message,

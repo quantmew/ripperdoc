@@ -8,7 +8,7 @@ import pytest
 
 from ripperdoc.protocol.stdio.handler_query import _QueryRuntimeState, StdioQueryMixin
 from ripperdoc.protocol.models import UserMessageData, UserStreamMessage
-from ripperdoc.utils.messages import create_assistant_message, create_progress_message
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_progress_message
 
 
 class _DummyHandler(StdioQueryMixin):

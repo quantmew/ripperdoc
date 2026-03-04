@@ -6,7 +6,7 @@ import time
 
 from ripperdoc.core.query import QueryContext
 from ripperdoc.tools.task_tool import AgentRunRecord, TaskTool
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.task_notifications import parse_task_notification
 
 

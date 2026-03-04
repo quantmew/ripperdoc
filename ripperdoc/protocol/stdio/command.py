@@ -11,7 +11,7 @@ from typing import Any
 import click
 from ripperdoc import __version__
 from ripperdoc.protocol.models import DEFAULT_PROTOCOL_VERSION
-from ripperdoc.utils.session_history import (
+from ripperdoc.utils.sessions.session_history import (
     load_session_messages,
     list_session_summaries,
 )

@@ -6,15 +6,15 @@ import json
 import os
 from datetime import datetime, timezone
 
-from ripperdoc.utils.messages import create_assistant_message, create_user_message
-from ripperdoc.utils.session_history import SessionHistory, list_session_summaries
-from ripperdoc.utils.session_index import load_or_build_session_index, set_session_index_title
-from ripperdoc.utils.session_stats import collect_session_stats
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.sessions.session_history import SessionHistory, list_session_summaries
+from ripperdoc.utils.sessions.session_index import load_or_build_session_index, set_session_index_title
+from ripperdoc.utils.sessions.session_stats import collect_session_stats
 
 
 def _patch_session_home(monkeypatch, home_path):
-    monkeypatch.setattr("ripperdoc.utils.session_history.Path.home", lambda: home_path)
-    monkeypatch.setattr("ripperdoc.utils.session_index.Path.home", lambda: home_path)
+    monkeypatch.setattr("ripperdoc.utils.sessions.session_history.Path.home", lambda: home_path)
+    monkeypatch.setattr("ripperdoc.utils.sessions.session_index.Path.home", lambda: home_path)
 
 
 def test_session_index_incremental_append_and_summary(tmp_path, monkeypatch):

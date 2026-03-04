@@ -52,14 +52,14 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.config_paths import user_config_dir
-from ripperdoc.utils.messages import (
+from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     UserMessage,
     create_hook_notice_payload,
     create_user_message,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.task_notifications import enqueue_task_notification
 from ripperdoc.utils.teams import (
     TeamMember,

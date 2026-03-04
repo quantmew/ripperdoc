@@ -43,7 +43,7 @@ from ripperdoc.core.hooks.state import (
     get_pending_message_queue,
     get_hook_status_emitter,
 )
-from ripperdoc.utils.messages import create_hook_notice_message, create_user_message
+from ripperdoc.utils.messaging.messages import create_hook_notice_message, create_user_message
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

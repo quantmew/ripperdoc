@@ -502,10 +502,10 @@ def normalize_messages_for_api(
     Progress messages are filtered out as they are not sent to the API.
 
     Provider-specific behavior is delegated to strategy helpers in
-    ``ripperdoc.utils.message_normalization`` to keep this module focused on
+    ``ripperdoc.utils.messaging.message_normalization`` to keep this module focused on
     message model definitions and block conversion primitives.
     """
-    from ripperdoc.utils.message_normalization import normalize_messages_for_api_impl
+    from ripperdoc.utils.messaging.message_normalization import normalize_messages_for_api_impl
 
     return normalize_messages_for_api_impl(
         messages,

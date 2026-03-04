@@ -16,7 +16,7 @@ from ripperdoc.cli.commands.todos_cmd import command as todos_command
 from ripperdoc.core.plugins import clear_runtime_plugin_dirs
 from ripperdoc.tools import background_shell
 from ripperdoc.utils.mcp import McpServerInfo
-from ripperdoc.utils.messages import create_user_message
+from ripperdoc.utils.messaging.messages import create_user_message
 from ripperdoc.utils.working_directories import normalize_directory_inputs
 from ripperdoc.utils.todo import TodoItem, set_todos
 from ripperdoc.utils.tasks import create_task
@@ -141,8 +141,8 @@ def test_rename_command_is_registered():
 
 
 def test_rename_command_can_set_explicit_title(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.session_history.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.session_index.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.sessions.session_history.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.sessions.session_index.Path.home", lambda: tmp_path)
 
     ui = _RenameUI(Console(record=True, width=120), tmp_path)
     rename_command.handler(ui, "一个小测试")
@@ -160,8 +160,8 @@ def test_rename_command_without_context_shows_usage(tmp_path):
 
 
 def test_rename_command_auto_extracts_title(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.session_history.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.session_index.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.sessions.session_history.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.sessions.session_index.Path.home", lambda: tmp_path)
 
     ui = _RenameUI(Console(record=True, width=120), tmp_path)
     ui.conversation_messages = [create_user_message("Need help with indexing performance")]

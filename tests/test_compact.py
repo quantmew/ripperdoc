@@ -1,11 +1,11 @@
 """Tests for conversation compaction functionality."""
 
-from ripperdoc.utils.conversation_compaction import (
+from ripperdoc.utils.messaging.conversation_compaction import (
     extract_tool_ids_from_message,
     format_summary_response,
     get_complete_tool_pairs_tail,
 )
-from ripperdoc.utils.messages import create_user_message, create_assistant_message
+from ripperdoc.utils.messaging.messages import create_user_message, create_assistant_message
 
 
 def test_extract_tool_ids_from_assistant_message():

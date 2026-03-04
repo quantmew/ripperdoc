@@ -9,7 +9,7 @@ from ripperdoc.core.query import QueryContext
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.utils.memory import build_memory_instructions
-from ripperdoc.utils.message_compaction import (
+from ripperdoc.utils.messaging.message_compaction import (
     ContextBudgetConfigurationError,
     get_remaining_context_tokens,
     resolve_auto_compact_enabled,

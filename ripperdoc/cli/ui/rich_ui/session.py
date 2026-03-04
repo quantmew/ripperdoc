@@ -44,12 +44,12 @@ from ripperdoc.cli.ui.context_display import context_usage_lines
 from ripperdoc.cli.ui.panels import create_welcome_panel, print_shortcuts
 from ripperdoc.cli.ui.message_display import MessageDisplay, parse_bash_output_sections
 from ripperdoc.cli.ui.interrupt_listener import EscInterruptListener
-from ripperdoc.utils.conversation_compaction import (
+from ripperdoc.utils.messaging.conversation_compaction import (
     compact_conversation,
     CompactionResult,
     CompactionError,
 )
-from ripperdoc.utils.message_compaction import (
+from ripperdoc.utils.messaging.message_compaction import (
     estimate_conversation_tokens,
     estimate_used_tokens,
     get_context_usage_status,
@@ -71,9 +71,9 @@ from ripperdoc.tools.dynamic_mcp_tool import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
 )
-from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.memory import build_memory_instructions
-from ripperdoc.utils.messages import (
+from ripperdoc.utils.messaging.messages import (
     UserMessage,
     AssistantMessage,
     ProgressMessage,
@@ -82,13 +82,13 @@ from ripperdoc.utils.messages import (
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.tips import get_random_tip
-from ripperdoc.utils.message_formatting import stringify_message_content
+from ripperdoc.utils.messaging.message_formatting import stringify_message_content
 from ripperdoc.utils.task_notifications import (
     format_task_notification_for_agent,
     parse_task_notification,
 )
 from ripperdoc.utils.tasks import set_runtime_task_scope
-from ripperdoc.utils.session_usage import rebuild_session_usage
+from ripperdoc.utils.sessions.session_usage import rebuild_session_usage
 from ripperdoc.utils.worktree import (
     cleanup_worktree_sessions,
     consume_session_worktrees,

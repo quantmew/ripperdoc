@@ -7,7 +7,7 @@ import re
 from html import escape, unescape
 from typing import Any, Dict, Optional, TypedDict
 
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 
 
 class ParsedTaskNotification(TypedDict, total=False):

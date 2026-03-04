@@ -2,8 +2,8 @@
 
 import pytest
 
-from ripperdoc.utils.messages import create_assistant_message, create_user_message
-from ripperdoc.utils.session_usage import (
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.sessions.session_usage import (
     get_session_usage,
     rebuild_session_usage,
     reset_session_usage,

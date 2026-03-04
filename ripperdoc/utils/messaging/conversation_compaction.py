@@ -8,15 +8,15 @@ from typing import Callable, List, Optional, Set, Tuple, Union
 
 from ripperdoc.core.query import query_llm
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.message_compaction import (
+from ripperdoc.utils.messaging.message_compaction import (
     estimate_conversation_tokens,
     micro_compact_messages,
 )
-from ripperdoc.utils.message_formatting import (
+from ripperdoc.utils.messaging.message_formatting import (
     render_transcript,
     extract_assistant_text,
 )
-from ripperdoc.utils.messages import (
+from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     ProgressMessage,
     UserMessage,

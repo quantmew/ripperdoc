@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from ripperdoc.core.query import loop as loop_mod
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 
 
 def test_inject_team_inbox_prioritizes_shutdown_and_wraps_messages(monkeypatch):

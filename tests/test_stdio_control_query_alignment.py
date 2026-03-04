@@ -16,7 +16,7 @@ from ripperdoc import __version__
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_control as handler_control_module
 from ripperdoc.protocol.stdio import handler_session as handler_session_module
-from ripperdoc.utils.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 
 
 @lru_cache(maxsize=1)

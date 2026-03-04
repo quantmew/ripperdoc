@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.session_index import list_session_index_entries
+from ripperdoc.utils.sessions.session_index import list_session_index_entries
 
 logger = get_logger()
 

@@ -49,7 +49,7 @@ from ripperdoc.tools.dynamic_mcp_tool import (
 )
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
-from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.tasks import set_runtime_task_scope
 from ripperdoc.utils.working_directories import coerce_directory_list, normalize_directory_inputs
 

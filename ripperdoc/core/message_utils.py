@@ -14,7 +14,7 @@ from ripperdoc.core.config import ModelProfile, ProtocolType, get_effective_conf
 from ripperdoc.core.tool import Tool, build_tool_description, tool_input_examples
 from ripperdoc.utils.json_utils import safe_parse_json
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messages import (
+from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     MessageContent,
     ProgressMessage,

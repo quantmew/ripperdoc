@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable, List, Set
 
 from ripperdoc.utils.safe_get_cwd import safe_get_cwd
-from ripperdoc.utils.shell_token_utils import parse_and_clean_shell_tokens
+from ripperdoc.utils.shell.shell_token_utils import parse_and_clean_shell_tokens
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

@@ -4,7 +4,7 @@ from rich.console import Console
 
 from ripperdoc.cli.commands import get_slash_command
 from ripperdoc.cli.commands.copy_cmd import command as copy_command
-from ripperdoc.utils.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 
 
 class _DummyUI:

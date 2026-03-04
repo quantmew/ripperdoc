@@ -34,7 +34,7 @@ from ripperdoc.core.providers.openai_responses import (
 )
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.session_usage import record_usage
+from ripperdoc.utils.sessions.session_usage import record_usage
 from ripperdoc.utils.user_agent import build_user_agent
 
 logger = get_logger()

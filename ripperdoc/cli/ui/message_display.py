@@ -13,8 +13,8 @@ from rich.markdown import Markdown
 from rich.markup import escape
 
 from ripperdoc.cli.ui.tool_renderers import ToolResultRendererRegistry
-from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMessage
-from ripperdoc.utils.message_formatting import format_reasoning_preview
+from ripperdoc.utils.messaging.messages import UserMessage, AssistantMessage, ProgressMessage
+from ripperdoc.utils.messaging.message_formatting import format_reasoning_preview
 
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 

@@ -36,7 +36,7 @@ from ripperdoc.core.providers.error_mapping import (
 from ripperdoc.core.message_utils import normalize_tool_args, build_tool_description
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.session_usage import record_usage
+from ripperdoc.utils.sessions.session_usage import record_usage
 from ripperdoc.core.message_utils import estimate_cost_usd
 from ripperdoc.utils.user_agent import build_user_agent
 

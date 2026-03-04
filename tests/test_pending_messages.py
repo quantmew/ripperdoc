@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
-from ripperdoc.utils.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 
 
 class NoOpInput(BaseModel):

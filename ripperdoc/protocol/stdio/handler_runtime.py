@@ -17,7 +17,7 @@ from ripperdoc.protocol.models import IncomingUserStreamMessage
 from ripperdoc.tools.background_shell import shutdown_background_shell
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.lsp import shutdown_lsp_manager
-from ripperdoc.utils.messages import create_user_message
+from ripperdoc.utils.messaging.messages import create_user_message
 from ripperdoc.utils.mcp import clear_mcp_runtime_overrides, shutdown_mcp_runtime
 from ripperdoc.utils.task_notifications import (
     format_task_notification_for_agent,

@@ -6,7 +6,7 @@ from ripperdoc.cli.ui.rich_ui.rendering import (
     handle_progress_message,
     simplify_progress_suffix,
 )
-from ripperdoc.utils.messages import create_assistant_message, create_progress_message
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_progress_message
 
 
 def test_simplify_progress_suffix_strips_stdout_prefix() -> None:

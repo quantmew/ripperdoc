@@ -9,8 +9,8 @@ from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.file_watch import BoundedFileCache
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messages import ProgressMessage, UserMessage
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.messages import ProgressMessage, UserMessage
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 
 logger = get_logger()
 

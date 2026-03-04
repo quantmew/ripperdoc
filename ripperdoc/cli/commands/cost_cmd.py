@@ -1,4 +1,4 @@
-from ripperdoc.utils.session_usage import get_session_usage
+from ripperdoc.utils.sessions.session_usage import get_session_usage
 
 from typing import Any
 from .base import SlashCommand

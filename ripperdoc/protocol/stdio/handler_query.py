@@ -24,13 +24,13 @@ from ripperdoc.protocol.models import (
 )
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
-from ripperdoc.utils.messages import (
+from ripperdoc.utils.messaging.messages import (
     create_assistant_message,
     create_hook_notice_payload,
     create_user_message,
     is_hook_notice_payload,
 )
-from ripperdoc.utils.session_history import SessionHistory
+from ripperdoc.utils.sessions.session_history import SessionHistory
 
 from .timeouts import (
     STDIO_HOOK_TIMEOUT_SEC,

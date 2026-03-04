@@ -7,8 +7,8 @@ from typing import Any, Dict, List
 import pytest
 
 from ripperdoc.cli.ui.rich_ui.session import RichUI
-from ripperdoc.utils.message_formatting import stringify_message_content
-from ripperdoc.utils.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.messaging.message_formatting import stringify_message_content
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 from ripperdoc.core.message_utils import tool_result_message
 
 

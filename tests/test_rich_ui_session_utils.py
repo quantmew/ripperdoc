@@ -10,8 +10,8 @@ import pytest
 from pathlib import Path
 
 from ripperdoc.cli.ui.rich_ui.session import RichUI, _replace_surrogate_codepoints
-from ripperdoc.utils.pending_messages import PendingMessageQueue
-from ripperdoc.utils.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 
 
 class _DummyConsole:

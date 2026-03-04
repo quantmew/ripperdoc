@@ -7,7 +7,7 @@ conversation summarization and compaction.
 
 from typing import Any, List, Union
 
-from ripperdoc.utils.messages import UserMessage, AssistantMessage, ProgressMessage
+from ripperdoc.utils.messaging.messages import UserMessage, AssistantMessage, ProgressMessage
 
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
 

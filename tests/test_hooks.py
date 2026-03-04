@@ -2339,9 +2339,9 @@ class TestHookManagerAsyncMethods:
     @pytest.mark.asyncio
     async def test_async_command_hook_enqueues_output(self, tmp_path, monkeypatch):
         """Async command hooks should enqueue hook notices."""
-        from ripperdoc.utils.pending_messages import PendingMessageQueue
+        from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
         from ripperdoc.core.hooks.state import bind_pending_message_queue
-        from ripperdoc.utils.messages import is_hook_notice_payload
+        from ripperdoc.utils.messaging.messages import is_hook_notice_payload
 
         monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
 

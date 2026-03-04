@@ -4,7 +4,7 @@ from typing import Optional
 
 from rich.markup import escape
 
-from ripperdoc.utils.session_history import (
+from ripperdoc.utils.sessions.session_history import (
     SessionSummary,
     list_session_summaries,
     load_session_messages,

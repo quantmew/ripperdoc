@@ -45,7 +45,7 @@ from ripperdoc.tools.task_tool import (
     list_agent_runs,
 )
 from ripperdoc.utils.json_utils import safe_parse_json
-from ripperdoc.utils.messages import create_user_message
+from ripperdoc.utils.messaging.messages import create_user_message
 
 
 @dataclass

@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from ripperdoc.utils.messages import (
+from ripperdoc.utils.messaging.messages import (
     MessageRole,
     create_user_message,
     create_assistant_message,

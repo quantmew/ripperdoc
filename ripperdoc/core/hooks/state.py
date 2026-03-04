@@ -7,7 +7,7 @@ from typing import Any, Callable, Generator, List, Optional, Sequence
 from ripperdoc.core.hooks.config import HooksConfig
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.pending_messages import PendingMessageQueue
+from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 
 logger = get_logger()
 

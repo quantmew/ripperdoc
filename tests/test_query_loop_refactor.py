@@ -12,7 +12,7 @@ from ripperdoc.core.providers.base import ProviderResponse
 from ripperdoc.core.tool import Tool, ToolOutput, ToolResult, ToolUseContext
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.query import loop as loop_module
-from ripperdoc.utils.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 
 
 class _ToolInput(BaseModel):
