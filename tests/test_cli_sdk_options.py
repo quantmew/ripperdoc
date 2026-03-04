@@ -128,6 +128,28 @@ def test_cli_rejects_sdk_only_options_outside_stdio(monkeypatch, tmp_path):
     assert "--json-schema" in result.output
 
 
+def test_cli_sdk_url_without_print_runs_stdio_loop_mode(monkeypatch, tmp_path):
+    captured: dict[str, Any] = {}
+
+    async def fake_run_stdio(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("ripperdoc.protocol.stdio.run_stdio", fake_run_stdio)
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["--sdk-url", "ws://localhost:3000/v2/session_ingress/ws/session-1"],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert captured["input_format"] == "stream-json"
+    assert captured["output_format"] == "stream-json"
+    assert captured["print_mode"] is False
+
+
 def test_cli_agent_overrides_settings_agent_for_prompt(monkeypatch, tmp_path):
     captured: dict[str, Any] = {}
 
@@ -212,6 +234,27 @@ def test_main_rewrites_debug_optional_filter(monkeypatch):
     assert "--debug-filter" in captured["args"]
     idx = captured["args"].index("--debug-filter")
     assert captured["args"][idx + 1] == "api,hooks"
+
+
+def test_main_does_not_treat_remote_control_subcommand_as_debug_filter(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    def fake_cli_main(*, args, prog_name):
+        captured["args"] = list(args)
+        captured["prog_name"] = prog_name
+
+    monkeypatch.setattr(cli_module.cli, "main", fake_cli_main)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        ["ripperdoc", "--debug", "remote-control", "--help"],
+    )
+
+    cli_module.main()
+
+    assert captured["prog_name"] == "ripperdoc"
+    assert "--debug-filter" not in captured["args"]
+    assert "remote-control" in captured["args"]
 
 
 def test_main_rewrites_worktree_optional_name(monkeypatch):

@@ -215,12 +215,7 @@ class _SDKWebSocketTransport:
             websockets_client = _websockets
             if websockets_client is None:
                 raise RuntimeError("websockets package is required for --sdk-url support.")
-            ws = await websockets_client.connect(
-                self.url,
-                extra_headers=self._collect_connect_headers(),
-                ping_interval=None,
-                ping_timeout=None,
-            )
+            ws = await self._open_websocket(websockets_client)
         except Exception as exc:
             return await self._handle_connection_close(None, exc)
 
@@ -328,7 +323,10 @@ class _SDKWebSocketTransport:
                 raise
 
     async def _keepalive_loop(self, ws: Any) -> None:
-        if parse_boolish(os.getenv("CLAUDE_CODE_REMOTE"), default=False):
+        if parse_boolish(
+            os.getenv("RIPPERDOC_REMOTE_CONTROL"),
+            default=False,
+        ):
             return
         while self._running:
             await asyncio.sleep(_SDK_KEEPALIVE_INTERVAL_SEC)
@@ -425,6 +423,30 @@ class _SDKWebSocketTransport:
             elapsed,
         )
         return delay
+
+    async def _open_websocket(self, websockets_client: Any) -> Any:
+        """Open websocket with headers while supporting multiple websockets versions."""
+        connect_headers = self._collect_connect_headers()
+        connect_kwargs: dict[str, Any] = {
+            "ping_interval": None,
+            "ping_timeout": None,
+        }
+        try:
+            # websockets >= 14 uses `additional_headers`
+            return await websockets_client.connect(
+                self.url,
+                additional_headers=connect_headers,
+                **connect_kwargs,
+            )
+        except TypeError as exc:
+            # websockets <= 13 uses `extra_headers`
+            if "additional_headers" not in str(exc):
+                raise
+            return await websockets_client.connect(
+                self.url,
+                extra_headers=connect_headers,
+                **connect_kwargs,
+            )
 
     async def _replay_buffer(self, last_request_id: str | None = None) -> None:
         if not self._message_buffer:
@@ -648,7 +670,8 @@ class StdioIOMixin:
         headers: dict[str, str] = {}
 
         session_access_token = self._readable_stripped_env(
-            "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+            "RIPPERDOC_SESSION_ACCESS_TOKEN",
+            "RIPPERDOC_REMOTE_CONTROL_ACCESS_TOKEN",
             "RIPPERDOC_AUTH_TOKEN",
             "RIPPERDOC_API_KEY",
         )
@@ -656,14 +679,14 @@ class StdioIOMixin:
             if session_access_token.startswith("sk-ant-sid"):
                 headers["Cookie"] = f"sessionKey={session_access_token}"
                 if organization_uuid := self._readable_stripped_env(
-                    "CLAUDE_CODE_ORGANIZATION_UUID"
+                    "RIPPERDOC_ORGANIZATION_UUID",
                 ):
                     headers["X-Organization-Uuid"] = organization_uuid
             else:
                 headers["Authorization"] = f"Bearer {session_access_token}"
 
         if runner_version := self._readable_stripped_env(
-            "CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION"
+            "RIPPERDOC_ENVIRONMENT_RUNNER_VERSION",
         ):
             headers["x-environment-runner-version"] = runner_version
 
@@ -680,7 +703,10 @@ class StdioIOMixin:
             return
 
         transport_cls = _SDKWebSocketTransport
-        if parse_boolish(os.getenv("CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2"), default=False):
+        if parse_boolish(
+            os.getenv("RIPPERDOC_POST_FOR_SESSION_INGRESS_V2"),
+            default=False,
+        ):
             transport_cls = _SDKHybridWebSocketTransport
 
         transport = transport_cls(

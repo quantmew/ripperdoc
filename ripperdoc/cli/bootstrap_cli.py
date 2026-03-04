@@ -363,7 +363,8 @@ def _run_stdio_mode_if_requested(
     from ripperdoc.protocol.stdio import run_stdio
 
     effective_prompt = print_prompt or prompt
-    effective_print_mode = bool(print_mode or sdk_url)
+    # sdk_url implies stdio transport, but should not force one-shot print mode.
+    effective_print_mode = bool(print_mode)
     if sdk_url:
         input_format = "stream-json"
         if output_format == "text":

@@ -129,11 +129,24 @@ ripperdoc [OPTIONS]
 - `RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE` - Override auto-compaction trigger percentage (1-100, capped at default threshold)
 - `RIPPERDOC_TMPDIR` - Override internal temp root; Ripperdoc uses `<this-path>/ripperdoc/`
 - `RIPPERDOC_EXIT_AFTER_STOP_DELAY` - In stdio/SDK mode, auto-exit after this many milliseconds of runtime idleness (positive integer only)
+- `RIPPERDOC_REMOTE_CONTROL_BASE_URL` - Remote Control control-plane base URL (used by `ripperdoc remote-control`)
+- `RIPPERDOC_REMOTE_CONTROL_ACCESS_TOKEN` - Bearer token for Remote Control control-plane API
+- `RIPPERDOC_REMOTE_CONTROL_INGRESS_URL` - Optional override for session-ingress host (defaults to base URL)
 - `ENABLE_TOOL_SEARCH` - Controls deferred MCP tool search mode: `auto` (default, on at 10% context), `auto:N`, `true`, `false`
 
 Task Graph scope behavior:
 - By default, task lists are session-scoped (new session starts clean; resume/continue keeps the same tasks)
 - Set `RIPPERDOC_TASK_LIST_ID` to intentionally share one task list across sessions
+
+### Remote Control Bridge
+
+Run a local bridge process that accepts remote work and spawns `ripperdoc --sdk-url` sessions:
+
+```bash
+export RIPPERDOC_REMOTE_CONTROL_BASE_URL="https://your-remote-control-host"
+export RIPPERDOC_REMOTE_CONTROL_ACCESS_TOKEN="your-access-token"
+ripperdoc remote-control
+```
 
 ### Basic Usage Examples
 

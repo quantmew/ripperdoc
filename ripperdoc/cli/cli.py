@@ -34,6 +34,7 @@ from ripperdoc.cli.bootstrap_cli import (
     parse_tools_option,
 )
 from ripperdoc.cli.mcp_cli import mcp_group
+from ripperdoc.cli.remote_control_cli import remote_control_cmd
 from ripperdoc.cli.runtime_cli import run_query
 from ripperdoc.cli.top_level_cli import config_cmd, update_cmd, version_cmd
 from ripperdoc.cli.ui.wizard import check_onboarding
@@ -741,7 +742,13 @@ def cli(
             },
         )
 
-        skip_onboarding = ctx.invoked_subcommand in ("update", "upgrade", "mcp", "agents")
+        skip_onboarding = ctx.invoked_subcommand in (
+            "update",
+            "upgrade",
+            "mcp",
+            "agents",
+            "remote-control",
+        )
         if not skip_onboarding:
             if not check_onboarding():
                 logger.info(
@@ -857,6 +864,7 @@ cli.add_command(update_cmd, name="update")
 cli.add_command(update_cmd, name="upgrade")
 cli.add_command(mcp_group, name="mcp")
 cli.add_command(agents_cmd, name="agents")
+cli.add_command(remote_control_cmd, name="remote-control")
 cli.add_command(version_cmd, name="version")
 
 
@@ -871,7 +879,15 @@ def main() -> None:
             if error:
                 console.print(f"[red]{escape(error)}[/red]")
                 sys.exit(1)
-        top_level_commands = {"config", "update", "upgrade", "mcp", "agents", "version"}
+        top_level_commands = {
+            "config",
+            "update",
+            "upgrade",
+            "mcp",
+            "agents",
+            "remote-control",
+            "version",
+        }
         if "--print" in argv and "--" in argv:
             sep_index = argv.index("--")
             prompt = " ".join(argv[sep_index + 1 :]).strip()

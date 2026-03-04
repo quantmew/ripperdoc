@@ -126,11 +126,24 @@ ripperdoc [OPTIONS]
 - `RIPPERDOC_TEMPERATURE` - 默认温度(0.0-2.0)
 - `RIPPERDOC_API_KEY` - 已配置提供商的 API 密钥
 - `RIPPERDOC_EXIT_AFTER_STOP_DELAY` - 在 stdio/SDK 模式下,运行时进入空闲后等待指定毫秒数自动退出(仅正整数生效)
+- `RIPPERDOC_REMOTE_CONTROL_BASE_URL` - Remote Control 控制面基础地址(用于 `ripperdoc remote-control`)
+- `RIPPERDOC_REMOTE_CONTROL_ACCESS_TOKEN` - Remote Control 控制面 Bearer Token
+- `RIPPERDOC_REMOTE_CONTROL_INGRESS_URL` - 可选: 覆盖会话 ingress 地址(默认使用 base URL)
 - `ENABLE_TOOL_SEARCH` - 控制延迟 MCP 工具搜索: `auto`(默认,达到上下文 10% 时启用)、`auto:N`、`true`、`false`
 
 任务图作用域行为:
 - 默认情况下,任务列表按会话隔离(新会话从干净状态开始;恢复/继续会话保持相同的任务)
 - 设置 `RIPPERDOC_TASK_LIST_ID` 以有意跨会话共享一个任务列表
+
+### Remote Control 桥接进程
+
+启动本地桥接进程,接收远端任务并拉起 `ripperdoc --sdk-url` 子会话:
+
+```bash
+export RIPPERDOC_REMOTE_CONTROL_BASE_URL="https://your-remote-control-host"
+export RIPPERDOC_REMOTE_CONTROL_ACCESS_TOKEN="your-access-token"
+ripperdoc remote-control
+```
 
 ### 基本使用示例
 
