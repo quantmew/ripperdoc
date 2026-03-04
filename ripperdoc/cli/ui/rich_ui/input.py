@@ -22,6 +22,32 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 
+def _apply_current_or_first_completion(buf: Any) -> bool:
+    """Apply current completion, or fall back to the first completion."""
+    state = buf.complete_state
+    if state is None:
+        return False
+    completion = state.current_completion
+    if completion is None and state.completions:
+        completion = state.completions[0]
+    if completion is None:
+        return False
+    buf.apply_completion(completion)
+    return True
+
+
+def _handle_tab_completion(buf: Any) -> None:
+    """Handle completion acceptance for Tab when input is not empty."""
+    if buf.complete_state is None:
+        buf.start_completion(select_first=True)
+
+    if _apply_current_or_first_completion(buf):
+        return
+
+    # Keep previous fallback behavior when the completion menu has no entries yet.
+    buf.start_completion(select_first=True)
+
+
 def build_prompt_session(
     ui: object,
     ignore_filter: Any,
@@ -96,23 +122,7 @@ def build_prompt_session(
             return
 
         # Otherwise, handle completion as usual.
-        # If only one completion is available, apply it automatically.
-        if buf.complete_state is None:
-            buf.start_completion(select_first=True)
-
-        if buf.complete_state is None:
-            return
-
-        if len(buf.complete_state.completions) == 1:
-            completion = buf.complete_state.current_completion or buf.complete_state.completions[0]
-            buf.apply_completion(completion)
-            return
-
-        if buf.complete_state.current_completion:
-            buf.apply_completion(buf.complete_state.current_completion)
-            return
-
-        buf.start_completion(select_first=True)
+        _handle_tab_completion(buf)
 
     @key_bindings.add("s-tab")
     def _(event: Any) -> None:
