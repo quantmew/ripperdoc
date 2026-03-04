@@ -15,7 +15,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.todo import (
+from ripperdoc.utils.collaboration.todo import (
     TodoItem,
     TodoPriority,
     TodoStatus,

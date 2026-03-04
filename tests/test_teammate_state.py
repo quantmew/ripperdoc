@@ -6,11 +6,11 @@ import json
 
 import pytest
 
-from ripperdoc.utils.teams import (
+from ripperdoc.utils.collaboration.teams import (
     create_team,
     list_team_messages,
 )
-from ripperdoc.utils.teammate_state import (
+from ripperdoc.utils.collaboration.teammate_state import (
     IdleReason,
     TeammateStatus,
     _TEAMMATE_STATES,
@@ -35,8 +35,8 @@ from ripperdoc.utils.teammate_state import (
 @pytest.fixture
 def temp_home(monkeypatch, tmp_path):
     """Set up a temporary home directory for team files."""
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     # Clear global teammate state before each test

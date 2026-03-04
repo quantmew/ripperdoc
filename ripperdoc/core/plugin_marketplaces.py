@@ -23,9 +23,9 @@ from ripperdoc.core.plugins import (
     remove_enabled_plugin_for_scope,
 )
 from ripperdoc.core.managed_settings import get_managed_setting
-from ripperdoc.utils.config_paths import user_config_dir
+from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.temp_paths import ripperdoc_temporary_directory
+from ripperdoc.utils.filesystem.temp_paths import ripperdoc_temporary_directory
 from ripperdoc.utils.user_agent import build_user_agent
 
 logger = get_logger()

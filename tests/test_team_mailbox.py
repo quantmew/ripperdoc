@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
-from ripperdoc.utils.teams import (
+from ripperdoc.utils.collaboration.teams import (
     clear_mailbox,
     create_team,
     drain_team_inbox_messages,
@@ -22,8 +22,8 @@ from ripperdoc.utils.teams import (
 
 
 def test_mailbox_read_and_mark_flow(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_team(name="alpha")
@@ -54,8 +54,8 @@ def test_mailbox_read_and_mark_flow(tmp_path, monkeypatch):
 
 
 def test_clear_mailbox_keeps_inbox_file(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_team(name="alpha")
@@ -76,8 +76,8 @@ def test_clear_mailbox_keeps_inbox_file(tmp_path, monkeypatch):
 
 
 def test_live_listener_delivery_persists_read_entry(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_team(name="alpha")

@@ -24,7 +24,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import yaml
 
 from ripperdoc.core.plugins import discover_plugins
-from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
+from ripperdoc.utils.filesystem.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

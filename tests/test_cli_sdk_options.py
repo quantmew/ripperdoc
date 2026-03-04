@@ -848,7 +848,7 @@ def test_worktree_name_generators_align_patterns():
     cli_name = cli_module.generate_cli_worktree_name()
     assert re.match(r"^(swift|bright|calm|keen|bold)-(fox|owl|elm|oak|ray)-[a-z0-9]{4}$", cli_name)
 
-    from ripperdoc.utils.worktree import generate_session_worktree_name
+    from ripperdoc.utils.collaboration.worktree import generate_session_worktree_name
 
     session_name = generate_session_worktree_name("session-abc")
     assert session_name.startswith("worktree-session-abc-")

@@ -8,14 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
-from ripperdoc.utils.config_paths import user_config_dir
+from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     ProgressMessage,
     UserMessage,
 )
-from ripperdoc.utils.path_utils import project_storage_dir
+from ripperdoc.utils.filesystem.path_utils import project_storage_dir
 from ripperdoc.utils.sessions.session_index import (
     list_session_index_entries,
     update_session_index_for_payload,

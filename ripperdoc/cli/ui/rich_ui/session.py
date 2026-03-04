@@ -80,22 +80,22 @@ from ripperdoc.utils.messaging.messages import (
     create_user_message,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
-from ripperdoc.utils.path_ignore import build_ignore_filter
+from ripperdoc.utils.filesystem.path_ignore import build_ignore_filter
 from ripperdoc.cli.ui.tips import get_random_tip
 from ripperdoc.utils.messaging.message_formatting import stringify_message_content
-from ripperdoc.utils.task_notifications import (
+from ripperdoc.utils.collaboration.task_notifications import (
     format_task_notification_for_agent,
     parse_task_notification,
 )
-from ripperdoc.utils.tasks import set_runtime_task_scope
+from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
 from ripperdoc.utils.sessions.session_usage import rebuild_session_usage
-from ripperdoc.utils.worktree import (
+from ripperdoc.utils.collaboration.worktree import (
     cleanup_worktree_sessions,
     consume_session_worktrees,
     list_session_worktrees,
     register_session_worktree,
 )
-from ripperdoc.utils.working_directories import normalize_directory_inputs
+from ripperdoc.utils.filesystem.working_directories import normalize_directory_inputs
 
 from ripperdoc.cli.ui.rich_ui.commands import handle_slash_command as _handle_slash_command
 from ripperdoc.cli.ui.rich_ui.images import process_images_in_input
@@ -289,7 +289,7 @@ class RichUI:
             None if yolo_mode else self._create_permission_checker()
         )
         # Build ignore filter for file completion
-        from ripperdoc.utils.path_ignore import get_project_ignore_patterns
+        from ripperdoc.utils.filesystem.path_ignore import get_project_ignore_patterns
 
         project_patterns = get_project_ignore_patterns()
         self._ignore_filter = build_ignore_filter(

@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
-from ripperdoc.utils.config_paths import config_file_for_scope
-from ripperdoc.utils.git_utils import get_git_root, is_git_repository
+from ripperdoc.utils.filesystem.config_paths import config_file_for_scope
+from ripperdoc.utils.filesystem.git_utils import get_git_root, is_git_repository
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import is_windows
 

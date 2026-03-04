@@ -19,7 +19,7 @@ from ripperdoc.utils.memory import (
     collect_all_memory_files,
 )
 from ripperdoc.utils.platform import is_windows
-from ripperdoc.utils.config_paths import user_config_dir
+from ripperdoc.utils.filesystem.config_paths import user_config_dir
 
 from .base import SlashCommand
 

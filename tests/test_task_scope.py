@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ripperdoc.utils.tasks import resolve_task_list_id, set_runtime_task_scope
+from ripperdoc.utils.collaboration.tasks import resolve_task_list_id, set_runtime_task_scope
 
 
 @pytest.fixture(autouse=True)

@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ripperdoc.utils.config_paths import user_config_dir
+from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.path_utils import project_storage_dir
-from ripperdoc.utils.tasks import is_task_system_enabled, list_tasks
+from ripperdoc.utils.filesystem.path_utils import project_storage_dir
+from ripperdoc.utils.collaboration.tasks import is_task_system_enabled, list_tasks
 
 
 logger = get_logger()

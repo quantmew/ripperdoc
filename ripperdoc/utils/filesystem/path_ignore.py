@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from ripperdoc.utils.git_utils import (
+from ripperdoc.utils.filesystem.git_utils import (
     build_ignore_patterns_map,
     get_git_root,
     is_git_repository,
@@ -523,7 +523,7 @@ def is_path_ignored(
     # Resolve paths
     file_path = Path(file_path)
     if not file_path.is_absolute():
-        from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+        from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
 
         file_path = Path(safe_get_cwd()) / file_path
 
@@ -533,7 +533,7 @@ def is_path_ignored(
     if root_path is None:
         root_path = get_git_root(file_path.parent)
         if root_path is None:
-            from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+            from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
 
             root_path = Path(safe_get_cwd())
 
@@ -637,7 +637,7 @@ def _get_ignore_details(file_path: Path, root_path: Optional[Path] = None) -> Di
     # Resolve paths
     file_path = Path(file_path)
     if not file_path.is_absolute():
-        from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+        from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
 
         file_path = Path(safe_get_cwd()) / file_path
 
@@ -647,7 +647,7 @@ def _get_ignore_details(file_path: Path, root_path: Optional[Path] = None) -> Di
     if root_path is None:
         root_path = get_git_root(file_path.parent)
         if root_path is None:
-            from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+            from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
 
             root_path = Path(safe_get_cwd())
 

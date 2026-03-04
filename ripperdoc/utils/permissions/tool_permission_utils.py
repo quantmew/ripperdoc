@@ -9,7 +9,7 @@ from typing import Callable, Iterable, List, Optional, Set
 
 from ripperdoc.utils.permissions.path_validation_utils import validate_shell_command_paths
 from ripperdoc.utils.permissions.shell_command_validation import validate_shell_command
-from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
 from ripperdoc.utils.shell.shell_token_utils import parse_and_clean_shell_tokens, parse_shell_tokens
 
 

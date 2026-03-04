@@ -40,11 +40,11 @@ from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.config import get_effective_model_profile, get_project_config
 from ripperdoc.core.plugins import set_runtime_plugin_dirs
 from ripperdoc.core.tool_defaults import get_default_tools
-from ripperdoc.utils.git_utils import get_git_root
+from ripperdoc.utils.filesystem.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
 from ripperdoc.utils.sessions.session_history import SessionHistory
-from ripperdoc.utils.tasks import set_runtime_task_scope
-from ripperdoc.utils.worktree import (
+from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
+from ripperdoc.utils.collaboration.worktree import (
     WorktreeSession,
     create_task_worktree,
     generate_cli_worktree_name,

@@ -16,7 +16,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.tasks import (
+from ripperdoc.utils.collaboration.tasks import (
     TaskItem,
     TaskPatch,
     create_task,
@@ -27,7 +27,7 @@ from ripperdoc.utils.tasks import (
     unresolved_blockers,
     update_task,
 )
-from ripperdoc.utils.teams import find_team_by_task_list_id, get_active_team_name, get_team, send_team_message
+from ripperdoc.utils.collaboration.teams import find_team_by_task_list_id, get_active_team_name, get_team, send_team_message
 
 
 logger = get_logger()

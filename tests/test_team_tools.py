@@ -18,7 +18,7 @@ from ripperdoc.tools.team_tool import (
     TeamDeleteTool,
 )
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
-from ripperdoc.utils.teams import (
+from ripperdoc.utils.collaboration.teams import (
     TeamMember,
     clear_active_team_name,
     create_team,
@@ -32,8 +32,8 @@ from ripperdoc.utils.teams import (
 
 
 def test_team_tools_create_and_send_message(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()
@@ -85,8 +85,8 @@ def test_team_tools_create_and_send_message(tmp_path, monkeypatch):
 
 
 def test_task_update_owner_emits_assignment_message(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     team_create = TeamCreateTool()
@@ -163,8 +163,8 @@ def test_send_message_summary_validation():
 
 
 def test_team_create_allows_new_team_when_only_singleton_team_exists(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("RIPPERDOC_TEAM_NAME", raising=False)
 
@@ -189,8 +189,8 @@ def test_team_create_allows_new_team_when_only_singleton_team_exists(tmp_path, m
 
 
 def test_team_delete_requires_no_active_members(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()
@@ -250,8 +250,8 @@ def test_team_tool_descriptions_and_examples():
 
 
 def test_send_team_message_live_listener_delivery(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_team(name="alpha")
@@ -277,8 +277,8 @@ def test_send_team_message_live_listener_delivery(tmp_path, monkeypatch):
 
 
 def test_send_shutdown_request_writes_structured_payload(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()
@@ -314,8 +314,8 @@ def test_send_shutdown_request_writes_structured_payload(tmp_path, monkeypatch):
 
 
 def test_send_shutdown_response_uses_shutdown_approved_payload(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()
@@ -358,8 +358,8 @@ def test_send_shutdown_response_uses_shutdown_approved_payload(tmp_path, monkeyp
 
 
 def test_send_shutdown_response_uses_shutdown_rejected_payload(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()
@@ -397,8 +397,8 @@ def test_send_shutdown_response_uses_shutdown_rejected_payload(tmp_path, monkeyp
 
 
 def test_send_plan_approval_response_uses_protocol_payload(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()
@@ -435,8 +435,8 @@ def test_send_plan_approval_response_uses_protocol_payload(tmp_path, monkeypatch
 
 
 def test_team_member_persistence_includes_extended_fields(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()
@@ -458,8 +458,8 @@ def test_team_member_persistence_includes_extended_fields(tmp_path, monkeypatch)
 
 
 def test_send_message_recipient_alias_resolution(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()
@@ -492,8 +492,8 @@ def test_send_message_recipient_alias_resolution(tmp_path, monkeypatch):
 
 
 def test_send_message_rejects_unknown_recipient(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.teams.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.teams.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TeamCreateTool()

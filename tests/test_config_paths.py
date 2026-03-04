@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ripperdoc.utils.config_paths import (
+from ripperdoc.utils.filesystem.config_paths import (
     config_dir_for_scope,
     config_file_for_scope,
     local_config_dir,

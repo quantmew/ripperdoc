@@ -39,8 +39,8 @@ from ripperdoc.utils.mcp import (
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.messaging.messages import create_user_message
 from ripperdoc.utils.sessions.session_history import SessionHistory
-from ripperdoc.utils.tasks import set_runtime_task_scope
-from ripperdoc.utils.worktree import (
+from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
+from ripperdoc.utils.collaboration.worktree import (
     cleanup_worktree_sessions,
     consume_session_worktrees,
     list_session_worktrees,

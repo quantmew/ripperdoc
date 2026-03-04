@@ -36,7 +36,7 @@ from ripperdoc.core.custom_commands import (
     render_command_markdown,
     validate_command_name,
 )
-from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
+from ripperdoc.utils.filesystem.config_paths import project_config_dir, user_config_dir
 
 KNOWN_FRONTMATTER_KEYS = {
     "description",

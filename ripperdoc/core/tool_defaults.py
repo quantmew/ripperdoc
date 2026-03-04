@@ -40,7 +40,7 @@ from ripperdoc.tools.mcp_tools import (
 )
 from ripperdoc.tools.dynamic_mcp_tool import load_dynamic_mcp_tools_sync
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.tasks import is_task_system_enabled
+from ripperdoc.utils.collaboration.tasks import is_task_system_enabled
 
 logger = get_logger()
 

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from ripperdoc.utils.working_directories import (
+from ripperdoc.utils.filesystem.working_directories import (
     coerce_directory_list,
     extract_additional_directories,
     normalize_directory_inputs,

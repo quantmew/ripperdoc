@@ -13,7 +13,7 @@ from ripperdoc.utils.permissions.shell_command_validation import (
 from ripperdoc.utils.permissions.tool_permission_utils import (
     evaluate_shell_command_permissions,
 )
-from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
 
 
 # =============================================================================
@@ -928,7 +928,7 @@ class TestFlexibleWildcardMatching:
         from ripperdoc.utils.permissions.tool_permission_utils import (
             evaluate_shell_command_permissions,
         )
-        from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+        from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
 
         # Glob format rules
         allowed_rules = {
@@ -1020,7 +1020,7 @@ class TestFlexibleWildcardMatching:
         from ripperdoc.utils.permissions.tool_permission_utils import (
             evaluate_shell_command_permissions,
         )
-        from ripperdoc.utils.safe_get_cwd import safe_get_cwd
+        from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
 
         cwd = safe_get_cwd()
 

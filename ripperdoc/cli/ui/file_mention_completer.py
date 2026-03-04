@@ -9,7 +9,7 @@ from typing import Any, Iterable, List, Set
 
 from prompt_toolkit.completion import Completer, Completion
 
-from ripperdoc.utils.path_ignore import should_skip_path, IgnoreFilter
+from ripperdoc.utils.filesystem.path_ignore import should_skip_path, IgnoreFilter
 from ripperdoc.utils.image_utils import is_image_file
 
 

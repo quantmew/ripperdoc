@@ -9,7 +9,7 @@ from typing import AsyncGenerator, Optional
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import Tool, ToolOutput, ToolResult, ToolUseContext, ValidationResult
-from ripperdoc.utils.worktree import (
+from ripperdoc.utils.collaboration.worktree import (
     create_task_worktree,
     generate_session_worktree_name,
     list_session_worktrees,

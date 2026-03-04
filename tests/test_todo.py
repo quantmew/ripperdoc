@@ -11,13 +11,13 @@ from ripperdoc.tools.todo_tool import (
     TodoWriteTool,
     TodoWriteToolInput,
 )
-from ripperdoc.utils.todo import TodoItem, format_todo_summary, load_todos, set_todos
-from ripperdoc.utils.tasks import create_task
+from ripperdoc.utils.collaboration.todo import TodoItem, format_todo_summary, load_todos, set_todos
+from ripperdoc.utils.collaboration.tasks import create_task
 
 
 def test_todo_storage_roundtrip(tmp_path, monkeypatch):
     """Todos should persist to disk and retain ordering rules."""
-    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     todos = [
@@ -40,7 +40,7 @@ def test_todo_tools_flow(tmp_path, monkeypatch):
     """Todo tools should write and read tasks, surfacing next action."""
     import asyncio
 
-    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     write_tool = TodoWriteTool()
     read_tool = TodoReadTool()
@@ -88,8 +88,8 @@ def test_todo_tools_flow(tmp_path, monkeypatch):
 def test_load_todos_reads_task_graph_when_enabled(tmp_path, monkeypatch):
     """When task graph is active and has tasks, legacy todo reads should mirror it."""
     monkeypatch.setenv("RIPPERDOC_ENABLE_TASKS", "true")
-    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_task(subject="task one", task_id="t1", status="in_progress")

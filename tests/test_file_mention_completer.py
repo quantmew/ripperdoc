@@ -3,7 +3,7 @@
 from prompt_toolkit.document import Document
 
 from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
-from ripperdoc.utils.path_ignore import build_ignore_filter
+from ripperdoc.utils.filesystem.path_ignore import build_ignore_filter
 
 
 def _get_text_suggestions(completer, text: str):

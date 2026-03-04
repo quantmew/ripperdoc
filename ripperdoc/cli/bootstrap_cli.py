@@ -25,7 +25,7 @@ from ripperdoc.utils.sessions.session_history import (
     list_session_summaries,
     load_session_messages,
 )
-from ripperdoc.utils.working_directories import (
+from ripperdoc.utils.filesystem.working_directories import (
     extract_additional_directories,
     normalize_directory_inputs,
 )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from ripperdoc.utils.shell.output_utils import trim_blank_lines, truncate_output
-from ripperdoc.utils.safe_get_cwd import get_original_cwd, safe_get_cwd
+from ripperdoc.utils.filesystem.safe_get_cwd import get_original_cwd, safe_get_cwd
 
 
 def append_cwd_reset_message(message: str) -> str:

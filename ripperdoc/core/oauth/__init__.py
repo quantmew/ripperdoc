@@ -9,7 +9,7 @@ from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
 
-from ripperdoc.utils.config_paths import CONFIG_DIR_NAME, config_file_for_scope
+from ripperdoc.utils.filesystem.config_paths import CONFIG_DIR_NAME, config_file_for_scope
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

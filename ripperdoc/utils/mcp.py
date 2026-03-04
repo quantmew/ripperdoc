@@ -18,9 +18,9 @@ from typing import Any, Dict, List, Optional, TextIO
 
 from ripperdoc import __version__
 from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
-from ripperdoc.utils.config_paths import config_dir_for_scope, config_file_for_scope
+from ripperdoc.utils.filesystem.config_paths import config_dir_for_scope, config_file_for_scope
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.path_utils import sanitize_project_path
+from ripperdoc.utils.filesystem.path_utils import sanitize_project_path
 from ripperdoc.utils.token_estimation import estimate_tokens
 
 logger = get_logger()

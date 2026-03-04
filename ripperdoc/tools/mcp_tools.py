@@ -26,7 +26,7 @@ from ripperdoc.utils.mcp import (
     format_mcp_instructions,
     load_mcp_servers_async,
 )
-from ripperdoc.utils.temp_paths import ripperdoc_mkstemp
+from ripperdoc.utils.filesystem.temp_paths import ripperdoc_mkstemp
 from ripperdoc.tools.mcp_output_limits import evaluate_mcp_output_size
 
 

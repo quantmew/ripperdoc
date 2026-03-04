@@ -7,7 +7,7 @@ from ripperdoc.cli.ui.tool_renderers import (
     EditResultRenderer,
     ToolResultRendererRegistry,
 )
-from ripperdoc.utils.tasks import create_task
+from ripperdoc.utils.collaboration.tasks import create_task
 
 
 def test_bash_renderer_hides_empty_stdout_and_stderr_sections() -> None:

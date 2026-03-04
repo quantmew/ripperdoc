@@ -44,7 +44,7 @@ from ripperdoc.utils.messaging.message_compaction import (
     estimate_tokens_from_text,
     get_model_context_limit,
 )
-from ripperdoc.utils.teams import (
+from ripperdoc.utils.collaboration.teams import (
     get_active_team_name,
     list_teams,
     drain_team_inbox_messages,

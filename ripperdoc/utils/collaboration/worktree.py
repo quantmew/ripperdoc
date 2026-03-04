@@ -22,8 +22,8 @@ from ripperdoc.core.config import (
 )
 from ripperdoc.core.hooks.events import HookEvent
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
-from ripperdoc.utils.config_paths import project_config_dir
-from ripperdoc.utils.git_utils import get_git_root
+from ripperdoc.utils.filesystem.config_paths import project_config_dir
+from ripperdoc.utils.filesystem.git_utils import get_git_root
 from ripperdoc.utils.log import get_logger
 
 

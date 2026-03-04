@@ -2,7 +2,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from ripperdoc.utils.temp_paths import (
+from ripperdoc.utils.filesystem.temp_paths import (
     RIPPERDOC_TMPDIR_ENV,
     ripperdoc_mkstemp,
     ripperdoc_temporary_directory,

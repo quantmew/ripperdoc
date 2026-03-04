@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.teams import send_team_message
+from ripperdoc.utils.collaboration.teams import send_team_message
 
 logger = get_logger()
 

@@ -51,7 +51,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ValidationResult,
 )
-from ripperdoc.utils.config_paths import user_config_dir
+from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     UserMessage,
@@ -60,8 +60,8 @@ from ripperdoc.utils.messaging.messages import (
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
-from ripperdoc.utils.task_notifications import enqueue_task_notification
-from ripperdoc.utils.teams import (
+from ripperdoc.utils.collaboration.task_notifications import enqueue_task_notification
+from ripperdoc.utils.collaboration.teams import (
     TeamMember,
     TeamMessageType,
     get_team,
@@ -69,14 +69,14 @@ from ripperdoc.utils.teams import (
     send_team_message,
     upsert_team_member,
 )
-from ripperdoc.utils.teammate_state import (
+from ripperdoc.utils.collaboration.teammate_state import (
     IdleReason,
     InProcessTeammateState,
     set_teammate_idle,
     set_teammate_active,
     inject_user_message,
 )
-from ripperdoc.utils.worktree import (
+from ripperdoc.utils.collaboration.worktree import (
     WorktreeSession,
     cleanup_worktree_session,
     create_task_worktree,

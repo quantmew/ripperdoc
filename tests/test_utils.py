@@ -197,7 +197,7 @@ class TestSafeParseJson:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from ripperdoc.utils.safe_get_cwd import safe_get_cwd, get_original_cwd  # noqa: E402
+from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd, get_original_cwd  # noqa: E402
 
 
 class TestSafeGetCwd:

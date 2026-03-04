@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from ripperdoc.utils.path_utils import (
+from ripperdoc.utils.filesystem.path_utils import (
     _legacy_sanitize_project_path,
     project_storage_dir,
     sanitize_project_path,

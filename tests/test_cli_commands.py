@@ -17,9 +17,9 @@ from ripperdoc.core.plugins import clear_runtime_plugin_dirs
 from ripperdoc.tools import background_shell
 from ripperdoc.utils.mcp import McpServerInfo
 from ripperdoc.utils.messaging.messages import create_user_message
-from ripperdoc.utils.working_directories import normalize_directory_inputs
-from ripperdoc.utils.todo import TodoItem, set_todos
-from ripperdoc.utils.tasks import create_task
+from ripperdoc.utils.filesystem.working_directories import normalize_directory_inputs
+from ripperdoc.utils.collaboration.todo import TodoItem, set_todos
+from ripperdoc.utils.collaboration.tasks import create_task
 
 
 class _DummyUI:
@@ -173,7 +173,7 @@ def test_rename_command_auto_extracts_title(tmp_path, monkeypatch):
 
 def test_todos_command_empty(tmp_path, monkeypatch):
     """Todos command should show an empty state when nothing is stored."""
-    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     ui = _DummyUI(Console(record=True, width=80), tmp_path)
@@ -185,7 +185,7 @@ def test_todos_command_empty(tmp_path, monkeypatch):
 
 def test_todos_command_lists_items(tmp_path, monkeypatch):
     """Todos command should render stored items."""
-    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     set_todos(
@@ -208,8 +208,8 @@ def test_todos_command_lists_items(tmp_path, monkeypatch):
 def test_todos_command_reads_task_graph_when_enabled(tmp_path, monkeypatch):
     """Todos command should display task graph items when task system is enabled."""
     monkeypatch.setenv("RIPPERDOC_ENABLE_TASKS", "true")
-    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_task(subject="write code", task_id="t1", status="in_progress")
@@ -226,7 +226,7 @@ def test_todos_command_reads_task_graph_when_enabled(tmp_path, monkeypatch):
 def test_todos_command_hides_completed_by_default(tmp_path, monkeypatch):
     """Todos command should hide completed rows by default while keeping summary counts."""
     monkeypatch.delenv("RIPPERDOC_UI_SHOW_COMPLETED_TASKS", raising=False)
-    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     set_todos(
@@ -249,7 +249,7 @@ def test_todos_command_hides_completed_by_default(tmp_path, monkeypatch):
 def test_todos_command_all_shows_completed(tmp_path, monkeypatch):
     """`/todos all` should include completed rows."""
     monkeypatch.delenv("RIPPERDOC_UI_SHOW_COMPLETED_TASKS", raising=False)
-    monkeypatch.setattr("ripperdoc.utils.todo.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     set_todos(

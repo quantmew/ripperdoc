@@ -13,7 +13,7 @@ from ripperdoc.tools.task_graph_tool import (
     TaskUpdateInput,
     TaskUpdateTool,
 )
-from ripperdoc.utils.tasks import (
+from ripperdoc.utils.collaboration.tasks import (
     TaskPatch,
     create_task,
     format_task_summary,
@@ -26,7 +26,7 @@ from ripperdoc.utils.tasks import (
 
 
 def test_task_graph_roundtrip_and_dependency_sync(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     parent = create_task(subject="run build", description="run build pipeline", task_id="1")
@@ -49,7 +49,7 @@ def test_task_graph_roundtrip_and_dependency_sync(tmp_path, monkeypatch):
 
 
 def test_task_graph_tools_flow_and_deleted_status(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_tool = TaskCreateTool()
@@ -107,7 +107,7 @@ def test_task_graph_tools_flow_and_deleted_status(tmp_path, monkeypatch):
 
 
 def test_task_update_blocks_completed_when_dependencies_unresolved(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_task(subject="build", description="build", task_id="1", status="in_progress")
@@ -129,7 +129,7 @@ def test_task_update_blocks_completed_when_dependencies_unresolved(tmp_path, mon
 
 
 def test_task_list_filters_internal_and_prunes_completed_blockers(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.utils.tasks.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
     create_task(subject="internal", description="meta", task_id="1", metadata={"_internal": True})

@@ -27,7 +27,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from ripperdoc.utils.config_paths import (
+from ripperdoc.utils.filesystem.config_paths import (
     CONFIG_DIR_NAME,
     project_config_dir,
     user_config_dir,

@@ -19,12 +19,12 @@ from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.utils.messaging.messages import create_user_message
 from ripperdoc.utils.mcp import clear_mcp_runtime_overrides, shutdown_mcp_runtime
-from ripperdoc.utils.task_notifications import (
+from ripperdoc.utils.collaboration.task_notifications import (
     format_task_notification_for_agent,
     parse_task_notification,
 )
-from ripperdoc.utils.tasks import set_runtime_task_scope
-from ripperdoc.utils.worktree import consume_session_worktrees, list_session_worktrees
+from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
+from ripperdoc.utils.collaboration.worktree import consume_session_worktrees, list_session_worktrees
 
 
 logger = logging.getLogger("ripperdoc.protocol.stdio.handler")

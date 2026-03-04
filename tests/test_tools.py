@@ -25,7 +25,7 @@ from ripperdoc.tools.task_output_tool import TaskOutputTool, TaskOutputInput
 from ripperdoc.tools.task_stop_tool import TaskStopTool, TaskStopInput
 from ripperdoc.tools.task_tool import AgentRunRecord, TaskTool, TaskToolInput
 from ripperdoc.tools.enter_worktree_tool import EnterWorktreeTool, EnterWorktreeToolInput
-from ripperdoc.utils.worktree import (
+from ripperdoc.utils.collaboration.worktree import (
     WorktreeSession,
     cleanup_worktree_session,
     cleanup_registered_worktrees,
@@ -873,9 +873,9 @@ def test_create_task_worktree_prefers_worktree_create_hook(monkeypatch, tmp_path
             outputs=[output],
         )
 
-    monkeypatch.setattr("ripperdoc.utils.worktree._has_worktree_create_hook", lambda: True)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.worktree._has_worktree_create_hook", lambda: True)
     monkeypatch.setattr(
-        "ripperdoc.utils.worktree.hook_manager.run_worktree_create",
+        "ripperdoc.utils.collaboration.worktree.hook_manager.run_worktree_create",
         fake_run_worktree_create,
     )
 
@@ -1123,9 +1123,9 @@ def test_cleanup_worktree_session_uses_worktree_remove_hook(monkeypatch, tmp_pat
         called["path"] = worktree_path
         return SimpleNamespace(should_block=False, has_errors=False, errors=[])
 
-    monkeypatch.setattr("ripperdoc.utils.worktree._has_worktree_remove_hook", lambda: True)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.worktree._has_worktree_remove_hook", lambda: True)
     monkeypatch.setattr(
-        "ripperdoc.utils.worktree.hook_manager.run_worktree_remove",
+        "ripperdoc.utils.collaboration.worktree.hook_manager.run_worktree_remove",
         fake_run_worktree_remove,
     )
 
@@ -1165,7 +1165,7 @@ def test_sync_worktree_configuration_syncs_settings_hooks_and_symlink(
             args=["git", *args], returncode=0, stdout="", stderr=""
         )
 
-    monkeypatch.setattr("ripperdoc.utils.worktree._run_git", fake_run_git)
+    monkeypatch.setattr("ripperdoc.utils.collaboration.worktree._run_git", fake_run_git)
 
     sync_worktree_configuration(repo_root=repo, worktree_path=worktree)
 

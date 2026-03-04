@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
+from ripperdoc.utils.filesystem.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

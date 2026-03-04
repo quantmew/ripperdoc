@@ -47,9 +47,9 @@ from ripperdoc.utils.permissions.tool_permission_utils import (
 )
 from ripperdoc.utils.permissions import PermissionDecision
 from ripperdoc.utils.shell.sandbox_utils import create_sandbox_wrapper, is_sandbox_available
-from ripperdoc.utils.safe_get_cwd import get_original_cwd, safe_get_cwd
+from ripperdoc.utils.filesystem.safe_get_cwd import get_original_cwd, safe_get_cwd
 from ripperdoc.utils.shell.shell_utils import build_shell_command, find_suitable_shell
-from ripperdoc.utils.task_notifications import enqueue_task_notification
+from ripperdoc.utils.collaboration.task_notifications import enqueue_task_notification
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import IS_WINDOWS
 

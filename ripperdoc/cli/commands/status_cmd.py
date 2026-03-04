@@ -14,7 +14,7 @@ from ripperdoc.core.config import (
 )
 from ripperdoc.core.managed_settings import has_managed_settings
 from ripperdoc.core.oauth import get_oauth_token
-from ripperdoc.utils.config_paths import config_file_for_scope
+from ripperdoc.utils.filesystem.config_paths import config_file_for_scope
 from ripperdoc.utils.memory import MAX_CONTENT_LENGTH, MemoryFile, collect_all_memory_files
 
 from .base import SlashCommand

@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from ripperdoc.utils.config_paths import config_file_for_scope
+from ripperdoc.utils.filesystem.config_paths import config_file_for_scope
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

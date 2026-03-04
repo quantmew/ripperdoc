@@ -21,11 +21,11 @@ from uuid import uuid4
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
-from ripperdoc.utils.config_paths import user_config_dir
+from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.file_editing import file_lock
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.path_utils import sanitize_project_path
+from ripperdoc.utils.filesystem.path_utils import sanitize_project_path
 
 
 logger = get_logger()

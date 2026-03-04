@@ -19,7 +19,7 @@ from ripperdoc.core.tool import (
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import HAS_FCNTL
-from ripperdoc.utils.path_ignore import check_path_for_tool
+from ripperdoc.utils.filesystem.path_ignore import check_path_for_tool
 from ripperdoc.utils.file_editing import (
     atomic_write_with_fallback,
     file_lock,

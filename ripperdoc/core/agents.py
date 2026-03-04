@@ -11,7 +11,7 @@ import yaml
 
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.core.plugins import discover_plugins
-from ripperdoc.utils.config_paths import project_config_dir, user_config_dir
+from ripperdoc.utils.filesystem.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.log import get_logger
 from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool

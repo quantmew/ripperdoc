@@ -22,8 +22,8 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.tasks import task_list_dir
-from ripperdoc.utils.teams import (
+from ripperdoc.utils.collaboration.tasks import task_list_dir
+from ripperdoc.utils.collaboration.teams import (
     TeamMessage,
     TeamMember,
     clear_active_team_name,

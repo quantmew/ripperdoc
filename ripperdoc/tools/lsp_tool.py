@@ -16,7 +16,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.path_ignore import check_path_for_tool
+from ripperdoc.utils.filesystem.path_ignore import check_path_for_tool
 from ripperdoc.utils.lsp import (
     LspLaunchError,
     LspProtocolError,

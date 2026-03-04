@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 
-from ripperdoc.utils.path_ignore import (
+from ripperdoc.utils.filesystem.path_ignore import (
     DEFAULT_IGNORE_PATTERNS,
     IGNORED_DIRECTORIES,
     IgnoreFilter,
@@ -308,7 +308,7 @@ class TestCheckPathForToolGitignoreWarnings:
             binary.touch()
             # For temp directories, we need to check if the file is ignored
             # based on the ignore filter, not just the path check
-            from ripperdoc.utils.path_ignore import is_path_ignored
+            from ripperdoc.utils.filesystem.path_ignore import is_path_ignored
 
             # Binary files (.exe) are in default ignore patterns
             is_ignored = is_path_ignored(binary, root)
@@ -321,7 +321,7 @@ class TestCheckPathForToolGitignoreWarnings:
             binary = root / "app.dll"
             binary.touch()
             # Check that .dll files are in the ignore patterns
-            from ripperdoc.utils.path_ignore import is_path_ignored
+            from ripperdoc.utils.filesystem.path_ignore import is_path_ignored
 
             is_ignored = is_path_ignored(binary, root)
             assert is_ignored is True  # .dll files should be ignored
@@ -346,7 +346,7 @@ class TestCheckPathForToolGitignoreWarnings:
             package.parent.mkdir(parents=True)
             package.touch()
             # Check that files in node_modules are ignored
-            from ripperdoc.utils.path_ignore import is_path_ignored
+            from ripperdoc.utils.filesystem.path_ignore import is_path_ignored
 
             is_ignored = is_path_ignored(package, root)
             assert is_ignored is True  # Files in node_modules should be ignored

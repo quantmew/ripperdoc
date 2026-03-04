@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional
 
-from ripperdoc.utils.config_paths import user_config_dir
-from ripperdoc.utils.path_utils import sanitize_project_path
+from ripperdoc.utils.filesystem.config_paths import user_config_dir
+from ripperdoc.utils.filesystem.path_utils import sanitize_project_path
 
 
 class SpinnerSafeStreamHandler(logging.StreamHandler):

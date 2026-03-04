@@ -22,7 +22,7 @@ from ripperdoc.core.config import (
     save_project_config,
     save_project_local_config,
 )
-from ripperdoc.utils.config_paths import config_file_for_scope
+from ripperdoc.utils.filesystem.config_paths import config_file_for_scope
 from ripperdoc.utils.permissions.rule_syntax import normalize_permission_rule
 
 from .base import SlashCommand

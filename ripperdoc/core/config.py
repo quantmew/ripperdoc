@@ -13,7 +13,7 @@ from enum import Enum
 
 from ripperdoc.core.managed_settings import load_managed_settings_snapshot
 from ripperdoc.core.oauth import OAuthTokenType
-from ripperdoc.utils.config_paths import (
+from ripperdoc.utils.filesystem.config_paths import (
     CONFIG_DIR_NAME,
     RIPPERDOC_CONFIG_DIR_ENV,
     config_dir_for_scope,

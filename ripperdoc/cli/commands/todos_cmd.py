@@ -4,13 +4,13 @@ from rich import box
 from rich.panel import Panel
 from rich.markup import escape
 
-from ripperdoc.utils.todo import (
+from ripperdoc.utils.collaboration.todo import (
     format_todo_lines,
     format_todo_summary,
     get_next_actionable,
     load_todos,
 )
-from ripperdoc.utils.tasks import should_show_completed_tasks_in_ui
+from ripperdoc.utils.collaboration.tasks import should_show_completed_tasks_in_ui
 
 from typing import Any
 from .base import SlashCommand

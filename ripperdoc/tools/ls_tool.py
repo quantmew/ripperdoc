@@ -18,8 +18,8 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
-from ripperdoc.utils.safe_get_cwd import safe_get_cwd
-from ripperdoc.utils.git_utils import (
+from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
+from ripperdoc.utils.filesystem.git_utils import (
     build_ignore_patterns_map,
     should_ignore_path,
     is_git_repository,

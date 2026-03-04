@@ -23,7 +23,7 @@ from textual.widgets import Button, Input, OptionList, Select, Static
 from textual.widgets.option_list import Option
 from textual.worker import Worker, WorkerState
 
-from ripperdoc.utils.config_paths import config_file_for_scope
+from ripperdoc.utils.filesystem.config_paths import config_file_for_scope
 from ripperdoc.utils.mcp import (
     McpServerInfo,
     get_mcp_stderr_log_path,

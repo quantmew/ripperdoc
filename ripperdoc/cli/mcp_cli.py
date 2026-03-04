@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import click
-from ripperdoc.utils.config_paths import config_dir_for_scope, config_file_for_scope
+from ripperdoc.utils.filesystem.config_paths import config_dir_for_scope, config_file_for_scope
 
 _PROJECT_SCOPE = "project"
 _USER_SCOPE = "user"

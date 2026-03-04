@@ -15,8 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Callable, MutableMapping, Optional
 
-from ripperdoc.utils.git_utils import get_git_root
-from ripperdoc.utils.worktree import (
+from ripperdoc.utils.filesystem.git_utils import get_git_root
+from ripperdoc.utils.collaboration.worktree import (
     WorktreeSession,
     create_task_worktree,
     generate_cli_worktree_name,

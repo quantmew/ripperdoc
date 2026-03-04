@@ -18,7 +18,7 @@ import subprocess
 
 import pytest
 
-from ripperdoc.utils.git_utils import (
+from ripperdoc.utils.filesystem.git_utils import (
     is_git_repository,
     get_git_root,
     read_gitignore_patterns,

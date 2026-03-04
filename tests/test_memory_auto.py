@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from ripperdoc.utils import memory
-from ripperdoc.utils.path_utils import sanitize_project_path
+from ripperdoc.utils.filesystem.path_utils import sanitize_project_path
 
 
 def _clear_memory_env(monkeypatch) -> None:

@@ -12,12 +12,12 @@ from rich.text import Text
 
 from ripperdoc.core.theme import theme_color
 from ripperdoc.utils.diff_rendering import build_numbered_diff_layout, format_numbered_diff_text
-from ripperdoc.utils.tasks import (
+from ripperdoc.utils.collaboration.tasks import (
     list_tasks,
     resolve_task_list_id,
     should_show_completed_tasks_in_ui,
 )
-from ripperdoc.utils.teams import get_active_team_name, get_team
+from ripperdoc.utils.collaboration.teams import get_active_team_name, get_team
 
 
 class ToolResultRenderer:
