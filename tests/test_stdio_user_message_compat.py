@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 import pytest
@@ -160,6 +161,69 @@ async def test_run_waits_for_inflight_user_query_on_eof(monkeypatch) -> None:
 
     async def fake_handle_control_request(_message: dict) -> None:
         await asyncio.sleep(0.02)
+        completed.append("done")
+
+    async def noop_async(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(handler, "_read_messages", fake_read_messages)
+    monkeypatch.setattr(handler, "_handle_control_request", fake_handle_control_request)
+    monkeypatch.setattr(handler, "flush_output", noop_async)
+    monkeypatch.setattr(handler, "_run_session_end", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_mcp_runtime", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_lsp_manager", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_background_shell", lambda force=True: None)
+
+    await handler.run()
+
+    assert completed == ["done"]
+
+
+@pytest.mark.asyncio
+async def test_run_auto_exits_after_idle_delay(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    monkeypatch.setenv("RIPPERDOC_EXIT_AFTER_STOP_DELAY", "30")
+
+    async def fake_read_messages():
+        while True:
+            await asyncio.sleep(3600)
+            yield {}
+
+    async def noop_async(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(handler, "_read_messages", fake_read_messages)
+    monkeypatch.setattr(handler, "flush_output", noop_async)
+    monkeypatch.setattr(handler, "_run_session_end", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_mcp_runtime", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_lsp_manager", noop_async)
+    monkeypatch.setattr(handler_runtime, "shutdown_background_shell", lambda force=True: None)
+
+    start = time.monotonic()
+    await handler.run()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 1.0
+
+
+@pytest.mark.asyncio
+async def test_run_idle_exit_waits_for_inflight_completion(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    monkeypatch.setenv("RIPPERDOC_EXIT_AFTER_STOP_DELAY", "120")
+    completed: list[str] = []
+
+    async def fake_read_messages():
+        yield {
+            "type": "control_request",
+            "request_id": "control-idle-exit",
+            "request": {"subtype": "query", "prompt": "hello"},
+        }
+        while True:
+            await asyncio.sleep(3600)
+            yield {}
+
+    async def fake_handle_control_request(_message: dict[str, Any]) -> None:
+        await asyncio.sleep(0.05)
         completed.append("done")
 
     async def noop_async(*_args, **_kwargs) -> None:

@@ -128,6 +128,7 @@ ripperdoc [OPTIONS]
 - `RIPPERDOC_CONFIG_DIR` - Override where user-level Ripperdoc config/data are stored
 - `RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE` - Override auto-compaction trigger percentage (1-100, capped at default threshold)
 - `RIPPERDOC_TMPDIR` - Override internal temp root; Ripperdoc uses `<this-path>/ripperdoc/`
+- `RIPPERDOC_EXIT_AFTER_STOP_DELAY` - In stdio/SDK mode, auto-exit after this many milliseconds of runtime idleness (positive integer only)
 
 Task Graph scope behavior:
 - By default, task lists are session-scoped (new session starts clean; resume/continue keeps the same tasks)

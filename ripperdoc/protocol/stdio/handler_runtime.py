@@ -28,11 +28,94 @@ from ripperdoc.utils.worktree import consume_session_worktrees, list_session_wor
 
 
 logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
+_EXIT_AFTER_STOP_DELAY_ENV = "RIPPERDOC_EXIT_AFTER_STOP_DELAY"
+
+
+def _parse_exit_after_stop_delay_ms() -> int | None:
+    """Return positive idle-exit delay in ms, or None when disabled/invalid."""
+    raw = os.getenv(_EXIT_AFTER_STOP_DELAY_ENV)
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    try:
+        parsed = int(value, 10)
+    except (TypeError, ValueError):
+        logger.warning(
+            "[stdio] Ignoring invalid %s=%r (expected positive integer milliseconds)",
+            _EXIT_AFTER_STOP_DELAY_ENV,
+            raw,
+        )
+        return None
+    return parsed if parsed > 0 else None
 
 
 class StdioRuntimeMixin:
     _task_notification_task: asyncio.Task[None] | None
     _query_in_progress: bool
+    _inflight_tasks: set[asyncio.Task[None]]
+    _pending_requests: dict[str, Any]
+    _idle_exit_delay_ms: int | None
+    _idle_exit_task: asyncio.Task[None] | None
+    _runtime_task: asyncio.Task[Any] | None
+    _idle_exit_triggered: bool
+
+    def _is_runtime_idle(self) -> bool:
+        """True when there are no active query/control operations."""
+        pending_requests = getattr(self, "_pending_requests", {})
+        pending_count = len(pending_requests) if isinstance(pending_requests, dict) else 0
+        return (
+            not self._query_in_progress
+            and not self._inflight_tasks
+            and pending_count == 0
+        )
+
+    def _cancel_idle_exit_timer(self) -> None:
+        """Cancel pending idle-exit timer, if any."""
+        task = getattr(self, "_idle_exit_task", None)
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        self._idle_exit_task = None
+
+    def _arm_idle_exit_timer(self) -> None:
+        """Start idle-exit timer when enabled and runtime is idle."""
+        delay_ms = getattr(self, "_idle_exit_delay_ms", None)
+        runtime_task = getattr(self, "_runtime_task", None)
+        if delay_ms is None or delay_ms <= 0:
+            return
+        if runtime_task is None or runtime_task.done():
+            return
+        if not self._is_runtime_idle():
+            return
+
+        existing = getattr(self, "_idle_exit_task", None)
+        if existing is not None and not existing.done():
+            return
+        self._idle_exit_task = asyncio.create_task(self._idle_exit_after_delay(delay_ms))
+
+    async def _idle_exit_after_delay(self, delay_ms: int) -> None:
+        """Cancel runtime loop task if idle state persists for the configured delay."""
+        try:
+            await asyncio.sleep(delay_ms / 1000.0)
+        except asyncio.CancelledError:
+            return
+
+        runtime_task = getattr(self, "_runtime_task", None)
+        if runtime_task is None or runtime_task.done():
+            return
+        if not self._is_runtime_idle():
+            return
+
+        self._idle_exit_triggered = True
+        logger.info(
+            "[stdio] Exiting after %dms of idle time (%s)",
+            delay_ms,
+            _EXIT_AFTER_STOP_DELAY_ENV,
+        )
+        runtime_task.cancel()
 
     def _extract_prompt_from_user_content(self, content: str | list[dict[str, Any]]) -> str | None:
         """Extract plain-text prompt from validated user message content."""
@@ -101,6 +184,7 @@ class StdioRuntimeMixin:
 
     def _spawn_control_request_task(self, message: dict[str, Any]) -> None:
         """Schedule a control request for async handling with lifecycle tracking."""
+        self._cancel_idle_exit_timer()
         task = asyncio.create_task(self._handle_control_request(message))
         self._inflight_tasks.add(task)
         request_id = message.get("request_id")
@@ -125,6 +209,7 @@ class StdioRuntimeMixin:
                 )
                 return
             self._ensure_task_notification_poller()
+            self._arm_idle_exit_timer()
 
         task.add_done_callback(_cleanup_task)
 
@@ -210,77 +295,95 @@ class StdioRuntimeMixin:
         """Main run loop for stdio protocol handler with graceful shutdown."""
         logger.info("Stdio protocol handler starting")
         cancel_inflight_tasks = True
+        self._runtime_task = asyncio.current_task()
+        self._idle_exit_task = None
+        self._idle_exit_triggered = False
+        self._idle_exit_delay_ms = _parse_exit_after_stop_delay_ms()
+        self._arm_idle_exit_timer()
 
         try:
             async for message in self._read_messages():
-                if not isinstance(message, dict):
-                    logger.warning("[stdio] Ignoring non-dict message")
-                    continue
-
-                is_jsonrpc = message.get("jsonrpc") == "2.0"
-                request_id = message.get("id")
-                has_method = isinstance(message.get("method"), str)
-                is_response = is_jsonrpc and request_id is not None and not has_method
-
-                if is_response or ("result" in message or "error" in message):
-                    await self._handle_control_response(message)
-                    self._ensure_task_notification_poller()
-                    continue
-
-                if message.get("type") == "keep_alive":
-                    continue
-
-                if message.get("type") == "update_environment_variables":
-                    variables = message.get("variables")
-                    if isinstance(variables, dict):
-                        for key, value in variables.items():
-                            os.environ[str(key)] = "" if value is None else str(value)
-                    else:
-                        logger.debug(
-                            "[stdio] Ignoring update_environment_variables without mapping payload: %s",
-                            type(variables).__name__,
-                        )
-                    continue
-
-                if message.get("type") == "control_request":
-                    self._spawn_control_request_task(message)
-                    self._ensure_task_notification_poller()
-                    continue
-
-                if message.get("type") == "control_cancel_request":
-                    await self._handle_control_cancel_request(message)
-                    self._ensure_task_notification_poller()
-                    continue
-
-                if is_jsonrpc and has_method:
-                    self._spawn_control_request_task(message)
-                    self._ensure_task_notification_poller()
-                    continue
-
-                if message.get("type") == "user":
-                    control_message = self._coerce_user_message_to_control_request(message)
-                    if control_message is None:
-                        logger.warning(
-                            "[stdio] Ignoring user message without text prompt content"
-                        )
+                try:
+                    if not isinstance(message, dict):
+                        logger.warning("[stdio] Ignoring non-dict message")
                         continue
-                    self._spawn_control_request_task(control_message)
-                    self._ensure_task_notification_poller()
-                    continue
 
-                logger.warning("[stdio] Unknown message format: %s", message)
+                    is_jsonrpc = message.get("jsonrpc") == "2.0"
+                    request_id = message.get("id")
+                    has_method = isinstance(message.get("method"), str)
+                    is_response = is_jsonrpc and request_id is not None and not has_method
+                    message_type = str(message.get("type") or "")
+
+                    if message_type not in {"keep_alive", "update_environment_variables"}:
+                        self._cancel_idle_exit_timer()
+
+                    if is_response or ("result" in message or "error" in message):
+                        await self._handle_control_response(message)
+                        self._ensure_task_notification_poller()
+                        continue
+
+                    if message_type == "keep_alive":
+                        continue
+
+                    if message_type == "update_environment_variables":
+                        variables = message.get("variables")
+                        if isinstance(variables, dict):
+                            for key, value in variables.items():
+                                os.environ[str(key)] = "" if value is None else str(value)
+                        else:
+                            logger.debug(
+                                "[stdio] Ignoring update_environment_variables without mapping payload: %s",
+                                type(variables).__name__,
+                            )
+                        continue
+
+                    if message_type == "control_request":
+                        self._spawn_control_request_task(message)
+                        self._ensure_task_notification_poller()
+                        continue
+
+                    if message_type == "control_cancel_request":
+                        await self._handle_control_cancel_request(message)
+                        self._ensure_task_notification_poller()
+                        continue
+
+                    if is_jsonrpc and has_method:
+                        self._spawn_control_request_task(message)
+                        self._ensure_task_notification_poller()
+                        continue
+
+                    if message_type == "user":
+                        control_message = self._coerce_user_message_to_control_request(message)
+                        if control_message is None:
+                            logger.warning(
+                                "[stdio] Ignoring user message without text prompt content"
+                            )
+                            continue
+                        self._spawn_control_request_task(control_message)
+                        self._ensure_task_notification_poller()
+                        continue
+
+                    logger.warning("[stdio] Unknown message format: %s", message)
+                finally:
+                    self._arm_idle_exit_timer()
 
             # stdin EOF in stream-json mode is expected after SDK finishes sending prompts.
             # Keep in-flight query tasks alive so they can finish and emit results.
             cancel_inflight_tasks = False
+            self._arm_idle_exit_timer()
 
         except (OSError, IOError, json.JSONDecodeError) as e:
             logger.error("Error in stdio loop: %s", e, exc_info=True)
         except asyncio.CancelledError:
-            logger.info("Stdio protocol handler cancelled")
+            if self._idle_exit_triggered:
+                logger.info("Stdio protocol handler auto-exit after idle delay")
+            else:
+                logger.info("Stdio protocol handler cancelled")
         except Exception as e:
             logger.error("Unexpected error in stdio loop: %s: %s", type(e).__name__, e, exc_info=True)
         finally:
+            self._cancel_idle_exit_timer()
+            self._runtime_task = None
             set_runtime_task_scope(session_id=None)
             # Comprehensive cleanup with timeout
             logger.info("Stdio protocol handler shutting down...")

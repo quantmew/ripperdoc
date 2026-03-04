@@ -123,6 +123,10 @@ class StdioProtocolHandler(
         self._query_in_progress: bool = False
         self._task_notification_task: asyncio.Task[None] | None = None
         self._resolved_tool_use_ids: set[str] = set()
+        self._idle_exit_delay_ms: int | None = None
+        self._idle_exit_task: asyncio.Task[None] | None = None
+        self._runtime_task: asyncio.Task[Any] | None = None
+        self._idle_exit_triggered: bool = False
 
         # Ensure each stdio handler starts with a clean MCP runtime override state.
         from ripperdoc.utils.mcp import clear_mcp_runtime_overrides

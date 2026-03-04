@@ -125,6 +125,7 @@ ripperdoc [OPTIONS]
 - `RIPPERDOC_MODEL` - 默认使用的模型
 - `RIPPERDOC_TEMPERATURE` - 默认温度(0.0-2.0)
 - `RIPPERDOC_API_KEY` - 已配置提供商的 API 密钥
+- `RIPPERDOC_EXIT_AFTER_STOP_DELAY` - 在 stdio/SDK 模式下,运行时进入空闲后等待指定毫秒数自动退出(仅正整数生效)
 
 任务图作用域行为:
 - 默认情况下,任务列表按会话隔离(新会话从干净状态开始;恢复/继续会话保持相同的任务)
