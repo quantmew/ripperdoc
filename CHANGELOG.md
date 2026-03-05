@@ -5,6 +5,35 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-03-05
+
+### Added
+- **Remote-control bridge command** - New remote-control bridge command for remote work sessions with explicit ACK and session token refresh
+- **Provider preset mode** - Added provider preset mode for simplified model configuration
+- **AI-powered prompt suggestions** - Intelligent prompt suggestion feature to help users craft better queries
+- **Plugin marketplace management** - Enhanced plugin system with marketplace management commands and improved installation workflow
+- **Environment variable overrides** - Added multiple new environment variable configuration options:
+  - `RIPPERDOC_EXIT_AFTER_STOP_DELAY` - Auto-exit after idle delay in stdio mode
+  - `RIPPERDOC_ENABLE_TOOL_SEARCH` - Control deferred MCP tool search
+  - `RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE` - Override auto-compaction percentage threshold
+  - Storage env override diagnostics for configuration debugging
+- **Centralized temp path management** - New centralized utility for managing temporary paths across the application
+- **Expanded LLM provider support** - Added support for additional providers: volcengine seed 2.0, aliyun-coding, stepfun, and nvidia
+- **Replay user messages flag** - New `--replay-user-messages` flag for improved remote control protocol support
+
+### Changed
+- **Utils modularization** - Reorganized utils package into modular subpackages for better maintainability
+- **Tab completion refactoring** - Extracted tab completion logic into dedicated functions for better code organization
+- **Auto-completion improvement** - Enhanced auto-completion logic for single completion scenarios
+- **Config path management** - Unified configuration path management with added managed settings support
+
+### Fixed
+- **Prompt handler escape bindings** - Fixed escape key bindings in prompt handlers by setting `eager=True`
+- **Terminal CPR** - Fixed terminal cursor position reporting issues
+
+### Removed
+- **AI prompt suggestion feature** - Reverted AI-powered prompt suggestion feature due to user experience concerns
+
 ## [0.5.0] - 2026-03-03
 
 ### Added
@@ -474,6 +503,7 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.5.1]: https://github.com/quantmew/Ripperdoc/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/quantmew/Ripperdoc/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/quantmew/Ripperdoc/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/quantmew/Ripperdoc/compare/v0.4.3...v0.4.4
