@@ -1438,7 +1438,11 @@ async def _process_iteration_assistant_message(
         return
 
     if prepared.prepared_calls:
-        async for message in _run_tools_concurrently(prepared.prepared_calls, prepared.tool_results):
+        async for message in _run_tools_concurrently(
+            prepared.prepared_calls,
+            prepared.tool_results,
+            abort_signal=query_context.abort_controller,
+        ):
             yield message
 
     _apply_skill_context_updates(prepared.tool_results, query_context, context)
@@ -1491,6 +1495,7 @@ async def _process_iteration_assistant_message(
                 async for message in _run_tools_concurrently(
                     auto_prepared.prepared_calls,
                     auto_prepared.tool_results,
+                    abort_signal=query_context.abort_controller,
                 ):
                     yield message
 

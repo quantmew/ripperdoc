@@ -456,21 +456,64 @@ def _group_tool_calls_by_concurrency(prepared_calls: List[Dict[str, Any]]) -> Li
 
 
 async def _execute_tools_sequentially(
-    items: List[Dict[str, Any]], tool_results: List[UserMessage]
+    items: List[Dict[str, Any]],
+    tool_results: List[UserMessage],
+    abort_signal: Optional[asyncio.Event] = None,
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Run tool generators one by one."""
     for item in items:
         gen = item.get("generator")
         if not gen:
             continue
-        async for message in gen:
+        if abort_signal is None:
+            async for message in gen:
+                if isinstance(message, UserMessage):
+                    tool_results.append(message)
+                yield message
+            continue
+
+        while True:
+            if abort_signal.is_set():
+                await gen.aclose()
+                return
+
+            next_item = asyncio.create_task(gen.__anext__())
+            abort_waiter = asyncio.create_task(abort_signal.wait())
+            done, pending = await asyncio.wait(
+                {next_item, abort_waiter},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for pending_task in pending:
+                pending_task.cancel()
+                try:
+                    await pending_task
+                except asyncio.CancelledError:
+                    pass
+
+            if abort_waiter in done and abort_signal.is_set():
+                next_item.cancel()
+                try:
+                    await next_item
+                except (asyncio.CancelledError, StopAsyncIteration):
+                    pass
+                await gen.aclose()
+                return
+
+            try:
+                message = next_item.result()
+            except StopAsyncIteration:
+                break
+
             if isinstance(message, UserMessage):
                 tool_results.append(message)
             yield message
 
 
 async def _execute_tools_in_parallel(
-    items: List[Dict[str, Any]], tool_results: List[UserMessage]
+    items: List[Dict[str, Any]],
+    tool_results: List[UserMessage],
+    abort_signal: Optional[asyncio.Event] = None,
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Run tool generators concurrently."""
     logger.debug("[query] _execute_tools_in_parallel ENTER: %d items", len(items))
@@ -482,13 +525,20 @@ async def _execute_tools_in_parallel(
         len(generators),
         tool_names,
     )
-    async for message in _run_concurrent_tool_uses(generators, tool_names, tool_results):
+    async for message in _run_concurrent_tool_uses(
+        generators,
+        tool_names,
+        tool_results,
+        abort_signal=abort_signal,
+    ):
         yield message
     logger.debug("[query] _execute_tools_in_parallel DONE")
 
 
 async def _run_tools_concurrently(
-    prepared_calls: List[Dict[str, Any]], tool_results: List[UserMessage]
+    prepared_calls: List[Dict[str, Any]],
+    tool_results: List[UserMessage],
+    abort_signal: Optional[asyncio.Event] = None,
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Run tools grouped by concurrency safety (parallel for safe groups)."""
     for group in _group_tool_calls_by_concurrency(prepared_calls):
@@ -496,21 +546,35 @@ async def _run_tools_concurrently(
             logger.debug(
                 f"[query] Executing {len(group['items'])} concurrency-safe tool(s) in parallel"
             )
-            async for message in _execute_tools_in_parallel(group["items"], tool_results):
+            async for message in _execute_tools_in_parallel(
+                group["items"],
+                tool_results,
+                abort_signal=abort_signal,
+            ):
                 yield message
         else:
             logger.debug(
                 f"[query] Executing {len(group['items'])} tool(s) sequentially (not concurrency safe)"
             )
-            async for message in _run_tools_serially(group["items"], tool_results):
+            async for message in _run_tools_serially(
+                group["items"],
+                tool_results,
+                abort_signal=abort_signal,
+            ):
                 yield message
 
 
 async def _run_tools_serially(
-    prepared_calls: List[Dict[str, Any]], tool_results: List[UserMessage]
+    prepared_calls: List[Dict[str, Any]],
+    tool_results: List[UserMessage],
+    abort_signal: Optional[asyncio.Event] = None,
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Run all tools sequentially (helper for clarity)."""
-    async for message in _execute_tools_sequentially(prepared_calls, tool_results):
+    async for message in _execute_tools_sequentially(
+        prepared_calls,
+        tool_results,
+        abort_signal=abort_signal,
+    ):
         yield message
 
 
@@ -518,6 +582,8 @@ async def _run_concurrent_tool_uses(
     generators: List[AsyncGenerator[Union[UserMessage, ProgressMessage], None]],
     tool_names: List[str],
     tool_results: List[UserMessage],
+    *,
+    abort_signal: Optional[asyncio.Event] = None,
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Drain multiple tool generators concurrently and stream outputs with overall timeout."""
     overall_timeout_sec = _resolve_concurrent_timeout_sec(tool_names)
@@ -601,8 +667,41 @@ async def _run_concurrent_tool_uses(
                 logger.debug(
                     "[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active
                 )
+                abort_waiter: Optional[asyncio.Task[bool]] = None
+                queue_waiter: Optional[asyncio.Task[Optional[Union[UserMessage, ProgressMessage]]]] = None
                 try:
-                    message = await _queue_get_with_timeout(queue, overall_timeout_sec)
+                    queue_waiter = asyncio.create_task(
+                        _queue_get_with_timeout(queue, overall_timeout_sec)
+                    )
+                    if abort_signal is not None:
+                        abort_waiter = asyncio.create_task(abort_signal.wait())
+                        done, pending = await asyncio.wait(
+                            {queue_waiter, abort_waiter},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        for pending_task in pending:
+                            pending_task.cancel()
+                            try:
+                                await pending_task
+                            except asyncio.CancelledError:
+                                pass
+
+                        if abort_waiter in done and abort_signal.is_set():
+                            logger.info(
+                                "[query] Abort signal set; cancelling %d concurrent tool task(s)",
+                                len(tasks),
+                            )
+                            for task in tasks:
+                                if not task.done():
+                                    task.cancel()
+                            break
+
+                        if queue_waiter not in done:
+                            # Defensive: should not happen, but keep behavior deterministic.
+                            continue
+                        message = queue_waiter.result()
+                    else:
+                        message = await queue_waiter
                 except asyncio.TimeoutError:
                     logger.error(
                         "[query] Concurrent tool execution timed out waiting for messages"
@@ -612,6 +711,19 @@ async def _run_concurrent_tool_uses(
                         if not task.done():
                             task.cancel()
                     raise
+                finally:
+                    if abort_waiter is not None and not abort_waiter.done():
+                        abort_waiter.cancel()
+                        try:
+                            await abort_waiter
+                        except asyncio.CancelledError:
+                            pass
+                    if queue_waiter is not None and not queue_waiter.done():
+                        queue_waiter.cancel()
+                        try:
+                            await queue_waiter
+                        except asyncio.CancelledError:
+                            pass
 
                 logger.debug(
                     "[query] _run_concurrent_tool_uses: got message type=%s, active=%d",

@@ -78,3 +78,79 @@ async def test_tool_execution_cwd_reentrant_restores_parent_and_original(tmp_pat
     assert cwd_in_child == child_dir.resolve()
     assert cwd_after_child == parent_dir.resolve()
     assert Path.cwd().resolve() == original_cwd
+
+
+@pytest.mark.asyncio
+async def test_run_concurrent_tool_uses_honors_abort_signal() -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _never_finishes():
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        if False:  # pragma: no cover - keeps this as an async generator
+            yield None
+
+    async def _collect() -> list[object]:
+        collected: list[object] = []
+        abort_signal = asyncio.Event()
+        runner = tools_module._run_concurrent_tool_uses(  # type: ignore[attr-defined]
+            [_never_finishes()],
+            ["Task"],
+            [],
+            abort_signal=abort_signal,
+        )
+
+        task = asyncio.create_task(_drain_runner(runner, collected))
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        abort_signal.set()
+        await asyncio.wait_for(task, timeout=1.0)
+        return collected
+
+    async def _drain_runner(runner, collected: list[object]) -> None:
+        async for item in runner:
+            collected.append(item)
+
+    collected = await _collect()
+    assert collected == []
+    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_execute_tools_sequentially_honors_abort_signal() -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _never_finishes():
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        if False:  # pragma: no cover - keeps this as an async generator
+            yield None
+
+    collected: list[object] = []
+    tool_results = []
+    abort_signal = asyncio.Event()
+
+    async def _drain_runner() -> None:
+        async for item in tools_module._execute_tools_sequentially(  # type: ignore[attr-defined]
+            [{"generator": _never_finishes()}],
+            tool_results,
+            abort_signal=abort_signal,
+        ):
+            collected.append(item)
+
+    task = asyncio.create_task(_drain_runner())
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    abort_signal.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert collected == []
+    assert cancelled.is_set()

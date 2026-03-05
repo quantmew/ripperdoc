@@ -6,7 +6,11 @@ from ripperdoc.cli.ui.rich_ui.rendering import (
     handle_progress_message,
     simplify_progress_suffix,
 )
-from ripperdoc.utils.messaging.messages import create_assistant_message, create_progress_message
+from ripperdoc.utils.messaging.messages import (
+    create_assistant_message,
+    create_hook_additional_context_message,
+    create_progress_message,
+)
 
 
 def test_simplify_progress_suffix_strips_stdout_prefix() -> None:
@@ -134,3 +138,29 @@ def test_handle_progress_message_renders_structured_subagent_assistant_message()
     assert args[0] == "Subagent(writer:agent_abcd1234)"
     assert args[1] == "requesting Glob"
     assert kwargs.get("is_tool") is True
+
+
+def test_handle_progress_message_hides_subagent_hook_additional_context() -> None:
+    """Subagent hook_additional_context meta messages should stay hidden in live UI."""
+    hook_message = create_hook_additional_context_message(
+        "6666",
+        hook_name="PreToolUse:Read",
+        hook_event="PreToolUse",
+    )
+    assert hook_message is not None
+
+    message = create_progress_message(
+        tool_use_id="tool1",
+        sibling_tool_use_ids=set(),
+        content=hook_message,
+        progress_sender="Subagent(writer:agent_abcd1234)",
+        is_subagent_message=True,
+    )
+    spinner = _DummySpinner()
+    ui = _DummyUI()
+
+    out_tokens = handle_progress_message(ui, message, spinner, output_token_est=5)
+
+    assert out_tokens == 5
+    assert spinner.calls == [(5, None)]
+    assert ui.display_calls == []

@@ -1519,6 +1519,22 @@ class RichUI:
         """Trigger a follow-up assistant response for an idle task notification."""
         if self._loop.is_closed():
             return
+        # When the interactive prompt is active, avoid launching an automatic
+        # query that would race prompt_toolkit redraw and spinner rendering.
+        # Defer it into pending messages so it is consumed on the next user turn.
+        prompt_app = getattr(getattr(self, "_prompt_session", None), "app", None)
+        if (
+            not self._query_in_progress
+            and prompt_app is not None
+            and bool(getattr(prompt_app, "is_running", False))
+            and self.query_context is not None
+        ):
+            self.query_context.pending_message_queue.enqueue_text(
+                agent_message,
+                metadata=metadata,
+            )
+            self._request_prompt_redraw()
+            return
 
         async def _run() -> None:
             try:
@@ -1974,7 +1990,13 @@ class RichUI:
         if threading.current_thread() is self._loop_thread:
             raise RuntimeError("_run_async cannot be called from the UI event loop thread")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result()
+        try:
+            return future.result()
+        except KeyboardInterrupt:
+            # If the caller interrupts while waiting, propagate cancellation to the
+            # coroutine so async generators are not left running into shutdown.
+            future.cancel()
+            raise
 
     def run_async(self, coro: Any) -> Any:
         """Public wrapper for running coroutines on the UI event loop."""
@@ -2432,11 +2454,21 @@ class RichUI:
         if self._loop.is_closed():
             return
 
-        async def _shutdown_asyncgens_only() -> None:
-            await asyncio.get_running_loop().shutdown_asyncgens()
+        async def _drain_tasks_and_shutdown_asyncgens() -> None:
+            loop = asyncio.get_running_loop()
+            current = asyncio.current_task(loop=loop)
+            pending = [
+                task for task in asyncio.all_tasks(loop)
+                if task is not current and not task.done()
+            ]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            await loop.shutdown_asyncgens()
 
         try:
-            self._run_async(_shutdown_asyncgens_only())
+            self._run_async(_drain_tasks_and_shutdown_asyncgens())
         except (RuntimeError, asyncio.CancelledError, concurrent.futures.TimeoutError):
             pass
 

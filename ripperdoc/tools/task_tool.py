@@ -1219,6 +1219,42 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             record.status = "failed"
             record.error = str(exc)
 
+    def _handoff_foreground_run_to_background(
+        self,
+        *,
+        record: AgentRunRecord,
+        subagent_context: QueryContext,
+        permission_checker: Any,
+        notification_queue: Optional[PendingMessageQueue],
+        parent_tool_use_id: Optional[str],
+    ) -> bool:
+        """Detach a foreground run and continue it as a background subagent task."""
+        if record.task and not record.task.done():
+            return True
+        try:
+            record.status = "running"
+            record.error = None
+            record.is_background = True
+            record.completion_notified = False
+            record.task = asyncio.create_task(
+                self._run_subagent_background(
+                    record,
+                    subagent_context,
+                    permission_checker,
+                    notification_queue=notification_queue,
+                    parent_tool_use_id=parent_tool_use_id,
+                )
+            )
+            return True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "[task_tool] Failed to hand off foreground subagent to background: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"agent_id": record.agent_id, "team_name": record.team_name},
+            )
+            return False
+
     def _build_subagent_start_notices(
         self,
         hook_result: HookResult,
@@ -1485,6 +1521,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         record: AgentRunRecord,
         subagent_context: QueryContext,
         permission_checker: Any,
+        parent_abort_signal: Optional[asyncio.Event],
+        notification_queue: Optional[PendingMessageQueue],
         parent_tool_use_id: Optional[str],
     ) -> AsyncGenerator[ToolProgress, None]:
         assistant_messages: List[AssistantMessage] = []
@@ -1492,6 +1530,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         finalize_status = "running"
         finalize_error: Optional[str] = None
         finalize_result_text: Optional[str] = None
+        handed_off_to_background = False
         try:
             async for message in query(
                 record.history,  # type: ignore[arg-type]
@@ -1500,6 +1539,17 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 subagent_context,
                 permission_checker,
             ):
+                if parent_abort_signal is not None and parent_abort_signal.is_set():
+                    handed_off_to_background = self._handoff_foreground_run_to_background(
+                        record=record,
+                        subagent_context=subagent_context,
+                        permission_checker=permission_checker,
+                        notification_queue=notification_queue,
+                        parent_tool_use_id=parent_tool_use_id,
+                    )
+                    if handed_off_to_background:
+                        finalize_result_text = "Subagent moved to background after interrupt."
+                        break
                 msg_type = getattr(message, "type", "")
                 if msg_type == "progress":
                     continue
@@ -1552,6 +1602,17 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                         progress_sender=self._subagent_progress_sender(record),
                     )
         except asyncio.CancelledError:
+            if parent_abort_signal is not None and parent_abort_signal.is_set():
+                handed_off_to_background = self._handoff_foreground_run_to_background(
+                    record=record,
+                    subagent_context=subagent_context,
+                    permission_checker=permission_checker,
+                    notification_queue=notification_queue,
+                    parent_tool_use_id=parent_tool_use_id,
+                )
+                if handed_off_to_background:
+                    finalize_result_text = "Subagent moved to background after interrupt."
+                    return
             finalize_status = "cancelled"
             finalize_error = "Subagent run was cancelled."
             raise
@@ -1565,6 +1626,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                 extra={"agent_id": record.agent_id, "team_name": record.team_name},
             )
         finally:
+            if handed_off_to_background:
+                return
             if finalize_status == "running":
                 finalize_status = "completed"
             self._finalize_record_from_messages(
@@ -1659,9 +1722,26 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             record=record,
             subagent_context=subagent_context,
             permission_checker=context.permission_checker,
+            parent_abort_signal=context.abort_signal,
+            notification_queue=context.task_notification_queue,
             parent_tool_use_id=context.message_id,
         ):
             yield progress
+
+        if record.task and not record.task.done():
+            output = self._output_from_record(
+                record,
+                status_override="async_launched",
+                result_text_override="Resumed subagent moved to background after interrupt.",
+                is_background=True,
+                is_resumed=True,
+                can_read_output_file=any(
+                    getattr(tool, "name", "") in {READ_TOOL_NAME, BASH_TOOL_NAME}
+                    for tool in self._available_tools_provider()
+                ),
+            )
+            yield self._render_tool_result(output)
+            return
 
         output = self._output_from_record(record, is_resumed=True)
         yield self._render_tool_result(output)
@@ -1915,9 +1995,25 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             record=record,
             subagent_context=subagent_context,
             permission_checker=context.permission_checker,
+            parent_abort_signal=context.abort_signal,
+            notification_queue=context.task_notification_queue,
             parent_tool_use_id=context.message_id,
         ):
             yield progress
+
+        if record.task and not record.task.done():
+            output = self._output_from_record(
+                record,
+                status_override="async_launched",
+                result_text_override="Subagent moved to background after interrupt.",
+                is_background=True,
+                can_read_output_file=any(
+                    getattr(tool, "name", "") in {READ_TOOL_NAME, BASH_TOOL_NAME}
+                    for tool in self._available_tools_provider()
+                ),
+            )
+            yield self._render_tool_result(output)
+            return
 
         output = self._output_from_record(record)
         yield self._render_tool_result(output)

@@ -27,6 +27,9 @@ def _summarize_subagent_progress_content(content: Any) -> str:
         return str(content)
 
     message_payload = getattr(content, "message", None)
+    metadata = getattr(message_payload, "metadata", None) or {}
+    if metadata.get("hook_additional_context"):
+        return ""
     body = getattr(message_payload, "content", None) if message_payload is not None else None
     if isinstance(body, str):
         return body

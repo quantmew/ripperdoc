@@ -412,6 +412,62 @@ async def test_schedule_background_notification_response_triggers_process_query(
     assert redraw_calls == ["invalidate"]
 
 
+@pytest.mark.asyncio
+async def test_schedule_background_notification_response_defers_when_prompt_active() -> None:
+    ui = _new_ui()
+    ui._loop = asyncio.get_running_loop()
+    ui._background_notification_tasks = set()
+    ui._query_in_progress = False
+    ui.query_context = QueryContext(tools=[])
+
+    redraw_calls: list[str] = []
+    ui._prompt_session = type(
+        "PromptSessionStub",
+        (),
+        {
+            "app": type(
+                "AppStub",
+                (),
+                {
+                    "is_running": True,
+                    "invalidate": lambda self: redraw_calls.append("invalidate"),
+                },
+            )()
+        },
+    )()
+
+    calls: list[tuple[str, dict[str, Any] | None, bool]] = []
+
+    async def _fake_process_query(
+        user_input: str,
+        *,
+        user_message_metadata: dict[str, Any] | None = None,
+        append_prompt_history: bool = True,
+    ) -> None:
+        calls.append((user_input, user_message_metadata, append_prompt_history))
+
+    ui.process_query = _fake_process_query  # type: ignore[assignment]
+
+    payload = {"notification_type": "task_notification", "task_id": "bash_1"}
+    ui._schedule_background_notification_response(
+        agent_message="background finished",
+        metadata=payload,
+    )
+
+    await asyncio.sleep(0)
+    assert calls == []
+    assert not ui._background_notification_tasks
+    assert redraw_calls == ["invalidate"]
+
+    pending = ui.query_context.pending_message_queue.drain()
+    assert len(pending) == 1
+    pending_message = pending[0]
+    assert getattr(getattr(pending_message, "message", None), "content", "") == "background finished"
+    metadata = dict(getattr(getattr(pending_message, "message", None), "metadata", {}) or {})
+    assert metadata.get("notification_type") == "task_notification"
+    assert metadata.get("task_id") == "bash_1"
+
+
 def test_finalize_query_stream_flushes_deferred_task_notifications() -> None:
     ui = _new_ui()
     ui._clear_context_after_turn = False
