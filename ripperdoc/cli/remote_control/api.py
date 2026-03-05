@@ -14,6 +14,7 @@ from ripperdoc.utils.log import get_logger
 
 from .constants import (
     LEGACY_HEADERS_ENV,
+    POLL_ACK_IN_QUERY_ENV,
     REMOTE_CONTROL_API_BETA,
     REMOTE_CONTROL_API_VERSION,
     REMOTE_CONTROL_BETA_HEADER,
@@ -36,11 +37,19 @@ class RemoteControlApiClient:
         access_token: str | None,
         runner_version: str,
         refresh_access_token: Callable[[str], str | None] | None = None,
+        poll_ack_in_query: bool | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.access_token = access_token.strip() if isinstance(access_token, str) else None
         self.runner_version = runner_version
         self._refresh_access_token = refresh_access_token
+        if poll_ack_in_query is None:
+            self.poll_ack_in_query = parse_boolish(
+                os.getenv(POLL_ACK_IN_QUERY_ENV),
+                default=True,
+            )
+        else:
+            self.poll_ack_in_query = bool(poll_ack_in_query)
 
     def _headers(self, bearer_token: str | None = None) -> dict[str, str]:
         headers: dict[str, str] = {
@@ -247,7 +256,10 @@ class RemoteControlApiClient:
         status, data = self._request_json(
             "GET",
             f"/v1/environments/{safe_env}/work/poll",
-            query={"block_ms": 900, "ack": "true"},
+            query={
+                "block_ms": 900,
+                "ack": "true" if self.poll_ack_in_query else "false",
+            },
             timeout_sec=10.0,
             bearer_token=environment_secret,
         )
@@ -259,6 +271,28 @@ class RemoteControlApiClient:
         if isinstance(data, dict):
             return data
         return None
+
+    @property
+    def needs_explicit_ack(self) -> bool:
+        return not self.poll_ack_in_query
+
+    def acknowledge_work(
+        self,
+        environment_id: str,
+        work_id: str,
+        environment_secret: str | None = None,
+    ) -> None:
+        safe_env = quote(validate_identifier(environment_id, "environmentId"), safe="")
+        safe_work = quote(validate_identifier(work_id, "workId"), safe="")
+        status, data = self._request_json_with_refresh(
+            "POST",
+            f"/v1/environments/{safe_env}/work/{safe_work}/ack",
+            payload={},
+            timeout_sec=10.0,
+            bearer_token=environment_secret,
+            operation_name="AcknowledgeWork",
+        )
+        self._raise_for_status(status, data, "AcknowledgeWork")
 
     def stop_work(
         self,

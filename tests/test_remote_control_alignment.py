@@ -62,6 +62,10 @@ class _ApiStub:
     def get_session(self, _session_id: str) -> dict[str, str]:
         return {"organization_uuid": "org-test"}
 
+    @property
+    def needs_explicit_ack(self) -> bool:
+        return False
+
 
 class _BridgeStub:
     def __init__(self) -> None:
@@ -249,11 +253,22 @@ def test_loop_forwards_child_control_response_to_session_bridge(tmp_path: Path) 
 
 def test_runner_attach_session_bridge_uses_repl_bridge_manager(monkeypatch, tmp_path: Path) -> None:
     created: dict[str, object] = {}
+    fallback_calls: list[tuple[str, dict[str, object], str]] = []
+
+    class _ApiWithFallback(_ApiStub):
+        def send_permission_response_event(
+            self,
+            session_id: str,
+            event: dict[str, object],
+            access_token: str,
+        ) -> None:
+            fallback_calls.append((session_id, event, access_token))
 
     class _BridgeManagerFake:
-        def __init__(self, config, callbacks):
+        def __init__(self, config, callbacks, *, on_control_response_fallback=None):
             created["config"] = config
             created["callbacks"] = callbacks
+            created["fallback"] = on_control_response_fallback
             self.connected = False
 
         def connect(self):
@@ -267,7 +282,7 @@ def test_runner_attach_session_bridge_uses_repl_bridge_manager(monkeypatch, tmp_
 
     runner = RemoteControlBridgeRunner(
         config=_config(tmp_path),
-        api_client=_ApiStub(),  # type: ignore[arg-type]
+        api_client=_ApiWithFallback(),  # type: ignore[arg-type]
         process_spawner=RemoteControlProcessSpawner(verbose=False, debug_file=None),
         stop_event=threading.Event(),
         token_supplier=lambda: "oauth-token",
@@ -280,6 +295,16 @@ def test_runner_attach_session_bridge_uses_repl_bridge_manager(monkeypatch, tmp_
     assert getattr(config, "session_id") == "session-abc"
     assert getattr(config, "org_uuid") == "org-test"
     assert "session-abc" in runner._session_bridges
+    fallback = created.get("fallback")
+    assert callable(fallback)
+    fallback({"type": "control_response", "response": {"subtype": "success"}})
+    assert fallback_calls == [
+        (
+            "session-abc",
+            {"type": "control_response", "response": {"subtype": "success"}},
+            "oauth-token",
+        )
+    ]
 
 
 def test_detect_sleep_gap_matches_retry_budget_model(tmp_path: Path) -> None:
@@ -293,3 +318,20 @@ def test_detect_sleep_gap_matches_retry_budget_model(tmp_path: Path) -> None:
     assert runner._detect_sleep_gap(None, 20.0, 5.0) is False
     assert runner._detect_sleep_gap(10.0, 19.0, 5.0) is False
     assert runner._detect_sleep_gap(10.0, 21.5, 5.0) is True
+
+
+def test_get_refresh_token_for_session_prefers_session_payload_token(tmp_path: Path) -> None:
+    class _ApiWithSessionToken(_ApiStub):
+        def get_session(self, _session_id: str) -> dict[str, str]:
+            return {"session_ingress_token": "session-token-1"}
+
+    runner = RemoteControlBridgeRunner(
+        config=_config(tmp_path),
+        api_client=_ApiWithSessionToken(),  # type: ignore[arg-type]
+        process_spawner=RemoteControlProcessSpawner(verbose=False, debug_file=None),
+        stop_event=threading.Event(),
+        token_supplier=lambda: "fallback-token",
+    )
+
+    token = runner._get_refresh_token_for_session("session-1")
+    assert token == "session-token-1"

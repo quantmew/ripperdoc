@@ -45,9 +45,16 @@ class _PendingRequest:
 class RemoteSessionBridgeManager:
     """High-level manager that handles control messages and permission requests."""
 
-    def __init__(self, config: RemoteSessionConfig, callbacks: RemoteSessionCallbacks) -> None:
+    def __init__(
+        self,
+        config: RemoteSessionConfig,
+        callbacks: RemoteSessionCallbacks,
+        *,
+        on_control_response_fallback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.config = config
         self.callbacks = callbacks
+        self._on_control_response_fallback = on_control_response_fallback
         self.websocket: SessionsWebSocketManager | None = None
         self.pending_permission_requests: dict[str, dict[str, Any]] = {}
         self._pending_outbound: dict[str, _PendingRequest] = {}
@@ -152,11 +159,26 @@ class RemoteSessionBridgeManager:
     def send_control_response(self, payload: dict[str, Any]) -> None:
         if self.websocket is None:
             logger.error("[RemoteSessionManager] No websocket available for response")
+            self._emit_control_response_fallback(payload, reason="no websocket")
             return
         try:
             self.websocket.send_control_response(payload)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[RemoteSessionManager] send_control_response failed: %s", exc)
+            self._emit_control_response_fallback(payload, reason=str(exc))
+
+    def _emit_control_response_fallback(self, payload: dict[str, Any], *, reason: str) -> None:
+        if self._on_control_response_fallback is None:
+            return
+        try:
+            self._on_control_response_fallback(payload)
+            logger.debug(
+                "[RemoteSessionManager] control_response fallback dispatched session=%s reason=%s",
+                self.config.session_id,
+                reason,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[RemoteSessionManager] control_response fallback failed: %s", exc)
 
     def forward_control_request(
         self,

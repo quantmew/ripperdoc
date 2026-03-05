@@ -39,6 +39,7 @@ from .remote_control.utils import (
     build_connect_url as _build_default_connect_url,
     build_session_ingress_ws_url,
     decode_work_secret,
+    get_token_expiration_epoch,
 )
 
 logger = get_logger()
@@ -95,12 +96,20 @@ def _resolve_auth_token(explicit_token: str | None) -> str | None:
     return token or None
 
 
-def _resolve_session_token_refresh_enabled() -> bool:
-    """Return whether bridge loop should actively overwrite child session token via timer."""
-    return parse_boolish(
-        os.getenv("RIPPERDOC_REMOTE_CONTROL_ENABLE_SESSION_TOKEN_REFRESH"),
-        default=False,
-    )
+def _resolve_session_refresh_strategy(initial_auth_token: str | None) -> bool:
+    """Enable proactive session token refresh only when source token looks refreshable."""
+    explicit = os.getenv("RIPPERDOC_REMOTE_CONTROL_ENABLE_SESSION_TOKEN_REFRESH")
+    if explicit is not None and explicit.strip():
+        return parse_boolish(explicit, default=False)
+    mode = (os.getenv("RIPPERDOC_REMOTE_CONTROL_SESSION_TOKEN_REFRESH_MODE") or "auto").strip().lower()
+    if mode in {"off", "false", "0", "disabled"}:
+        return False
+    if mode in {"on", "true", "1", "enabled"}:
+        return True
+    token = (initial_auth_token or "").strip()
+    if not token:
+        return False
+    return get_token_expiration_epoch(token) is not None
 
 
 def _build_connect_url(base_url: str, bridge_id: str) -> str:
@@ -183,7 +192,9 @@ def run_remote_control(
         api_client=api_client,
         process_spawner=spawner,
         stop_event=stop_event,
-        token_supplier=_token_supplier if _resolve_session_token_refresh_enabled() else None,
+        token_supplier=_token_supplier
+        if _resolve_session_refresh_strategy(resolved_auth_token)
+        else None,
     )
 
     previous_handlers: list[tuple[int, Any]] = []

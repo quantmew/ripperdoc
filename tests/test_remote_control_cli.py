@@ -109,6 +109,9 @@ def test_poll_for_work_uses_environment_secret_bearer_token(monkeypatch) -> None
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
     assert kwargs.get("bearer_token") == "env-secret"
+    query = kwargs.get("query")
+    assert isinstance(query, dict)
+    assert query.get("ack") == "true"
 
 
 def test_stop_work_uses_client_access_token(monkeypatch) -> None:
@@ -134,6 +137,31 @@ def test_stop_work_uses_client_access_token(monkeypatch) -> None:
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
     assert kwargs.get("bearer_token") is None
+
+
+def test_acknowledge_work_uses_environment_secret_when_provided(monkeypatch) -> None:
+    client = remote_control_cli.RemoteControlApiClient(
+        base_url="https://example.com",
+        access_token="user-token",
+        runner_version="test",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_request_json(method: str, path: str, **kwargs: object):
+        captured["method"] = method
+        captured["path"] = path
+        captured["kwargs"] = kwargs
+        return 200, {}
+
+    monkeypatch.setattr(client, "_request_json", fake_request_json)
+
+    client.acknowledge_work("env-1", "work-1", "env-secret")
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/v1/environments/env-1/work/work-1/ack"
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs.get("bearer_token") == "env-secret"
 
 
 def test_deregister_environment_falls_back_to_post_when_delete_not_supported(
@@ -223,6 +251,56 @@ def test_create_initial_session_returns_none_on_non_2xx(monkeypatch) -> None:
     assert session_id is None
 
 
+def test_get_session_returns_payload(monkeypatch) -> None:
+    client = remote_control_cli.RemoteControlApiClient(
+        base_url="https://example.com",
+        access_token="user-token",
+        runner_version="test",
+    )
+
+    def fake_request_json(method: str, path: str, **kwargs: object):
+        assert method == "GET"
+        assert path == "/v1/sessions/session-1"
+        return 200, {"id": "session-1", "organization_uuid": "org-1"}
+
+    monkeypatch.setattr(client, "_request_json", fake_request_json)
+
+    data = client.get_session("session-1")
+    assert data["id"] == "session-1"
+
+
+def test_send_permission_response_event_posts_session_events(monkeypatch) -> None:
+    client = remote_control_cli.RemoteControlApiClient(
+        base_url="https://example.com",
+        access_token="user-token",
+        runner_version="test",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_request_json(method: str, path: str, **kwargs: object):
+        captured["method"] = method
+        captured["path"] = path
+        captured["kwargs"] = kwargs
+        return 200, {}
+
+    monkeypatch.setattr(client, "_request_json", fake_request_json)
+
+    client.send_permission_response_event(
+        "session-1",
+        {"type": "permission_response", "behavior": "allow"},
+        "access-token-1",
+    )
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/v1/sessions/session-1/events"
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs.get("bearer_token") == "access-token-1"
+    payload = kwargs.get("payload")
+    assert isinstance(payload, dict)
+    assert payload.get("events") == [{"type": "permission_response", "behavior": "allow"}]
+
+
 def test_api_headers_include_bridge_metadata() -> None:
     client = remote_control_cli.RemoteControlApiClient(
         base_url="https://example.com",
@@ -252,6 +330,34 @@ def test_api_headers_support_legacy_compat_mode(monkeypatch: pytest.MonkeyPatch)
     assert headers["x-ripperdoc-beta"] == "environments-2025-11-01"
     assert headers["anthropic-version"] == "2023-06-01"
     assert headers["anthropic-beta"] == "environments-2025-11-01"
+
+
+def test_poll_for_work_can_disable_ack_query_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RIPPERDOC_REMOTE_CONTROL_POLL_ACK_IN_QUERY", "0")
+    client = remote_control_cli.RemoteControlApiClient(
+        base_url="https://example.com",
+        access_token="token-1",
+        runner_version="test-version",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_request_json(method: str, path: str, **kwargs: object):
+        captured["method"] = method
+        captured["path"] = path
+        captured["kwargs"] = kwargs
+        return 204, None
+
+    monkeypatch.setattr(client, "_request_json", fake_request_json)
+
+    result = client.poll_for_work("env-1", "env-secret")
+
+    assert result is None
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    query = kwargs.get("query")
+    assert isinstance(query, dict)
+    assert query.get("ack") == "false"
+    assert client.needs_explicit_ack is True
 
 
 def test_poll_for_work_rejects_unsafe_environment_id() -> None:
@@ -330,7 +436,32 @@ def test_process_spawner_sets_bridge_compat_env(monkeypatch, tmp_path) -> None:
     assert all(not key.startswith("CLAUDE_CODE_") for key in env)
 
 
-def test_reap_sessions_stops_bridge_on_non_interrupted_exit(monkeypatch, tmp_path) -> None:
+def test_session_refresh_strategy_auto_requires_jwt_like_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RIPPERDOC_REMOTE_CONTROL_ENABLE_SESSION_TOKEN_REFRESH", raising=False)
+    monkeypatch.delenv("RIPPERDOC_REMOTE_CONTROL_SESSION_TOKEN_REFRESH_MODE", raising=False)
+
+    assert remote_control_cli._resolve_session_refresh_strategy("plain-token") is False
+    assert (
+        remote_control_cli._resolve_session_refresh_strategy(
+            "sk-ant-si-eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjQxMDAwMDAwMDB9.sig"
+        )
+        is True
+    )
+
+
+def test_session_refresh_strategy_honors_explicit_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RIPPERDOC_REMOTE_CONTROL_SESSION_TOKEN_REFRESH_MODE", "on")
+    monkeypatch.delenv("RIPPERDOC_REMOTE_CONTROL_ENABLE_SESSION_TOKEN_REFRESH", raising=False)
+    assert remote_control_cli._resolve_session_refresh_strategy(None) is True
+
+    monkeypatch.setenv("RIPPERDOC_REMOTE_CONTROL_SESSION_TOKEN_REFRESH_MODE", "off")
+    assert remote_control_cli._resolve_session_refresh_strategy("any") is False
+
+    monkeypatch.setenv("RIPPERDOC_REMOTE_CONTROL_ENABLE_SESSION_TOKEN_REFRESH", "1")
+    assert remote_control_cli._resolve_session_refresh_strategy(None) is True
+
+
+def test_reap_sessions_keeps_bridge_running_on_non_interrupted_exit(monkeypatch, tmp_path) -> None:
     class _FakeApi:
         def archive_session(self, _session_id: str) -> None:
             return None
@@ -381,4 +512,4 @@ def test_reap_sessions_stops_bridge_on_non_interrupted_exit(monkeypatch, tmp_pat
 
     runner._reap_sessions()
 
-    assert stop_event.is_set()
+    assert stop_event.is_set() is False

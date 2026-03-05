@@ -25,7 +25,7 @@ class TokenSessionManager:
     def __init__(
         self,
         *,
-        get_access_token: Callable[[], str | None],
+        get_access_token: Callable[[str], str | None] | Callable[[], str | None],
         on_refresh: Callable[[str, str], None],
         label: str = "bridge",
         refresh_buffer_sec: int = TOKEN_REFRESH_BUFFER_SEC,
@@ -119,7 +119,10 @@ class TokenSessionManager:
 
         new_token = None
         try:
-            new_token = self._get_access_token()
+            try:
+                new_token = self._get_access_token(session_id)  # type: ignore[misc]
+            except TypeError:
+                new_token = self._get_access_token()  # type: ignore[call-arg]
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "[%s:token] get_access_token failed for sessionId=%s: %s",

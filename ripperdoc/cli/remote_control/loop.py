@@ -63,7 +63,7 @@ class RemoteControlBridgeRunner:
         self._token_supplier = token_supplier
         self._token_manager = (
             TokenSessionManager(
-                get_access_token=token_supplier,
+                get_access_token=self._get_refresh_token_for_session,
                 on_refresh=self._refresh_session_token,
                 label="bridge",
             )
@@ -87,6 +87,34 @@ class RemoteControlBridgeRunner:
             return
         active.process.update_access_token(token)
         logger.info("[bridge] Token manager refreshed token for active session %s", session_id)
+
+    @staticmethod
+    def _extract_session_ingress_token(payload: dict[str, Any]) -> str | None:
+        for key in (
+            "session_ingress_token",
+            "sessionIngressToken",
+            "access_token",
+            "accessToken",
+        ):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    def _get_refresh_token_for_session(self, session_id: str) -> str | None:
+        # Prefer a session-scoped token from control plane if exposed.
+        try:
+            session_payload = self.api_client.get_session(session_id)
+            session_token = self._extract_session_ingress_token(session_payload)
+            if session_token:
+                return session_token
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[bridge:token] get_session refresh failed for %s: %s", session_id, exc)
+
+        # Fallback to externally supplied token source.
+        if self._token_supplier is not None:
+            return self._token_supplier()
+        return None
 
     def run(self) -> None:
         registered = self.api_client.register_environment(self.config)
@@ -147,6 +175,19 @@ class RemoteControlBridgeRunner:
                 if not work:
                     self._sleep_with_stop(1.0)
                     continue
+                if self.api_client.needs_explicit_ack:
+                    work_id = str(work.get("id") or "").strip()
+                    if work_id and IDENTIFIER_RE.match(work_id):
+                        try:
+                            self.api_client.acknowledge_work(env_id, work_id, env_secret)
+                        except BridgeFatalError:
+                            raise
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug(
+                                "[bridge] acknowledgeWork failed for work_id=%s: %s",
+                                work_id,
+                                exc,
+                            )
                 self._handle_work_item(work)
             except BridgeFatalError as exc:
                 console.print(f"[red]Remote Control fatal error:[/red] {exc}")
@@ -397,6 +438,10 @@ class RemoteControlBridgeRunner:
                     request_id,
                 )
             ),
+            on_control_response_fallback=lambda payload: self._send_control_response_via_events(
+                session_id,
+                payload,
+            ),
         )
         manager.connect()
         self._session_bridges[session_id] = manager
@@ -416,6 +461,27 @@ class RemoteControlBridgeRunner:
             "request": request,
         }
         active.process.write_stdin(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    def _send_control_response_via_events(
+        self,
+        session_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        token = self._token_supplier() if self._token_supplier is not None else None
+        if not token:
+            logger.debug(
+                "[bridge:control] Cannot fallback control_response via events: missing access token session=%s",
+                session_id,
+            )
+            return
+        try:
+            self.api_client.send_permission_response_event(session_id, payload, token)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "[bridge:control] control_response events fallback failed session=%s: %s",
+                session_id,
+                exc,
+            )
 
     def _handle_work_item(self, work: dict[str, object]) -> None:
         work_id = str(work.get("id") or "").strip()
@@ -543,11 +609,10 @@ class RemoteControlBridgeRunner:
             self._sessions.pop(session_id, None)
             if status_label != "interrupted":
                 logger.info(
-                    "[bridge] Session %s ended with status %s; stopping bridge loop",
+                    "[bridge] Session %s ended with status %s; continuing work poll loop",
                     session_id,
                     status_label,
                 )
-                self.stop_event.set()
 
     def _sleep_with_stop(self, seconds: float) -> None:
         end_time = time.monotonic() + max(seconds, 0.0)
