@@ -13,6 +13,7 @@ from ripperdoc.core.tool import Tool, ToolOutput, ToolUseContext
 from ripperdoc.core.providers.anthropic import (
     AnthropicClient,
     _classify_anthropic_error,
+    _content_blocks_from_response,
     _content_blocks_from_stream_state,
 )
 from ripperdoc.core.providers.errors import ProviderMappedError, ProviderTimeoutError
@@ -73,6 +74,66 @@ def test_content_blocks_from_stream_state_omits_signature_when_missing() -> None
 
     assert blocks[0] == {"type": "thinking", "thinking": "step-1"}
     assert "signature" not in blocks[0]
+
+
+def test_content_blocks_from_stream_state_supports_server_tool_and_search_result() -> None:
+    blocks = _content_blocks_from_stream_state(
+        collected_text=[],
+        collected_thinking=[],
+        collected_tool_calls={
+            0: {
+                "type": "server_tool_use",
+                "id": "srvtoolu_01ABC123",
+                "name": "tool_search_tool_regex",
+                "input": {"query": "weather"},
+            },
+            1: {
+                "type": "tool_search_tool_result",
+                "tool_use_id": "srvtoolu_01ABC123",
+                "content": {
+                    "type": "tool_search_tool_search_result",
+                    "tool_references": [
+                        {"type": "tool_reference", "tool_name": "mcp__weather__get_weather"}
+                    ],
+                },
+            },
+        },
+    )
+
+    assert blocks[0]["type"] == "server_tool_use"
+    assert blocks[0]["id"] == "srvtoolu_01ABC123"
+    assert blocks[1]["type"] == "tool_search_tool_result"
+    assert blocks[1]["content"]["tool_references"][0]["tool_name"] == "mcp__weather__get_weather"
+
+
+def test_content_blocks_from_response_supports_tool_reference_family_blocks() -> None:
+    response = SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="server_tool_use",
+                id="srvtoolu_01ABC123",
+                name="tool_search_tool_regex",
+                input={"query": "weather"},
+            ),
+            SimpleNamespace(
+                type="tool_search_tool_result",
+                tool_use_id="srvtoolu_01ABC123",
+                content={
+                    "type": "tool_search_tool_search_result",
+                    "tool_references": [
+                        {"type": "tool_reference", "tool_name": "mcp__weather__get_weather"}
+                    ],
+                },
+            ),
+            SimpleNamespace(type="tool_reference", tool_name="mcp__weather__get_weather"),
+        ]
+    )
+
+    blocks = _content_blocks_from_response(response)
+    assert blocks[0]["type"] == "server_tool_use"
+    assert blocks[1]["type"] == "tool_search_tool_result"
+    assert blocks[1]["content"]["tool_references"][0]["tool_name"] == "mcp__weather__get_weather"
+    assert blocks[2] == {"type": "tool_reference", "tool_name": "mcp__weather__get_weather"}
 
 
 @pytest.mark.asyncio

@@ -339,7 +339,6 @@ class StdioControlMixin:
             "unavailable": unavailable,
             "connecting": configuring,
             "servers": configured,
-            # Claude-style field alias
             "mcpServers": configured,
         }
 

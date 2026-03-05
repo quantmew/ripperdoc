@@ -293,6 +293,10 @@ class QueryContext:
         self.skill_execution_context_hint: Optional[str] = None
         self.skill_agent_hint: Optional[str] = None
         self.skill_paths_hint: List[str] = []
+        # Sticky per-query decision for deferred MCP tool search mode.
+        # This avoids per-iteration mode flip-flops that can destabilize prompt prefixes.
+        self.mcp_tool_search_enabled: Optional[bool] = None
+        self.mcp_tool_search_reason: Optional[str] = None
         self.abort_controller = asyncio.Event()
         self.pending_message_queue: PendingMessageQueue = (
             pending_message_queue if pending_message_queue is not None else PendingMessageQueue()
@@ -328,7 +332,18 @@ class QueryContext:
     @tools.setter
     def tools(self, tools: List[Tool[Any, Any]]) -> None:
         """Replace tool inventory and recompute active/deferred sets."""
+        previous_deferred_signature = tuple(sorted(self.tool_registry.deferred_names))
+        previous_has_tool_search = self.tool_registry.get("ToolSearch") is not None
         self.tool_registry.replace_tools(tools)
+        current_deferred_signature = tuple(sorted(self.tool_registry.deferred_names))
+        current_has_tool_search = self.tool_registry.get("ToolSearch") is not None
+        # only invalidate tool-search mode cache when deferred inventory or ToolSearch availability changes.
+        if (
+            previous_deferred_signature != current_deferred_signature
+            or previous_has_tool_search != current_has_tool_search
+        ):
+            self.mcp_tool_search_enabled = None
+            self.mcp_tool_search_reason = None
 
     def activate_tools(self, names: Iterable[str]) -> Tuple[List[str], List[str]]:
         """Activate deferred tools by name."""

@@ -23,6 +23,7 @@ from typing import (
 
 from pydantic import ValidationError
 
+from ripperdoc.core.agents import TOOL_SEARCH_TOOL_NAME
 from ripperdoc.core.config import ModelProfile, provider_protocol
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
 from ripperdoc.core.hooks.state import bind_hook_scopes, bind_pending_message_queue
@@ -59,6 +60,7 @@ from ripperdoc.utils.messaging.messages import (
     ProgressMessage,
     UserMessage,
     create_assistant_message,
+    create_hook_additional_context_message,
     create_hook_notice_message,
     create_progress_message,
     create_user_message,
@@ -67,7 +69,7 @@ from ripperdoc.utils.messaging.messages import (
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
 )
 
-from .context import QueryContext, _append_hook_context, _apply_skill_context_updates
+from .context import QueryContext, _apply_skill_context_updates
 from .errors import _format_changed_file_notice
 from .permissions import ToolPermissionCallable, _check_tool_permissions
 from .tools import (
@@ -541,6 +543,89 @@ def _is_mcp_tool(tool: Tool[Any, Any]) -> bool:
     return name.startswith("mcp__")
 
 
+def _is_tool_search_tool(tool: Tool[Any, Any]) -> bool:
+    """Return whether a tool is the ToolSearch helper."""
+    name = str(getattr(tool, "name", "") or "")
+    return name == TOOL_SEARCH_TOOL_NAME
+
+
+def _collect_deferred_mcp_names(
+    all_tools: Sequence[Tool[Any, Any]],
+    deferred_tool_names: set[str],
+) -> set[str]:
+    """Collect deferred MCP tool names from the full tool inventory."""
+    deferred_mcp_names: set[str] = set()
+    for tool in all_tools:
+        name = str(getattr(tool, "name", "") or "")
+        if name not in deferred_tool_names:
+            continue
+        if _is_mcp_tool(tool):
+            deferred_mcp_names.add(name)
+    return deferred_mcp_names
+
+
+def _extract_discovered_deferred_mcp_tools(
+    messages: Sequence[ConversationMessage],
+    deferred_mcp_names: set[str],
+) -> set[str]:
+    """Extract deferred MCP tool names previously discovered by ToolSearch.
+
+    Supports both Anthropic tool_reference-style payloads and Ripperdoc's
+    structured ToolSearch tool_use_result payload.
+    """
+    def _collect_tool_reference_names(payload: Any, out: set[str]) -> None:
+        if isinstance(payload, list):
+            for item in payload:
+                _collect_tool_reference_names(item, out)
+            return
+        if not isinstance(payload, dict):
+            return
+        ptype = str(payload.get("type") or "")
+        if ptype == "tool_reference":
+            tool_name = payload.get("tool_name")
+            if isinstance(tool_name, str) and tool_name.strip():
+                out.add(tool_name.strip())
+        for value in payload.values():
+            if isinstance(value, (list, dict)):
+                _collect_tool_reference_names(value, out)
+
+    discovered_names: set[str] = set()
+
+    for message in messages:
+        content = getattr(getattr(message, "message", None), "content", None)
+        if isinstance(content, list):
+            for block in content:
+                block_type = getattr(block, "type", None)
+                if block_type == "tool_search_tool_result":
+                    _collect_tool_reference_names(getattr(block, "content", None), discovered_names)
+                if block_type == "tool_result":
+                    _collect_tool_reference_names(getattr(block, "content", None), discovered_names)
+
+        if isinstance(message, UserMessage):
+            payload = getattr(message, "tool_use_result", None)
+            if not isinstance(payload, dict):
+                continue
+            if not any(key in payload for key in ("activated", "matches", "deferred_remaining")):
+                continue
+
+            activated = payload.get("activated")
+            if isinstance(activated, list):
+                for raw_name in activated:
+                    if isinstance(raw_name, str) and raw_name.strip():
+                        discovered_names.add(raw_name.strip())
+
+            matches = payload.get("matches")
+            if isinstance(matches, list):
+                for match in matches:
+                    if not isinstance(match, dict):
+                        continue
+                    name = match.get("name")
+                    if isinstance(name, str) and name.strip():
+                        discovered_names.add(name.strip())
+
+    return {name for name in discovered_names if name in deferred_mcp_names}
+
+
 def _parse_auto_tool_search_threshold(raw_value: str) -> int:
     """Parse auto threshold from ENABLE_TOOL_SEARCH, defaulting to 10."""
     normalized = (raw_value or "").strip().lower()
@@ -591,16 +676,16 @@ def _resolve_mcp_tool_search_enabled(
     deferred_tool_names: set[str],
 ) -> tuple[bool, set[str], str]:
     """Resolve whether deferred MCP tools should stay hidden behind ToolSearch."""
-    deferred_mcp_names: set[str] = set()
+    deferred_mcp_names = _collect_deferred_mcp_names(all_tools, deferred_tool_names)
     deferred_mcp_tools: list[Tool[Any, Any]] = []
     for tool in all_tools:
         name = str(getattr(tool, "name", "") or "")
-        if name not in deferred_tool_names:
+        if name not in deferred_mcp_names:
             continue
-        if not _is_mcp_tool(tool):
-            continue
-        deferred_mcp_names.add(name)
         deferred_mcp_tools.append(tool)
+
+    if not any(_is_tool_search_tool(tool) for tool in all_tools):
+        return False, deferred_mcp_names, "tool_search_unavailable"
 
     if not deferred_mcp_names:
         return False, set(), "no_deferred_mcp_tools"
@@ -652,14 +737,205 @@ def _compose_next_iteration_messages(
     tool_results: Sequence[UserMessage],
     extra_messages: Optional[Sequence[ConversationMessage]] = None,
 ) -> list[ConversationMessage]:
-    """Build next-iteration history in a type-safe way."""
+    """Build next-iteration history and reorder tool lifecycle messages."""
     next_messages: list[ConversationMessage] = list(base_messages)
     if assistant_message is not None:
         next_messages.append(assistant_message)
     next_messages.extend(tool_results)
-    if extra_messages:
-        next_messages.extend(extra_messages)
-    return next_messages
+    next_messages = _reorder_tool_lifecycle_messages(
+        next_messages,
+        additional_messages=extra_messages,
+    )
+    return _drop_unmatched_tool_use_messages(next_messages)
+
+
+def _extract_tool_use_ids(message: ConversationMessage) -> list[str]:
+    """Extract tool_use IDs from an assistant message."""
+    if not isinstance(message, AssistantMessage):
+        return []
+    content = message.message.content
+    if not isinstance(content, list):
+        return []
+    ids: list[str] = []
+    for block in content:
+        if getattr(block, "type", None) != "tool_use":
+            continue
+        tool_id = str(getattr(block, "id", None) or getattr(block, "tool_use_id", None) or "").strip()
+        if tool_id:
+            ids.append(tool_id)
+    return ids
+
+
+def _extract_tool_result_ids(message: ConversationMessage) -> list[str]:
+    """Extract tool_result IDs from a user message."""
+    if not isinstance(message, UserMessage):
+        return []
+    content = message.message.content
+    if not isinstance(content, list):
+        return []
+    ids: list[str] = []
+    for block in content:
+        if getattr(block, "type", None) != "tool_result":
+            continue
+        tool_id = str(
+            getattr(block, "tool_use_id", None) or getattr(block, "id", None) or ""
+        ).strip()
+        if tool_id:
+            ids.append(tool_id)
+    return ids
+
+
+def _is_hook_additional_context_message(message: ConversationMessage) -> bool:
+    """Return whether a user message is hook_additional_context."""
+    if not isinstance(message, UserMessage):
+        return False
+    metadata = getattr(message.message, "metadata", {}) or {}
+    return bool(metadata.get("hook_additional_context"))
+
+
+def _classify_hook_phase(message: ConversationMessage) -> Optional[str]:
+    """Classify hook_additional_context message as pre/post around a tool use."""
+    if not _is_hook_additional_context_message(message):
+        return None
+    if not getattr(message, "parent_tool_use_id", None):
+        return None
+    metadata = getattr(message.message, "metadata", {}) or {}
+    event = str(metadata.get("hook_event") or "")
+    if event == "PreToolUse":
+        return "pre"
+    if event in {"PostToolUse", "PostToolUseFailure"}:
+        return "post"
+    return None
+
+
+def _reorder_tool_lifecycle_messages(
+    messages: Sequence[ConversationMessage],
+    *,
+    additional_messages: Optional[Sequence[ConversationMessage]] = None,
+) -> list[ConversationMessage]:
+    """Group tool_use + pre-hooks + tool_result + post-hooks similar to Claude ordering."""
+
+    tool_data: dict[str, dict[str, list[ConversationMessage] | Optional[ConversationMessage]]] = {}
+
+    def _ensure(tool_id: str) -> dict[str, list[ConversationMessage] | Optional[ConversationMessage]]:
+        if tool_id not in tool_data:
+            tool_data[tool_id] = {
+                "tool_use": None,
+                "pre": [],
+                "result": [],
+                "post": [],
+            }
+        return tool_data[tool_id]
+
+    for message in messages:
+        tool_use_ids = _extract_tool_use_ids(message)
+        if tool_use_ids:
+            for tool_id in tool_use_ids:
+                slot = _ensure(tool_id)
+                if slot["tool_use"] is None:
+                    slot["tool_use"] = message
+            continue
+
+        hook_phase = _classify_hook_phase(message)
+        parent_id = str(getattr(message, "parent_tool_use_id", None) or "").strip()
+        if hook_phase and parent_id:
+            slot = _ensure(parent_id)
+            cast(list[ConversationMessage], slot[hook_phase]).append(message)
+            continue
+
+        result_ids = _extract_tool_result_ids(message)
+        if result_ids:
+            for tool_id in result_ids:
+                slot = _ensure(tool_id)
+                cast(list[ConversationMessage], slot["result"]).append(message)
+            continue
+
+    ordered: list[ConversationMessage] = []
+    emitted_ids: set[str] = set()
+    emitted_messages: set[str] = set()
+
+    def _emit(message: ConversationMessage) -> None:
+        msg_uuid = str(getattr(message, "uuid", ""))
+        if msg_uuid and msg_uuid in emitted_messages:
+            return
+        if msg_uuid:
+            emitted_messages.add(msg_uuid)
+        ordered.append(message)
+
+    for message in messages:
+        tool_use_ids = _extract_tool_use_ids(message)
+        if tool_use_ids:
+            has_emitted_tool_use = False
+            for tool_id in tool_use_ids:
+                if tool_id in emitted_ids:
+                    continue
+                emitted_ids.add(tool_id)
+                slot = tool_data.get(tool_id)
+                if not slot or slot.get("tool_use") is None:
+                    continue
+                if not has_emitted_tool_use:
+                    _emit(cast(ConversationMessage, slot["tool_use"]))
+                    has_emitted_tool_use = True
+                for pre_message in cast(list[ConversationMessage], slot["pre"]):
+                    _emit(pre_message)
+                for result_message in cast(list[ConversationMessage], slot["result"]):
+                    _emit(result_message)
+                for post_message in cast(list[ConversationMessage], slot["post"]):
+                    _emit(post_message)
+            continue
+
+        hook_phase = _classify_hook_phase(message)
+        if hook_phase:
+            parent_id = str(getattr(message, "parent_tool_use_id", None) or "").strip()
+            slot = tool_data.get(parent_id)
+            if parent_id and slot and slot.get("tool_use") is not None:
+                continue
+
+        result_ids = _extract_tool_result_ids(message)
+        if result_ids:
+            # Keep orphan tool_result messages; drop only those attached to known tool_use.
+            keep_orphan = False
+            for tool_id in result_ids:
+                slot = tool_data.get(tool_id)
+                if slot is None or slot.get("tool_use") is None:
+                    keep_orphan = True
+                    break
+            if not keep_orphan:
+                continue
+
+        _emit(message)
+
+    if additional_messages:
+        for message in additional_messages:
+            _emit(message)
+
+    return ordered
+
+
+def _drop_unmatched_tool_use_messages(
+    messages: Sequence[ConversationMessage],
+) -> list[ConversationMessage]:
+    """Drop assistant tool_use-only messages when all calls are unmatched by tool_result."""
+    tool_use_ids: set[str] = set()
+    tool_result_ids: set[str] = set()
+    for message in messages:
+        tool_use_ids.update(_extract_tool_use_ids(message))
+        tool_result_ids.update(_extract_tool_result_ids(message))
+
+    unmatched_ids = {tool_id for tool_id in tool_use_ids if tool_id not in tool_result_ids}
+    if not unmatched_ids:
+        return list(messages)
+
+    filtered: list[ConversationMessage] = []
+    for message in messages:
+        msg_tool_use_ids = _extract_tool_use_ids(message)
+        if not msg_tool_use_ids:
+            filtered.append(message)
+            continue
+        if all(tool_id in unmatched_ids for tool_id in msg_tool_use_ids):
+            continue
+        filtered.append(message)
+    return filtered
 
 
 def _resolve_query_team_name(query_context: QueryContext) -> Optional[str]:
@@ -901,6 +1177,7 @@ def _append_changed_file_notice_if_needed(
 
 def _build_iteration_plan(
     *,
+    messages: Optional[Sequence[ConversationMessage]] = None,
     system_prompt: str,
     context: Dict[str, str],
     query_context: QueryContext,
@@ -912,23 +1189,53 @@ def _build_iteration_plan(
     tools_for_model: List[Tool[Any, Any]] = [] if tool_mode == "text" else all_tools
 
     if tool_mode != "text":
-        enabled, deferred_mcp_names, reason = _resolve_mcp_tool_search_enabled(
-            model_profile,
+        # Keep ENABLE_TOOL_SEARCH decision sticky within one query context so the tool
+        # surface does not flip across iterations and break prefix cache locality.
+        decision_source = "cached"
+        enabled = query_context.mcp_tool_search_enabled
+        if enabled is None:
+            enabled, _, reason = _resolve_mcp_tool_search_enabled(
+                model_profile,
+                all_tools,
+                query_context.tool_registry.deferred_names,
+            )
+            query_context.mcp_tool_search_enabled = enabled
+            query_context.mcp_tool_search_reason = reason
+            decision_source = "computed"
+        else:
+            reason = query_context.mcp_tool_search_reason or "cached"
+
+        deferred_mcp_names = _collect_deferred_mcp_names(
             all_tools,
             query_context.tool_registry.deferred_names,
         )
+        discovered_deferred_mcp_names: set[str] = set()
+
         if enabled and deferred_mcp_names:
-            tools_for_model = [
-                tool
-                for tool in all_tools
-                if str(getattr(tool, "name", "") or "") not in deferred_mcp_names
-            ]
+            discovered_deferred_mcp_names = _extract_discovered_deferred_mcp_tools(
+                messages or (),
+                deferred_mcp_names,
+            )
+            tools_for_model = []
+            for tool in all_tools:
+                name = str(getattr(tool, "name", "") or "")
+                if _is_tool_search_tool(tool):
+                    tools_for_model.append(tool)
+                    continue
+                if name in deferred_mcp_names and name not in discovered_deferred_mcp_names:
+                    continue
+                tools_for_model.append(tool)
+        else:
+            # Keep standard mode deterministic by excluding ToolSearch itself.
+            tools_for_model = [tool for tool in all_tools if not _is_tool_search_tool(tool)]
         logger.debug(
             "[query] MCP tool search decision",
             extra={
                 "enabled": enabled,
                 "reason": reason,
+                "decision_source": decision_source,
                 "deferred_mcp_count": len(deferred_mcp_names),
+                "discovered_deferred_mcp_count": len(discovered_deferred_mcp_names),
                 "tools_before": len(all_tools),
                 "tools_after": len(tools_for_model),
             },
@@ -1110,7 +1417,7 @@ async def _process_iteration_assistant_message(
     )
 
     if not tool_use_blocks:
-        async for msg in _handle_iteration_stop_hook(context, query_context, result):
+        async for msg in _handle_iteration_stop_hook(query_context, result):
             yield msg
         return
 
@@ -1200,7 +1507,6 @@ async def _process_iteration_assistant_message(
 
 
 async def _handle_iteration_stop_hook(
-    context: Dict[str, str],
     query_context: QueryContext,
     result: IterationResult,
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
@@ -1219,11 +1525,18 @@ async def _handle_iteration_stop_hook(
     )
     logger.debug("[query] AFTER calling hook_manager.run_stop_async")
     logger.debug("[query] Checking additional_context")
+    hook_event = "SubagentStop" if stop_hook == "subagent" else "Stop"
+    additional_context_messages: List[UserMessage] = []
     if stop_result.additional_context:
-        _append_hook_context(context, f"{stop_hook}:context", stop_result.additional_context)
+        additional_context_message = create_hook_additional_context_message(
+            str(stop_result.additional_context),
+            hook_name=hook_event,
+            hook_event=hook_event,
+        )
+        if additional_context_message:
+            additional_context_messages.append(additional_context_message)
     logger.debug("[query] Checking system_message")
     if stop_result.system_message:
-        hook_event = "SubagentStop" if stop_hook == "subagent" else "Stop"
         yield create_hook_notice_message(
             str(stop_result.system_message),
             hook_event=hook_event,
@@ -1232,12 +1545,17 @@ async def _handle_iteration_stop_hook(
     logger.debug("[query] Checking should_block")
     if stop_result.should_block:
         reason = stop_result.block_reason or stop_result.stop_reason or "Blocked by hook."
-        result.tool_results = [create_user_message(f"{stop_hook} hook blocked: {reason}")]
+        result.tool_results = [
+            *additional_context_messages,
+            create_user_message(f"{stop_hook} hook blocked: {reason}"),
+        ]
         for msg in result.tool_results:
             yield msg
         query_context.stop_hook_active = True
         result.should_stop = False
         return
+    for msg in additional_context_messages:
+        yield msg
     logger.debug("[query] Setting should_stop=True and returning")
     query_context.stop_hook_active = False
     result.should_stop = True
@@ -1350,11 +1668,12 @@ async def _prepare_single_iteration_tool_call(
 
         for notice in _collect_pre_tool_hook_notices(
             pre_result=pre_result,
-            context=context,
             tool_name=tool_name,
             tool_use_id=tool_use_id,
             sibling_ids=sibling_ids,
         ):
+            if isinstance(notice, UserMessage):
+                out.tool_results.append(notice)
             yield notice
 
         parsed_input, permission_denied, permission_error = await _apply_permission_updates(
@@ -1384,7 +1703,6 @@ async def _prepare_single_iteration_tool_call(
                     parsed_input,
                     sibling_ids,
                     tool_context,
-                    context,
                 ),
             }
         )
@@ -1524,7 +1842,6 @@ async def _parse_and_validate_tool_input_for_call(
 def _collect_pre_tool_hook_notices(
     *,
     pre_result: HookResult,
-    context: Dict[str, str],
     tool_name: str,
     tool_use_id: str,
     sibling_ids: set[str],
@@ -1532,7 +1849,14 @@ def _collect_pre_tool_hook_notices(
     """Apply pre-hook context updates and build any user-visible notices."""
     notices: List[Union[UserMessage, ProgressMessage]] = []
     if pre_result.additional_context:
-        _append_hook_context(context, f"PreToolUse:{tool_name}", pre_result.additional_context)
+        additional_context_message = create_hook_additional_context_message(
+            str(pre_result.additional_context),
+            hook_name=f"PreToolUse:{tool_name}",
+            hook_event="PreToolUse",
+            parent_tool_use_id=tool_use_id,
+        )
+        if additional_context_message:
+            notices.append(additional_context_message)
     if pre_result.system_message:
         notices.append(
             create_hook_notice_message(
@@ -1729,6 +2053,7 @@ async def _run_query_iteration(
 
     _append_changed_file_notice_if_needed(messages, query_context)
     plan = _build_iteration_plan(
+        messages=messages,
         system_prompt=system_prompt,
         context=context,
         query_context=query_context,
@@ -1850,6 +2175,10 @@ async def query(
         # Work on a copy so external mutations (e.g., UI appending messages while consuming)
         # do not interfere with the loop or normalization.
         messages = list(messages)
+        # Recompute tool-search mode once per user query while keeping it sticky across
+        # iterations inside this query, matching Claude-style request scoping.
+        query_context.mcp_tool_search_enabled = None
+        query_context.mcp_tool_search_reason = None
 
         max_iterations = MAX_QUERY_ITERATIONS
         if query_context.max_turns and query_context.max_turns > 0:

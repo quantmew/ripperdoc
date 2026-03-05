@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from ripperdoc.utils.messaging.messages import (
     MessageRole,
+    create_hook_additional_context_message,
     create_user_message,
     create_assistant_message,
     create_progress_message,
@@ -54,6 +55,38 @@ def test_create_progress_message_with_sender() -> None:
     )
 
     assert msg.progress_sender == "Subagent(writer:agent_abcd1234)"
+
+
+def test_create_hook_additional_context_message() -> None:
+    msg = create_hook_additional_context_message(
+        "6666",
+        hook_name="PreToolUse:Read",
+        hook_event="PreToolUse",
+        parent_tool_use_id="call_1",
+    )
+    assert msg is not None
+    assert msg.type == "user"
+    assert msg.parent_tool_use_id == "call_1"
+    assert msg.message.role == MessageRole.USER
+    assert (
+        msg.message.content
+        == "<system-reminder>\nPreToolUse:Read hook additional context: 6666\n</system-reminder>"
+    )
+    assert msg.message.metadata["hook_additional_context"] is True
+
+
+def test_create_hook_additional_context_message_joins_list_content() -> None:
+    msg = create_hook_additional_context_message(
+        ["6666", " ", "7777"],
+        hook_name="PreToolUse:Read",
+        hook_event="PreToolUse",
+        parent_tool_use_id="call_1",
+    )
+    assert msg is not None
+    assert (
+        msg.message.content
+        == "<system-reminder>\nPreToolUse:Read hook additional context: 6666\n7777\n</system-reminder>"
+    )
 
 
 def test_normalize_messages_for_api():
@@ -405,3 +438,58 @@ def test_normalize_messages_openai_keeps_paired_tool_results():
     tool_messages = [msg for msg in normalized if msg.get("role") == "tool"]
     assert len(tool_messages) == 1, "Paired tool_results should be kept"
     assert tool_messages[0]["tool_call_id"] == "valid_call"
+
+
+def test_normalize_messages_anthropic_preserves_tool_reference_blocks():
+    assistant = create_assistant_message(
+        [
+            {
+                "type": "server_tool_use",
+                "id": "srvtoolu_01ABC123",
+                "name": "tool_search_tool_regex",
+                "input": {"query": "weather"},
+            },
+            {
+                "type": "tool_search_tool_result",
+                "tool_use_id": "srvtoolu_01ABC123",
+                "content": {
+                    "type": "tool_search_tool_search_result",
+                    "tool_references": [
+                        {"type": "tool_reference", "tool_name": "mcp__weather__get_weather"}
+                    ],
+                },
+            },
+        ]
+    )
+
+    normalized = normalize_messages_for_api([assistant], protocol="anthropic")
+    assert len(normalized) == 1
+    content = normalized[0]["content"]
+    assert content[0]["type"] == "server_tool_use"
+    assert content[0]["id"] == "srvtoolu_01ABC123"
+    assert content[1]["type"] == "tool_search_tool_result"
+    refs = content[1]["content"]["tool_references"]
+    assert refs[0]["type"] == "tool_reference"
+    assert refs[0]["tool_name"] == "mcp__weather__get_weather"
+
+
+def test_normalize_messages_openai_skips_anthropic_tool_search_blocks():
+    assistant = create_assistant_message(
+        [
+            {
+                "type": "server_tool_use",
+                "id": "srvtoolu_01ABC123",
+                "name": "tool_search_tool_regex",
+                "input": {"query": "weather"},
+            },
+            {
+                "type": "tool_search_tool_result",
+                "tool_use_id": "srvtoolu_01ABC123",
+                "content": {"type": "tool_search_tool_search_result", "tool_references": []},
+            },
+        ]
+    )
+
+    normalized = normalize_messages_for_api([assistant], protocol="openai")
+    # Anthropic-only blocks should not leak into OpenAI payload.
+    assert normalized == []

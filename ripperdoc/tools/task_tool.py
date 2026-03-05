@@ -55,6 +55,7 @@ from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     UserMessage,
+    create_hook_additional_context_message,
     create_hook_notice_payload,
     create_user_message,
 )
@@ -961,11 +962,23 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         )
         return result
 
-    def _build_subagent_hook_context(self, result: HookResult) -> Dict[str, str]:
-        context: Dict[str, str] = {}
+    def _build_subagent_hook_messages(
+        self,
+        result: HookResult,
+        *,
+        parent_tool_use_id: Optional[str] = None,
+    ) -> List[UserMessage]:
+        messages: List[UserMessage] = []
         if result.additional_context:
-            context["Hook:SubagentStart"] = result.additional_context
-        return context
+            additional_context_message = create_hook_additional_context_message(
+                str(result.additional_context),
+                hook_name="SubagentStart",
+                hook_event="SubagentStart",
+                parent_tool_use_id=parent_tool_use_id,
+            )
+            if additional_context_message:
+                messages.append(additional_context_message)
+        return messages
 
     def _render_tool_result(self, output: TaskToolOutput) -> ToolResult:
         return ToolResult(
@@ -1472,7 +1485,6 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         record: AgentRunRecord,
         subagent_context: QueryContext,
         permission_checker: Any,
-        hook_context: Dict[str, str],
         parent_tool_use_id: Optional[str],
     ) -> AsyncGenerator[ToolProgress, None]:
         assistant_messages: List[AssistantMessage] = []
@@ -1484,7 +1496,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             async for message in query(
                 record.history,  # type: ignore[arg-type]
                 record.system_prompt,
-                hook_context,
+                {},
                 subagent_context,
                 permission_checker,
             ):
@@ -1608,7 +1620,11 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         )
         for notice in self._build_subagent_start_notices(hook_result, agent_type=record.agent_type):
             yield notice
-        hook_context = self._build_subagent_hook_context(hook_result)
+        hook_messages = self._build_subagent_hook_messages(
+            hook_result, parent_tool_use_id=context.message_id
+        )
+        if hook_messages:
+            record.history.extend(hook_messages)
 
         if input_data.model:
             record.model_used = input_data.model
@@ -1643,7 +1659,6 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             record=record,
             subagent_context=subagent_context,
             permission_checker=context.permission_checker,
-            hook_context=hook_context,
             parent_tool_use_id=context.message_id,
         ):
             yield progress
@@ -1705,7 +1720,9 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             hook_result, agent_type=target_agent.agent_type
         ):
             yield notice
-        hook_context = self._build_subagent_hook_context(hook_result)
+        hook_messages = self._build_subagent_hook_messages(
+            hook_result, parent_tool_use_id=context.message_id
+        )
 
         agent_id = _new_agent_id()
         worktree_path: Optional[str] = None
@@ -1780,6 +1797,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             worktree_head_commit=worktree_head_commit,
             worktree_hook_based=worktree_hook_based,
         )
+        if hook_messages:
+            record.history.extend(hook_messages)
         _write_task_output(
             record.output_file,
             (
@@ -1851,7 +1870,6 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
                         record,
                         subagent_context,
                         context.permission_checker,
-                        hook_context,
                         notification_queue=context.task_notification_queue,
                         parent_tool_use_id=context.message_id,
                     )
@@ -1897,7 +1915,6 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             record=record,
             subagent_context=subagent_context,
             permission_checker=context.permission_checker,
-            hook_context=hook_context,
             parent_tool_use_id=context.message_id,
         ):
             yield progress
@@ -2049,7 +2066,6 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         record: AgentRunRecord,
         subagent_context: QueryContext,
         permission_checker: Any,
-        hook_context: Optional[Dict[str, str]] = None,
         *,
         notification_queue: Optional[PendingMessageQueue] = None,
         parent_tool_use_id: Optional[str] = None,
@@ -2063,7 +2079,7 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
             async for message in query(
                 record.history,  # type: ignore[arg-type]
                 record.system_prompt,
-                hook_context or {},
+                {},
                 subagent_context,
                 permission_checker,
             ):

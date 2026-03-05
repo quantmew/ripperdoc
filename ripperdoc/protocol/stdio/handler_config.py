@@ -17,6 +17,7 @@ from ripperdoc.core.permission_engine import PermissionPreview, PermissionResult
 from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.protocol.models import UserMessageData, UserStreamMessage
+from ripperdoc.utils.messaging.messages import create_hook_additional_context_message
 from ripperdoc.utils.memory import build_memory_instructions
 
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC
@@ -397,12 +398,18 @@ class StdioConfigMixin:
             message="Invalid can_use_tool response from SDK",
         )
 
-    def _collect_hook_contexts(self, hook_result: Any) -> list[str]:
-        contexts: list[str] = []
+    def _collect_hook_context_messages(self, hook_result: Any, hook_event: str) -> list[Any]:
+        messages: list[Any] = []
         additional_context = getattr(hook_result, "additional_context", None)
         if additional_context:
-            contexts.append(str(additional_context))
-        return contexts
+            message = create_hook_additional_context_message(
+                str(additional_context),
+                hook_name=hook_event,
+                hook_event=hook_event,
+            )
+            if message is not None:
+                messages.append(message)
+        return messages
 
     def _build_hook_notice_stream_message(
         self,

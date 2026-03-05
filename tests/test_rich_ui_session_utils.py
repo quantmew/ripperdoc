@@ -9,7 +9,9 @@ import pytest
 
 from pathlib import Path
 
+from ripperdoc.cli.ui.rich_ui import session as session_module
 from ripperdoc.cli.ui.rich_ui.session import RichUI, _replace_surrogate_codepoints
+from ripperdoc.core.query import QueryContext
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 
@@ -34,6 +36,15 @@ def _new_ui() -> RichUI:
     ui._saved_conversation = None
     ui._pre_plan_mode = None
     return ui
+
+
+class _NamedTool:
+    def __init__(self, name: str, *, deferred: bool = False) -> None:
+        self.name = name
+        self._deferred = deferred
+
+    def defer_loading(self) -> bool:
+        return self._deferred
 
 
 def test_build_history_candidates_skips_tool_result_only_user_message() -> None:
@@ -235,6 +246,51 @@ async def test_on_exit_plan_mode_shift_tab_cycles_confirmation_mode(monkeypatch:
     assert decision["clear_context"] is False
     assert ui.permission_mode == "acceptEdits"
     assert ui._clear_context_after_turn is False
+
+
+@pytest.mark.asyncio
+async def test_prepare_query_context_merges_dynamic_tools_from_full_inventory(
+    monkeypatch: Any,
+) -> None:
+    ui = _new_ui()
+    ui.project_path = Path.cwd()
+    ui.allowed_tools = None
+    ui.disable_slash_commands = True
+    ui._session_hook_contexts = []
+    ui.custom_system_prompt = "custom"
+    ui.append_system_prompt = None
+    ui.output_style = "default"
+    ui.output_language = "auto"
+    ui.query_context = QueryContext(
+        tools=[
+            _NamedTool("ActiveTool"),
+            _NamedTool("mcp__demo__deferred_tool", deferred=True),
+        ],
+        yolo_mode=False,
+        verbose=False,
+    )
+
+    async def _fake_load_servers(_project_path: Path) -> list[Any]:
+        return []
+
+    async def _fake_load_dynamic(_project_path: Path) -> list[Any]:
+        return [_NamedTool("mcp__demo__dynamic_tool", deferred=True)]
+
+    captured: dict[str, list[str]] = {}
+
+    def _fake_merge(base_tools: list[Any], dynamic_tools: list[Any]) -> list[Any]:
+        captured["base"] = [getattr(tool, "name", "") for tool in base_tools]
+        return [*base_tools, *dynamic_tools]
+
+    monkeypatch.setattr(session_module, "load_mcp_servers_async", _fake_load_servers)
+    monkeypatch.setattr(session_module, "load_dynamic_mcp_tools_async", _fake_load_dynamic)
+    monkeypatch.setattr(session_module, "merge_tools_with_dynamic", _fake_merge)
+    monkeypatch.setattr(session_module, "format_mcp_instructions", lambda _servers: "")
+    monkeypatch.setattr(session_module, "build_memory_instructions", lambda: "")
+
+    await ui._prepare_query_context("hello")
+
+    assert captured["base"] == ["ActiveTool", "mcp__demo__deferred_tool"]
 
 
 @pytest.mark.asyncio

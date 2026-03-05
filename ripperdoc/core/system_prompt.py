@@ -458,7 +458,7 @@ def _build_doing_tasks_section(
     doing_tasks_lines.extend(
         [
             "NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive.",
-            "- Tool results and user messages may include <system-reminder> tags. <system-reminder> tags contain useful information and reminders. They are NOT part of the user's provided input or the tool result.",
+            "- Tool results and user messages may include <system-reminder> tags. <system-reminder> tags contain useful information and reminders. They are automatically added by the system, and bear no direct relation to the specific tool results or user messages in which they appear.",
             "- The conversation has unlimited context through automatic summarization. Complete tasks fully; do not stop mid-task or claim context limits.",
         ]
     )

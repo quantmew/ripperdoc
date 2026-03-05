@@ -78,6 +78,7 @@ from ripperdoc.utils.messaging.messages import (
     UserMessage,
     AssistantMessage,
     ProgressMessage,
+    create_hook_additional_context_message,
     create_user_message,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
@@ -250,7 +251,7 @@ class RichUI:
             },
         )
         self._session_history = SessionHistory(self.project_path, self.session_id)
-        self._session_hook_contexts: List[str] = []
+        self._session_hook_messages: List[UserMessage] = []
         self._session_start_time = time.time()
         self._session_end_sent = False
         self._exit_reason: Optional[str] = None
@@ -686,6 +687,19 @@ class RichUI:
             contexts.append(str(additional_context))
         return contexts
 
+    def _collect_hook_context_messages(self, hook_result: Any, hook_event: str) -> List[UserMessage]:
+        messages: List[UserMessage] = []
+        additional_context = getattr(hook_result, "additional_context", None)
+        if additional_context:
+            message = create_hook_additional_context_message(
+                str(additional_context),
+                hook_name=hook_event,
+                hook_event=hook_event,
+            )
+            if message is not None:
+                messages.append(message)
+        return messages
+
     def _display_hook_system_message(
         self, hook_result: Any, event: str, tool_name: Optional[str] = None
     ) -> None:
@@ -698,7 +712,13 @@ class RichUI:
         )
 
     def _set_session_hook_contexts(self, hook_result: Any) -> None:
-        self._session_hook_contexts = self._collect_hook_contexts(hook_result)
+        self._session_hook_messages = self._collect_hook_context_messages(
+            hook_result,
+            "SessionStart",
+        )
+        for message in self._session_hook_messages:
+            self.conversation_messages.append(message)
+            self._log_message(message)
         self._session_start_time = time.time()
         self._session_end_sent = False
 
@@ -1083,8 +1103,21 @@ class RichUI:
         """Render a conversation history in the console and seed prompt history."""
         if not messages:
             return
-        replay_messages = list(messages)
-        total_messages = len(replay_messages)
+
+        # Pre-filter messages: exclude hook_additional_context messages from UI display
+        # These messages are for AI context only, not for user display
+        def _should_display(msg: ConversationMessage) -> bool:
+            message_payload = getattr(msg, "message", None) or getattr(msg, "content", None)
+            metadata = getattr(message_payload, "metadata", None) or {}
+            return not metadata.get("hook_additional_context")
+
+        replay_messages = [msg for msg in messages if _should_display(msg)]
+        total_messages = len(messages)
+        displayable_count = len(replay_messages)
+
+        # Don't print anything if all messages were filtered out
+        if not replay_messages:
+            return
 
         if isinstance(max_messages, int):
             if max_messages == 0:
@@ -1093,12 +1126,12 @@ class RichUI:
                     "(history replay skipped).[/dim]"
                 )
                 return
-            if max_messages > 0 and total_messages > max_messages:
+            if max_messages > 0 and displayable_count > max_messages:
                 replay_messages = replay_messages[-max_messages:]
                 shown = len(replay_messages)
-                skipped = total_messages - shown
+                skipped = displayable_count - shown
                 self.console.print(
-                    f"\n[dim]Restored recent conversation ({shown}/{total_messages} messages; "
+                    f"\n[dim]Restored recent conversation ({shown}/{displayable_count} messages; "
                     f"skipped {skipped}).[/dim]"
                 )
             else:
@@ -1211,9 +1244,7 @@ class RichUI:
     def _print_reasoning(self, reasoning: Any) -> None:
         self._message_display.print_reasoning(reasoning)
 
-    async def _prepare_query_context(
-        self, user_input: str, hook_instructions: Optional[List[str]] = None
-    ) -> tuple[str, Dict[str, str]]:
+    async def _prepare_query_context(self, user_input: str) -> tuple[str, Dict[str, str]]:
         """Load MCP servers, skills, and build system prompt.
 
         Returns:
@@ -1226,7 +1257,10 @@ class RichUI:
         )
 
         if dynamic_tools and self.query_context:
-            merged_tools = merge_tools_with_dynamic(self.query_context.tools, dynamic_tools)
+            merged_tools = merge_tools_with_dynamic(
+                self.query_context.all_tools(),
+                dynamic_tools,
+            )
             if self.allowed_tools is not None:
                 merged_tools = filter_tools_by_names(merged_tools, self.allowed_tools)
             self.query_context.tools = merged_tools
@@ -1264,11 +1298,6 @@ class RichUI:
         memory_instructions = build_memory_instructions()
         if memory_instructions:
             additional_instructions.append(memory_instructions)
-        if self._session_hook_contexts:
-            additional_instructions.extend(self._session_hook_contexts)
-        if hook_instructions:
-            additional_instructions.extend([text for text in hook_instructions if text])
-
         # Build system prompt based on options:
         # - custom_system_prompt: replaces the default entirely
         # - append_system_prompt: appends to the default system prompt
@@ -1822,16 +1851,24 @@ class RichUI:
                     self.console.print(f"[red]{escape(str(reason))}[/red]")
                     return
                 self._display_hook_system_message(hook_result, "UserPromptSubmit")
-                hook_instructions = self._collect_hook_contexts(hook_result)
-
-                system_prompt, context = await self._prepare_query_context(
-                    user_input, hook_instructions
+                prompt_hook_messages = self._collect_hook_context_messages(
+                    hook_result,
+                    "UserPromptSubmit",
                 )
+
+                system_prompt, context = await self._prepare_query_context(user_input)
                 processed_input, user_message = self._build_user_message_from_input(user_input)
                 if user_message_metadata:
                     user_message.message.metadata.update(dict(user_message_metadata))
 
-                messages: List[ConversationMessage] = self.conversation_messages + [user_message]
+                for message in prompt_hook_messages:
+                    self._log_message(message)
+
+                messages: List[ConversationMessage] = [
+                    *self.conversation_messages,
+                    *prompt_hook_messages,
+                    user_message,
+                ]
                 self._log_message(user_message)
                 if append_prompt_history:
                     self._append_prompt_history(processed_input)

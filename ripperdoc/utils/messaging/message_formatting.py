@@ -42,6 +42,9 @@ def stringify_message_content(content: Any, *, include_tool_details: bool = Fals
                     parts.append(format_tool_use_detail(name, tool_input))
                 else:
                     parts.append(f"[Called {name}]")
+            elif block_type == "server_tool_use":
+                name = getattr(block, "name", "server_tool")
+                parts.append(f"[Server called {name}]")
             elif block_type == "tool_result":
                 if include_tool_details:
                     result_text = getattr(block, "text", None) or ""
@@ -49,6 +52,11 @@ def stringify_message_content(content: Any, *, include_tool_details: bool = Fals
                     parts.append(format_tool_result_detail(result_text, is_error))
                 else:
                     parts.append("[Tool result]")
+            elif block_type == "tool_search_tool_result":
+                parts.append("[Tool search result]")
+            elif block_type == "tool_reference":
+                tool_name = getattr(block, "tool_name", None) or getattr(block, "name", None) or "tool"
+                parts.append(f"[Tool reference: {tool_name}]")
         return "\n".join(parts)
     return str(content)
 

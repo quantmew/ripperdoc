@@ -16,12 +16,11 @@ from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.messaging.messages import (
     ProgressMessage,
     UserMessage,
+    create_hook_additional_context_message,
     create_hook_notice_message,
     create_progress_message,
     create_user_message,
 )
-
-from .context import _append_hook_context
 
 if TYPE_CHECKING:
     from ripperdoc.core.query.loop import ToolRegistry
@@ -232,7 +231,6 @@ async def _run_tool_use_generator(
     parsed_input: Any,
     sibling_ids: set[str],
     tool_context: ToolUseContext,
-    context: Dict[str, str],
 ) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
     """Execute a single tool_use and yield progress/results."""
     logger.debug(
@@ -339,11 +337,14 @@ async def _run_tool_use_generator(
         if post_failure_result is None:
             post_failure_result = HookResult([])
         if post_failure_result.additional_context:
-            _append_hook_context(
-                context,
-                f"PostToolUseFailure:{tool_name}",
-                post_failure_result.additional_context,
+            additional_context_message = create_hook_additional_context_message(
+                str(post_failure_result.additional_context),
+                hook_name=f"PostToolUseFailure:{tool_name}",
+                hook_event="PostToolUseFailure",
+                parent_tool_use_id=tool_use_id,
             )
+            if additional_context_message:
+                yield additional_context_message
         if post_failure_result.system_message:
             yield create_hook_notice_message(
                 str(post_failure_result.system_message),
@@ -417,7 +418,14 @@ async def _run_tool_use_generator(
         )
         yield result_msg
     if post_result.additional_context:
-        _append_hook_context(context, f"PostToolUse:{tool_name}", post_result.additional_context)
+        additional_context_message = create_hook_additional_context_message(
+            str(post_result.additional_context),
+            hook_name=f"PostToolUse:{tool_name}",
+            hook_event="PostToolUse",
+            parent_tool_use_id=tool_use_id,
+        )
+        if additional_context_message:
+            yield additional_context_message
     if post_result.system_message:
         yield create_hook_notice_message(
             str(post_result.system_message),

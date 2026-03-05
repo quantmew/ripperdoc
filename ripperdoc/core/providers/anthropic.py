@@ -148,27 +148,59 @@ def _content_blocks_from_stream_state(
             }
         )
 
-    # Add tool_use blocks
+    # Add tool_use / server_tool_use / tool_search_tool_result blocks
     for idx in sorted(collected_tool_calls.keys()):
         call = collected_tool_calls[idx]
-        name = call.get("name")
-        if not name:
-            continue
-        tool_use_id = call.get("id") or str(uuid4())
-        blocks.append(
-            {
-                "type": "tool_use",
-                "tool_use_id": tool_use_id,
+        block_type = str(call.get("type") or "tool_use")
+        if block_type in {"tool_use", "server_tool_use"}:
+            name = call.get("name")
+            if not name:
+                continue
+            tool_use_id = call.get("id") or str(uuid4())
+            block_payload: Dict[str, Any] = {
+                "type": block_type,
                 "name": name,
                 "input": call.get("input", {}),
             }
-        )
+            if block_type == "tool_use":
+                block_payload["tool_use_id"] = tool_use_id
+            else:
+                block_payload["id"] = tool_use_id
+            blocks.append(block_payload)
+            continue
+
+        if block_type == "tool_search_tool_result":
+            blocks.append(
+                {
+                    "type": "tool_search_tool_result",
+                    "tool_use_id": call.get("tool_use_id") or call.get("id") or "",
+                    "content": call.get("content") or {},
+                }
+            )
 
     return blocks
 
 
 def _content_blocks_from_response(response: Any) -> List[Dict[str, Any]]:
     """Normalize Anthropic response content to our internal block format."""
+    def _to_plain_json(value: Any) -> Any:
+        if value is None:
+            return None
+        if hasattr(value, "model_dump"):
+            try:
+                value = value.model_dump(mode="json")
+            except (TypeError, ValueError):
+                value = value.model_dump()
+        elif hasattr(value, "dict"):
+            value = value.dict()
+        if isinstance(value, list):
+            return [_to_plain_json(item) for item in value]
+        if isinstance(value, tuple):
+            return [_to_plain_json(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): _to_plain_json(item) for key, item in value.items()}
+        return value
+
     blocks: List[Dict[str, Any]] = []
     for block in getattr(response, "content", []) or []:
         btype = getattr(block, "type", None)
@@ -198,6 +230,33 @@ def _content_blocks_from_response(response: Any) -> List[Dict[str, Any]]:
                     "tool_use_id": getattr(block, "id", None) or str(uuid4()),
                     "name": getattr(block, "name", None),
                     "input": raw_input if isinstance(raw_input, dict) else {},
+                }
+            )
+        elif btype == "server_tool_use":
+            raw_input = getattr(block, "input", {}) or {}
+            blocks.append(
+                {
+                    "type": "server_tool_use",
+                    "id": getattr(block, "id", None) or str(uuid4()),
+                    "name": getattr(block, "name", None),
+                    "input": raw_input if isinstance(raw_input, dict) else {},
+                }
+            )
+        elif btype == "tool_search_tool_result":
+            blocks.append(
+                {
+                    "type": "tool_search_tool_result",
+                    "tool_use_id": getattr(block, "tool_use_id", None)
+                    or getattr(block, "id", None)
+                    or "",
+                    "content": _to_plain_json(getattr(block, "content", None)) or {},
+                }
+            )
+        elif btype == "tool_reference":
+            blocks.append(
+                {
+                    "type": "tool_reference",
+                    "tool_name": getattr(block, "tool_name", None),
                 }
             )
     return blocks
@@ -665,9 +724,10 @@ class AnthropicClient(ProviderClient):
                 current_block_index_ref[0] = index
                 current_block_type_ref[0] = block_type
 
-                if block_type == "tool_use":
+                if block_type in {"tool_use", "server_tool_use"}:
                     # Initialize tool call state
                     collected_tool_calls[index] = {
+                        "type": block_type,
                         "id": getattr(content_block, "id", None),
                         "name": getattr(content_block, "name", None),
                         "input_json": "",
@@ -680,6 +740,14 @@ class AnthropicClient(ProviderClient):
                             await progress_callback(f"[tool:{tool_name}]")
                         except (RuntimeError, ValueError, TypeError, OSError):
                             pass
+                elif block_type == "tool_search_tool_result":
+                    collected_tool_calls[index] = {
+                        "type": "tool_search_tool_result",
+                        "tool_use_id": getattr(content_block, "tool_use_id", None)
+                        or getattr(content_block, "id", None)
+                        or "",
+                        "content": getattr(content_block, "content", None) or {},
+                    }
 
         elif event_type == "content_block_delta":
             # Content delta within a block

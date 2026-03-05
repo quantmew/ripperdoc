@@ -50,7 +50,6 @@ def _looks_like_tool_name(
         return True
     if token == default_tool_name:
         return True
-    # Claude-style built-in tool names are typically capitalized.
     return bool(token) and token[0].isupper()
 
 

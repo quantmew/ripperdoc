@@ -120,7 +120,7 @@ class StdioProtocolHandler(
         self._session_started = False
         self._session_start_time: float | None = None
         self._session_end_sent = False
-        self._session_hook_contexts: list[str] = []
+        self._session_hook_messages: list[Any] = []
         self._session_history: SessionHistory | None = None
         self._query_in_progress: bool = False
         self._task_notification_task: asyncio.Task[None] | None = None

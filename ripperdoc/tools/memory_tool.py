@@ -1,4 +1,4 @@
-"""Claude-style memory tool for persistent cross-session notes."""
+"""Memory tool for persistent cross-session notes."""
 
 from __future__ import annotations
 

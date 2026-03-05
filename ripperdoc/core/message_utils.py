@@ -449,14 +449,34 @@ def normalize_tool_args(raw_args: Any) -> Dict[str, Any]:
     return {}
 
 
+def format_context_as_system_reminder(context: Dict[str, str]) -> str:
+    """Format context dict as a system-reminder wrapped string."""
+    if not context:
+        return ""
+
+    # Format each context entry as "# key\nvalue"
+    context_lines = []
+    for key, value in context.items():
+        context_lines.append(f"# {key}\n{value}")
+    context_content = "\n".join(context_lines)
+
+    return f"""<system-reminder>
+As you answer the user's questions, you can use the following context:
+{context_content}
+
+      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
+</system-reminder>"""
+
+
 def build_full_system_prompt(
     system_prompt: str, context: Dict[str, str], tool_mode: str, tools: List[Tool[Any, Any]]
 ) -> str:
     """Compose the final system prompt including context and tool hints."""
     full_prompt = system_prompt
     if context:
-        context_str = "\n".join(f"{k}: {v}" for k, v in context.items())
-        full_prompt = f"{system_prompt}\n\nContext:\n{context_str}"
+        context_reminder = format_context_as_system_reminder(context)
+        if context_reminder:
+            full_prompt = f"{system_prompt}\n\n{context_reminder}"
     if tool_mode == "text":
         tool_hint = _tool_prompt_for_text_mode(tools)
         if tool_hint:
@@ -520,6 +540,24 @@ async def build_openai_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[st
 
 def content_blocks_from_anthropic_response(response: Any, tool_mode: str) -> List[Dict[str, Any]]:
     """Normalize Anthropic response content to our internal block format."""
+    def _to_plain_json(value: Any) -> Any:
+        if value is None:
+            return None
+        if hasattr(value, "model_dump"):
+            try:
+                value = value.model_dump(mode="json")
+            except (TypeError, ValueError):
+                value = value.model_dump()
+        elif hasattr(value, "dict"):
+            value = value.dict()
+        if isinstance(value, list):
+            return [_to_plain_json(item) for item in value]
+        if isinstance(value, tuple):
+            return [_to_plain_json(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): _to_plain_json(item) for key, item in value.items()}
+        return value
+
     blocks: List[Dict[str, Any]] = []
     for block in getattr(response, "content", []) or []:
         btype = getattr(block, "type", None)
@@ -550,6 +588,33 @@ def content_blocks_from_anthropic_response(response: Any, tool_mode: str) -> Lis
                     "tool_use_id": getattr(block, "id", None) or str(uuid4()),
                     "name": getattr(block, "name", None),
                     "input": normalize_tool_args(raw_input),
+                }
+            )
+        elif btype == "server_tool_use":
+            raw_input = getattr(block, "input", {}) or {}
+            blocks.append(
+                {
+                    "type": "server_tool_use",
+                    "id": getattr(block, "id", None) or str(uuid4()),
+                    "name": getattr(block, "name", None),
+                    "input": normalize_tool_args(raw_input),
+                }
+            )
+        elif btype == "tool_search_tool_result":
+            blocks.append(
+                {
+                    "type": "tool_search_tool_result",
+                    "tool_use_id": getattr(block, "tool_use_id", None)
+                    or getattr(block, "id", None)
+                    or "",
+                    "content": _to_plain_json(getattr(block, "content", None)) or {},
+                }
+            )
+        elif btype == "tool_reference":
+            blocks.append(
+                {
+                    "type": "tool_reference",
+                    "tool_name": getattr(block, "tool_name", None),
                 }
             )
 

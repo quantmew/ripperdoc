@@ -21,6 +21,10 @@ from ripperdoc.core.tool import (
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.file_watch import record_snapshot
 from ripperdoc.utils.filesystem.path_ignore import check_path_for_tool
+from ripperdoc.utils.messaging.messages import (
+    format_empty_file_warning,
+    format_offset_exceeded_warning,
+)
 
 logger = get_logger()
 
@@ -287,16 +291,29 @@ and limit to read only a portion of the file."""
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: FileReadToolOutput) -> str:
-        """Format output for the AI."""
+        """Format output for the AI.
+
+
+        Handle edge cases for empty content and offset exceeding file length.
+        Returns system-reminder formatted warnings matching original implementation.
+        """
+        # Case 1: Empty file (content is empty, line_count is 0)
+        if output.content == "" and output.line_count == 0:
+            return format_empty_file_warning()
+
+
+        # Case 2: Offset exceeds file length (content is empty but offset > 0 or line_count > 0)
+        if output.content == "" and output.offset > 0 and output.line_count > 0:
+            return format_offset_exceeded_warning(output.offset, output.line_count)
+
+        # Normal case: render with line numbers
         lines = output.content.split("\n")
         numbered_lines = []
-
         for i, line in enumerate(lines, start=output.offset + 1):
             # Truncate very long lines
             if len(line) > 2000:
                 line = line[:2000] + "... [truncated]"
             numbered_lines.append(f"{i:6d}\t{line}")
-
         return "\n".join(numbered_lines)
 
     def render_tool_use_message(self, input_data: FileReadToolInput, verbose: bool = False) -> str:

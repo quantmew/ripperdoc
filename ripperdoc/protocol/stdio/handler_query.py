@@ -26,6 +26,7 @@ from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
 from ripperdoc.utils.messaging.messages import (
     create_assistant_message,
+    create_hook_additional_context_message,
     create_hook_notice_payload,
     create_user_message,
     is_hook_notice_payload,
@@ -225,12 +226,16 @@ class StdioQueryMixin:
 
         self._conversation_messages = conversation_messages
 
-        additional_instructions, hook_notices, blocked_reason = await self._collect_prepare_inputs(
+        hook_context_messages, hook_notices, blocked_reason = await self._collect_prepare_inputs(
             prompt
         )
         if blocked_reason:
             await self._fail_query_request(request_id, state, str(blocked_reason))
             return None
+        if hook_context_messages:
+            conversation_messages = [*hook_context_messages, *conversation_messages]
+            for hook_message in hook_context_messages:
+                session_history.append(hook_message)
 
         servers = await load_mcp_servers_async(self._project_path)
         mcp_instructions = format_mcp_instructions(servers)
@@ -238,7 +243,7 @@ class StdioQueryMixin:
             self._query_context.tools if self._query_context else [],
             prompt,
             mcp_instructions,
-            additional_instructions,
+            [],
         )
 
         await self._emit_hook_notices(hook_notices)
@@ -454,17 +459,17 @@ class StdioQueryMixin:
     async def _collect_prepare_inputs(
         self,
         prompt: str,
-    ) -> tuple[list[str], list[dict[str, Any]], str | None]:
-        """Collect hook notices and additional system instructions before execution."""
-        additional_instructions: list[str] = []
+    ) -> tuple[list[Any], list[dict[str, Any]], str | None]:
+        """Collect hook notices and model-visible hook context messages before execution."""
+        hook_context_messages: list[Any] = []
         hook_notices: list[dict[str, Any]] = []
         blocked_reason: str | None = None
 
         queue = self._query_context.pending_message_queue if self._query_context else None
         hook_scopes = self._query_context.hook_scopes if self._query_context else []
         with bind_pending_message_queue(queue), bind_hook_scopes(hook_scopes):
-            if self._session_hook_contexts:
-                additional_instructions.extend(self._session_hook_contexts)
+            if self._session_hook_messages:
+                hook_context_messages.extend(self._session_hook_messages)
 
             try:
                 async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
@@ -475,7 +480,7 @@ class StdioQueryMixin:
                             if hasattr(prompt_hook_result, "block_reason")
                             else "Prompt blocked by hook."
                         )
-                        return additional_instructions, hook_notices, blocked_reason
+                        return hook_context_messages, hook_notices, blocked_reason
                     if (
                         hasattr(prompt_hook_result, "system_message")
                         and prompt_hook_result.system_message
@@ -490,13 +495,19 @@ class StdioQueryMixin:
                         hasattr(prompt_hook_result, "additional_context")
                         and prompt_hook_result.additional_context
                     ):
-                        additional_instructions.append(str(prompt_hook_result.additional_context))
+                        message = create_hook_additional_context_message(
+                            str(prompt_hook_result.additional_context),
+                            hook_name="UserPromptSubmit",
+                            hook_event="UserPromptSubmit",
+                        )
+                        if message is not None:
+                            hook_context_messages.append(message)
             except asyncio.TimeoutError:
                 logger.warning(f"[stdio] Prompt submit hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s")
             except Exception as e:
                 logger.warning(f"[stdio] Prompt submit hook failed: {e}")
 
-        return additional_instructions, hook_notices, blocked_reason
+        return hook_context_messages, hook_notices, blocked_reason
 
     async def _emit_hook_notices(self, notices: list[dict[str, Any]]) -> None:
         """Stream prepared hook notices to SDK."""

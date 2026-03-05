@@ -37,7 +37,11 @@ from ripperdoc.utils.mcp import (
     shutdown_mcp_runtime,
 )
 from ripperdoc.utils.memory import build_memory_instructions
-from ripperdoc.utils.messaging.messages import create_user_message
+from ripperdoc.utils.messaging.messages import (
+    UserMessage,
+    create_hook_additional_context_message,
+    create_user_message,
+)
 from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
 from ripperdoc.utils.collaboration.worktree import (
@@ -133,13 +137,21 @@ async def _run_prompt_submission_hooks(
     prompt: str,
     query_context: QueryContext,
     additional_instructions: List[str],
-) -> bool:
+) -> tuple[bool, List[UserMessage]]:
+    hook_context_messages: List[UserMessage] = []
     with bind_pending_message_queue(query_context.pending_message_queue):
         session_start_result = await hook_manager.run_session_start_async("startup")
         _print_hook_system_message(session_start_result, "SessionStart")
         session_hook_contexts = _collect_hook_contexts(session_start_result)
         if session_hook_contexts:
-            additional_instructions.extend(session_hook_contexts)
+            for text in session_hook_contexts:
+                msg = create_hook_additional_context_message(
+                    text,
+                    hook_name="SessionStart",
+                    hook_event="SessionStart",
+                )
+                if msg:
+                    hook_context_messages.append(msg)
 
         prompt_hook_result = await hook_manager.run_user_prompt_submit_async(prompt)
         if prompt_hook_result.should_block or not prompt_hook_result.should_continue:
@@ -149,12 +161,19 @@ async def _run_prompt_submission_hooks(
                 or "Prompt blocked by hook."
             )
             console.print(f"[red]{escape(str(reason))}[/red]")
-            return False
+            return False, hook_context_messages
         _print_hook_system_message(prompt_hook_result, "UserPromptSubmit")
         prompt_hook_contexts = _collect_hook_contexts(prompt_hook_result)
         if prompt_hook_contexts:
-            additional_instructions.extend(prompt_hook_contexts)
-    return True
+            for text in prompt_hook_contexts:
+                msg = create_hook_additional_context_message(
+                    text,
+                    hook_name="UserPromptSubmit",
+                    hook_event="UserPromptSubmit",
+                )
+                if msg:
+                    hook_context_messages.append(msg)
+    return True, hook_context_messages
 
 
 def _build_effective_system_prompt(
@@ -379,7 +398,6 @@ async def run_query(
     )
     hook_manager.set_transcript_path(str(session_history.path))
     messages: List[Any] = [create_user_message(prompt)]
-    session_history.append(messages[0])
 
     resolved_model = _resolve_model_pointer_with_fallback(
         model,
@@ -409,13 +427,19 @@ async def run_query(
             query_context=query_context,
             disable_skills=disable_skills,
         )
-        should_continue = await _run_prompt_submission_hooks(
+        should_continue, hook_context_messages = await _run_prompt_submission_hooks(
             prompt=prompt,
             query_context=query_context,
             additional_instructions=additional_instructions,
         )
         if not should_continue:
+            for message in messages:
+                session_history.append(message)
             return
+        if hook_context_messages:
+            messages = [*hook_context_messages, *messages]
+        for message in messages:
+            session_history.append(message)
 
         system_prompt = _build_effective_system_prompt(
             custom_system_prompt=custom_system_prompt,

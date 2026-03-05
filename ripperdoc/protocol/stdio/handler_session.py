@@ -419,7 +419,9 @@ class StdioSessionMixin:
                 try:
                     async with asyncio_timeout(STDIO_HOOK_TIMEOUT_SEC):
                         session_start_result = await hook_manager.run_session_start_async("startup")
-                    self._session_hook_contexts = self._collect_hook_contexts(session_start_result)
+                    self._session_hook_messages = self._collect_hook_context_messages(
+                        session_start_result, "SessionStart"
+                    )
                 except asyncio.TimeoutError:
                     logger.warning(
                         f"[stdio] Session start hook timed out after {STDIO_HOOK_TIMEOUT_SEC}s"
@@ -473,7 +475,7 @@ class StdioSessionMixin:
                 tools,
                 "",  # Will be set per query
                 mcp_instructions,
-                self._session_hook_contexts,
+                None,
             )
 
             # Apply permission mode to runtime state (checker + query context)

@@ -1,5 +1,3 @@
-"""Compatibility tests for Claude-style `type=user` stdio input."""
-
 from __future__ import annotations
 
 import asyncio
