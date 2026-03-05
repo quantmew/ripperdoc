@@ -133,7 +133,9 @@ class ToolRegistry:
 
 
 def _apply_skill_context_updates(
-    tool_results: List[UserMessage], query_context: "QueryContext"
+    tool_results: List[UserMessage],
+    query_context: "QueryContext",
+    shared_context: Optional[Dict[str, str]] = None,
 ) -> None:
     """Update query context based on Skill tool outputs."""
     for message in tool_results:
@@ -181,11 +183,61 @@ def _apply_skill_context_updates(
             )
             query_context.max_thinking_tokens = parsed_max
 
+        execution_context = (
+            data.get("context")
+            or data.get("execution_context")
+            or data.get("executionContext")
+        )
+        execution_context_hint: Optional[str] = None
+        if isinstance(execution_context, str) and execution_context.strip():
+            execution_context_hint = execution_context.strip()
+        query_context.skill_execution_context_hint = execution_context_hint
+
+        agent_hint = data.get("agent")
+        normalized_agent_hint: Optional[str] = None
+        if isinstance(agent_hint, str) and agent_hint.strip():
+            normalized_agent_hint = agent_hint.strip()
+        query_context.skill_agent_hint = normalized_agent_hint
+
+        base_dir = data.get("base_dir") or data.get("baseDir")
+        raw_paths = data.get("paths")
+        resolved_paths: List[str] = []
+        if isinstance(raw_paths, list):
+            for raw in raw_paths:
+                if not isinstance(raw, str):
+                    continue
+                candidate = raw.strip()
+                if not candidate:
+                    continue
+                try:
+                    if Path(candidate).is_absolute():
+                        resolved = str(Path(candidate).resolve())
+                    elif isinstance(base_dir, str) and base_dir.strip():
+                        resolved = str((Path(base_dir).expanduser().resolve() / candidate).resolve())
+                    else:
+                        resolved = candidate
+                except (OSError, RuntimeError, ValueError):
+                    resolved = candidate
+                if resolved not in resolved_paths:
+                    resolved_paths.append(resolved)
+        query_context.skill_paths_hint = resolved_paths
+
         hooks_payload = data.get("hooks")
         if hooks_payload:
             hooks_config = parse_hooks_config(hooks_payload, source=f"skill:{skill_name}")
             if hooks_config.hooks:
                 query_context.add_hook_scope(f"skill:{skill_name}", hooks_config)
+
+        if shared_context is not None:
+            hint_lines: List[str] = []
+            if execution_context_hint:
+                hint_lines.append(f"context={execution_context_hint}")
+            if normalized_agent_hint:
+                hint_lines.append(f"agent={normalized_agent_hint}")
+            if resolved_paths:
+                hint_lines.append(f"paths={', '.join(resolved_paths)}")
+            if hint_lines:
+                shared_context[f"Skill:{skill_name}:Execution"] = "\n".join(hint_lines)
 
 
 def _append_hook_context(context: Dict[str, str], label: str, payload: Optional[str]) -> None:
@@ -238,6 +290,9 @@ class QueryContext:
         self.team_name = team_name
         self.teammate_name = teammate_name
         self.working_directory = working_directory
+        self.skill_execution_context_hint: Optional[str] = None
+        self.skill_agent_hint: Optional[str] = None
+        self.skill_paths_hint: List[str] = []
         self.abort_controller = asyncio.Event()
         self.pending_message_queue: PendingMessageQueue = (
             pending_message_queue if pending_message_queue is not None else PendingMessageQueue()

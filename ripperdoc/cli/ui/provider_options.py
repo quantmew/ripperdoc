@@ -195,8 +195,17 @@ KNOWN_PROVIDERS = ProviderRegistry(
                 "openai/gpt-5.3-codex",
                 "anthropic/claude-sonnet-4.6",
                 "anthropic/claude-opus-4.6",
+                "anthropic/claude-opus-4.5",
+                "anthropic/claude-sonnet-4.5",
+                "anthropic/claude-haiku-4.5",
                 "google/gemini-3.1-pro-preview",
+                "google/gemini-3.1-flash-lite-preview",
+                "google/gemini-3-flash-preview",
                 "meta-llama/llama-3.1-70b-instruct",
+                "minimax/minimax-m2.5",
+                "moonshotai/kimi-k2.5",
+                "deepseek/deepseek-v3.2",
+                "x-ai/grok-4.1-fast",
             ),
             default_api_base="https://openrouter.ai/api/v1",
         ),
@@ -259,8 +268,25 @@ KNOWN_PROVIDERS = ProviderRegistry(
         ProviderOption(
             key="volcengine",
             protocol=ProtocolType.OPENAI_COMPATIBLE,
-            default_model="doubao-pro-32k",
+            default_model="doubao-seed-2-0-pro-260215",
             model_suggestions=(
+                # Doubao Seed 2.0 series (latest)
+                "doubao-seed-2-0-pro-260215",
+                "doubao-seed-2-0-lite-260215",
+                "doubao-seed-2-0-mini-260215",
+                "doubao-seed-2-0-code-preview-260215",
+                # Doubao Seed 1.8 series
+                "doubao-seed-1-8-251228",
+                # Doubao Seed 1.6 series
+                "doubao-seed-1-6-lite-251015",
+                "doubao-seed-1-6-flash-250828",
+                "doubao-seed-1-6-vision-250815",
+                "doubao-seed-1-6-251015",
+                "doubao-seed-1-6-250615",
+                # GLM series
+                "glm-4-7-251222",
+                # Legacy Doubao Seed models
+                "doubao-seed-code-preview-251028",
                 # Doubao Pro series
                 "doubao-pro-32k",
                 "doubao-pro-256k",
@@ -286,6 +312,12 @@ KNOWN_PROVIDERS = ProviderRegistry(
                 "DeepSeek-R1-Distill-Qwen-7B",
                 # Vision series
                 "Doubao-vision-lite-32k",
+                # Deprecated models (for reference)
+                "doubao-seed-1-6-flash-250715",
+                "doubao-seed-1-6-thinking-250615",
+                "doubao-1-5-thinking-pro-250415",
+                "doubao-1-5-thinking-pro-m-250428",
+                "doubao-1-5-vision-pro-250328",
             ),
             default_api_base="https://ark.cn-beijing.volces.com/api/v3",
         ),
@@ -300,6 +332,44 @@ KNOWN_PROVIDERS = ProviderRegistry(
                 "qwen-coder-plus",
             ),
             default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
+        ProviderOption(
+            key="aliyun-coding",
+            protocol=ProtocolType.ANTHROPIC,
+            default_model="qwen3.5-plus",
+            model_suggestions=(
+                # 千问系列
+                "qwen3.5-plus",
+                "qwen3-max-2026-01-23",
+                "qwen3-coder-next",
+                "qwen3-coder-plus",
+                # 智谱系列
+                "glm-5",
+                "glm-4.7",
+                # Kimi 系列
+                "kimi-k2.5",
+                # MiniMax 系列
+                "MiniMax-M2.5",
+            ),
+            default_api_base="https://coding.dashscope.aliyuncs.com/apps/anthropic",
+            description="Aliyun Coding Plan (Anthropic Protocol)",
+        ),
+        ProviderOption(
+            key="stepfun",
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            default_model="step-2-mini",
+            model_suggestions=(
+                # Step-2 系列 (新一代 MoE 架构)
+                "step-2-mini",
+                "step-2-16k",
+                "step-2-16k-exp",
+                # Step-1 系列 (经典架构)
+                "step-1-8k",
+                "step-1-32k",
+                "step-1-256k",
+            ),
+            default_api_base="https://api.stepfun.com/v1",
+            description="StepFun (OpenAI Protocol)",
         ),
         ProviderOption(
             key="minimax",
@@ -335,6 +405,34 @@ KNOWN_PROVIDERS = ProviderRegistry(
                 "glm-4-flash",
             ),
             default_api_base="https://api.z.ai/api/paas/v4",
+        ),
+        # === NVIDIA ===
+        ProviderOption(
+            key="nvidia",
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            default_model="qwen/qwen3.5-397b-a17b",
+            model_suggestions=(
+                # Qwen
+                "qwen/qwen3.5-397b-a17b",
+                "qwen/qwen3-next-80b-a3b-instruct",
+                "qwen/qwen3-coder-480b-a35b-instruct",
+                # Z.ai
+                "z-ai/glm5",
+                # Minimax
+                "minimaxai/minimax-m2.1",
+                # Stepfun
+                "stepfun-ai/step-3.5-flash",
+                # Mistral AI
+                "mistralai/devstral-2-123b-instruct-2512",
+                "mistralai/mistral-large-3-675b-instruct-2512",
+                # DeepSeek
+                "deepseek-ai/deepseek-v3.1-terminus",
+                # Moonshot AI
+                "moonshotai/kimi-k2-instruct-0905",
+                "moonshotai/kimi-k2-instruct",
+            ),
+            default_api_base="https://integrate.api.nvidia.com/v1",
+            description="NVIDIA (OpenAI Protocol)",
         ),
         # === Western AI Companies ===
         ProviderOption(

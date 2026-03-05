@@ -409,6 +409,16 @@ class _PreparedToolCalls:
 
 
 @dataclass
+class _SkillForkRequest:
+    """Auto-fork execution request derived from Skill tool outputs."""
+
+    skill_name: str
+    subagent_type: str
+    prompt: str
+    model: Optional[str] = None
+
+
+@dataclass
 class _IterationPlan:
     """Resolved model/prompt state for one query iteration."""
 
@@ -423,6 +433,104 @@ class _AssistantWaitState:
 
     assistant_message: Optional[AssistantMessage] = None
     aborted: bool = False
+
+
+def _extract_latest_user_prompt_text(
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+) -> str:
+    """Best-effort extraction of the latest plain user prompt text."""
+    for message in reversed(messages):
+        if not isinstance(message, UserMessage):
+            continue
+        content = getattr(message.message, "content", None)
+        if isinstance(content, str):
+            text = content.strip()
+            if text:
+                return text
+            continue
+        if not isinstance(content, list):
+            continue
+        text_blocks: List[str] = []
+        for block in content:
+            block_type = getattr(block, "type", None)
+            if block_type != "text":
+                continue
+            text = (getattr(block, "text", None) or "").strip()
+            if text:
+                text_blocks.append(text)
+        if text_blocks:
+            return "\n".join(text_blocks)
+    return ""
+
+
+def _collect_skill_fork_requests(
+    tool_results: List[UserMessage],
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+) -> List[_SkillForkRequest]:
+    """Build Task tool requests for skills that require forked execution."""
+    latest_user_prompt = _extract_latest_user_prompt_text(messages)
+    requests: List[_SkillForkRequest] = []
+
+    for message in tool_results:
+        data = getattr(message, "tool_use_result", None)
+        if not isinstance(data, dict):
+            continue
+        skill_name = (
+            data.get("skill")
+            or data.get("command_name")
+            or data.get("commandName")
+            or data.get("command")
+        )
+        if not isinstance(skill_name, str) or not skill_name.strip():
+            continue
+
+        execution_context = (
+            data.get("context")
+            or data.get("execution_context")
+            or data.get("executionContext")
+            or ""
+        )
+        if not isinstance(execution_context, str) or execution_context.strip().lower() != "fork":
+            continue
+
+        subagent_type = data.get("agent")
+        if not isinstance(subagent_type, str) or not subagent_type.strip():
+            continue
+
+        skill_content = data.get("content")
+        if not isinstance(skill_content, str) or not skill_content.strip():
+            continue
+
+        path_lines: List[str] = []
+        raw_paths = data.get("paths")
+        if isinstance(raw_paths, list):
+            for raw in raw_paths:
+                if isinstance(raw, str) and raw.strip():
+                    path_lines.append(raw.strip())
+
+        prompt_parts = [
+            (
+                f"You are executing skill '{skill_name.strip()}' in forked mode.\n"
+                "Apply the skill instructions to complete the user's task autonomously."
+            )
+        ]
+        if latest_user_prompt:
+            prompt_parts.append(f"Original user request:\n{latest_user_prompt}")
+        if path_lines:
+            prompt_parts.append("Preferred path scope:\n- " + "\n- ".join(path_lines))
+        prompt_parts.append(f"Skill instructions:\n{skill_content.strip()}")
+
+        model_hint = data.get("model")
+        model = model_hint.strip() if isinstance(model_hint, str) and model_hint.strip() else None
+        requests.append(
+            _SkillForkRequest(
+                skill_name=skill_name.strip(),
+                subagent_type=subagent_type.strip(),
+                prompt="\n\n".join(prompt_parts),
+                model=model,
+            )
+        )
+    return requests
 
 
 def _is_mcp_tool(tool: Tool[Any, Any]) -> bool:
@@ -1026,7 +1134,61 @@ async def _process_iteration_assistant_message(
         async for message in _run_tools_concurrently(prepared.prepared_calls, prepared.tool_results):
             yield message
 
-    _apply_skill_context_updates(prepared.tool_results, query_context)
+    _apply_skill_context_updates(prepared.tool_results, query_context, context)
+
+    auto_fork_requests = _collect_skill_fork_requests(prepared.tool_results, messages)
+    if auto_fork_requests:
+        task_tool = query_context.tool_registry.get("Task")
+        if task_tool is None:
+            logger.warning(
+                "[query] Skill requested fork execution but Task tool is unavailable",
+                extra={"count": len(auto_fork_requests)},
+            )
+        else:
+            auto_blocks: List[MessageContent] = []
+            batch_id = int(time.time() * 1000)
+            for idx, req in enumerate(auto_fork_requests):
+                task_input: Dict[str, Any] = {
+                    "description": f"Run skill {req.skill_name}"[:64],
+                    "prompt": req.prompt,
+                    "subagent_type": req.subagent_type,
+                }
+                if req.model:
+                    task_input["model"] = req.model
+                auto_blocks.append(
+                    MessageContent(
+                        type="tool_use",
+                        tool_use_id=f"auto-skill-fork-{batch_id}-{idx}",
+                        name="Task",
+                        input=task_input,
+                    )
+                )
+
+            auto_prepared = _PreparedToolCalls()
+            async for msg in _prepare_iteration_tool_calls(
+                tool_use_blocks=auto_blocks,
+                messages=messages,
+                context=context,
+                query_context=query_context,
+                can_use_tool_fn=can_use_tool_fn,
+                out=auto_prepared,
+            ):
+                yield msg
+
+            if auto_prepared.permission_denied:
+                result.tool_results = prepared.tool_results + auto_prepared.tool_results
+                result.should_stop = True
+                return
+
+            if auto_prepared.prepared_calls:
+                async for message in _run_tools_concurrently(
+                    auto_prepared.prepared_calls,
+                    auto_prepared.tool_results,
+                ):
+                    yield message
+
+            prepared.tool_results.extend(auto_prepared.tool_results)
+            _apply_skill_context_updates(auto_prepared.tool_results, query_context, context)
 
     if query_context.abort_controller.is_set():
         yield create_assistant_message(INTERRUPT_MESSAGE_FOR_TOOL_USE, model=model_name)

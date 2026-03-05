@@ -6,10 +6,18 @@ metadata (name + description) should be added to the system prompt up front;
 the full content is loaded on demand via the Skill tool. Optional frontmatter
 fields include:
 - allowed-tools: Comma-separated list of tools that are allowed/preferred.
+- argument-hint: Optional hint for arguments accepted by the skill.
+- arguments: Optional list of named arguments used by the skill template.
+- when-to-use: Optional activation guidance text.
+- version: Optional skill version string.
+- user-invocable: If false, hide this skill from the summary list.
 - model: Model pointer hint for this skill.
 - max-thinking-tokens: Reasoning budget hint for this skill.
 - disable-model-invocation: If true, block the Skill tool from loading this
   skill.
+- context: Optional execution context hint (`fork`).
+- agent: Optional preferred subagent type for forked execution.
+- paths: Optional path scope list (comma/newline-separated string or YAML list).
 - type: Skill kind (defaults to "prompt").
 - hooks: Hook definitions (same format as hooks.json) scoped to this skill.
 """
@@ -36,7 +44,7 @@ logger = get_logger()
 SKILL_DIR_NAME = "skills"
 SKILL_FILE_NAME = "SKILL.md"
 SKILL_STATE_FILE_NAME = ".skills_state.json"
-_SKILL_NAME_RE = re.compile(r"^[a-z0-9-]{1,64}$")
+_SKILL_NAME_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 
 class SkillLocation(str, Enum):
@@ -48,21 +56,37 @@ class SkillLocation(str, Enum):
     OTHER = "other"
 
 
+class SkillExecutionContext(str, Enum):
+    """Execution context hints parsed from skill frontmatter."""
+
+    FORK = "fork"
+
+
 @dataclass
 class SkillDefinition:
     """Parsed representation of a skill."""
 
     name: str
+    display_name: Optional[str]
     description: str
+    has_user_specified_description: bool
     content: str
     path: Path
     base_dir: Path
     location: SkillLocation
     allowed_tools: List[str]
+    argument_hint: Optional[str] = None
+    argument_names: List[str] = field(default_factory=list)
+    when_to_use: Optional[str] = None
+    version: Optional[str] = None
+    user_invocable: bool = True
     model: Optional[str] = None
     max_thinking_tokens: Optional[int] = None
     skill_type: str = "prompt"
     disable_model_invocation: bool = False
+    execution_context: Optional[SkillExecutionContext] = None
+    agent: Optional[str] = None
+    paths: List[str] = field(default_factory=list)
     hooks: HooksConfig = field(default_factory=HooksConfig)
     plugin_name: Optional[str] = None
 
@@ -123,6 +147,69 @@ def _normalize_allowed_tools(value: object) -> List[str]:
     return []
 
 
+def _normalize_optional_string(value: object) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _derive_skill_description(body: str, fallback_name: str) -> str:
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:160]
+    return f"Skill: {fallback_name}"
+
+
+def _normalize_argument_names(value: object) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        tokens = [item.strip() for item in re.split(r"[, \n]+", value) if item.strip()]
+        return tokens
+    if isinstance(value, Iterable):
+        names: List[str] = []
+        for item in value:
+            if isinstance(item, str):
+                normalized = item.strip()
+                if normalized:
+                    names.append(normalized)
+        return names
+    return []
+
+
+def _normalize_paths(value: object) -> List[str]:
+    if value is None:
+        return []
+    raw_paths: List[str] = []
+    if isinstance(value, str):
+        raw_paths = [item.strip() for item in re.split(r"[\n,]+", value) if item.strip()]
+    elif isinstance(value, Iterable):
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                raw_paths.append(item.strip())
+    processed = [
+        path[:-3] if path.endswith("/**") else path
+        for path in raw_paths
+        if path and path != "**"
+    ]
+    if not processed:
+        return []
+    if all(path == "**" for path in processed):
+        return []
+    return processed
+
+
+def _normalize_execution_context(value: object) -> Optional[SkillExecutionContext]:
+    normalized = _normalize_optional_string(value)
+    if not normalized:
+        return None
+    if normalized.lower() == SkillExecutionContext.FORK.value:
+        return SkillExecutionContext.FORK
+    return None
+
+
 def _load_skill_file(
     path: Path,
     location: SkillLocation,
@@ -149,24 +236,55 @@ def _load_skill_file(
 
     raw_name = frontmatter.get("name")
     raw_description = frontmatter.get("description")
-    resolved_name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
-    if resolved_name is None and default_name:
-        resolved_name = default_name.strip()
+    resolved_name = default_name.strip() if isinstance(default_name, str) and default_name.strip() else None
+    display_name = _normalize_optional_string(raw_name)
+    if resolved_name is None:
+        slug_from_name = _normalize_optional_string(raw_name)
+        if slug_from_name and _SKILL_NAME_RE.match(slug_from_name):
+            resolved_name = slug_from_name
     if not resolved_name:
-        return None, SkillLoadError(path=path, reason='Missing required "name" field')
+        return None, SkillLoadError(
+            path=path,
+            reason='Missing skill name. Use a valid directory name or provide "name" slug in frontmatter.',
+        )
     if not _SKILL_NAME_RE.match(resolved_name):
         return None, SkillLoadError(
             path=path,
-            reason='Invalid "name" format. Use lowercase letters, numbers, and hyphens only (max 64 chars).',
+            reason='Invalid "name" format. Use lowercase letters, numbers, hyphens, and underscores only (max 64 chars).',
         )
-    if not isinstance(raw_description, str) or not raw_description.strip():
-        return None, SkillLoadError(path=path, reason='Missing required "description" field')
+    has_user_specified_description = bool(
+        isinstance(raw_description, str) and raw_description.strip()
+    )
+    if has_user_specified_description:
+        description = raw_description.strip()
+    else:
+        description = _derive_skill_description(body, resolved_name)
 
     allowed_tools = _normalize_allowed_tools(
         frontmatter.get("allowed-tools") or frontmatter.get("allowed_tools")
     )
+    argument_hint = _normalize_optional_string(
+        frontmatter.get("argument-hint") or frontmatter.get("argument_hint")
+    )
+    argument_names = _normalize_argument_names(
+        frontmatter.get("arguments")
+        or frontmatter.get("argument-names")
+        or frontmatter.get("argument_names")
+    )
+    when_to_use = _normalize_optional_string(
+        frontmatter.get("when-to-use") or frontmatter.get("when_to_use")
+    )
+    version = _normalize_optional_string(frontmatter.get("version"))
+    user_invocable = True
+    if "user-invocable" in frontmatter or "user_invocable" in frontmatter:
+        user_invocable = parse_boolish(
+            frontmatter.get("user-invocable") or frontmatter.get("user_invocable")
+        )
+
     model_value = frontmatter.get("model")
-    model = model_value if isinstance(model_value, str) and model_value.strip() else None
+    model = _normalize_optional_string(model_value)
+    if model and model.lower() == "inherit":
+        model = None
     max_thinking_tokens = parse_optional_int(
         frontmatter.get("max-thinking-tokens") or frontmatter.get("max_thinking_tokens")
     )
@@ -180,21 +298,34 @@ def _load_skill_file(
     disable_model_invocation = parse_boolish(
         frontmatter.get("disable-model-invocation") or frontmatter.get("disable_model_invocation")
     )
+    execution_context = _normalize_execution_context(frontmatter.get("context"))
+    agent = _normalize_optional_string(frontmatter.get("agent"))
+    paths = _normalize_paths(frontmatter.get("paths"))
     hooks = parse_hooks_config(frontmatter.get("hooks"), source=f"skill:{resolved_name}")
     full_name = f"{namespace_prefix}:{resolved_name}" if namespace_prefix else resolved_name
 
     skill = SkillDefinition(
         name=full_name,
-        description=raw_description.strip(),
+        display_name=display_name,
+        description=description,
+        has_user_specified_description=has_user_specified_description,
         content=body.strip(),
         path=path,
         base_dir=path.parent,
         location=location,
         allowed_tools=allowed_tools,
+        argument_hint=argument_hint,
+        argument_names=argument_names,
+        when_to_use=when_to_use,
+        version=version,
+        user_invocable=user_invocable,
         model=model,
         max_thinking_tokens=max_thinking_tokens,
         skill_type=skill_type or "prompt",
         disable_model_invocation=disable_model_invocation,
+        execution_context=execution_context,
+        agent=agent,
+        paths=paths,
         hooks=hooks,
         plugin_name=plugin_name,
     )
@@ -531,9 +662,12 @@ def build_skill_summary(skills: Sequence[SkillDefinition]) -> str:
         'Call the Skill tool with {"skill": "<name>"} to load a skill when it matches the user request.',
         "Available skills:",
     ]
-    for skill in skills:
+    visible_skills = [skill for skill in skills if skill.user_invocable]
+    for skill in visible_skills:
         location = f" ({skill.location.value})" if skill.location else ""
         lines.append(f"- {skill.name}{location}: {skill.description}")
+    if not visible_skills:
+        lines.append("- (none visible)")
     return "\n".join(lines)
 
 
@@ -542,6 +676,7 @@ __all__ = [
     "SkillLoadError",
     "SkillLoadResult",
     "SkillLocation",
+    "SkillExecutionContext",
     "SKILL_DIR_NAME",
     "SKILL_FILE_NAME",
     "SKILL_STATE_FILE_NAME",

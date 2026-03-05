@@ -63,7 +63,19 @@ def test_load_all_skills_prefers_project_and_parses_fields(tmp_path: Path) -> No
         "worker",
         "Handles work",
         "Do the work well.",
-        extra_frontmatter="allowed-tools: Read, Grep\nmodel: gpt-4o\nmax-thinking-tokens: 128",
+        extra_frontmatter=(
+            "allowed-tools: Read, Grep\n"
+            "model: gpt-4o\n"
+            "max-thinking-tokens: 128\n"
+            "argument-hint: <file>\n"
+            "arguments: [file, mode]\n"
+            "when-to-use: For focused worker tasks\n"
+            "version: 1.2.0\n"
+            "user-invocable: true\n"
+            "context: fork\n"
+            "agent: explore\n"
+            "paths: src/**, docs\n"
+        ),
     )
 
     result = load_all_skills(project_path=project_dir, home=home_dir)
@@ -78,6 +90,15 @@ def test_load_all_skills_prefers_project_and_parses_fields(tmp_path: Path) -> No
     assert worker.allowed_tools == ["Read", "Grep"]
     assert worker.model == "gpt-4o"
     assert worker.max_thinking_tokens == 128
+    assert worker.argument_hint == "<file>"
+    assert worker.argument_names == ["file", "mode"]
+    assert worker.when_to_use == "For focused worker tasks"
+    assert worker.version == "1.2.0"
+    assert worker.user_invocable is True
+    assert worker.execution_context is not None
+    assert worker.execution_context.value == "fork"
+    assert worker.agent == "explore"
+    assert worker.paths == ["src", "docs"]
     assert worker.content.strip().startswith("Do the work")
 
     summary = build_skill_summary(result.skills)
@@ -232,12 +253,22 @@ async def test_skill_tool_applies_context_hints(tmp_path: Path) -> None:
     home_dir.mkdir(parents=True, exist_ok=True)
     project_dir.mkdir(parents=True, exist_ok=True)
 
+    docs_dir = project_dir / ".ripperdoc" / "skills" / "helper" / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
     _write_skill(
         project_dir,
         "helper",
         "Provides help",
         "Helper skill body.",
-        extra_frontmatter="allowed-tools: Read\nmodel: gpt-4o\nmax-thinking-tokens: 512",
+        extra_frontmatter=(
+            "allowed-tools: Read\n"
+            "model: gpt-4o\n"
+            "max-thinking-tokens: 512\n"
+            "context: fork\n"
+            "agent: explore\n"
+            "paths: docs\n"
+        ),
     )
 
     tool = SkillTool(project_path=project_dir, home=home_dir)
@@ -255,10 +286,46 @@ async def test_skill_tool_applies_context_hints(tmp_path: Path) -> None:
     )
 
     query_context = QueryContext(tools=[], max_thinking_tokens=0, model="main")
-    _apply_skill_context_updates([msg], query_context)
+    shared_context: dict[str, str] = {}
+    _apply_skill_context_updates([msg], query_context, shared_context)
 
     assert query_context.model == "gpt-4o"
     assert query_context.max_thinking_tokens == 512
+    assert query_context.skill_execution_context_hint == "fork"
+    assert query_context.skill_agent_hint == "explore"
+    assert str(docs_dir.resolve()) in query_context.skill_paths_hint
+    assert "Skill:helper:Execution" in shared_context
+
+
+def test_build_skill_summary_hides_non_user_invocable(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    _write_skill(
+        project_dir,
+        "hidden-worker",
+        "Internal helper",
+        "Hidden body",
+        extra_frontmatter="user-invocable: false",
+    )
+    result = load_all_skills(project_path=project_dir, home=project_dir)
+    summary = build_skill_summary(result.skills)
+    assert "hidden-worker" not in summary
+
+
+def test_load_skill_allows_underscore_name(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    _write_skill(
+        project_dir,
+        "cangjie_skills",
+        "Cangjie support",
+        "Body",
+        extra_frontmatter="name: cangjie_skills",
+    )
+    result = load_all_skills(project_path=project_dir, home=project_dir)
+    assert not result.errors
+    skill_names = {skill.name for skill in result.skills}
+    assert "cangjie_skills" in skill_names
 
 
 @pytest.mark.asyncio

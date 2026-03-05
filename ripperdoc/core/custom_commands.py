@@ -23,8 +23,10 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
+from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.core.plugins import discover_plugins
 from ripperdoc.utils.filesystem.config_paths import project_config_dir, user_config_dir
+from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
@@ -58,6 +60,12 @@ class CommandLocation(str, Enum):
     OTHER = "other"
 
 
+class CommandExecutionContext(str, Enum):
+    """Execution context hints parsed from command frontmatter."""
+
+    FORK = "fork"
+
+
 @dataclass
 class CustomCommandDefinition:
     """Parsed representation of a custom command."""
@@ -72,6 +80,11 @@ class CustomCommandDefinition:
     argument_hint: Optional[str] = None
     model: Optional[str] = None
     thinking_mode: Optional[str] = None
+    disable_model_invocation: bool = False
+    user_invocable: bool = True
+    execution_context: Optional[CommandExecutionContext] = None
+    agent: Optional[str] = None
+    hooks: HooksConfig = field(default_factory=HooksConfig)
     plugin_name: Optional[str] = None
 
 
@@ -133,6 +146,15 @@ def _extract_thinking_mode(content: str) -> Optional[str]:
     for mode in reversed(THINKING_MODES):  # Check longer modes first
         if mode in content_lower:
             return mode
+    return None
+
+
+def _normalize_execution_context(value: object) -> Optional[CommandExecutionContext]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized == CommandExecutionContext.FORK.value:
+        return CommandExecutionContext.FORK
     return None
 
 
@@ -205,11 +227,26 @@ def _load_command_file(
 
     model_value = frontmatter.get("model")
     model = model_value.strip() if isinstance(model_value, str) and model_value.strip() else None
+    if model and model.lower() == "inherit":
+        model = None
 
     # Get thinking mode from frontmatter or content
     thinking_mode = frontmatter.get("thinking-mode") or frontmatter.get("thinking_mode")
     if not thinking_mode:
         thinking_mode = _extract_thinking_mode(body)
+
+    disable_model_invocation = parse_boolish(
+        frontmatter.get("disable-model-invocation") or frontmatter.get("disable_model_invocation")
+    )
+    user_invocable = True
+    if "user-invocable" in frontmatter or "user_invocable" in frontmatter:
+        user_invocable = parse_boolish(
+            frontmatter.get("user-invocable") or frontmatter.get("user_invocable")
+        )
+    execution_context = _normalize_execution_context(frontmatter.get("context"))
+    agent_value = frontmatter.get("agent")
+    agent = agent_value.strip() if isinstance(agent_value, str) and agent_value.strip() else None
+    hooks = parse_hooks_config(frontmatter.get("hooks"), source=f"command:{command_name}")
 
     command = CustomCommandDefinition(
         name=command_name,
@@ -222,6 +259,11 @@ def _load_command_file(
         argument_hint=argument_hint.strip() if argument_hint else None,
         model=model,
         thinking_mode=thinking_mode.strip() if isinstance(thinking_mode, str) else None,
+        disable_model_invocation=disable_model_invocation,
+        user_invocable=user_invocable,
+        execution_context=execution_context,
+        agent=agent,
+        hooks=hooks,
         plugin_name=plugin_name,
     )
     return command, None
@@ -545,6 +587,7 @@ __all__ = [
     "CustomCommandLoadError",
     "CustomCommandLoadResult",
     "CommandLocation",
+    "CommandExecutionContext",
     "COMMAND_DIR_NAME",
     "command_name_to_path",
     "load_custom_commands_by_scope",

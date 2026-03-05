@@ -186,8 +186,16 @@ Extend Ripperdoc with reusable Skill bundles stored in `SKILL.md` files:
 name: pdf-processing
 description: Comprehensive PDF manipulation toolkit
 allowed-tools: Read, Write, Bash
+argument-hint: "<input-file>"
+arguments: [input_file]
+when-to-use: Use when user asks for PDF extraction or transforms
+version: 1.0.0
+user-invocable: true
 model: claude-sonnet-4-20250514
 max-thinking-tokens: 20000
+context: fork
+agent: explore
+paths: docs/**, src/**
 ---
 ```
 

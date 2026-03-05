@@ -79,11 +79,35 @@ def _render_skills_plain(ui: Any) -> bool:
         if skill.max_thinking_tokens:
             console.print(f"  Max thinking tokens: {skill.max_thinking_tokens}")
 
+        if skill.argument_hint:
+            console.print(f"  Argument hint: {escape(skill.argument_hint)}")
+
+        if skill.argument_names:
+            console.print(f"  Argument names: {escape(', '.join(skill.argument_names))}")
+
+        if skill.when_to_use:
+            console.print(f"  When to use: {escape(skill.when_to_use)}")
+
+        if skill.version:
+            console.print(f"  Version: {escape(skill.version)}")
+
+        if not skill.user_invocable:
+            console.print("  [yellow]Hidden from user-invocable skill list[/yellow]")
+
         if skill.skill_type != "prompt":
             console.print(f"  Type: {escape(skill.skill_type)}")
 
         if skill.disable_model_invocation:
             console.print("  [yellow]Model invocation disabled[/yellow]")
+
+        if skill.execution_context:
+            console.print(f"  Execution context: {escape(skill.execution_context.value)}")
+
+        if skill.agent:
+            console.print(f"  Agent: {escape(skill.agent)}")
+
+        if skill.paths:
+            console.print(f"  Paths: {escape(', '.join(skill.paths))}")
 
         console.print(f"  Path: {escape(str(skill.path))}", markup=False)
 

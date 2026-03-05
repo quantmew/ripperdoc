@@ -9,6 +9,7 @@ from typing import Generator
 import pytest
 
 from ripperdoc.core.custom_commands import (
+    CommandExecutionContext,
     CommandLocation,
     load_all_custom_commands,
     find_custom_command,
@@ -258,3 +259,24 @@ class TestCommandDefinition:
         assert cmd.description  # Should have auto-generated description
         assert cmd.allowed_tools == []
         assert cmd.argument_hint is None
+
+    def test_command_parses_fork_context_and_agent(self, temp_project: Path) -> None:
+        commands_dir = temp_project / ".ripperdoc" / "commands"
+        fork_cmd = commands_dir / "forked.md"
+        fork_cmd.write_text(
+            """---
+description: Run in fork mode
+context: fork
+agent: general-purpose
+user-invocable: true
+disable-model-invocation: false
+---
+Do complex work in a subagent."""
+        )
+
+        cmd = find_custom_command("forked", project_path=temp_project, home=temp_project)
+        assert cmd is not None
+        assert cmd.execution_context == CommandExecutionContext.FORK
+        assert cmd.agent == "general-purpose"
+        assert cmd.user_invocable is True
+        assert cmd.disable_model_invocation is False

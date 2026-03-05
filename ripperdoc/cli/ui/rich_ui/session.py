@@ -29,6 +29,7 @@ from ripperdoc.core.config import (
 from ripperdoc.core.tool_defaults import filter_tools_by_names, get_default_tools
 from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
+from ripperdoc.core.tool import ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
@@ -98,6 +99,7 @@ from ripperdoc.utils.collaboration.worktree import (
 from ripperdoc.utils.filesystem.working_directories import normalize_directory_inputs
 
 from ripperdoc.cli.ui.rich_ui.commands import handle_slash_command as _handle_slash_command
+from ripperdoc.cli.ui.rich_ui.commands import ForkedCustomCommandRequest
 from ripperdoc.cli.ui.rich_ui.images import process_images_in_input
 from ripperdoc.cli.ui.rich_ui.input import build_prompt_session
 from ripperdoc.cli.ui.rich_ui.rendering import (
@@ -1941,17 +1943,116 @@ class RichUI:
         """Public wrapper for running coroutines on the UI event loop."""
         return self._run_async(coro)
 
-    def handle_slash_command(self, user_input: str) -> bool | str:
+    def handle_slash_command(self, user_input: str) -> bool | str | ForkedCustomCommandRequest:
         """Handle slash commands.
 
         Returns True if handled as built-in, False if not a command,
-        or a string if it's a custom command that should be sent to the AI.
+        a string for direct query expansion, or a forked command request.
         """
         if self.disable_slash_commands:
             return False
         from ripperdoc.cli.ui.rich_ui import suggest_slash_command_matches
 
         return _handle_slash_command(self, user_input, suggest_slash_command_matches)
+
+    def _build_tool_use_context(self, query_context: QueryContext) -> ToolUseContext:
+        """Build ToolUseContext for direct tool invocation from the UI loop."""
+        return ToolUseContext(
+            message_id=f"slash-{uuid.uuid4().hex[:8]}",
+            agent_id=query_context.agent_id,
+            team_name=query_context.team_name,
+            teammate_name=query_context.teammate_name,
+            working_directory=query_context.working_directory,
+            set_working_directory=query_context.set_working_directory,
+            yolo_mode=query_context.yolo_mode,
+            verbose=query_context.verbose,
+            permission_checker=self._permission_checker,
+            read_file_timestamps={},
+            file_state_cache=query_context.file_state_cache,
+            conversation_messages=self.conversation_messages,
+            tool_registry=query_context.tool_registry,
+            abort_signal=query_context.abort_controller,
+            pause_ui=query_context.pause_ui,
+            resume_ui=query_context.resume_ui,
+            on_enter_plan_mode=query_context.on_enter_plan_mode,
+            on_exit_plan_mode=query_context.on_exit_plan_mode,
+            pending_message_queue=query_context.pending_message_queue,
+            task_notification_queue=query_context.task_notification_queue,
+        )
+
+    async def _execute_forked_custom_command(self, request: ForkedCustomCommandRequest) -> bool:
+        """Execute a forked custom command directly through Task tool."""
+        query_context = self._ensure_query_context()
+        task_tool = query_context.tool_registry.get("Task")
+        if task_tool is None:
+            self.console.print(
+                "[yellow]Task tool is unavailable; falling back to normal command execution.[/yellow]"
+            )
+            await self.process_query(request.expanded_content)
+            return True
+
+        try:
+            from ripperdoc.tools.task_tool import TaskToolInput
+        except (ImportError, ModuleNotFoundError) as exc:
+            logger.warning(
+                "[ui] Failed to import TaskToolInput for forked command execution: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"session_id": self.session_id, "command": request.command_name},
+            )
+            await self.process_query(request.expanded_content)
+            return True
+
+        task_input = TaskToolInput(
+            description=f"Run {request.command_name}"[:64],
+            prompt=request.expanded_content,
+            subagent_type=request.subagent_type,
+            model=request.model,
+        )
+        tool_context = self._build_tool_use_context(query_context)
+        validation = await task_tool.validate_input(task_input, tool_context)
+        if not validation.result:
+            logger.warning(
+                "[ui] Forked custom command validation failed",
+                extra={
+                    "session_id": self.session_id,
+                    "command": request.command_name,
+                    "reason": validation.message,
+                },
+            )
+            fallback_reason = validation.message or "validation failed"
+            self.console.print(
+                f"[yellow]Forked execution unavailable ({escape(str(fallback_reason))}); using normal execution.[/yellow]"
+            )
+            await self.process_query(request.expanded_content)
+            return True
+
+        self.display_message(
+            "System",
+            f"Running /{request.command_name} in forked mode via agent '{request.subagent_type}'.",
+            is_tool=True,
+        )
+        fork_outputs: List[str] = []
+        async for output in task_tool.call(task_input, tool_context):
+            if isinstance(output, ToolProgress):
+                progress_text = str(output.content or "").strip()
+                if progress_text:
+                    self._message_display.print_generic_tool("Task", progress_text)
+                continue
+            if isinstance(output, ToolResult):
+                result_text = output.result_for_assistant or str(output.data)
+                fork_outputs.append(result_text)
+                self.display_message(
+                    "Task",
+                    result_text,
+                    is_tool=True,
+                    tool_type="result",
+                    tool_data=output.data,
+                )
+
+        if not fork_outputs:
+            self.console.print("[yellow]Forked command finished with no output.[/yellow]")
+        return True
 
     def get_prompt_session(self) -> PromptSession:
         """Create (or return) the prompt session with command completion."""
@@ -2041,6 +2142,10 @@ class RichUI:
                         if isinstance(handled, str):
                             # Process the expanded custom command as a query
                             user_input = handled
+                        elif isinstance(handled, ForkedCustomCommandRequest):
+                            self._run_async(self._execute_forked_custom_command(handled))
+                            console.print()  # spacing
+                            continue
                         elif handled:
                             console.print()  # spacing
                             continue

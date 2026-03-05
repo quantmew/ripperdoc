@@ -183,8 +183,16 @@ ripperdoc remote-control
 name: pdf-processing
 description: 全面的 PDF 操作工具包
 allowed-tools: Read, Write, Bash
+argument-hint: "<输入文件>"
+arguments: [input_file]
+when-to-use: 当用户请求 PDF 提取或转换时使用
+version: 1.0.0
+user-invocable: true
 model: claude-sonnet-4-20250514
 max-thinking-tokens: 20000
+context: fork
+agent: explore
+paths: docs/**, src/**
 ---
 ```
 

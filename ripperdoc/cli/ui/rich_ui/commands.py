@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -13,6 +14,16 @@ from ripperdoc.cli.commands import (
     get_slash_command,
     expand_command_content,
 )
+
+
+@dataclass
+class ForkedCustomCommandRequest:
+    """Execution request for a custom command that should run in fork mode."""
+
+    command_name: str
+    expanded_content: str
+    subagent_type: str
+    model: Optional[str] = None
 
 
 def suggest_slash_commands(
@@ -32,7 +43,11 @@ def suggest_slash_commands(
     return difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
 
 
-def handle_slash_command(ui: object, user_input: str, suggest_fn: Callable[[str, Optional[Path]], List[str]]) -> bool | str:
+def handle_slash_command(
+    ui: object,
+    user_input: str,
+    suggest_fn: Callable[[str, Optional[Path]], List[str]],
+) -> bool | str | ForkedCustomCommandRequest:
     """Handle slash commands.
 
     Returns True if handled as a built-in, False if not a command,
@@ -57,6 +72,16 @@ def handle_slash_command(ui: object, user_input: str, suggest_fn: Callable[[str,
     # Then, try custom commands.
     custom_cmd = get_custom_command(command_name, ui.project_path)
     if custom_cmd is not None:
+        if not getattr(custom_cmd, "user_invocable", True):
+            ui.console.print(
+                f"[yellow]Command /{escape(command_name)} is not user-invocable.[/yellow]"
+            )
+            return True
+        if getattr(custom_cmd, "disable_model_invocation", False):
+            ui.console.print(
+                f"[yellow]Command /{escape(command_name)} is blocked by disable-model-invocation.[/yellow]"
+            )
+            return True
         # Expand the custom command content.
         expanded_content = expand_command_content(custom_cmd, trimmed_arg, ui.project_path)
 
@@ -64,6 +89,16 @@ def handle_slash_command(ui: object, user_input: str, suggest_fn: Callable[[str,
         ui.console.print(f"[dim]Running custom command: /{command_name}[/dim]")
         if custom_cmd.argument_hint and trimmed_arg:
             ui.console.print(f"[dim]Arguments: {trimmed_arg}[/dim]")
+
+        execution_context = getattr(custom_cmd, "execution_context", None)
+        if execution_context is not None and getattr(execution_context, "value", "") == "fork":
+            subagent_type = (getattr(custom_cmd, "agent", None) or "general-purpose").strip()
+            return ForkedCustomCommandRequest(
+                command_name=command_name,
+                expanded_content=expanded_content,
+                subagent_type=subagent_type or "general-purpose",
+                model=getattr(custom_cmd, "model", None),
+            )
 
         # Return the expanded content to be processed as a query.
         return expanded_content
