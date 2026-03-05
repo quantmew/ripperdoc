@@ -1523,13 +1523,15 @@ class RichUI:
         # query that would race prompt_toolkit redraw and spinner rendering.
         # Defer it into pending messages so it is consumed on the next user turn.
         prompt_app = getattr(getattr(self, "_prompt_session", None), "app", None)
+        query_in_progress = bool(getattr(self, "_query_in_progress", False))
+        query_context = getattr(self, "query_context", None)
         if (
-            not self._query_in_progress
+            not query_in_progress
             and prompt_app is not None
             and bool(getattr(prompt_app, "is_running", False))
-            and self.query_context is not None
+            and query_context is not None
         ):
-            self.query_context.pending_message_queue.enqueue_text(
+            query_context.pending_message_queue.enqueue_text(
                 agent_message,
                 metadata=metadata,
             )
