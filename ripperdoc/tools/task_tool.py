@@ -54,6 +54,7 @@ from ripperdoc.core.tool import (
 from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
+    AttachmentMessage,
     UserMessage,
     create_hook_additional_context_message,
     create_hook_notice_payload,
@@ -967,8 +968,8 @@ class TaskTool(Tool[TaskToolInput, TaskToolOutput]):
         result: HookResult,
         *,
         parent_tool_use_id: Optional[str] = None,
-    ) -> List[UserMessage]:
-        messages: List[UserMessage] = []
+    ) -> List[Union[UserMessage, AttachmentMessage]]:
+        messages: List[Union[UserMessage, AttachmentMessage]] = []
         if result.additional_context:
             additional_context_message = create_hook_additional_context_message(
                 str(result.additional_context),

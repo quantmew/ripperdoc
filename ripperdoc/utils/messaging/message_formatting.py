@@ -6,10 +6,21 @@ conversation summarization and compaction.
 """
 
 from typing import Any, List, Union
+import re
 
-from ripperdoc.utils.messaging.messages import UserMessage, AssistantMessage, ProgressMessage
+from ripperdoc.utils.messaging.messages import (
+    ATTACHMENT_EXPORT_HIDDEN_TYPES,
+    ATTACHMENT_IGNORED_TYPES,
+    ATTACHMENT_SUMMARY_HIDDEN_TYPES,
+    AssistantMessage,
+    AttachmentMessage,
+    ProgressMessage,
+    UserMessage,
+    parse_attachment_message,
+)
 
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
+_SYSTEM_REMINDER_EXTRACT_RE = re.compile(r"</?system-reminder>\n?")
 
 
 def stringify_message_content(content: Any, *, include_tool_details: bool = False) -> str:
@@ -176,7 +187,10 @@ def format_reasoning_preview(reasoning: Any, show_full_thinking: bool = False) -
 
 
 def render_transcript(
-    messages: List[ConversationMessage], *, include_tool_details: bool = True
+    messages: List[ConversationMessage],
+    *,
+    include_tool_details: bool = True,
+    attachment_mode: str = "default",
 ) -> str:
     """Render conversation messages into a plain-text transcript.
 
@@ -192,6 +206,33 @@ def render_transcript(
     for msg in messages:
         msg_type = getattr(msg, "type", "")
         if msg_type == "progress":
+            continue
+        if msg_type == "attachment" and isinstance(msg, AttachmentMessage):
+            attachment_type = getattr(msg, "attachment_type", "")
+            if attachment_type in ATTACHMENT_IGNORED_TYPES:
+                continue
+            if attachment_mode == "export" and attachment_type in ATTACHMENT_EXPORT_HIDDEN_TYPES:
+                continue
+            if attachment_mode == "summary" and attachment_type in ATTACHMENT_SUMMARY_HIDDEN_TYPES:
+                continue
+
+            rendered = parse_attachment_message(msg)
+            if not rendered:
+                continue
+            attachment_lines: List[str] = []
+            for rendered_message in rendered:
+                rendered_content = getattr(getattr(rendered_message, "message", None), "content", None)
+                rendered_text = stringify_message_content(
+                    rendered_content,
+                    include_tool_details=include_tool_details,
+                )
+                rendered_text = _SYSTEM_REMINDER_EXTRACT_RE.sub("", rendered_text).strip()
+                if rendered_text:
+                    attachment_lines.append(rendered_text)
+            if not attachment_lines:
+                continue
+            label = f"System ({attachment_type})"
+            lines.append(f"{label}: " + "\n".join(attachment_lines))
             continue
         role = "User" if msg_type == "user" else "Assistant"
         content = getattr(getattr(msg, "message", None), "content", None)

@@ -1007,13 +1007,17 @@ class StdioIOMixin:
                     subtype = str(args[1])
             else:
                 raise TypeError("Invalid _send_control_request positional arguments")
+        if isinstance(request, dict) and subtype is None:
+            request_name = request.get("name")
+            request_args = request.get("arguments")
+            if request_name == "ripperdoc.can_use_tool" and isinstance(request_args, dict):
+                subtype = "can_use_tool"
+                request = request_args
+            elif request_name == "ripperdoc.hook_callback" and isinstance(request_args, dict):
+                subtype = "hook_callback"
+                request = request_args
         if subtype is None:
-            if request is not None and isinstance(request, dict):
-                request_name = request.get("name")
-                if request_name in {"ripperdoc.can_use_tool", "ripperdoc.hook_callback"}:
-                    subtype = "tools/call"
-            if subtype is None:
-                raise TypeError("_send_control_request requires a subtype")
+            raise TypeError("_send_control_request requires a subtype")
         if request is None:
             request = {}
 

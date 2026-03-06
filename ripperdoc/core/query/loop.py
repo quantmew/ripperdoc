@@ -7,6 +7,7 @@ import sys
 import time
 from asyncio import CancelledError
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import (
     Any,
     AsyncGenerator,
@@ -38,6 +39,13 @@ from ripperdoc.core.message_utils import (
     text_mode_history,
     tool_result_message,
 )
+from ripperdoc.core.plan_mode import (
+    build_plan_mode_full_system_prompt,
+    build_plan_mode_reentry_system_prompt,
+    build_plan_mode_sparse_system_prompt,
+    ensure_plan_file_directory,
+    resolve_plan_mode_attachment_decision,
+)
 from ripperdoc.core.tool import Tool, ToolUseContext
 from ripperdoc.utils.context_length_errors import detect_context_length_error
 from ripperdoc.utils.file_watch import detect_changed_files
@@ -56,12 +64,14 @@ from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
+    AttachmentMessage,
     MessageContent,
     ProgressMessage,
     UserMessage,
     create_assistant_message,
     create_hook_additional_context_message,
     create_hook_notice_message,
+    create_plan_mode_attachment_message,
     create_progress_message,
     create_user_message,
     normalize_messages_for_api,
@@ -83,7 +93,7 @@ logger = get_logger()
 
 DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_API_TIMEOUT", "120"))
 MAX_LLM_RETRIES = int(os.getenv("RIPPERDOC_MAX_RETRIES", "10"))
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 
 def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
@@ -397,7 +407,7 @@ class IterationResult:
     """
 
     assistant_message: Optional[AssistantMessage] = None
-    tool_results: List[UserMessage] = field(default_factory=list)
+    tool_results: List[ConversationMessage] = field(default_factory=list)
     should_stop: bool = False  # True means exit the query loop entirely
 
 
@@ -406,7 +416,7 @@ class _PreparedToolCalls:
     """Intermediate state while preparing tool calls for execution."""
 
     prepared_calls: List[Dict[str, Any]] = field(default_factory=list)
-    tool_results: List[UserMessage] = field(default_factory=list)
+    tool_results: List[ConversationMessage] = field(default_factory=list)
     permission_denied: bool = False
 
 
@@ -427,6 +437,7 @@ class _IterationPlan:
     model_profile: ModelProfile
     full_system_prompt: str
     tools_for_model: List[Tool[Any, Any]]
+    plan_mode_messages: List[AttachmentMessage] = field(default_factory=list)
 
 
 @dataclass
@@ -463,6 +474,63 @@ def _extract_latest_user_prompt_text(
         if text_blocks:
             return "\n".join(text_blocks)
     return ""
+
+
+def _build_plan_mode_messages(
+    *,
+    messages: Sequence[ConversationMessage],
+    query_context: QueryContext,
+    tools_for_model: Sequence[Tool[Any, Any]],
+) -> List[UserMessage]:
+    """Build Claude Code style plan-mode attachments for the next model turn."""
+
+    if query_context.permission_mode != "plan" or not query_context.plan_file_path:
+        return []
+
+    decision = resolve_plan_mode_attachment_decision(messages)
+    if not decision.should_inject:
+        return []
+
+    plan_file_path = str(ensure_plan_file_directory(query_context.plan_file_path))
+    plan_exists = Path(plan_file_path).exists()
+    available_tool_names = [tool.name for tool in tools_for_model]
+    plan_messages: List[AttachmentMessage] = []
+    if query_context.has_exited_plan_mode and plan_exists:
+        plan_messages.append(
+            create_plan_mode_attachment_message(
+                build_plan_mode_reentry_system_prompt(
+                    plan_file_path=plan_file_path,
+                    available_tool_names=available_tool_names,
+                ),
+                plan_file_path=plan_file_path,
+                reminder_type="full",
+                attachment_type="plan_mode_reentry",
+                plan_exists=plan_exists,
+            )
+        )
+        query_context.has_exited_plan_mode = False
+
+    if decision.reminder_type == "sparse":
+        content = build_plan_mode_sparse_system_prompt(
+            plan_file_path=plan_file_path,
+            available_tool_names=available_tool_names,
+        )
+    else:
+        content = build_plan_mode_full_system_prompt(
+            plan_file_path=plan_file_path,
+            available_tool_names=available_tool_names,
+        )
+
+    plan_messages.append(
+        create_plan_mode_attachment_message(
+            content,
+            plan_file_path=plan_file_path,
+            reminder_type=decision.reminder_type,
+            attachment_type="plan_mode",
+            plan_exists=plan_exists,
+        )
+    )
+    return plan_messages
 
 
 def _collect_skill_fork_requests(
@@ -734,7 +802,7 @@ def _compose_next_iteration_messages(
     base_messages: Sequence[ConversationMessage],
     *,
     assistant_message: Optional[AssistantMessage],
-    tool_results: Sequence[UserMessage],
+    tool_results: Sequence[ConversationMessage],
     extra_messages: Optional[Sequence[ConversationMessage]] = None,
 ) -> list[ConversationMessage]:
     """Build next-iteration history and reorder tool lifecycle messages."""
@@ -786,7 +854,10 @@ def _extract_tool_result_ids(message: ConversationMessage) -> list[str]:
 
 
 def _is_hook_additional_context_message(message: ConversationMessage) -> bool:
-    """Return whether a user message is hook_additional_context."""
+    """Return whether a message is hook_additional_context."""
+    if isinstance(message, AttachmentMessage):
+        metadata = getattr(message, "metadata", {}) or {}
+        return bool(metadata.get("hook_additional_context"))
     if not isinstance(message, UserMessage):
         return False
     metadata = getattr(message.message, "metadata", {}) or {}
@@ -799,7 +870,10 @@ def _classify_hook_phase(message: ConversationMessage) -> Optional[str]:
         return None
     if not getattr(message, "parent_tool_use_id", None):
         return None
-    metadata = getattr(message.message, "metadata", {}) or {}
+    if isinstance(message, AttachmentMessage):
+        metadata = getattr(message, "metadata", {}) or {}
+    else:
+        metadata = getattr(message.message, "metadata", {}) or {}
     event = str(metadata.get("hook_event") or "")
     if event == "PreToolUse":
         return "pre"
@@ -1242,7 +1316,15 @@ def _build_iteration_plan(
         )
 
     full_system_prompt = build_full_system_prompt(
-        system_prompt, context, tool_mode, tools_for_model
+        system_prompt,
+        context,
+        tool_mode,
+        tools_for_model,
+    )
+    plan_mode_messages = _build_plan_mode_messages(
+        messages=messages or (),
+        query_context=query_context,
+        tools_for_model=tools_for_model,
     )
     logger.debug(
         "[query] Built system prompt",
@@ -1250,12 +1332,14 @@ def _build_iteration_plan(
             "prompt_chars": len(full_system_prompt),
             "context_entries": len(context),
             "tool_count": len(tools_for_model),
+            "plan_mode_messages": len(plan_mode_messages),
         },
     )
     return _IterationPlan(
         model_profile=model_profile,
         full_system_prompt=full_system_prompt,
         tools_for_model=tools_for_model,
+        plan_mode_messages=plan_mode_messages,
     )
 
 
@@ -1531,7 +1615,7 @@ async def _handle_iteration_stop_hook(
     logger.debug("[query] AFTER calling hook_manager.run_stop_async")
     logger.debug("[query] Checking additional_context")
     hook_event = "SubagentStop" if stop_hook == "subagent" else "Stop"
-    additional_context_messages: List[UserMessage] = []
+    additional_context_messages: List[ConversationMessage] = []
     if stop_result.additional_context:
         additional_context_message = create_hook_additional_context_message(
             str(stop_result.additional_context),
@@ -1574,7 +1658,7 @@ async def _prepare_iteration_tool_calls(
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable],
     out: _PreparedToolCalls,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Resolve tools, run hooks/permissions, and build runnable tool generators."""
     logger.debug(f"[query] Executing {len(tool_use_blocks)} tool_use block(s).")
     sibling_ids = set(
@@ -1677,7 +1761,7 @@ async def _prepare_single_iteration_tool_call(
             tool_use_id=tool_use_id,
             sibling_ids=sibling_ids,
         ):
-            if isinstance(notice, UserMessage):
+            if isinstance(notice, (UserMessage, AttachmentMessage)):
                 out.tool_results.append(notice)
             yield notice
 
@@ -1700,7 +1784,7 @@ async def _prepare_single_iteration_tool_call(
         out.prepared_calls.append(
             {
                 "tool_name": tool_name,
-                "is_concurrency_safe": tool.is_concurrency_safe(),
+                "is_concurrency_safe": tool.is_concurrency_safe_for_input(parsed_input),
                 "generator": _run_tool_use_generator(
                     tool,
                     tool_use_id,
@@ -1786,6 +1870,7 @@ async def _parse_and_validate_tool_input_for_call(
                 resume_ui=query_context.resume_ui,
                 on_enter_plan_mode=query_context.on_enter_plan_mode,
                 on_exit_plan_mode=query_context.on_exit_plan_mode,
+                plan_file_path=query_context.plan_file_path,
                 pending_message_queue=query_context.pending_message_queue,
                 task_notification_queue=query_context.task_notification_queue,
             ),
@@ -1818,6 +1903,7 @@ async def _parse_and_validate_tool_input_for_call(
         resume_ui=query_context.resume_ui,
         on_enter_plan_mode=query_context.on_enter_plan_mode,
         on_exit_plan_mode=query_context.on_exit_plan_mode,
+        plan_file_path=query_context.plan_file_path,
         pending_message_queue=query_context.pending_message_queue,
         task_notification_queue=query_context.task_notification_queue,
     )
@@ -1850,9 +1936,9 @@ def _collect_pre_tool_hook_notices(
     tool_name: str,
     tool_use_id: str,
     sibling_ids: set[str],
-) -> List[Union[UserMessage, ProgressMessage]]:
+) -> List[Union[UserMessage, AttachmentMessage, ProgressMessage]]:
     """Apply pre-hook context updates and build any user-visible notices."""
-    notices: List[Union[UserMessage, ProgressMessage]] = []
+    notices: List[Union[UserMessage, AttachmentMessage, ProgressMessage]] = []
     if pre_result.additional_context:
         additional_context_message = create_hook_additional_context_message(
             str(pre_result.additional_context),
@@ -2063,6 +2149,10 @@ async def _run_query_iteration(
         context=context,
         query_context=query_context,
     )
+    if plan.plan_mode_messages:
+        messages.extend(plan.plan_mode_messages)
+        for meta_message in plan.plan_mode_messages:
+            yield meta_message
 
     progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue(maxsize=1000)
     query_llm_fn = _resolve_query_llm_callable()

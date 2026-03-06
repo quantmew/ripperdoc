@@ -154,3 +154,30 @@ async def test_execute_tools_sequentially_honors_abort_signal() -> None:
 
     assert collected == []
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_execute_tools_sequentially_keeps_tool_generator_on_one_task(tmp_path: Path) -> None:
+    original_cwd = Path.cwd().resolve()
+    collected: list[object] = []
+    tool_results = []
+
+    async def _two_messages():
+        async with tools_module._tool_execution_cwd(
+            tool_name="Bash",
+            tool_use_id="call-1",
+            working_directory=str(tmp_path),
+        ):
+            yield tools_module.create_user_message("first")
+            yield tools_module.create_user_message("second")
+
+    async for item in tools_module._execute_tools_sequentially(  # type: ignore[attr-defined]
+        [{"generator": _two_messages()}],
+        tool_results,
+        abort_signal=asyncio.Event(),
+    ):
+        collected.append(item)
+
+    assert len(collected) == 2
+    assert len(tool_results) == 2
+    assert Path.cwd().resolve() == original_cwd

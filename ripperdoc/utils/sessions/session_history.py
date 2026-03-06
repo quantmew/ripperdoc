@@ -12,6 +12,7 @@ from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
+    AttachmentMessage,
     ProgressMessage,
     UserMessage,
 )
@@ -24,7 +25,7 @@ from ripperdoc.utils.sessions.session_index import (
 
 logger = get_logger()
 
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 
 @dataclass
@@ -73,6 +74,8 @@ def _deserialize_message(payload: dict) -> Optional[ConversationMessage]:
         return AssistantMessage(**payload)
     if msg_type == "progress":
         return ProgressMessage(**payload)
+    if msg_type == "attachment":
+        return AttachmentMessage(**payload)
     return None
 
 

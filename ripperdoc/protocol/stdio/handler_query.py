@@ -238,6 +238,7 @@ class StdioQueryMixin:
                 session_history.append(hook_message)
 
         servers = await load_mcp_servers_async(self._project_path)
+        await self._refresh_query_context_dynamic_tools()
         mcp_instructions = format_mcp_instructions(servers)
         system_prompt = sampling_request.systemPrompt or self._resolve_system_prompt(
             self._query_context.tools if self._query_context else [],
@@ -245,6 +246,14 @@ class StdioQueryMixin:
             mcp_instructions,
             [],
         )
+
+        if not self._init_stream_message_sent:
+            init_message = self._build_sdk_init_stream_message(
+                tools=self._query_context.tools if self._query_context else [],
+                servers=servers,
+            )
+            await self._write_message_stream(init_message)
+            self._init_stream_message_sent = True
 
         await self._emit_hook_notices(hook_notices)
 

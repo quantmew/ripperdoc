@@ -17,10 +17,12 @@ from ripperdoc import __version__
 from ripperdoc.core.agents import load_agent_definitions
 from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.core.config import (
+    ProtocolType,
     get_effective_model_profile,
     get_project_config,
     get_project_local_config,
 )
+from ripperdoc.core.oauth import get_oauth_token
 from ripperdoc.core.session_agents import (
     normalize_agent_name,
     parse_session_agents,
@@ -49,6 +51,13 @@ from ripperdoc.tools.dynamic_mcp_tool import (
 )
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.mcp import format_mcp_instructions, load_mcp_servers_async
+from ripperdoc.utils.mcp import (
+    clear_sdk_mcp_request_sender,
+    load_mcp_server_configs,
+    parse_mcp_config_option,
+    set_mcp_runtime_overrides,
+    set_sdk_mcp_request_sender,
+)
 from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
 from ripperdoc.utils.filesystem.working_directories import coerce_directory_list, normalize_directory_inputs
@@ -75,8 +84,119 @@ class StdioSessionMixin:
     _session_agent_name: str | None
     _session_agents: dict[str, dict[str, str]]
     _session_agent_prompt: str | None
+    _active_agent_names: list[str]
+    _enabled_skill_names: list[str]
+    _plugin_payloads: list[dict[str, str]]
     _disable_slash_commands: bool
     _replay_user_messages: bool
+    _permission_mode: str
+    _init_stream_message_sent: bool
+    _sdk_betas: list[str]
+
+    async def _load_mcp_servers_for_initialize(self) -> list[Any]:
+        try:
+            return await load_mcp_servers_async(self._project_path, wait_for_connections=True)
+        except TypeError as exc:
+            if "wait_for_connections" not in str(exc):
+                raise
+            return await load_mcp_servers_async(self._project_path)
+
+    async def _load_dynamic_mcp_tools_for_initialize(self) -> list[Any]:
+        try:
+            return await load_dynamic_mcp_tools_async(
+                self._project_path,
+                wait_for_connections=True,
+            )
+        except TypeError as exc:
+            if "wait_for_connections" not in str(exc):
+                raise
+            return await load_dynamic_mcp_tools_async(self._project_path)
+
+    async def _send_sdk_mcp_message(self, server_name: str, message: dict[str, Any]) -> dict[str, Any]:
+        """Bridge SDK-backed MCP traffic over stdio control requests."""
+        response = await self._send_control_request(
+            subtype="mcp_message",
+            request={
+                "server_name": server_name,
+                "message": message,
+            },
+            timeout=STDIO_HOOK_TIMEOUT_SEC,
+        )
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Invalid SDK MCP response for server '{server_name}'")
+        return response
+
+    def _build_sdk_init_stream_message(
+        self,
+        *,
+        tools: list[Any],
+        servers: list[Any],
+    ) -> dict[str, Any]:
+        slash_commands = [
+            str(getattr(cmd, "name", "")).strip()
+            for cmd in list_slash_commands()
+            if str(getattr(cmd, "name", "")).strip()
+        ]
+        slash_commands.extend(
+            str(getattr(cmd, "name", "")).strip()
+            for cmd in list_custom_commands(self._project_path)
+            if str(getattr(cmd, "name", "")).strip()
+        )
+
+        mcp_servers: list[dict[str, str]] = []
+        for server in servers:
+            name = str(getattr(server, "name", "")).strip()
+            if not name:
+                continue
+            mcp_servers.append(
+                {
+                    "name": name,
+                    "status": str(getattr(server, "status", "unknown") or "unknown"),
+                }
+            )
+
+        model_name = "main"
+        if self._query_context is not None:
+            model_name = str(getattr(self._query_context, "model", model_name) or model_name)
+
+        api_key_source = "none"
+        if os.getenv("RIPPERDOC_AUTH_TOKEN"):
+            api_key_source = "RIPPERDOC_AUTH_TOKEN"
+        elif os.getenv("RIPPERDOC_API_KEY"):
+            api_key_source = "RIPPERDOC_API_KEY"
+        else:
+            model_profile = get_effective_model_profile(model_name)
+            if model_profile is not None and getattr(model_profile, "protocol", None) == ProtocolType.OAUTH:
+                token_name = str(getattr(model_profile, "oauth_token_name", "") or "").strip()
+                if token_name and get_oauth_token(token_name):
+                    api_key_source = token_name
+
+        payload = {
+            "type": "system",
+            "subtype": "init",
+            "cwd": str(self._project_path),
+            "session_id": self._session_id or "",
+            "tools": [
+                str(getattr(tool, "name", "")).strip()
+                for tool in tools
+                if str(getattr(tool, "name", "")).strip()
+            ],
+            "mcp_servers": mcp_servers,
+            "model": model_name,
+            "permissionMode": self._permission_mode or "default",
+            "slash_commands": slash_commands,
+            "apiKeySource": api_key_source,
+            "ripperdoc_version": __version__,
+            "output_style": self._output_style,
+            "agents": list(self._active_agent_names),
+            "skills": list(self._enabled_skill_names),
+            "plugins": list(self._plugin_payloads),
+            "uuid": str(uuid.uuid4()),
+            "fast_mode_state": "off",
+        }
+        if self._sdk_betas:
+            payload["betas"] = list(self._sdk_betas)
+        return payload
 
     async def _handle_initialize(self, request: dict[str, Any], request_id: str) -> None:
         """Handle initialize request from SDK.
@@ -163,6 +283,13 @@ class StdioSessionMixin:
                 options.get("replay_user_messages"),
                 getattr(self, "_replay_user_messages", False),
             )
+            raw_betas = options.get("betas")
+            if isinstance(raw_betas, str):
+                self._sdk_betas = [item.strip() for item in raw_betas.split(",") if item.strip()]
+            elif isinstance(raw_betas, (list, tuple, set)):
+                self._sdk_betas = [str(item).strip() for item in raw_betas if str(item).strip()]
+            else:
+                self._sdk_betas = []
             if self._replay_user_messages and (
                 self._input_format != "stream-json"
                 or self._output_format != "stream-json"
@@ -229,12 +356,10 @@ class StdioSessionMixin:
                         logger.warning("[stdio] json_schema must be a JSON object; ignoring")
 
             ignored_option_keys = [
-                "mcp_config",
                 "permission_prompt_tool",
                 "include_partial_messages",
                 "fork_session",
                 "setting_sources",
-                "betas",
             ]
             ignored_in_use = [
                 key
@@ -270,6 +395,7 @@ class StdioSessionMixin:
                 session_id=self._session_id,
                 project_root=self._project_path,
             )
+            set_sdk_mcp_request_sender(self._send_sdk_mcp_message)
 
             raw_additional_dirs = options.get("additional_directories")
             additional_dirs = coerce_directory_list(raw_additional_dirs)
@@ -344,12 +470,13 @@ class StdioSessionMixin:
             permission_mode = self._normalize_permission_mode(
                 options.get("permission_mode", "default")
             )
+            self._permission_mode = permission_mode
             yolo_mode = permission_mode == "bypassPermissions"
             self._pre_plan_mode = None
             self._clear_context_after_turn = False
             self._sdk_can_use_tool_enabled = self._coerce_bool_option(
                 options.get("sdk_can_use_tool"),
-                self._input_format == "stream-json" and self._output_format == "stream-json",
+                False,
             )
 
             # Setup model
@@ -393,6 +520,7 @@ class StdioSessionMixin:
                 pre_plan_mode=self._pre_plan_mode,
                 on_enter_plan_mode=self._enter_plan_mode,
                 on_exit_plan_mode=self._on_exit_plan_mode,
+                working_directory=str(self._project_path),
             )
 
             # Initialize hook manager
@@ -434,10 +562,25 @@ class StdioSessionMixin:
                         self._session_start_time = time.time()
                     self._session_end_sent = False
 
+            raw_mcp_config = options.get("mcp_config")
+            if raw_mcp_config not in (None, ""):
+                base_configs = load_mcp_server_configs(self._project_path)
+                cli_configs = parse_mcp_config_option(
+                    raw_mcp_config,
+                    base_dir=self._project_path,
+                )
+                merged_configs = {**base_configs, **cli_configs}
+                self._mcp_server_overrides = self._clone_mcp_config_map(merged_configs)
+                set_mcp_runtime_overrides(
+                    self._project_path,
+                    servers=self._mcp_server_overrides,
+                    disabled=self._mcp_disabled_servers or None,
+                )
+
             # Load MCP servers and dynamic tools
             servers, dynamic_tools = await asyncio.gather(
-                load_mcp_servers_async(self._project_path),
-                load_dynamic_mcp_tools_async(self._project_path),
+                self._load_mcp_servers_for_initialize(),
+                self._load_dynamic_mcp_tools_for_initialize(),
             )
             if dynamic_tools:
                 tools = merge_tools_with_dynamic(tools, dynamic_tools)
@@ -467,9 +610,30 @@ class StdioSessionMixin:
                     skill_result.skills, project_path=self._project_path
                 )
                 self._skill_instructions = build_skill_summary(enabled_skills)
+            self._enabled_skill_names = sorted(
+                str(getattr(skill, "name", "")).strip()
+                for skill in enabled_skills
+                if str(getattr(skill, "name", "")).strip()
+            )
 
-            load_agent_definitions(project_path=self._project_path)
-            discover_plugins(project_path=self._project_path)
+            agent_result = load_agent_definitions(project_path=self._project_path)
+            plugin_result = discover_plugins(project_path=self._project_path)
+            self._active_agent_names = sorted(
+                str(getattr(agent, "agent_type", "")).strip()
+                for agent in getattr(agent_result, "active_agents", [])
+                if str(getattr(agent, "agent_type", "")).strip()
+            )
+            self._plugin_payloads = sorted(
+                [
+                    {
+                        "name": str(getattr(plugin, "name", "")).strip(),
+                        "path": str(getattr(plugin, "root", "")),
+                    }
+                    for plugin in getattr(plugin_result, "plugins", [])
+                    if str(getattr(plugin, "name", "")).strip()
+                ],
+                key=lambda item: item["name"],
+            )
 
             system_prompt = self._resolve_system_prompt(
                 tools,
@@ -483,6 +647,7 @@ class StdioSessionMixin:
 
             # Mark as initialized
             self._initialized = True
+            self._init_stream_message_sent = False
 
             # Build enhanced response payload aligned with SDK conventions
             slash_commands = list_slash_commands()
@@ -571,6 +736,7 @@ class StdioSessionMixin:
                     "message": str(e),
                 },
             )
+            clear_sdk_mcp_request_sender()
 
     def _coerce_initialize_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Normalize initialize payload into strict `InitializeParams` shape."""

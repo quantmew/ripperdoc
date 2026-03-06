@@ -6,7 +6,11 @@ import json
 import os
 from datetime import datetime, timezone
 
-from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
+from ripperdoc.utils.messaging.messages import (
+    create_assistant_message,
+    create_plan_file_reference_attachment_message,
+    create_user_message,
+)
 from ripperdoc.utils.sessions.session_history import SessionHistory, list_session_summaries
 from ripperdoc.utils.sessions.session_index import load_or_build_session_index, set_session_index_title
 from ripperdoc.utils.sessions.session_stats import collect_session_stats
@@ -106,6 +110,7 @@ def test_collect_session_stats_aggregates_from_index(tmp_path, monkeypatch):
 
     s1 = SessionHistory(project, "stats-1")
     s1.append(create_user_message("u1"))
+    s1.append(create_plan_file_reference_attachment_message("/tmp/plan.md", "step1"))
     s1.append(
         create_assistant_message(
             "a1",
@@ -141,7 +146,7 @@ def test_collect_session_stats_aggregates_from_index(tmp_path, monkeypatch):
 
     stats = collect_session_stats(project, days=365)
     assert stats.total_sessions == 2
-    assert stats.total_messages == 5
+    assert stats.total_messages == 6
     assert stats.total_input_tokens == 31
     assert stats.total_output_tokens == 17
     assert stats.total_cache_read_tokens == 2
@@ -149,9 +154,27 @@ def test_collect_session_stats_aggregates_from_index(tmp_path, monkeypatch):
     assert stats.total_tokens == 51
     assert stats.total_cost_usd == 0.35
     assert stats.favorite_model == "model-b"
+    assert stats.favorite_attachment_type == "plan_file_reference"
+    assert stats.attachment_usage["plan_file_reference"] == 1
     assert stats.current_streak >= 0
     assert stats.longest_streak >= 1
     assert stats.active_days >= 1
+
+
+def test_session_index_tracks_attachment_usage(tmp_path, monkeypatch):
+    _patch_session_home(monkeypatch, tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+
+    session = SessionHistory(project, "s-attachments")
+    session.append(create_user_message("hello"))
+    session.append(create_plan_file_reference_attachment_message("/tmp/plan.md", "step1"))
+
+    index = load_or_build_session_index(project)
+    entry = index.sessions["s-attachments"]
+
+    assert entry.message_count == 2
+    assert entry.attachment_usage == {"plan_file_reference": 1}
 
 
 def test_session_title_can_be_renamed_and_survives_new_messages(tmp_path, monkeypatch):

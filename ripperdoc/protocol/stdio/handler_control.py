@@ -48,6 +48,25 @@ class _UnknownControlMethodError(RuntimeError):
 class StdioControlMixin:
     _mcp_server_overrides: dict[str, McpServerInfo] | None
 
+    async def _load_mcp_servers_with_wait(self) -> list[McpServerInfo]:
+        try:
+            return await load_mcp_servers_async(self._project_path, wait_for_connections=True)
+        except TypeError as exc:
+            if "wait_for_connections" not in str(exc):
+                raise
+            return await load_mcp_servers_async(self._project_path)
+
+    async def _load_dynamic_mcp_tools_with_wait(self) -> list[Any]:
+        try:
+            return await load_dynamic_mcp_tools_async(
+                self._project_path,
+                wait_for_connections=True,
+            )
+        except TypeError as exc:
+            if "wait_for_connections" not in str(exc):
+                raise
+            return await load_dynamic_mcp_tools_async(self._project_path)
+
     def _coerce_tool_request(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Normalize JSON-RPC payload into (name, arguments)."""
         name = str(request.get("name") or "").strip()
@@ -247,7 +266,7 @@ class StdioControlMixin:
     async def _reload_mcp_runtime(self) -> list[McpServerInfo]:
         self._sync_mcp_runtime_overrides()
         await shutdown_mcp_runtime()
-        return await load_mcp_servers_async(self._project_path)
+        return await self._load_mcp_servers_with_wait()
 
     def _clone_mcp_config_map(self, configs: dict[str, McpServerInfo]) -> dict[str, McpServerInfo]:
         return {name: replace(info) for name, info in configs.items()}
@@ -271,7 +290,7 @@ class StdioControlMixin:
             disallowed_tools=self._disallowed_tools,
             tools_list=self._tools_list,
         )
-        dynamic_tools = await load_dynamic_mcp_tools_async(self._project_path)
+        dynamic_tools = await self._load_dynamic_mcp_tools_with_wait()
         if dynamic_tools:
             tools = merge_tools_with_dynamic(tools, dynamic_tools)
             tools = self._apply_tool_filters(
@@ -289,6 +308,10 @@ class StdioControlMixin:
                 "type": server.type,
                 "url": server.url,
                 "headers": server.headers or None,
+            }
+        elif server.type == "sdk":
+            config = {
+                "type": "sdk",
             }
         else:
             config = {
@@ -345,7 +368,7 @@ class StdioControlMixin:
     async def _handle_mcp_status(self, _request: dict[str, Any], request_id: str) -> None:
         """Return MCP runtime status and server summaries."""
         try:
-            servers = await load_mcp_servers_async(self._project_path)
+            servers = await self._load_mcp_servers_with_wait()
             await self._write_control_response(
                 request_id,
                 response=self._build_mcp_status_response(servers, status="mcp_status"),

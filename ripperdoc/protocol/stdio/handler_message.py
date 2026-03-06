@@ -15,6 +15,73 @@ from ripperdoc.protocol.models import (
 
 
 class StdioMessageMixin:
+    def _normalize_tool_result_content_blocks(
+        self,
+        text_value: Any,
+        content_value: Any,
+    ) -> list[dict[str, Any]]:
+        source = content_value if content_value is not None else text_value
+        if source is None:
+            return [{"type": "text", "text": ""}]
+        if isinstance(source, str):
+            return [{"type": "text", "text": source}]
+        if isinstance(source, list):
+            blocks: list[dict[str, Any]] = []
+            for item in source:
+                if isinstance(item, dict):
+                    block_type = str(item.get("type") or "").strip()
+                    if block_type == "text":
+                        blocks.append({"type": "text", "text": str(item.get("text") or "")})
+                    elif block_type:
+                        blocks.append(self._sanitize_for_json(item))
+                else:
+                    blocks.append({"type": "text", "text": str(item)})
+            return blocks or [{"type": "text", "text": ""}]
+        if isinstance(source, dict):
+            block_type = str(source.get("type") or "").strip()
+            if block_type:
+                return [self._sanitize_for_json(source)]
+            if source.get("text") is not None:
+                return [{"type": "text", "text": str(source.get("text"))}]
+            if source.get("content") is not None:
+                return [{"type": "text", "text": str(source.get("content"))}]
+        return [{"type": "text", "text": str(source)}]
+
+    def _normalize_tool_use_result_payload(
+        self,
+        raw_payload: Any,
+        fallback_blocks: list[dict[str, Any]] | None,
+    ) -> Any:
+        payload = self._sanitize_for_json(raw_payload)
+        if isinstance(payload, dict):
+            rich_keys = {
+                "server",
+                "tool",
+                "content",
+                "text",
+                "content_blocks",
+                "structured_content",
+                "is_error",
+                "token_estimate",
+                "warning",
+            }
+            if rich_keys.intersection(payload):
+                if payload.get("content_blocks") is not None:
+                    return self._normalize_tool_result_content_blocks(
+                        None,
+                        payload.get("content_blocks"),
+                    )
+                if payload.get("content") is not None:
+                    return self._normalize_tool_result_content_blocks(None, payload.get("content"))
+                if payload.get("text") is not None:
+                    return self._normalize_tool_result_content_blocks(payload.get("text"), None)
+            return payload
+        if payload is not None:
+            return payload
+        if fallback_blocks is not None:
+            return fallback_blocks
+        return None
+
     def _convert_message_to_sdk(self, message: Any) -> dict[str, Any] | None:
         """Convert internal message to SDK format.
 
@@ -28,6 +95,8 @@ class StdioMessageMixin:
 
         # Filter out progress messages (internal implementation detail)
         if msg_type == "progress":
+            return None
+        if msg_type == "attachment":
             return None
 
         if msg_type == "assistant":
@@ -80,8 +149,7 @@ class StdioMessageMixin:
         if msg_type == "user":
             msg_content = getattr(message, "message", None)
             content = getattr(msg_content, "content", "") if msg_content else ""
-            tool_result_text: str | None = None
-            tool_result_is_error = False
+            first_tool_result_blocks: list[dict[str, Any]] | None = None
 
             # If content is a list of MessageContent objects (e.g., tool results),
             # convert it to SDK content blocks
@@ -92,20 +160,20 @@ class StdioMessageMixin:
                         block_type = block.get("type", "")
                         if block_type == "tool_result":
                             tool_use_id = block.get("tool_use_id") or block.get("id") or ""
-                            text_value = self._normalize_tool_result_text(
-                                block.get("text"), block.get("content")
+                            content_value = self._normalize_tool_result_content_blocks(
+                                block.get("text"),
+                                block.get("content"),
                             )
                             normalized_block: dict[str, Any] = {
                                 "type": "tool_result",
                                 "tool_use_id": tool_use_id,
-                                "content": text_value,
+                                "content": content_value,
                             }
                             if "is_error" in block:
                                 normalized_block["is_error"] = block.get("is_error")
-                                tool_result_is_error = bool(block.get("is_error"))
                             content_blocks.append(normalized_block)
-                            if tool_result_text is None:
-                                tool_result_text = str(text_value) if text_value is not None else ""
+                            if first_tool_result_blocks is None:
+                                first_tool_result_blocks = content_value
                         else:
                             if block_type == "tool_use":
                                 content_blocks.append(self._normalize_tool_use_block(block))
@@ -115,9 +183,9 @@ class StdioMessageMixin:
                         block_dict = self._convert_content_block(block)
                         if block_dict:
                             if block_dict.get("type") == "tool_result":
-                                if tool_result_text is None:
-                                    tool_result_text = str(block_dict.get("content") or "")
-                                tool_result_is_error = bool(block_dict.get("is_error", False))
+                                block_content = block_dict.get("content")
+                                if isinstance(block_content, list) and first_tool_result_blocks is None:
+                                    first_tool_result_blocks = block_content
                             content_blocks.append(block_dict)
                 content = content_blocks
 
@@ -126,14 +194,9 @@ class StdioMessageMixin:
                 uuid=getattr(message, "uuid", None),
                 session_id=self._session_id,
                 parent_tool_use_id=getattr(message, "parent_tool_use_id", None),
-                tool_use_result=(
-                    (
-                        self._format_tool_use_result(tool_result_text, tool_result_is_error)
-                        if isinstance(content, list)
-                        and tool_result_is_error
-                        and tool_result_text is not None
-                        else self._sanitize_for_json(getattr(message, "tool_use_result", None))
-                    )
+                tool_use_result=self._normalize_tool_use_result_payload(
+                    getattr(message, "tool_use_result", None),
+                    first_tool_result_blocks,
                 ),
             )
             return model_to_dict(stream_message)
@@ -302,17 +365,15 @@ class StdioMessageMixin:
             }
 
         if block_type == "tool_result":
-            text_value = (
-                getattr(block, "text", None)
-                or self._normalize_tool_result_text(None, getattr(block, "content", None))
-                or ""
-            )
             result_block: dict[str, Any] = {
                 "type": "tool_result",
                 "tool_use_id": getattr(block, "tool_use_id", None)
                 or getattr(block, "id", None)
                 or "",
-                "content": text_value,
+                "content": self._normalize_tool_result_content_blocks(
+                    getattr(block, "text", None),
+                    getattr(block, "content", None),
+                ),
             }
             if getattr(block, "is_error", None) is not None:
                 result_block["is_error"] = getattr(block, "is_error", None)

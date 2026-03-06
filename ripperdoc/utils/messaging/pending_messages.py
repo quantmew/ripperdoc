@@ -9,9 +9,14 @@ from collections import deque
 import threading
 from typing import Any, Deque, Dict, List, Optional
 
-from ripperdoc.utils.messaging.messages import ProgressMessage, UserMessage, create_user_message
+from ripperdoc.utils.messaging.messages import (
+    AttachmentMessage,
+    ProgressMessage,
+    UserMessage,
+    create_user_message,
+)
 
-PendingMessage = UserMessage | ProgressMessage
+PendingMessage = UserMessage | ProgressMessage | AttachmentMessage
 
 
 class PendingMessageQueue:

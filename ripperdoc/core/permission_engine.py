@@ -17,6 +17,7 @@ from ripperdoc.cli.ui.choice import prompt_choice
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.managed_settings import get_managed_setting
+from ripperdoc.core.plan_mode import is_plan_file_path
 from ripperdoc.core.tool import Tool
 from ripperdoc.tools.file_read_tool import detect_file_encoding
 from ripperdoc.utils.diff_rendering import build_numbered_diff_layout, format_numbered_diff_text
@@ -43,6 +44,8 @@ _PERMISSION_PROMPT_RESERVED_LINES = 14
 _PERMISSION_PROMPT_MIN_DIFF_LINES = 4
 _PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"}
 _AUTO_MEMORY_WRITE_TOOLS = {"Write", "Edit", "MultiEdit"}
+_PLAN_MODE_SPECIAL_ALLOWED_TOOLS = {"AskUserQuestion", "ExitPlanMode"}
+_PLAN_MODE_PLAN_FILE_EDIT_TOOLS = {"Write", "Edit", "MultiEdit"}
 
 
 def _as_str_set(raw: Any) -> Set[str]:
@@ -64,6 +67,54 @@ def _managed_permissions_only_enabled() -> bool:
     if raw is None:
         raw = get_managed_setting("managed_permissions_only")
     return bool(raw)
+
+
+def _extract_tool_target_path(tool_name: str, parsed_input: Any) -> Optional[str]:
+    """Return the primary filesystem target path for mutating file tools."""
+
+    if tool_name in {"Write", "Edit", "MultiEdit"} and hasattr(parsed_input, "file_path"):
+        return str(getattr(parsed_input, "file_path"))
+    if tool_name == "NotebookEdit" and hasattr(parsed_input, "notebook_path"):
+        return str(getattr(parsed_input, "notebook_path"))
+    return None
+
+
+def _plan_mode_restriction_result(
+    *,
+    tool: Tool[Any, Any],
+    parsed_input: Any,
+    plan_file_path: str | None,
+) -> Optional[PermissionPreview]:
+    """Apply Claude Code style plan-mode write restrictions.
+
+    In plan mode, only read-only tools, AskUserQuestion, ExitPlanMode, and edits
+    to the active plan file are allowed. All other mutating operations are denied.
+    """
+
+    tool_name = str(getattr(tool, "name", "") or "")
+    if tool.is_read_only():
+        return None
+    if tool_name in _PLAN_MODE_SPECIAL_ALLOWED_TOOLS:
+        return None
+
+    target_path = _extract_tool_target_path(tool_name, parsed_input)
+    if (
+        tool_name in _PLAN_MODE_PLAN_FILE_EDIT_TOOLS
+        and is_plan_file_path(target_path, plan_file_path)
+    ):
+        return None
+
+    plan_suffix = f" except the active plan file ({plan_file_path})" if plan_file_path else ""
+    return PermissionPreview(
+        requires_user_input=False,
+        result=PermissionResult(
+            result=False,
+            message=(
+                "Plan mode is read-only. "
+                f"Tool '{tool_name}' is blocked while planning{plan_suffix}."
+            ),
+        ),
+    )
 
 
 @dataclass
@@ -1058,10 +1109,12 @@ def make_permission_checker(
     yolo_mode: bool,
     permission_mode: str = "default",
     is_bypass_permissions_mode_available: Optional[bool] = None,
+    plan_file_path: Optional[str] = None,
     prompt_fn: Optional[Callable[[str], str]] = None,
     console: Optional["Console"] = None,  # noqa: ARG001 (kept for backward compatibility)
     prompt_session: Optional["PromptSession"] = None,  # noqa: ARG001 (kept for backward compatibility)
     session_additional_working_dirs: Optional[Iterable[str]] = None,
+    session_allowed_tools: Optional[Iterable[str]] = None,
 ) -> Callable[[Tool[Any, Any], Any], Awaitable[PermissionResult]]:
     """Create a permission checking function for the current project.
 
@@ -1088,7 +1141,11 @@ def make_permission_checker(
     bypass_permissions_mode_available = bool(is_bypass_permissions_mode_available)
     config_manager.get_project_config(project_path)
 
-    session_allowed_tools: Set[str] = set()
+    session_allowed_tools_set: Set[str] = {
+        str(name).strip()
+        for name in (session_allowed_tools or [])
+        if str(name).strip()
+    }
     session_tool_rules: dict[str, Set[str]] = defaultdict(set)
     session_working_dirs: Set[str] = set()
     for raw_path in session_additional_working_dirs or []:
@@ -1171,6 +1228,15 @@ def make_permission_checker(
                 ),
             )
 
+        if permission_mode == "plan":
+            plan_mode_preview = _plan_mode_restriction_result(
+                tool=tool,
+                parsed_input=parsed_input,
+                plan_file_path=plan_file_path,
+            )
+            if plan_mode_preview is not None:
+                return plan_mode_preview
+
         policy = _build_permission_policy(
             project_path=project_path,
             config=config,
@@ -1182,7 +1248,7 @@ def make_permission_checker(
         if policy.get("managed_permissions_only"):
             is_preapproved = False
         else:
-            is_preapproved = tool.name in allowed_tools or tool.name in session_allowed_tools
+            is_preapproved = tool.name in allowed_tools or tool.name in session_allowed_tools_set
         decision = None if is_preapproved else await _resolve_permission_decision(
             tool,
             parsed_input,
@@ -1234,7 +1300,7 @@ def make_permission_checker(
                 _apply_updated_permissions(
                     hook_result.updated_permissions,
                     default_tool_name=tool.name,
-                    session_allowed_tools=session_allowed_tools,
+                    session_allowed_tools=session_allowed_tools_set,
                     session_tool_rules=session_tool_rules,
                 )
                 updated_input = hook_result.updated_input or decision.updated_input
@@ -1302,7 +1368,7 @@ def make_permission_checker(
             if tool.name == "Bash":
                 session_tool_rules["Bash"].update(rule_suggestions)
             else:
-                session_allowed_tools.add(tool.name)
+                session_allowed_tools_set.add(tool.name)
             return PermissionResult(
                 result=True, updated_input=decision.updated_input, decision=decision
             )

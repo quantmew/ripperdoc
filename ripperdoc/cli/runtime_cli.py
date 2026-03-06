@@ -415,6 +415,7 @@ async def run_query(
         max_thinking_tokens=max(0, int(max_thinking_tokens or 0)),
         max_turns=max_turns,
         permission_mode=permission_mode,
+        working_directory=str(project_path),
     )
 
     session_start_time = time.time()

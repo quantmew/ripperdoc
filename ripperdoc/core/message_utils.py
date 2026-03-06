@@ -469,7 +469,10 @@ As you answer the user's questions, you can use the following context:
 
 
 def build_full_system_prompt(
-    system_prompt: str, context: Dict[str, str], tool_mode: str, tools: List[Tool[Any, Any]]
+    system_prompt: str,
+    context: Dict[str, str],
+    tool_mode: str,
+    tools: List[Tool[Any, Any]],
 ) -> str:
     """Compose the final system prompt including context and tool hints."""
     full_prompt = system_prompt

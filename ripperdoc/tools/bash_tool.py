@@ -310,6 +310,14 @@ build projects, run tests, and interact with the file system."""
     def is_concurrency_safe(self) -> bool:
         return self.is_read_only()
 
+    def is_concurrency_safe_for_input(self, input_data: Optional[BashToolInput] = None) -> bool:
+        if input_data is None:
+            return self.is_concurrency_safe()
+        sandbox_requested = bool(input_data.sandbox) and not bool(
+            input_data.dangerously_disable_sandbox
+        )
+        return sandbox_requested or is_command_read_only(input_data.command)
+
     def needs_permissions(self, input_data: Optional[BashToolInput] = None) -> bool:
         if not input_data:
             return True

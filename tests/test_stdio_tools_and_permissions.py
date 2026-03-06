@@ -306,7 +306,7 @@ async def test_stdio_can_use_tool_permission_result(monkeypatch, tmp_path):
 
     monkeypatch.setattr(handler, "_write_control_response", capture)
 
-    await handler._handle_initialize({"options": {}}, "init")
+    await handler._handle_initialize({"options": {"sdk_can_use_tool": True}}, "init")
 
     await handler._handle_can_use_tool(
         {"tool_name": "Read", "input": {"value": "hello"}},
@@ -322,6 +322,7 @@ async def test_stdio_can_use_tool_permission_result(monkeypatch, tmp_path):
         return PermissionResult(result=False, message="nope")
 
     handler._local_can_use_tool = deny_checker
+    handler._can_use_tool = deny_checker
 
     await handler._handle_can_use_tool(
         {"tool_name": "Read", "input": {"value": "hello"}},
@@ -365,7 +366,7 @@ async def test_stdio_sdk_can_use_tool_bridges_ask_user_question(monkeypatch, tmp
     monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
     monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
 
-    await handler._handle_initialize({"options": {}}, "init")
+    await handler._handle_initialize({"options": {"sdk_can_use_tool": True}}, "init")
 
     tool = handler._query_context.tool_registry.get("AskUserQuestion")
     assert tool is not None
@@ -405,7 +406,7 @@ async def test_stdio_sdk_can_use_tool_skips_read_only_tools(monkeypatch, tmp_pat
     monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
     monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
 
-    await handler._handle_initialize({"options": {}}, "init")
+    await handler._handle_initialize({"options": {"sdk_can_use_tool": True}}, "init")
 
     tool = handler._query_context.tool_registry.get("Read")
     assert tool is not None
@@ -452,7 +453,7 @@ async def test_stdio_sdk_can_use_tool_uses_preview_for_rule_level_ask(monkeypatc
     monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
     monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
 
-    await handler._handle_initialize({"options": {}}, "init")
+    await handler._handle_initialize({"options": {"sdk_can_use_tool": True}}, "init")
 
     tool = handler._query_context.tool_registry.get("Read")
     assert tool is not None
@@ -492,7 +493,7 @@ async def test_stdio_sdk_can_use_tool_falls_back_to_local_checker(monkeypatch, t
     monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
     monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
 
-    await handler._handle_initialize({"options": {}}, "init")
+    await handler._handle_initialize({"options": {"sdk_can_use_tool": True}}, "init")
 
     tool = handler._query_context.tool_registry.get("Write")
     assert tool is not None

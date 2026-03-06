@@ -39,6 +39,7 @@ class SessionIndexEntry:
     total_cache_creation_tokens: int = 0
     total_cost_usd: float = 0.0
     model_usage: Dict[str, int] = field(default_factory=dict)
+    attachment_usage: Dict[str, int] = field(default_factory=dict)
     file_size: int = 0
     file_mtime_ns: int = 0
 
@@ -167,6 +168,8 @@ def _detect_payload_type(line: str) -> Optional[str]:
         return "assistant"
     if '"type":"user"' in head or '"type": "user"' in head:
         return "user"
+    if '"type":"attachment"' in head or '"type": "attachment"' in head:
+        return "attachment"
     return None
 
 
@@ -185,6 +188,13 @@ def _entry_from_dict(session_id: str, data: dict) -> SessionIndexEntry:
             if isinstance(model_name, str):
                 model_usage[model_name] = _coerce_int(count)
 
+    attachment_usage_raw = data.get("attachment_usage") or {}
+    attachment_usage: Dict[str, int] = {}
+    if isinstance(attachment_usage_raw, dict):
+        for attachment_name, count in attachment_usage_raw.items():
+            if isinstance(attachment_name, str):
+                attachment_usage[attachment_name] = _coerce_int(count)
+
     return SessionIndexEntry(
         session_id=session_id,
         message_count=_coerce_int(data.get("message_count")),
@@ -199,6 +209,7 @@ def _entry_from_dict(session_id: str, data: dict) -> SessionIndexEntry:
         total_cache_creation_tokens=_coerce_int(data.get("total_cache_creation_tokens")),
         total_cost_usd=_coerce_float(data.get("total_cost_usd")),
         model_usage=model_usage,
+        attachment_usage=attachment_usage,
         file_size=_coerce_int(data.get("file_size")),
         file_mtime_ns=_coerce_int(data.get("file_mtime_ns")),
     )
@@ -218,6 +229,7 @@ def _entry_to_dict(entry: SessionIndexEntry) -> dict:
         "total_cache_creation_tokens": entry.total_cache_creation_tokens,
         "total_cost_usd": entry.total_cost_usd,
         "model_usage": entry.model_usage,
+        "attachment_usage": entry.attachment_usage,
         "file_size": entry.file_size,
         "file_mtime_ns": entry.file_mtime_ns,
     }
@@ -310,7 +322,7 @@ def _update_entry_from_payload(
     entry: SessionIndexEntry, payload: dict, logged_at: Optional[datetime]
 ) -> None:
     payload_type = payload.get("type")
-    if payload_type not in ("user", "assistant"):
+    if payload_type not in ("user", "assistant", "attachment"):
         return
 
     if logged_at is not None:
@@ -320,6 +332,13 @@ def _update_entry_from_payload(
             entry.updated_at = logged_at
 
     entry.message_count += 1
+
+    if payload_type == "attachment":
+        attachment_payload = payload.get("attachment") or {}
+        attachment_type = attachment_payload.get("type")
+        if isinstance(attachment_type, str) and attachment_type:
+            entry.attachment_usage[attachment_type] = entry.attachment_usage.get(attachment_type, 0) + 1
+        return
 
     if payload_type == "user":
         prompt = _extract_prompt(payload)
@@ -353,7 +372,7 @@ def _scan_session_file(path: Path, session_id: str) -> Optional[SessionIndexEntr
                 if not line.strip():
                     continue
                 payload_type = _detect_payload_type(line)
-                if payload_type not in ("user", "assistant"):
+                if payload_type not in ("user", "assistant", "attachment"):
                     continue
 
                 logged_at = _parse_logged_at_from_line(line)
@@ -364,6 +383,20 @@ def _scan_session_file(path: Path, session_id: str) -> Optional[SessionIndexEntr
                         entry.updated_at = logged_at
 
                 entry.message_count += 1
+
+                if payload_type == "attachment":
+                    try:
+                        data = json.loads(line)
+                        payload = data.get("payload") or {}
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        continue
+                    attachment_payload = payload.get("attachment") or {}
+                    attachment_type = attachment_payload.get("type")
+                    if isinstance(attachment_type, str) and attachment_type:
+                        entry.attachment_usage[attachment_type] = (
+                            entry.attachment_usage.get(attachment_type, 0) + 1
+                        )
+                    continue
 
                 if payload_type == "assistant":
                     try:
@@ -507,7 +540,7 @@ def update_session_index_for_payload(
 ) -> None:
     """Apply one message append to the sidecar index."""
     payload_type = payload.get("type")
-    if payload_type not in ("user", "assistant"):
+    if payload_type not in ("user", "assistant", "attachment"):
         return
 
     resolved_project = str(project_path.resolve())

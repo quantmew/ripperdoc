@@ -5,7 +5,13 @@ from ripperdoc.utils.messaging.conversation_compaction import (
     format_summary_response,
     get_complete_tool_pairs_tail,
 )
-from ripperdoc.utils.messaging.messages import create_user_message, create_assistant_message
+from ripperdoc.utils.messaging.message_formatting import render_transcript
+from ripperdoc.utils.messaging.messages import (
+    create_assistant_message,
+    create_plan_file_reference_attachment_message,
+    create_plan_mode_attachment_message,
+    create_user_message,
+)
 
 
 def test_extract_tool_ids_from_assistant_message():
@@ -172,3 +178,24 @@ def test_format_summary_response_handles_backreference_like_sequences():
     formatted = format_summary_response(raw)
 
     assert formatted == "Analysis:\nRegex-like: \\1 and path C:\\\\tmp"
+
+
+def test_render_transcript_summary_mode_filters_internal_attachments() -> None:
+    messages = [
+        create_user_message("start"),
+        create_plan_mode_attachment_message(
+            "Plan mode still active.",
+            plan_file_path="/tmp/plan.md",
+            reminder_type="sparse",
+        ),
+        create_plan_file_reference_attachment_message("/tmp/plan.md", "1. do work"),
+        create_assistant_message("done"),
+    ]
+
+    transcript = render_transcript(messages, attachment_mode="summary")
+
+    assert "User: start" in transcript
+    assert "Assistant: done" in transcript
+    assert "System (plan_file_reference):" in transcript
+    assert "A plan file exists from plan mode at: /tmp/plan.md" in transcript
+    assert "Plan mode still active" not in transcript

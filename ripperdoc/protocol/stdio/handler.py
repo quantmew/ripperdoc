@@ -108,11 +108,17 @@ class StdioProtocolHandler(
         self._session_agent_name: str | None = None
         self._session_agents: dict[str, dict[str, str]] = {}
         self._session_agent_prompt: str | None = None
+        self._active_agent_names: list[str] = []
+        self._enabled_skill_names: list[str] = []
+        self._plugin_payloads: list[dict[str, str]] = []
         self._disable_slash_commands: bool = False
         self._replay_user_messages: bool = False
         self._session_persistence_enabled: bool = True
         self._mcp_server_overrides: dict[str, McpServerInfo] | None = None
         self._mcp_disabled_servers: set[str] = set()
+        self._permission_mode: str = "default"
+        self._init_stream_message_sent: bool = False
+        self._sdk_betas: list[str] = []
 
         # Conversation history for multi-turn queries
         self._conversation_messages: list[Any] = []
@@ -131,9 +137,10 @@ class StdioProtocolHandler(
         self._idle_exit_triggered: bool = False
 
         # Ensure each stdio handler starts with a clean MCP runtime override state.
-        from ripperdoc.utils.mcp import clear_mcp_runtime_overrides
+        from ripperdoc.utils.mcp import clear_mcp_runtime_overrides, clear_sdk_mcp_request_sender
 
         clear_mcp_runtime_overrides(self._project_path)
+        clear_sdk_mcp_request_sender()
 
 
 __all__ = ["StdioProtocolHandler"]

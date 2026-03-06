@@ -12,6 +12,7 @@ from ripperdoc.utils.messaging.messages import (
     INTERRUPT_MESSAGE,
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
     is_hook_notice_payload,
+    is_hidden_meta_message,
 )
 from ripperdoc.utils.token_estimation import estimate_tokens
 from rich.markup import escape
@@ -23,13 +24,14 @@ def _summarize_subagent_progress_content(content: Any) -> str:
         return content
 
     msg_type = getattr(content, "type", None)
+    if msg_type == "attachment":
+        return ""
     if msg_type not in {"assistant", "user"}:
         return str(content)
 
-    message_payload = getattr(content, "message", None)
-    metadata = getattr(message_payload, "metadata", None) or {}
-    if metadata.get("hook_additional_context"):
+    if is_hidden_meta_message(content):
         return ""
+    message_payload = getattr(content, "message", None)
     body = getattr(message_payload, "content", None) if message_payload is not None else None
     if isinstance(body, str):
         return body

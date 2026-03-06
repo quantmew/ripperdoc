@@ -52,6 +52,11 @@ class OAuthModelOption(BaseModel):
 
 _CODEX_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
     OAuthModelOption(
+        model="gpt-5.4",
+        label="gpt-5.4",
+        description="Frontier general model available for Codex OAuth profiles.",
+    ),
+    OAuthModelOption(
         model="gpt-5.3-codex",
         label="gpt-5.3-codex (current)",
         description="Latest frontier agentic coding model.",

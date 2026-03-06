@@ -14,7 +14,7 @@ import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TextIO, cast
 
 from ripperdoc import __version__
 from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
@@ -35,6 +35,11 @@ _MCP_CIRCUIT_BREAKER_COOLDOWN_SEC_DEFAULT = 30.0
 
 _mcp_runtime_server_overrides: Dict[str, Dict[str, "McpServerInfo"]] = {}
 _mcp_runtime_disabled_servers: Dict[str, set[str]] = {}
+_sdk_mcp_request_sender_var: contextvars.ContextVar[Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None] = contextvars.ContextVar(
+    "ripperdoc_sdk_mcp_request_sender",
+    default=None,
+)
+_global_sdk_mcp_request_sender: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
 
 
 try:
@@ -87,6 +92,55 @@ class McpServerInfo:
     instructions: Optional[str] = None
     server_version: Optional[str] = None
     capabilities: Dict[str, Any] = field(default_factory=dict)
+
+
+def _get_sdk_mcp_request_sender() -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None:
+    sender = _sdk_mcp_request_sender_var.get()
+    if sender is not None:
+        return sender
+    return _global_sdk_mcp_request_sender
+
+
+def set_sdk_mcp_request_sender(
+    sender: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None,
+) -> None:
+    """Register the stdio control callback used to reach SDK-backed MCP servers."""
+    global _global_sdk_mcp_request_sender
+    _global_sdk_mcp_request_sender = sender
+    _sdk_mcp_request_sender_var.set(sender)
+
+
+def clear_sdk_mcp_request_sender() -> None:
+    """Clear the current SDK-backed MCP control callback."""
+    set_sdk_mcp_request_sender(None)
+
+
+def parse_mcp_config_option(
+    raw_value: str | Path | None,
+    *,
+    base_dir: Optional[Path] = None,
+) -> Dict[str, "McpServerInfo"]:
+    """Parse `--mcp-config` style JSON/path input into server configs."""
+    if raw_value is None:
+        return {}
+    if isinstance(raw_value, Path):
+        raw_text = raw_value.read_text(encoding="utf-8")
+    else:
+        candidate = str(raw_value).strip()
+        if not candidate:
+            return {}
+        candidate_path = Path(candidate)
+        if not candidate.lstrip().startswith("{") and not candidate.lstrip().startswith("["):
+            if not candidate_path.is_absolute() and base_dir is not None:
+                candidate_path = (base_dir / candidate_path).resolve()
+            if candidate_path.exists():
+                raw_text = candidate_path.read_text(encoding="utf-8")
+            else:
+                raw_text = candidate
+        else:
+            raw_text = candidate
+    parsed = json.loads(raw_text)
+    return parse_mcp_server_configs(parsed)
 
 
 def _load_json_file(path: Path) -> Dict[str, Any]:
@@ -364,6 +418,128 @@ def parse_mcp_server_configs(raw: Any) -> Dict[str, McpServerInfo]:
         return parsed
 
     return {}
+
+
+@dataclass
+class _SdkMcpCallToolResult:
+    content: list[dict[str, Any]]
+    structuredContent: dict[str, Any] | None = None
+    isError: bool = False
+
+
+@dataclass
+class _SdkMcpToolDefinition:
+    name: str
+    description: str = ""
+    inputSchema: dict[str, Any] | None = None
+    annotations: dict[str, Any] | None = None
+
+
+@dataclass
+class _SdkMcpListToolsResult:
+    tools: list[_SdkMcpToolDefinition]
+
+
+class _SdkMcpSession:
+    """Minimal MCP client for SDK-backed in-process servers exposed over control requests."""
+
+    def __init__(
+        self,
+        server_name: str,
+        sender: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+    ) -> None:
+        self.server_name = server_name
+        self._sender = sender
+        self._request_id = 0
+
+    async def _send_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        response = await self._sender(self.server_name, message)
+        payload = response.get("mcp_response", response)
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Invalid MCP response for server '{self.server_name}'")
+        error = payload.get("error")
+        if isinstance(error, dict):
+            raise RuntimeError(str(error.get("message") or "Unknown MCP error"))
+        return payload
+
+    def _next_id(self) -> int:
+        request_id = self._request_id
+        self._request_id += 1
+        return request_id
+
+    async def initialize(self) -> dict[str, Any]:
+        request_id = self._next_id()
+        response = await self._send_message(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "ripperdoc", "version": __version__},
+                },
+            }
+        )
+        await self._send_message(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {},
+            }
+        )
+        return cast(dict[str, Any], response.get("result") or {})
+
+    async def list_tools(self) -> _SdkMcpListToolsResult:
+        response = await self._send_message(
+            {
+                "jsonrpc": "2.0",
+                "id": self._next_id(),
+                "method": "tools/list",
+                "params": {},
+            }
+        )
+        result = response.get("result") or {}
+        raw_tools = result.get("tools") or []
+        tools: list[_SdkMcpToolDefinition] = []
+        for tool in raw_tools:
+            if not isinstance(tool, dict):
+                continue
+            tools.append(
+                _SdkMcpToolDefinition(
+                    name=str(tool.get("name") or ""),
+                    description=str(tool.get("description") or ""),
+                    inputSchema=tool.get("inputSchema")
+                    if isinstance(tool.get("inputSchema"), dict)
+                    else {},
+                    annotations=tool.get("annotations")
+                    if isinstance(tool.get("annotations"), dict)
+                    else {},
+                )
+            )
+        return _SdkMcpListToolsResult(tools=tools)
+
+    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> _SdkMcpCallToolResult:
+        response = await self._send_message(
+            {
+                "jsonrpc": "2.0",
+                "id": self._next_id(),
+                "method": "tools/call",
+                "params": {
+                    "name": name,
+                    "arguments": arguments or {},
+                },
+            }
+        )
+        result = response.get("result") or {}
+        content = result.get("content")
+        return _SdkMcpCallToolResult(
+            content=content if isinstance(content, list) else [],
+            structuredContent=result.get("structuredContent")
+            if isinstance(result.get("structuredContent"), dict)
+            else None,
+            isError=bool(result.get("is_error") or result.get("isError")),
+        )
 
 
 def _mcp_stderr_mode() -> str:
@@ -766,7 +942,43 @@ class McpRuntime:
                 },
             )
 
-            if config.type in ("sse", "sse-ide"):
+            if config.type == "sdk":
+                sender = _get_sdk_mcp_request_sender()
+                if sender is None:
+                    raise RuntimeError("SDK MCP transport is not available")
+                session = _SdkMcpSession(config.name, sender)
+                init_result = await session.initialize()
+                info.status = "connected"
+                info.instructions = cast(str | None, init_result.get("instructions")) or info.instructions
+                server_info = init_result.get("serverInfo")
+                if isinstance(server_info, dict):
+                    version = server_info.get("version")
+                    info.server_version = str(version) if version is not None else None
+                capabilities = init_result.get("capabilities")
+                info.capabilities = capabilities if isinstance(capabilities, dict) else {}
+                self.sessions[config.name] = cast(ClientSession, session)
+
+                tools_result = await session.list_tools()
+                info.tools = [
+                    McpToolInfo(
+                        name=tool.name,
+                        description=tool.description or "",
+                        input_schema=tool.inputSchema,
+                        annotations=tool.annotations or {},
+                    )
+                    for tool in tools_result.tools
+                    if tool.name
+                ]
+                logger.info(
+                    "[mcp] Connected to SDK MCP server",
+                    extra={
+                        "server": config.name,
+                        "status": info.status,
+                        "tools": len(info.tools),
+                    },
+                )
+                return info
+            elif config.type in ("sse", "sse-ide"):
                 if not config.url:
                     raise ValueError("SSE MCP server requires a 'url'.")
                 cm = sse_client(config.url, headers=config.headers or None)

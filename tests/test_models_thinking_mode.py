@@ -13,7 +13,7 @@ from ripperdoc.cli.ui.models_tui.textual_app import (
     _next_copied_profile_name,
 )
 from ripperdoc.core.config import ModelProfile, ProtocolType
-from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
+from ripperdoc.core.oauth import OAuthToken, OAuthTokenType, oauth_models_for_type
 
 
 class _FakeConsole:
@@ -266,6 +266,30 @@ def test_models_tui_oauth_token_options_include_non_codex(monkeypatch) -> None:
     assert "gitlab-main" in values
 
 
+def test_codex_oauth_model_options_include_gpt_5_4() -> None:
+    models = [option.model for option in oauth_models_for_type(OAuthTokenType.CODEX)]
+
+    assert "gpt-5.4" in models
+
+
+def test_models_tui_oauth_model_options_include_custom_for_codex_and_copilot() -> None:
+    screen = ModelFormScreen("add")
+
+    codex_options = screen._oauth_model_select_options(OAuthTokenType.CODEX)
+    copilot_options = screen._oauth_model_select_options(OAuthTokenType.COPILOT)
+
+    assert codex_options[-1] == ("Custom model...", "__oauth_model_custom__")
+    assert copilot_options[-1] == ("Custom model...", "__oauth_model_custom__")
+
+
+def test_models_tui_oauth_model_options_do_not_include_custom_for_gitlab() -> None:
+    screen = ModelFormScreen("add")
+
+    gitlab_options = screen._oauth_model_select_options(OAuthTokenType.GITLAB)
+
+    assert ("Custom model...", "__oauth_model_custom__") not in gitlab_options
+
+
 def test_render_models_table_includes_thinking_mode_column() -> None:
     profile = ModelProfile(
         protocol=ProtocolType.OPENAI_COMPATIBLE,
@@ -330,7 +354,7 @@ def test_collect_add_profile_input_oauth_uses_token_and_curated_model(monkeypatc
     assert profile.protocol == ProtocolType.OAUTH
     assert profile.oauth_token_name == "codex-main"
     assert profile.oauth_token_type == OAuthTokenType.CODEX
-    assert profile.model == "gpt-5.3-codex-spark"
+    assert profile.model == "gpt-5.3-codex"
 
 
 def test_collect_add_profile_input_oauth_supports_non_codex_token(monkeypatch) -> None:

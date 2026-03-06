@@ -16,6 +16,7 @@ from ripperdoc.tools.tool_search_tool import ToolSearchTool
 from ripperdoc.utils.messaging.messages import (
     create_assistant_message,
     create_hook_additional_context_message,
+    create_plan_mode_attachment_message,
     create_user_message,
 )
 
@@ -239,6 +240,114 @@ def test_build_iteration_plan_enable_tool_search_false_keeps_deferred_mcp(monkey
     names = {tool.name for tool in plan.tools_for_model}
     assert "ToolSearch" not in names
     assert "mcp__demo__heavy_tool" in names
+
+
+def test_build_iteration_plan_injects_full_plan_mode_attachment(monkeypatch: Any, tmp_path) -> None:
+    query_context = QueryContext(
+        tools=[_ActiveTool()],
+        permission_mode="plan",
+        working_directory=str(tmp_path),
+    )
+    monkeypatch.setattr(
+        loop_module,
+        "resolve_model_profile",
+        lambda _model: ModelProfile(
+            protocol=ProtocolType.ANTHROPIC,
+            model="claude-sonnet-4-20250514",
+            max_input_tokens=1000,
+        ),
+    )
+    monkeypatch.setattr(loop_module, "determine_tool_mode", lambda _profile: "native")
+
+    plan = loop_module._build_iteration_plan(
+        messages=[create_user_message("start planning")],
+        system_prompt="system",
+        context={},
+        query_context=query_context,
+    )
+
+    assert len(plan.plan_mode_messages) == 1
+    attachment = plan.plan_mode_messages[0]
+    assert attachment.type == "attachment"
+    assert attachment.metadata["plan_mode_attachment"] is True
+    assert attachment.metadata["plan_mode_reminder_type"] == "full"
+    assert "Plan mode is active." in str(attachment.content)
+
+
+def test_build_iteration_plan_skips_recent_plan_mode_attachment(monkeypatch: Any, tmp_path) -> None:
+    query_context = QueryContext(
+        tools=[_ActiveTool()],
+        permission_mode="plan",
+        working_directory=str(tmp_path),
+    )
+    monkeypatch.setattr(
+        loop_module,
+        "resolve_model_profile",
+        lambda _model: ModelProfile(
+            protocol=ProtocolType.ANTHROPIC,
+            model="claude-sonnet-4-20250514",
+            max_input_tokens=1000,
+        ),
+    )
+    monkeypatch.setattr(loop_module, "determine_tool_mode", lambda _profile: "native")
+
+    prior_attachment = create_plan_mode_attachment_message(
+        "full reminder",
+        plan_file_path=query_context.plan_file_path or str(tmp_path / "main.md"),
+        reminder_type="full",
+    )
+    messages = [
+        create_user_message("start planning"),
+        prior_attachment,
+        create_assistant_message("first reply"),
+    ]
+
+    plan = loop_module._build_iteration_plan(
+        messages=messages,
+        system_prompt="system",
+        context={},
+        query_context=query_context,
+    )
+
+    assert plan.plan_mode_messages == []
+
+
+def test_build_iteration_plan_uses_sparse_attachment_after_five_turns(monkeypatch: Any, tmp_path) -> None:
+    query_context = QueryContext(
+        tools=[_ActiveTool()],
+        permission_mode="plan",
+        working_directory=str(tmp_path),
+    )
+    monkeypatch.setattr(
+        loop_module,
+        "resolve_model_profile",
+        lambda _model: ModelProfile(
+            protocol=ProtocolType.ANTHROPIC,
+            model="claude-sonnet-4-20250514",
+            max_input_tokens=1000,
+        ),
+    )
+    monkeypatch.setattr(loop_module, "determine_tool_mode", lambda _profile: "native")
+
+    prior_attachment = create_plan_mode_attachment_message(
+        "full reminder",
+        plan_file_path=query_context.plan_file_path or str(tmp_path / "main.md"),
+        reminder_type="full",
+    )
+    messages = [create_user_message("start planning"), prior_attachment]
+    messages.extend(create_assistant_message(f"reply {idx}") for idx in range(5))
+
+    plan = loop_module._build_iteration_plan(
+        messages=messages,
+        system_prompt="system",
+        context={},
+        query_context=query_context,
+    )
+
+    assert len(plan.plan_mode_messages) == 1
+    attachment = plan.plan_mode_messages[0]
+    assert attachment.metadata["plan_mode_reminder_type"] == "sparse"
+    assert "Plan mode still active" in str(attachment.content)
 
 
 def test_build_iteration_plan_enable_tool_search_auto_uses_threshold(monkeypatch: Any) -> None:
@@ -604,14 +713,14 @@ def test_compose_next_iteration_messages_reorders_tool_hook_lifecycle() -> None:
     assert getattr(composed[1], "type", None) == "assistant"
     assert (
         isinstance(composed[2], type(pre_msg))
-        and composed[2].message.metadata.get("hook_event") == "PreToolUse"
+        and composed[2].metadata.get("hook_event") == "PreToolUse"
     )
     assert isinstance(composed[3], type(tool_result_msg))
     assert isinstance(composed[3].message.content, list)
     assert composed[3].message.content[0].type == "tool_result"
     assert (
         isinstance(composed[4], type(post_msg))
-        and composed[4].message.metadata.get("hook_event") == "PostToolUse"
+        and composed[4].metadata.get("hook_event") == "PostToolUse"
     )
 
 

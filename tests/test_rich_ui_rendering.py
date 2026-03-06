@@ -9,6 +9,7 @@ from ripperdoc.cli.ui.rich_ui.rendering import (
 from ripperdoc.utils.messaging.messages import (
     create_assistant_message,
     create_hook_additional_context_message,
+    create_plan_mode_attachment_message,
     create_progress_message,
 )
 
@@ -153,6 +154,30 @@ def test_handle_progress_message_hides_subagent_hook_additional_context() -> Non
         tool_use_id="tool1",
         sibling_tool_use_ids=set(),
         content=hook_message,
+        progress_sender="Subagent(writer:agent_abcd1234)",
+        is_subagent_message=True,
+    )
+    spinner = _DummySpinner()
+    ui = _DummyUI()
+
+    out_tokens = handle_progress_message(ui, message, spinner, output_token_est=5)
+
+    assert out_tokens == 5
+    assert spinner.calls == [(5, None)]
+    assert ui.display_calls == []
+
+
+def test_handle_progress_message_hides_subagent_plan_mode_attachment() -> None:
+    attachment = create_plan_mode_attachment_message(
+        "Plan mode still active.",
+        plan_file_path="/tmp/plan.md",
+        reminder_type="sparse",
+    )
+
+    message = create_progress_message(
+        tool_use_id="tool1",
+        sibling_tool_use_ids=set(),
+        content=attachment,
         progress_sender="Subagent(writer:agent_abcd1234)",
         is_subagent_message=True,
     )

@@ -24,10 +24,10 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
     monkeypatch.setattr(handler_session, "list_custom_commands", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(handler_session, "list_slash_commands", lambda: [])
 
-    async def fake_load_mcp_servers_async(_path):
+    async def fake_load_mcp_servers_async(_path, **_kwargs):
         return []
 
-    async def fake_load_dynamic_mcp_tools_async(_path):
+    async def fake_load_dynamic_mcp_tools_async(_path, **_kwargs):
         return []
 
     monkeypatch.setattr(handler_session, "load_mcp_servers_async", fake_load_mcp_servers_async)
@@ -104,5 +104,6 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
         assert decision["permission_mode"] == "acceptEdits"
         assert decision["clear_context"] is False
         assert handler._query_context.permission_mode == "acceptEdits"
+        assert handler._query_context.has_exited_plan_mode is True
     finally:
         hook_manager.set_permission_mode(previous_mode)

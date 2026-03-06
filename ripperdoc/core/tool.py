@@ -72,6 +72,10 @@ class ToolUseContext(BaseModel):
     on_exit_plan_mode: Optional[Any] = Field(
         default=None, description="Callback invoked when exiting plan mode"
     )
+    plan_file_path: Optional[str] = Field(
+        default=None,
+        description="Resolved plan file path for plan mode.",
+    )
     pending_message_queue: Annotated[Optional[PendingMessageQueue], SkipValidation] = Field(
         default=None,
         description="Queue for pending conversation messages (background notices or user interjections).",
@@ -159,6 +163,10 @@ class Tool(ABC, Generic[TInput, TOutput]):
     def is_concurrency_safe(self) -> bool:
         """Check if this tool can be run concurrently with others."""
         return self.is_read_only()
+
+    def is_concurrency_safe_for_input(self, input_data: Optional[TInput] = None) -> bool:
+        """Check if this tool can be run concurrently for a specific input."""
+        return self.is_concurrency_safe()
 
     def needs_permissions(self, input_data: Optional[TInput] = None) -> bool:
         """Check if this tool needs permission to execute."""

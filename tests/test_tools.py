@@ -257,6 +257,14 @@ async def test_tool_validation():
     assert "not found" in validation.message.lower()
 
 
+def test_bash_tool_concurrency_safety_uses_current_input() -> None:
+    tool = BashTool()
+
+    assert tool.is_concurrency_safe_for_input(BashToolInput(command="git status")) is True
+    assert tool.is_concurrency_safe_for_input(BashToolInput(command="git diff HEAD")) is True
+    assert tool.is_concurrency_safe_for_input(BashToolInput(command="git commit -m test")) is False
+
+
 @pytest.mark.asyncio
 async def test_ls_tool():
     """Test directory listing."""

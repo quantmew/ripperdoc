@@ -64,6 +64,7 @@ _ADD_MODE_OPTIONS: list[tuple[str, str]] = [
     ("OAuth token", _ADD_MODE_OAUTH),
 ]
 _PROVIDER_MODEL_CUSTOM = "__provider_model_custom__"
+_OAUTH_MODEL_CUSTOM = "__oauth_model_custom__"
 
 
 def _next_copied_profile_name(source_name: str, existing_names: set[str]) -> str:
@@ -352,10 +353,40 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         self,
         token_type: OAuthTokenType,
     ) -> list[tuple[str, str]]:
-        return [
+        options = [
             (option.label, option.model)
             for option in oauth_models_for_type(token_type)
         ]
+        if token_type in {OAuthTokenType.CODEX, OAuthTokenType.COPILOT}:
+            options.append(("Custom model...", _OAUTH_MODEL_CUSTOM))
+        return options
+
+    def _selected_oauth_model_value(self) -> str:
+        try:
+            oauth_model_select = self.query_one("#oauth_model_select", Select)
+        except Exception:
+            return ""
+        model_raw = oauth_model_select.value
+        return model_raw.strip() if isinstance(model_raw, str) else ""
+
+    def _sync_model_input_with_oauth_model(self, *, keep_manual_when_custom: bool = True) -> None:
+        try:
+            model_input = self.query_one("#model_input", Input)
+        except Exception:
+            return
+
+        oauth_model_value = self._selected_oauth_model_value()
+        if oauth_model_value and oauth_model_value != _OAUTH_MODEL_CUSTOM:
+            model_input.value = oauth_model_value
+            return
+        if keep_manual_when_custom and (model_input.value or "").strip():
+            return
+        if (
+            self._existing_profile
+            and self._existing_profile.protocol == ProtocolType.OAUTH
+            and (self._existing_profile.model or "").strip()
+        ):
+            model_input.value = self._existing_profile.model
 
     def _selected_oauth_token_type(self) -> OAuthTokenType:
         try:
@@ -388,13 +419,15 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         )
         preferred = current_value or existing_default
         if model_options:
+            allowed_values = {value for _label, value in model_options}
             selected_value = (
                 preferred
-                if any(value == preferred for _label, value in model_options)
-                else model_options[0][1]
+                if preferred in allowed_values
+                else (_OAUTH_MODEL_CUSTOM if preferred and _OAUTH_MODEL_CUSTOM in allowed_values else model_options[0][1])
             )
             oauth_model_select.set_options(model_options)
             oauth_model_select.value = selected_value
+            self._sync_model_input_with_oauth_model()
             return
         oauth_model_select.set_options([("No OAuth models", Select.BLANK)])
         oauth_model_select.value = Select.BLANK
@@ -498,14 +531,15 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                         else OAuthTokenType.CODEX
                     )
                 )
-                oauth_model_options = [
-                    (option.label, option.model)
-                    for option in oauth_models_for_type(selected_oauth_token_type)
-                ]
+                oauth_model_options = self._oauth_model_select_options(selected_oauth_token_type)
                 oauth_model_default = (
                     model_default
                     if any(value == model_default for _label, value in oauth_model_options)
-                    else (oauth_model_options[0][1] if oauth_model_options else "")
+                    else (
+                        _OAUTH_MODEL_CUSTOM
+                        if model_default and any(value == _OAUTH_MODEL_CUSTOM for _label, value in oauth_model_options)
+                        else (oauth_model_options[0][1] if oauth_model_options else "")
+                    )
                 )
                 yield Select(
                     oauth_model_options if oauth_model_options else [("No OAuth models", "")],
@@ -715,6 +749,11 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             return
         if event.select.id == "oauth_token_select":
             self._refresh_oauth_model_options()
+            self._refresh_provider_fields()
+            return
+        if event.select.id == "oauth_model_select":
+            self._sync_model_input_with_oauth_model()
+            self._refresh_provider_fields()
 
     def _set_widget_visible(self, selector: str, visible: bool) -> None:
         try:
@@ -742,8 +781,11 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         is_anthropic = protocol == ProtocolType.ANTHROPIC
         is_openai_compatible = protocol == ProtocolType.OPENAI_COMPATIBLE
         provider_model_is_custom = self._selected_provider_model_value() == _PROVIDER_MODEL_CUSTOM
-        show_manual_model = (not is_oauth) and (
-            not is_provider_preset_mode or provider_model_is_custom
+        oauth_model_is_custom = self._selected_oauth_model_value() == _OAUTH_MODEL_CUSTOM
+        show_manual_model = (
+            is_oauth and oauth_model_is_custom
+        ) or (
+            (not is_oauth) and (not is_provider_preset_mode or provider_model_is_custom)
         )
         show_protocol = is_custom_mode
 
@@ -772,7 +814,9 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
 
         try:
             model_label = self.query_one("#model_input_label", Static)
-            if is_oauth:
+            if is_oauth and oauth_model_is_custom:
+                model_label.update("Model name (custom OAuth)")
+            elif is_oauth:
                 model_label.update("Model (OAuth preset)")
             elif is_provider_preset_mode and not provider_model_is_custom:
                 model_label.update("Model (provider preset)")
@@ -828,10 +872,11 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         oauth_token_type: Optional[OAuthTokenType] = None
         if protocol == ProtocolType.OAUTH:
             oauth_model_raw = oauth_model_select.value
+            oauth_model_value = oauth_model_raw.strip() if isinstance(oauth_model_raw, str) else ""
             model_name = (
-                oauth_model_raw.strip()
-                if isinstance(oauth_model_raw, str)
-                else ""
+                (model_input.value or "").strip()
+                if oauth_model_value == _OAUTH_MODEL_CUSTOM
+                else oauth_model_value
             )
             oauth_token_raw = oauth_token_select.value
             oauth_token_name = (

@@ -33,6 +33,8 @@ class SessionStats:
     # Model statistics (model -> count)
     model_usage: Dict[str, int] = field(default_factory=dict)
     favorite_model: str = ""
+    attachment_usage: Dict[str, int] = field(default_factory=dict)
+    favorite_attachment_type: str = ""
 
     # Time statistics
     longest_session_duration: timedelta = field(default_factory=lambda: timedelta(0))
@@ -115,6 +117,7 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
         daily_activity=defaultdict(int),
         weekday_activity=defaultdict(int),
         model_usage=defaultdict(int),
+        attachment_usage=defaultdict(int),
     )
 
     index_entries = list_session_index_entries(project_path)
@@ -190,6 +193,10 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
             if not model_name:
                 continue
             stats.model_usage[model_name] += count
+        for attachment_type, count in entry.attachment_usage.items():
+            if not attachment_type:
+                continue
+            stats.attachment_usage[attachment_type] += count
 
     # Active days
     stats.active_days = len(date_set)
@@ -212,6 +219,8 @@ def collect_session_stats(project_path: Path, days: int = 32) -> SessionStats:
     # Determine favorite model
     if stats.model_usage:
         stats.favorite_model = max(stats.model_usage.items(), key=lambda x: x[1])[0]
+    if stats.attachment_usage:
+        stats.favorite_attachment_type = max(stats.attachment_usage.items(), key=lambda x: x[1])[0]
 
     return stats
 

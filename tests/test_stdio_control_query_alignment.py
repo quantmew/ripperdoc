@@ -10,11 +10,13 @@ from typing import Any
 import pytest
 
 from ripperdoc.utils.mcp import McpServerInfo
+from ripperdoc.utils.mcp import parse_mcp_config_option
 
 from ripperdoc.protocol.models import DEFAULT_PROTOCOL_VERSION, JsonRpcErrorCodes
 from ripperdoc import __version__
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_control as handler_control_module
+from ripperdoc.protocol.stdio import handler_query as handler_query_module
 from ripperdoc.protocol.stdio import handler_session as handler_session_module
 from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 
@@ -73,6 +75,57 @@ def test_coerce_initialize_request_defaults_from_options() -> None:
     }
 
 
+def test_build_sdk_init_stream_message_matches_expected_shape(monkeypatch, tmp_path: Path) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+    handler._session_id = "session-1"
+    handler._permission_mode = "default"
+    handler._output_style = "default"
+    handler._active_agent_names = ["Explore", "Plan"]
+    handler._enabled_skill_names = ["debug", "simplify"]
+    handler._plugin_payloads = [{"name": "demo-plugin", "path": str(tmp_path / ".plugins/demo")}]
+    handler._sdk_betas = ["compact-2026-01-12"]
+    handler._query_context = type("QueryContextStub", (), {"model": "glm-5"})()
+
+    monkeypatch.setattr(
+        handler_session_module,
+        "list_slash_commands",
+        lambda: [type("Cmd", (), {"name": "compact"})(), type("Cmd", (), {"name": "review"})()],
+    )
+    monkeypatch.setattr(
+        handler_session_module,
+        "list_custom_commands",
+        lambda _path: [type("Cmd", (), {"name": "release-notes"})()],
+    )
+
+    tools = [
+        type("Tool", (), {"name": "Read"})(),
+        type("Tool", (), {"name": "mcp__localtools__echo_notes"})(),
+    ]
+    servers = [McpServerInfo(name="localtools", status="connected", type="sdk", tools=[], resources=[])]
+
+    payload = handler._build_sdk_init_stream_message(tools=tools, servers=servers)
+
+    assert payload["type"] == "system"
+    assert payload["subtype"] == "init"
+    assert payload["cwd"] == str(tmp_path)
+    assert payload["session_id"] == "session-1"
+    assert payload["tools"] == ["Read", "mcp__localtools__echo_notes"]
+    assert payload["mcp_servers"] == [{"name": "localtools", "status": "connected"}]
+    assert payload["model"] == "glm-5"
+    assert payload["permissionMode"] == "default"
+    assert payload["slash_commands"] == ["compact", "review", "release-notes"]
+    assert payload["apiKeySource"] == "none"
+    assert payload["betas"] == ["compact-2026-01-12"]
+    assert payload["ripperdoc_version"] == __version__
+    assert payload["output_style"] == "default"
+    assert payload["agents"] == ["Explore", "Plan"]
+    assert payload["skills"] == ["debug", "simplify"]
+    assert payload["plugins"] == [{"name": "demo-plugin", "path": str(tmp_path / ".plugins/demo")}]
+    assert payload["fast_mode_state"] == "off"
+    assert isinstance(payload["uuid"], str) and payload["uuid"]
+
+
 @pytest.mark.asyncio
 async def test_handle_initialize_defaults_from_subtype_init_control_request(monkeypatch) -> None:
     handler = handler_module.StdioProtocolHandler()
@@ -102,6 +155,116 @@ async def test_handle_initialize_defaults_from_subtype_init_control_request(monk
     assert written[0]["response"]["protocolVersion"] == DEFAULT_PROTOCOL_VERSION
     assert written[0]["response"]["capabilities"] == {"tools": {"listChanged": False}, "sampling": {"tools": True}}
     assert written[0]["response"]["serverInfo"]["name"] == "ripperdoc"
+
+
+def test_parse_mcp_config_option_accepts_inline_json() -> None:
+    parsed = parse_mcp_config_option(
+        '{"mcpServers":{"localtools":{"type":"sdk","name":"example-local-tools"}}}'
+    )
+
+    assert "localtools" in parsed
+    assert parsed["localtools"].type == "sdk"
+
+
+@pytest.mark.asyncio
+async def test_initialize_applies_cli_mcp_config_and_sdk_sender(monkeypatch, tmp_path: Path) -> None:
+    handler = handler_module.StdioProtocolHandler(
+        default_options={
+            "mcp_config": '{"mcpServers":{"localtools":{"type":"sdk","name":"example-local-tools"}}}'
+        }
+    )
+    written: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(handler_session_module, "get_effective_model_profile", lambda _model: object())
+    monkeypatch.setattr(handler_session_module, "get_project_config", lambda _path: object())
+    monkeypatch.setattr(
+        handler_session_module,
+        "get_project_local_config",
+        lambda _path: type("Cfg", (), {"output_style": "default", "output_language": "auto"})(),
+    )
+    monkeypatch.setattr(handler_session_module, "set_runtime_plugin_dirs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handler_session_module, "set_runtime_task_scope", lambda **_kwargs: None)
+    monkeypatch.setattr(handler_session_module, "load_agent_definitions", lambda **_kwargs: None)
+    monkeypatch.setattr(handler_session_module, "discover_plugins", lambda **_kwargs: None)
+    monkeypatch.setattr(handler_session_module, "list_slash_commands", lambda: [])
+    monkeypatch.setattr(handler_session_module, "list_custom_commands", lambda _path: [])
+    monkeypatch.setattr(
+        handler_session_module,
+        "load_all_output_styles",
+        lambda _path: type("Styles", (), {"styles": [type("S", (), {"key": "default"})()]})(),
+    )
+    monkeypatch.setattr(
+        handler_session_module,
+        "load_mcp_servers_async",
+        lambda *_args, **_kwargs: asyncio.sleep(
+            0,
+            result=[McpServerInfo(name="localtools", type="sdk", status="connected", tools=[], resources=[])],
+        ),
+    )
+    monkeypatch.setattr(
+        handler_session_module,
+        "load_dynamic_mcp_tools_async",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=[]),
+    )
+    monkeypatch.setattr(
+        handler_session_module,
+        "format_mcp_instructions",
+        lambda _servers: "",
+    )
+
+    async def fake_write_control_response(
+        request_id: str,
+        response: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        written.append({"id": request_id, "response": response, "error": error})
+
+    monkeypatch.setattr(handler, "_write_control_response", fake_write_control_response)
+
+    await handler._handle_initialize(
+        {
+            "protocolVersion": DEFAULT_PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "1.0"},
+            "_meta": {"ripperdoc_options": {"cwd": str(tmp_path)}},
+        },
+        "init-sdk",
+    )
+
+    assert written[-1]["error"] is None
+    assert handler._mcp_server_overrides is not None
+    assert "localtools" in handler._mcp_server_overrides
+    assert handler._mcp_server_overrides["localtools"].type == "sdk"
+    assert handler._send_sdk_mcp_message is not None
+
+
+def test_convert_user_tool_result_to_sdk_uses_content_blocks_shape() -> None:
+    handler = handler_module.StdioProtocolHandler()
+    handler._session_id = "session-1"
+
+    message = create_user_message(
+        [{"type": "tool_result", "tool_use_id": "call_1", "text": "done"}],
+        tool_use_result={
+            "server": "localtools",
+            "tool": "echo_notes",
+            "text": "done",
+            "content_blocks": [{"type": "text", "text": "done"}],
+            "token_estimate": 12,
+        },
+    )
+
+    payload = handler._convert_message_to_sdk(message)
+
+    assert payload is not None
+    assert payload["type"] == "user"
+    assert payload["message"]["content"] == [
+        {
+            "type": "tool_result",
+            "tool_use_id": "call_1",
+            "content": [{"type": "text", "text": "done"}],
+        }
+    ]
+    assert payload["tool_use_result"] == [{"type": "text", "text": "done"}]
 
 
 
@@ -176,6 +339,100 @@ async def test_query_validation_rejects_bad_payload(monkeypatch) -> None:
     )
 
     assert captured["code"] == int(JsonRpcErrorCodes.InvalidParams)
+
+
+@pytest.mark.asyncio
+async def test_query_init_message_refreshes_dynamic_tools_before_emit(monkeypatch, tmp_path: Path) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    handler._initialized = True
+    handler._project_path = tmp_path
+    handler._session_id = "session-1"
+    handler._permission_mode = "default"
+    handler._query_context = type(
+        "QueryContextStub",
+        (),
+        {
+            "tools": [],
+            "pending_message_queue": None,
+            "hook_scopes": [],
+        },
+    )()
+    handler._conversation_messages = []
+
+    monkeypatch.setattr(
+        "ripperdoc.protocol.stdio.handler_query.load_mcp_servers_async",
+        lambda *_args, **_kwargs: asyncio.sleep(
+            0,
+            result=[McpServerInfo(name="localtools", status="connected", type="sdk", tools=[], resources=[])],
+        ),
+    )
+    monkeypatch.setattr(
+        "ripperdoc.protocol.stdio.handler_query.format_mcp_instructions",
+        lambda _servers: "",
+    )
+    monkeypatch.setattr(
+        handler,
+        "_resolve_system_prompt",
+        lambda tools, *_args, **_kwargs: ",".join(getattr(tool, "name", "") for tool in tools),
+    )
+    monkeypatch.setattr(handler, "_emit_hook_notices", lambda *_args, **_kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(
+        handler,
+        "_collect_prepare_inputs",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=([], [], None)),
+    )
+    monkeypatch.setattr(
+        handler,
+        "_coerce_sampling_messages",
+        lambda _messages: [create_user_message("hello")],
+    )
+    monkeypatch.setattr(handler, "_validate_tool_message_sequence", lambda _messages: True)
+    monkeypatch.setattr(handler, "_extract_latest_user_prompt", lambda *_args, **_kwargs: "hello")
+    monkeypatch.setattr(
+        handler,
+        "_ensure_session_history",
+        lambda: type(
+            "H",
+            (),
+            {
+                "path": tmp_path / "session.jsonl",
+                "append": lambda self, _m: None,
+            },
+        )(),
+    )
+
+    async def fake_refresh() -> None:
+        handler._query_context.tools = [
+            type("Tool", (), {"name": "mcp__localtools__echo_notes"})(),
+            type("Tool", (), {"name": "mcp__localtools__project_brief"})(),
+        ]
+
+    monkeypatch.setattr(handler, "_refresh_query_context_dynamic_tools", fake_refresh)
+
+    written: list[dict[str, Any]] = []
+
+    async def fake_write_message_stream(message: dict[str, Any]) -> None:
+        written.append(message)
+
+    monkeypatch.setattr(handler, "_write_message_stream", fake_write_message_stream)
+
+    prepared = await handler._prepare_query_stage(
+        {
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+            "maxTokens": 128,
+        },
+        "q-init-refresh",
+        handler_query_module._QueryRuntimeState(start_time=0.0),
+    )
+
+    assert prepared is not None
+    assert written
+    assert written[0]["type"] == "system"
+    assert written[0]["subtype"] == "init"
+    assert written[0]["tools"] == [
+        "mcp__localtools__echo_notes",
+        "mcp__localtools__project_brief",
+    ]
 
 
 def test_coerce_query_request_accepts_prompt_shortcut() -> None:
@@ -298,7 +555,7 @@ async def test_control_request_handles_mcp_status(monkeypatch) -> None:
     handler = handler_module.StdioProtocolHandler()
     written: list[dict[str, Any]] = []
 
-    async def fake_load_mcp_servers_async(_path):
+    async def fake_load_mcp_servers_async(_path, **_kwargs):
         return [
             McpServerInfo(
                 name="connected-server",
@@ -337,6 +594,42 @@ async def test_control_request_handles_mcp_status(monkeypatch) -> None:
     assert response["connected"] == ["connected-server"]
     assert response["failed"] == ["failed-server"]
     assert len(response["servers"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_control_request_handles_sdk_mcp_status_shape(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    written: list[dict[str, Any]] = []
+
+    async def fake_load_mcp_servers_async(_path, **_kwargs):
+        return [
+            McpServerInfo(
+                name="localtools",
+                status="connected",
+                type="sdk",
+                tools=[],
+                resources=[],
+            )
+        ]
+
+    async def fake_write_control_response(
+        request_id: str,
+        response: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        written.append({"id": request_id, "response": response, "error": error})
+
+    monkeypatch.setattr(handler, "_write_control_response", fake_write_control_response)
+    monkeypatch.setattr(
+        "ripperdoc.protocol.stdio.handler_control.load_mcp_servers_async",
+        fake_load_mcp_servers_async,
+    )
+
+    await handler._handle_mcp_status({}, "mcp-sdk")
+
+    assert written[-1]["error"] is None
+    assert written[-1]["response"]["connected"] == ["localtools"]
+    assert written[-1]["response"]["servers"][0]["config"] == {"type": "sdk"}
 
 
 @pytest.mark.asyncio

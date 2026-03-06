@@ -7,6 +7,7 @@ plan to the user for approval before starting to code.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from textwrap import dedent
 from typing import Any, AsyncGenerator, Optional
 
@@ -19,7 +20,12 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ValidationResult,
 )
+from ripperdoc.core.plan_mode import (
+    build_plan_mode_exit_system_prompt,
+    build_rejected_plan_user_message,
+)
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.messaging.messages import create_plan_mode_attachment_message, create_user_message
 
 logger = get_logger()
 
@@ -58,9 +64,12 @@ EXIT_PLAN_MODE_PROMPT = dedent(
 class ExitPlanModeToolInput(BaseModel):
     """Input for the ExitPlanMode tool."""
 
-    plan: str = Field(
-        description="The plan you came up with, that you want to run by the user for approval. "
-        "Supports markdown. The plan should be pretty concise."
+    plan: Optional[str] = Field(
+        default=None,
+        description=(
+            "Deprecated fallback. If omitted, ExitPlanMode will read the plan from the active "
+            "plan file path exposed by plan mode."
+        ),
     )
 
 
@@ -111,13 +120,23 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         input_data: ExitPlanModeToolInput,
         context: Optional[ToolUseContext] = None,  # noqa: ARG002
     ) -> ValidationResult:
-        """Validate that plan is not empty."""
-        if not input_data.plan or not input_data.plan.strip():
+        """Validate that plan exists either inline or in the active plan file."""
+        if input_data.plan and input_data.plan.strip():
+            return ValidationResult(result=True)
+        plan_file_path = (context.plan_file_path if context else None) or ""
+        if plan_file_path:
+            try:
+                plan_text = Path(plan_file_path).read_text(encoding="utf-8")
+            except (OSError, IOError, UnicodeDecodeError):
+                plan_text = ""
+            if plan_text.strip():
+                return ValidationResult(result=True)
+        if plan_file_path:
             return ValidationResult(
                 result=False,
-                message="Plan cannot be empty",
+                message=f"Plan file is empty or unreadable: {plan_file_path}",
             )
-        return ValidationResult(result=True)
+        return ValidationResult(result=False, message="Plan cannot be empty")
 
     def render_result_for_assistant(self, output: ExitPlanModeToolOutput) -> str:
         """Render the tool output for the AI assistant."""
@@ -142,9 +161,13 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         verbose: bool = False,  # noqa: ARG002
     ) -> str:
         """Render the tool use message for display."""
-        plan = input_data.plan
+        plan = input_data.plan or ""
         snippet = f"{plan[:77]}..." if len(plan) > 80 else plan
-        return f"Share plan for approval: {snippet}"
+        return (
+            f"Share plan for approval: {snippet}"
+            if snippet
+            else "Share plan file for approval"
+        )
 
     async def call(
         self,
@@ -156,6 +179,12 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         approved = True
         selected_mode: Optional[str] = None
         clear_context = False
+        plan_text = (input_data.plan or "").strip()
+        if not plan_text and context.plan_file_path:
+            try:
+                plan_text = Path(context.plan_file_path).read_text(encoding="utf-8").strip()
+            except (OSError, IOError, UnicodeDecodeError):
+                plan_text = ""
 
         # Invoke the exit plan mode callback if available. Rich UI uses this to
         # implement the "Ready to code?" confirmation flow.
@@ -169,7 +198,7 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
 
                 decision_payload = await self._invoke_exit_callback(
                     context.on_exit_plan_mode,
-                    plan=input_data.plan,
+                    plan=plan_text,
                     is_agent=is_agent,
                 )
                 approved, selected_mode, clear_context = self._coerce_exit_decision(decision_payload)
@@ -183,12 +212,31 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
                         logger.debug("[exit_plan_mode_tool] Failed to resume UI")
 
         output = ExitPlanModeToolOutput(
-            plan=input_data.plan,
+            plan=plan_text,
             is_agent=is_agent,
             approved=approved,
             permission_mode=selected_mode,
             clear_context=clear_context,
         )
+        if context.pending_message_queue is not None:
+            if approved and context.plan_file_path:
+                plan_file_path = str(context.plan_file_path)
+                context.pending_message_queue.enqueue(
+                    create_plan_mode_attachment_message(
+                        build_plan_mode_exit_system_prompt(
+                            plan_file_path=plan_file_path,
+                            plan_exists=bool(plan_text),
+                        ),
+                        plan_file_path=plan_file_path,
+                        reminder_type="exit",
+                        attachment_type="plan_mode_exit",
+                        plan_exists=bool(plan_text),
+                    )
+                )
+            elif not approved:
+                context.pending_message_queue.enqueue(
+                    create_user_message(build_rejected_plan_user_message(plan_text))
+                )
         yield ToolResult(
             data=output,
             result_for_assistant=self.render_result_for_assistant(output),

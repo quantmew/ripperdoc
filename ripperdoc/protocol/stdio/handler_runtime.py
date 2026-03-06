@@ -452,6 +452,8 @@ class StdioRuntimeMixin:
             # Keep in-flight query tasks alive so they can finish and emit results.
             cancel_inflight_tasks = False
             self._arm_idle_exit_timer()
+            while not self._is_runtime_idle():
+                await asyncio.sleep(0.05)
 
         except (OSError, IOError, json.JSONDecodeError) as e:
             logger.error("Error in stdio loop: %s", e, exc_info=True)

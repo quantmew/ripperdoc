@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from ripperdoc.core.tool import Tool
+from ripperdoc.core.plan_mode import resolve_plan_file_path
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.file_watch import BoundedFileCache
@@ -280,6 +281,7 @@ class QueryContext:
         on_enter_plan_mode: Optional[Callable[..., Any]] = None,
         on_exit_plan_mode: Optional[Callable[..., Any]] = None,
         hook_scopes: Optional[List[HooksConfig]] = None,
+        plan_file_path: Optional[str] = None,
     ) -> None:
         self.tool_registry = ToolRegistry(tools)
         self.max_thinking_tokens = max_thinking_tokens
@@ -321,6 +323,13 @@ class QueryContext:
         self.pre_plan_mode = pre_plan_mode
         self.on_enter_plan_mode = on_enter_plan_mode
         self.on_exit_plan_mode = on_exit_plan_mode
+        self.has_exited_plan_mode = False
+        self.plan_file_path = plan_file_path or str(
+            resolve_plan_file_path(
+                working_directory=self.working_directory,
+                agent_id=self.agent_id,
+            )
+        )
         self.hook_scopes: List[HooksConfig] = list(hook_scopes) if hook_scopes else []
         self._hook_scope_ids: set[str] = set()
 
@@ -357,8 +366,20 @@ class QueryContext:
         """Update the session-level working directory used for future tool calls."""
         if not working_directory:
             self.working_directory = None
+            self.plan_file_path = str(
+                resolve_plan_file_path(
+                    working_directory=None,
+                    agent_id=self.agent_id,
+                )
+            )
             return
         self.working_directory = str(Path(working_directory).expanduser().resolve())
+        self.plan_file_path = str(
+            resolve_plan_file_path(
+                working_directory=self.working_directory,
+                agent_id=self.agent_id,
+            )
+        )
 
     def add_hook_scope(self, scope_id: str, hooks: HooksConfig) -> bool:
         """Register a hook scope by id (idempotent)."""

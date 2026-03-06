@@ -221,8 +221,10 @@ class EnterPlanModeTool(Tool[EnterPlanModeToolInput, EnterPlanModeToolOutput]):
 
         output = EnterPlanModeToolOutput(
             message=(
-                "Entered plan mode. You should now focus on exploring "
-                "the codebase and designing an implementation approach."
+                "Entered plan mode. You should now focus on exploring the codebase, "
+                "asking clarifying questions, and incrementally writing the implementation "
+                "plan to the plan file"
+                + (f" at {context.plan_file_path}." if context.plan_file_path else ".")
             ),
             entered=True,
         )

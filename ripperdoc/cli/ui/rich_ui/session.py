@@ -39,6 +39,7 @@ from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permission_engine import make_permission_checker
+from ripperdoc.core.plan_mode import ensure_plan_file_directory
 from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
@@ -75,11 +76,13 @@ from ripperdoc.tools.dynamic_mcp_tool import (
 from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.messaging.messages import (
-    UserMessage,
     AssistantMessage,
+    AttachmentMessage,
     ProgressMessage,
+    UserMessage,
     create_hook_additional_context_message,
     create_user_message,
+    is_hidden_meta_message,
 )
 from ripperdoc.utils.log import enable_session_file_logging, get_logger
 from ripperdoc.utils.filesystem.path_ignore import build_ignore_filter
@@ -111,7 +114,7 @@ from ripperdoc.cli.ui.rich_ui.rendering import (
 
 
 # Type alias for conversation messages
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 console = Console()
 logger = get_logger()
@@ -363,6 +366,11 @@ class RichUI:
             yolo_mode=False,
             permission_mode=self.permission_mode,
             is_bypass_permissions_mode_available=self._is_bypass_permissions_mode_available(),
+            plan_file_path=(
+                getattr(self.query_context, "plan_file_path", None)
+                if self.query_context is not None
+                else None
+            ),
             session_additional_working_dirs=self._session_additional_working_dirs,
         )
 
@@ -432,6 +440,8 @@ class RichUI:
         current_mode = self._normalize_permission_mode(self.permission_mode)
         if current_mode != "plan":
             self._pre_plan_mode = current_mode
+        if self.query_context is not None and self.query_context.plan_file_path:
+            ensure_plan_file_directory(self.query_context.plan_file_path)
         self._apply_permission_mode("plan", announce=False)
 
     def _exit_plan_mode(self) -> None:
@@ -484,6 +494,8 @@ class RichUI:
     ) -> dict[str, Any]:
         """Prompt for plan approval and apply mode/context decisions."""
         if is_agent:
+            if self.query_context is not None:
+                self.query_context.has_exited_plan_mode = True
             self._exit_plan_mode()
             return {
                 "approved": True,
@@ -544,6 +556,8 @@ class RichUI:
 
             clear_context = selection == "yes_clear"
             self._apply_permission_mode(selected_mode, announce=False)
+            if self.query_context is not None:
+                self.query_context.has_exited_plan_mode = True
             if clear_context:
                 self._clear_context_after_turn = True
             return {
@@ -1104,12 +1118,9 @@ class RichUI:
         if not messages:
             return
 
-        # Pre-filter messages: exclude hook_additional_context messages from UI display
-        # These messages are for AI context only, not for user display
+        # Pre-filter hidden meta messages used only for AI context.
         def _should_display(msg: ConversationMessage) -> bool:
-            message_payload = getattr(msg, "message", None) or getattr(msg, "content", None)
-            metadata = getattr(message_payload, "metadata", None) or {}
-            return not metadata.get("hook_additional_context")
+            return not is_hidden_meta_message(msg)
 
         replay_messages = [msg for msg in messages if _should_display(msg)]
         total_messages = len(messages)
@@ -1460,6 +1471,7 @@ class RichUI:
                 pre_plan_mode=self._pre_plan_mode,
                 on_enter_plan_mode=self._enter_plan_mode,
                 on_exit_plan_mode=self._on_exit_plan_mode,
+                working_directory=str(self.project_path),
             )
         else:
             abort_controller = getattr(self.query_context, "abort_controller", None)
@@ -1472,6 +1484,7 @@ class RichUI:
             self.query_context.pre_plan_mode = self._pre_plan_mode
             self.query_context.on_enter_plan_mode = self._enter_plan_mode
             self.query_context.on_exit_plan_mode = self._on_exit_plan_mode
+            self.query_context.set_working_directory(str(self.project_path))
         self._ensure_task_notification_poller()
         self.query_context.stop_hook_active = False
         return self.query_context
@@ -2037,6 +2050,7 @@ class RichUI:
             resume_ui=query_context.resume_ui,
             on_enter_plan_mode=query_context.on_enter_plan_mode,
             on_exit_plan_mode=query_context.on_exit_plan_mode,
+            plan_file_path=query_context.plan_file_path,
             pending_message_queue=query_context.pending_message_queue,
             task_notification_queue=query_context.task_notification_queue,
         )

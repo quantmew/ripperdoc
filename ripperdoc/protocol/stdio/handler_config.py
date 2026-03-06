@@ -15,6 +15,7 @@ from ripperdoc.core.hooks.events import HookOutput
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.permission_engine import PermissionPreview, PermissionResult
 from ripperdoc.core.permission_engine import make_permission_checker
+from ripperdoc.core.plan_mode import ensure_plan_file_directory
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.protocol.models import UserMessageData, UserStreamMessage
 from ripperdoc.utils.messaging.messages import create_hook_additional_context_message
@@ -132,7 +133,13 @@ class StdioConfigMixin:
                 yolo_mode=False,
                 permission_mode=normalized_mode,
                 is_bypass_permissions_mode_available=self._is_bypass_permissions_mode_available(),
+                plan_file_path=(
+                    self._query_context.plan_file_path
+                    if self._query_context is not None
+                    else None
+                ),
                 session_additional_working_dirs=self._session_additional_working_dirs,
+                session_allowed_tools=self._allowed_tools,
             )
             self._sdk_can_use_tool_supported = True
 
@@ -169,6 +176,8 @@ class StdioConfigMixin:
             )
         if current_mode != "plan":
             self._pre_plan_mode = current_mode
+        if self._query_context is not None and self._query_context.plan_file_path:
+            ensure_plan_file_directory(self._query_context.plan_file_path)
         self._apply_permission_mode("plan")
 
     def _exit_plan_mode(self) -> None:
@@ -194,6 +203,8 @@ class StdioConfigMixin:
 
         self._pre_plan_mode = None
         self._apply_permission_mode(target_mode)
+        if self._query_context is not None:
+            self._query_context.has_exited_plan_mode = True
         # In stdio mode, keep context by default.
         self._clear_context_after_turn = False
         return {

@@ -18,6 +18,7 @@ from ripperdoc.utils.messaging.message_formatting import (
 )
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
+    AttachmentMessage,
     ProgressMessage,
     UserMessage,
     create_user_message,
@@ -25,7 +26,7 @@ from ripperdoc.utils.messaging.messages import (
 
 logger = get_logger()
 
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage]
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 RECENT_MESSAGES_AFTER_COMPACT = 8
 
@@ -305,7 +306,7 @@ async def summarize_conversation(
         The summary text, or empty string if summarization fails.
     """
     recent_messages = messages[-60:]
-    transcript = render_transcript(recent_messages)
+    transcript = render_transcript(recent_messages, attachment_mode="summary")
 
     logger.debug(
         "[compaction] summarize_conversation: %d messages, transcript length=%d",

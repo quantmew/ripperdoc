@@ -14,6 +14,7 @@ from ripperdoc.utils.log import get_logger
 from ripperdoc.core.message_utils import tool_result_message
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.messaging.messages import (
+    AttachmentMessage,
     ProgressMessage,
     UserMessage,
     create_hook_additional_context_message,
@@ -105,9 +106,9 @@ async def _optional_timeout(timeout_sec: Optional[float]) -> AsyncGenerator[None
 
 
 async def _queue_get_with_timeout(
-    queue: asyncio.Queue[Optional[Union[UserMessage, ProgressMessage]]],
+    queue: asyncio.Queue[Optional[Union[UserMessage, AttachmentMessage, ProgressMessage]]],
     timeout_sec: Optional[float],
-) -> Optional[Union[UserMessage, ProgressMessage]]:
+) -> Optional[Union[UserMessage, AttachmentMessage, ProgressMessage]]:
     """Read from queue with optional timeout."""
     if timeout_sec is None or timeout_sec <= 0:
         return await queue.get()
@@ -457,9 +458,9 @@ def _group_tool_calls_by_concurrency(prepared_calls: List[Dict[str, Any]]) -> Li
 
 async def _execute_tools_sequentially(
     items: List[Dict[str, Any]],
-    tool_results: List[UserMessage],
+    tool_results: List[Union[UserMessage, AttachmentMessage]],
     abort_signal: Optional[asyncio.Event] = None,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Run tool generators one by one."""
     for item in items:
         gen = item.get("generator")
@@ -467,54 +468,76 @@ async def _execute_tools_sequentially(
             continue
         if abort_signal is None:
             async for message in gen:
-                if isinstance(message, UserMessage):
+                if isinstance(message, (UserMessage, AttachmentMessage)):
                     tool_results.append(message)
                 yield message
             continue
 
-        while True:
-            if abort_signal.is_set():
-                await gen.aclose()
-                return
+        queue: asyncio.Queue[Optional[Union[UserMessage, AttachmentMessage, ProgressMessage]]] = (
+            asyncio.Queue()
+        )
 
-            next_item = asyncio.create_task(gen.__anext__())
-            abort_waiter = asyncio.create_task(abort_signal.wait())
-            done, pending = await asyncio.wait(
-                {next_item, abort_waiter},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            for pending_task in pending:
-                pending_task.cancel()
-                try:
-                    await pending_task
-                except asyncio.CancelledError:
-                    pass
-
-            if abort_waiter in done and abort_signal.is_set():
-                next_item.cancel()
-                try:
-                    await next_item
-                except (asyncio.CancelledError, StopAsyncIteration):
-                    pass
-                await gen.aclose()
-                return
-
+        async def _consume() -> None:
             try:
-                message = next_item.result()
-            except StopAsyncIteration:
-                break
+                async for message in gen:
+                    await queue.put(message)
+            finally:
+                await queue.put(None)
 
-            if isinstance(message, UserMessage):
-                tool_results.append(message)
-            yield message
+        consumer = asyncio.create_task(_consume())
+
+        try:
+            while True:
+                if abort_signal.is_set():
+                    consumer.cancel()
+                    await asyncio.gather(consumer, return_exceptions=True)
+                    return
+
+                queue_waiter = asyncio.create_task(queue.get())
+                abort_waiter = asyncio.create_task(abort_signal.wait())
+                done, pending = await asyncio.wait(
+                    {queue_waiter, abort_waiter},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                for pending_task in pending:
+                    pending_task.cancel()
+                    try:
+                        await pending_task
+                    except asyncio.CancelledError:
+                        pass
+
+                if abort_waiter in done and abort_signal.is_set():
+                    if not queue_waiter.done():
+                        queue_waiter.cancel()
+                        try:
+                            await queue_waiter
+                        except asyncio.CancelledError:
+                            pass
+                    consumer.cancel()
+                    await asyncio.gather(consumer, return_exceptions=True)
+                    return
+
+                message = queue_waiter.result()
+                if message is None:
+                    break
+
+                if isinstance(message, (UserMessage, AttachmentMessage)):
+                    tool_results.append(message)
+                yield message
+        finally:
+            result = (await asyncio.gather(consumer, return_exceptions=True))[0]
+            if isinstance(result, asyncio.CancelledError):
+                continue
+            if isinstance(result, Exception):
+                raise result
 
 
 async def _execute_tools_in_parallel(
     items: List[Dict[str, Any]],
-    tool_results: List[UserMessage],
+    tool_results: List[Union[UserMessage, AttachmentMessage]],
     abort_signal: Optional[asyncio.Event] = None,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Run tool generators concurrently."""
     logger.debug("[query] _execute_tools_in_parallel ENTER: %d items", len(items))
     valid_items = [call for call in items if call.get("generator")]
@@ -537,9 +560,9 @@ async def _execute_tools_in_parallel(
 
 async def _run_tools_concurrently(
     prepared_calls: List[Dict[str, Any]],
-    tool_results: List[UserMessage],
+    tool_results: List[Union[UserMessage, AttachmentMessage]],
     abort_signal: Optional[asyncio.Event] = None,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Run tools grouped by concurrency safety (parallel for safe groups)."""
     for group in _group_tool_calls_by_concurrency(prepared_calls):
         if group["is_concurrency_safe"]:
@@ -566,9 +589,9 @@ async def _run_tools_concurrently(
 
 async def _run_tools_serially(
     prepared_calls: List[Dict[str, Any]],
-    tool_results: List[UserMessage],
+    tool_results: List[Union[UserMessage, AttachmentMessage]],
     abort_signal: Optional[asyncio.Event] = None,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Run all tools sequentially (helper for clarity)."""
     async for message in _execute_tools_sequentially(
         prepared_calls,
@@ -579,12 +602,12 @@ async def _run_tools_serially(
 
 
 async def _run_concurrent_tool_uses(
-    generators: List[AsyncGenerator[Union[UserMessage, ProgressMessage], None]],
+    generators: List[AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]],
     tool_names: List[str],
-    tool_results: List[UserMessage],
+    tool_results: List[Union[UserMessage, AttachmentMessage]],
     *,
     abort_signal: Optional[asyncio.Event] = None,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Drain multiple tool generators concurrently and stream outputs with overall timeout."""
     overall_timeout_sec = _resolve_concurrent_timeout_sec(tool_names)
     logger.debug(
@@ -597,10 +620,10 @@ async def _run_concurrent_tool_uses(
         logger.debug("[query] _run_concurrent_tool_uses: no generators, returning")
         return
 
-    queue: asyncio.Queue[Optional[Union[UserMessage, ProgressMessage]]] = asyncio.Queue()
+    queue: asyncio.Queue[Optional[Union[UserMessage, AttachmentMessage, ProgressMessage]]] = asyncio.Queue()
 
     async def _consume(
-        gen: AsyncGenerator[Union[UserMessage, ProgressMessage], None],
+        gen: AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None],
         gen_index: int,
         tool_name: str,
     ) -> Optional[Exception]:
@@ -668,7 +691,7 @@ async def _run_concurrent_tool_uses(
                     "[query] _run_concurrent_tool_uses: waiting for queue.get(), active=%d", active
                 )
                 abort_waiter: Optional[asyncio.Task[bool]] = None
-                queue_waiter: Optional[asyncio.Task[Optional[Union[UserMessage, ProgressMessage]]]] = None
+                queue_waiter: Optional[asyncio.Task[Optional[Union[UserMessage, AttachmentMessage, ProgressMessage]]]] = None
                 try:
                     queue_waiter = asyncio.create_task(
                         _queue_get_with_timeout(queue, overall_timeout_sec)
