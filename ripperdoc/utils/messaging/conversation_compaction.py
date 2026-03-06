@@ -19,14 +19,13 @@ from ripperdoc.utils.messaging.message_formatting import (
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     AttachmentMessage,
+    ConversationMessage,
     ProgressMessage,
     UserMessage,
     create_user_message,
 )
 
 logger = get_logger()
-
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 RECENT_MESSAGES_AFTER_COMPACT = 8
 

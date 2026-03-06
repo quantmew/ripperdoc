@@ -17,6 +17,7 @@ from ripperdoc.core.permission_engine import PermissionPreview, PermissionResult
 from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.core.plan_mode import ensure_plan_file_directory
 from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.core.system_prompt_overrides import compose_system_prompt, select_base_system_prompt
 from ripperdoc.protocol.models import UserMessageData, UserStreamMessage
 from ripperdoc.utils.messaging.messages import create_hook_additional_context_message
 from ripperdoc.utils.memory import build_memory_instructions
@@ -32,6 +33,7 @@ class StdioConfigMixin:
     _local_can_use_tool: Any | None
     _query_context: Any | None
     _custom_system_prompt: str | None
+    _append_system_prompt: str | None
     _skill_instructions: str | None
     _output_style: str
     _output_language: str
@@ -449,14 +451,11 @@ class StdioConfigMixin:
         prompt: str,
         mcp_instructions: str | None,
         hook_instructions: list[str] | None = None,
+        custom_system_prompt: str | None = None,
+        append_system_prompt: str | None = None,
     ) -> str:
         """Resolve the system prompt for the current session/query."""
-        if self._custom_system_prompt:
-            return str(self._custom_system_prompt)
-
         additional_instructions: list[str] = []
-        if self._session_agent_prompt:
-            additional_instructions.append(self._session_agent_prompt)
         if self._skill_instructions:
             additional_instructions.append(self._skill_instructions)
         memory_instructions = build_memory_instructions()
@@ -464,16 +463,30 @@ class StdioConfigMixin:
             additional_instructions.append(memory_instructions)
         if hook_instructions:
             additional_instructions.extend([text for text in hook_instructions if text])
-
-        return build_system_prompt(
-            tools,
-            prompt,
-            {},
-            additional_instructions=additional_instructions or None,
-            mcp_instructions=mcp_instructions,
-            output_style=self._output_style,
-            output_language=self._output_language,
-            project_path=self._project_path,
+        base_system_prompt = select_base_system_prompt(
+            agent_system_prompt=self._session_agent_prompt,
+            custom_system_prompt=custom_system_prompt
+            if custom_system_prompt is not None
+            else self._custom_system_prompt,
+        )
+        effective_append_prompt = (
+            append_system_prompt
+            if append_system_prompt is not None
+            else self._append_system_prompt
+        )
+        return compose_system_prompt(
+            base_system_prompt=base_system_prompt,
+            append_system_prompt=effective_append_prompt,
+            default_prompt_factory=lambda: build_system_prompt(
+                tools,
+                prompt,
+                {},
+                additional_instructions=additional_instructions or None,
+                mcp_instructions=mcp_instructions,
+                output_style=self._output_style,
+                output_language=self._output_language,
+                project_path=self._project_path,
+            ),
         )
 
     def _build_sdk_hook_scope(self, hooks: Any) -> HooksConfig:

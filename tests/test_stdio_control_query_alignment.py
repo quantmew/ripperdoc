@@ -732,6 +732,86 @@ async def test_sdk_query_controls_payload_shape_for_setters_and_initialize(monke
 
 
 @pytest.mark.asyncio
+async def test_run_stdio_print_mode_forwards_append_system_prompt(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeHandler:
+        def __init__(self, input_format, output_format, default_options=None):
+            captured["default_options"] = dict(default_options or {})
+
+        async def _handle_initialize(self, request, request_id):
+            captured["initialize"] = {"request": request, "request_id": request_id}
+
+        async def _handle_query(self, request, request_id):
+            captured["query"] = {"request": request, "request_id": request_id}
+
+        async def flush_output(self):
+            captured["flushed"] = True
+
+    monkeypatch.setattr(handler_module, "StdioProtocolHandler", FakeHandler)
+    monkeypatch.setattr("ripperdoc.protocol.stdio.command.StdioProtocolHandler", FakeHandler)
+
+    from ripperdoc.protocol.stdio import command as stdio_command
+
+    await stdio_command.run_stdio(
+        input_format="stream-json",
+        output_format="json",
+        model=None,
+        permission_mode="default",
+        max_turns=None,
+        system_prompt=None,
+        append_system_prompt="Append these instructions.",
+        print_mode=True,
+        prompt="hello",
+    )
+
+    assert captured["default_options"]["append_system_prompt"] == "Append these instructions."
+    init_options = captured["initialize"]["request"]["_meta"]["ripperdoc_options"]
+    assert init_options["append_system_prompt"] == "Append these instructions."
+
+
+@pytest.mark.asyncio
+async def test_query_append_system_prompt_extends_session_base_prompt(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = Path.cwd()
+    handler._initialized = True
+    handler._session_id = "session-append"
+    handler._conversation_messages = []
+    handler._custom_system_prompt = "Base system prompt"
+    handler._append_system_prompt = "Session append"
+    handler._query_context = type("QueryContextStub", (), {"tools": []})()
+
+    monkeypatch.setattr(
+        handler_query_module,
+        "load_mcp_servers_async",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=[]),
+    )
+    monkeypatch.setattr(handler_query_module, "format_mcp_instructions", lambda _servers: "")
+
+    async def fake_refresh_query_context_dynamic_tools() -> None:
+        return None
+
+    monkeypatch.setattr(handler, "_refresh_query_context_dynamic_tools", fake_refresh_query_context_dynamic_tools)
+    monkeypatch.setattr(handler, "_collect_prepare_inputs", lambda _prompt: asyncio.sleep(0, result=([], [], None)))
+    monkeypatch.setattr(handler, "_build_sdk_init_stream_message", lambda **_kwargs: {"type": "system"})
+    monkeypatch.setattr(handler, "_write_message_stream", lambda _message: asyncio.sleep(0))
+    monkeypatch.setattr(handler, "_emit_hook_notices", lambda _notices: asyncio.sleep(0))
+
+    prepared = await handler._prepare_query_stage(
+        request={
+            "messages": [{"role": "user", "content": "hello"}],
+            "maxTokens": 32,
+            "appendSystemPrompt": "Request append",
+        },
+        request_id="query-1",
+        state=handler_query_module._QueryRuntimeState(start_time=0.0),
+    )
+
+    assert prepared is not None
+    assert prepared.system_prompt == "Base system prompt\n\nRequest append"
+
+
+@pytest.mark.asyncio
 async def test_send_control_request_timeout_emits_control_cancel_request(monkeypatch) -> None:
     handler = handler_module.StdioProtocolHandler()
     sent: list[dict[str, Any]] = []

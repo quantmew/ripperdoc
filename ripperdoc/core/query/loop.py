@@ -65,6 +65,7 @@ from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     AttachmentMessage,
+    ConversationMessage,
     MessageContent,
     ProgressMessage,
     UserMessage,
@@ -93,7 +94,6 @@ logger = get_logger()
 
 DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_API_TIMEOUT", "120"))
 MAX_LLM_RETRIES = int(os.getenv("RIPPERDOC_MAX_RETRIES", "10"))
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 
 def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
@@ -132,9 +132,9 @@ def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
 
 
 def _prepare_request_messages(
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
     model_profile: ModelProfile,
-) -> tuple[str, str, List[Union[UserMessage, AssistantMessage, ProgressMessage]]]:
+) -> tuple[str, str, List[ConversationMessage]]:
     """Prepare protocol/tool-mode and conversation payload for provider request."""
     protocol = provider_protocol(model_profile.protocol)
     tool_mode = determine_tool_mode(model_profile)
@@ -226,7 +226,7 @@ def _build_provider_error_metadata(provider_response: Any) -> Dict[str, Any]:
 
 
 async def query_llm(
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
     system_prompt: str,
     tools: List[Tool[Any, Any]],
     max_thinking_tokens: int = 0,
@@ -481,7 +481,7 @@ def _build_plan_mode_messages(
     messages: Sequence[ConversationMessage],
     query_context: QueryContext,
     tools_for_model: Sequence[Tool[Any, Any]],
-) -> List[UserMessage]:
+) -> List[AttachmentMessage]:
     """Build Claude Code style plan-mode attachments for the next model turn."""
 
     if query_context.permission_mode != "plan" or not query_context.plan_file_path:
@@ -535,7 +535,7 @@ def _build_plan_mode_messages(
 
 def _collect_skill_fork_requests(
     tool_results: List[UserMessage],
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
 ) -> List[_SkillForkRequest]:
     """Build Task tool requests for skills that require forked execution."""
     latest_user_prompt = _extract_latest_user_prompt_text(messages)
@@ -1320,6 +1320,7 @@ def _build_iteration_plan(
         context,
         tool_mode,
         tools_for_model,
+        include_anthropic_cache_boundary=provider_protocol(model_profile.protocol) == "anthropic",
     )
     plan_mode_messages = _build_plan_mode_messages(
         messages=messages or (),
@@ -2113,14 +2114,14 @@ async def _apply_permission_updates(
 
 
 async def _run_query_iteration(
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
     system_prompt: str,
     context: Dict[str, str],
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable],
     iteration: int,
     result: IterationResult,
-) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
+) -> AsyncGenerator[ConversationMessage, None]:
     """Run a single iteration of the query loop.
 
     This function handles one round of:

@@ -30,6 +30,7 @@ from ripperdoc.core.session_agents import (
 )
 from ripperdoc.core.output_styles import load_all_output_styles, resolve_output_style
 from ripperdoc.core.plugins import discover_plugins, set_runtime_plugin_dirs
+from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
 from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
@@ -72,6 +73,7 @@ class StdioSessionMixin:
     _query_context: QueryContext | None
     _session_id: str | None
     _custom_system_prompt: str | None
+    _append_system_prompt: str | None
     _skill_instructions: str | None
     _output_style: str
     _output_language: str
@@ -263,6 +265,7 @@ class StdioSessionMixin:
             options = {**self._default_options, **request_options}
             self._session_id = options.get("session_id") or str(uuid.uuid4())
             self._custom_system_prompt = options.get("system_prompt")
+            self._append_system_prompt = options.get("append_system_prompt")
             raw_sdk_url = options.get("sdk_url")
             self._sdk_url = (
                 raw_sdk_url.strip()
@@ -436,6 +439,10 @@ class StdioSessionMixin:
                     self._session_agent_name,
                     self._session_agents,
                     source="agent",
+                )
+                self._custom_system_prompt = select_base_system_prompt(
+                    agent_system_prompt=self._session_agent_prompt,
+                    custom_system_prompt=self._custom_system_prompt,
                 )
             except ValueError as exc:
                 await self._fail_initialize_request(

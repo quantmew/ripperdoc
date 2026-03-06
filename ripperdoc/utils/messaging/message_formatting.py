@@ -14,12 +14,11 @@ from ripperdoc.utils.messaging.messages import (
     ATTACHMENT_SUMMARY_HIDDEN_TYPES,
     AssistantMessage,
     AttachmentMessage,
+    ConversationMessage,
     ProgressMessage,
     UserMessage,
     parse_attachment_message,
 )
-
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 _SYSTEM_REMINDER_EXTRACT_RE = re.compile(r"</?system-reminder>\n?")
 
 

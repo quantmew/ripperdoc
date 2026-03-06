@@ -13,6 +13,7 @@ from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     AttachmentMessage,
+    ConversationMessage,
     ProgressMessage,
     UserMessage,
 )
@@ -24,8 +25,6 @@ from ripperdoc.utils.sessions.session_index import (
 
 
 logger = get_logger()
-
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 
 @dataclass

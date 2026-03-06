@@ -347,6 +347,7 @@ def _run_stdio_mode_if_requested(
     permission_mode: str,
     max_turns: Optional[int],
     system_prompt: Optional[str],
+    append_system_prompt: Optional[str],
     verbose: bool,
     continue_session: bool,
     resume_session: Optional[str],
@@ -404,6 +405,7 @@ def _run_stdio_mode_if_requested(
         "permission_mode": permission_mode,
         "max_turns": max_turns,
         "system_prompt": system_prompt,
+        "append_system_prompt": append_system_prompt,
         "verbose": effective_verbose,
     }
     if allowed_tools is not None:

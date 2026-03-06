@@ -449,6 +449,7 @@ class SamplingRequest(BaseModel):
     messages: list[SamplingRequestMessage]
     modelPreferences: dict[str, Any] | None = None
     systemPrompt: str | None = None
+    appendSystemPrompt: str | None = None
     includeContext: Literal["none", "thisServer", "allServers"] | None = None
     temperature: float | None = None
     maxTokens: int

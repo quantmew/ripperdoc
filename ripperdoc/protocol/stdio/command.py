@@ -235,6 +235,12 @@ async def _read_stream_json_messages_from_stdin() -> list[dict[str, Any]]:
     help="System prompt to use for the session.",
 )
 @click.option(
+    "--append-system-prompt",
+    type=str,
+    default=None,
+    help="Additional instructions to append to the system prompt.",
+)
+@click.option(
     "--print",
     "-p",
     is_flag=True,
@@ -283,6 +289,7 @@ def stdio_cmd(
     permission_mode: str,
     max_turns: int | None,
     system_prompt: str | None,
+    append_system_prompt: str | None,
     print: bool,
     resume_session_at: str | None,
     rewind_files: str | None,
@@ -313,6 +320,7 @@ def stdio_cmd(
             permission_mode=permission_mode,
             max_turns=max_turns,
             system_prompt=system_prompt,
+            append_system_prompt=append_system_prompt,
             print_mode=print,
             resume_session_at=resume_session_at,
             rewind_files=rewind_files,
@@ -341,6 +349,7 @@ async def run_stdio(
     sdk_url: str | None = None,
     replay_user_messages: bool = False,
     prompt: str | None = None,
+    append_system_prompt: str | None = None,
     default_options: dict[str, Any] | None = None,
 ) -> None:
     """Async entry point for stdio command."""
@@ -366,6 +375,10 @@ async def run_stdio(
         request_default_options["sdk_url"] = sdk_url
     if replay_user_messages:
         request_default_options["replay_user_messages"] = True
+    if system_prompt is not None:
+        request_default_options["system_prompt"] = system_prompt
+    if append_system_prompt is not None:
+        request_default_options["append_system_prompt"] = append_system_prompt
 
     handler = StdioProtocolHandler(
         input_format=input_format,
@@ -487,6 +500,8 @@ async def run_stdio(
             request_options["max_turns"] = max_turns
         if system_prompt is not None:
             request_options["system_prompt"] = system_prompt
+        if append_system_prompt is not None:
+            request_options["append_system_prompt"] = append_system_prompt
         request_options["sdk_can_use_tool"] = False
 
         request = {

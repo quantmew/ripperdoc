@@ -830,6 +830,10 @@ class AttachmentMessage(BaseModel):
         return str(value) if isinstance(value, str) else None
 
 
+# Unified conversation message type alias
+ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
+
+
 ATTACHMENT_IGNORED_TYPES: set[str] = {
     "dynamic_skill",
     "already_read_file",

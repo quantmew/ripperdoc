@@ -218,7 +218,40 @@ def test_cli_agent_overrides_settings_agent_for_prompt(monkeypatch, tmp_path):
     )
 
     assert result.exit_code == 0
-    assert captured["kwargs"]["append_system_prompt"] == "Use writer behavior from CLI."
+    assert captured["kwargs"]["custom_system_prompt"] == "Use writer behavior from CLI."
+    assert captured["kwargs"]["append_system_prompt"] is None
+
+
+def test_cli_preserves_append_system_prompt_after_agent_override(monkeypatch, tmp_path):
+    captured: dict[str, Any] = {}
+
+    async def fake_run_query(*args, **kwargs):
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(cli_module, "run_query", fake_run_query)
+    monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
+    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "--prompt",
+            "hi",
+            "--agent",
+            "writer",
+            "--agents",
+            '{"writer":{"prompt":"Use writer behavior from CLI."}}',
+            "--append-system-prompt",
+            "Keep answers terse.",
+        ],
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["custom_system_prompt"] == "Use writer behavior from CLI."
+    assert captured["kwargs"]["append_system_prompt"] == "Keep answers terse."
 
 
 def test_cli_debug_with_filter(monkeypatch, tmp_path):

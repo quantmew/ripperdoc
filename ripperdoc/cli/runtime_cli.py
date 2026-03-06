@@ -21,6 +21,7 @@ from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.core.system_prompt_overrides import compose_system_prompt
 from ripperdoc.core.tool_defaults import filter_tools_by_names
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.tools.background_shell import shutdown_background_shell
@@ -189,24 +190,20 @@ def _build_effective_system_prompt(
     output_language: str,
     project_path: Path,
 ) -> str:
-    if custom_system_prompt:
-        system_prompt = custom_system_prompt
-        if append_system_prompt:
-            system_prompt = f"{system_prompt}\n\n{append_system_prompt}"
-        return system_prompt
-
     all_instructions = list(additional_instructions) if additional_instructions else []
-    if append_system_prompt:
-        all_instructions.append(append_system_prompt)
-    return build_system_prompt(
-        tools,
-        prompt,
-        context,
-        additional_instructions=all_instructions or None,
-        mcp_instructions=mcp_instructions,
-        output_style=output_style,
-        output_language=output_language,
-        project_path=project_path,
+    return compose_system_prompt(
+        base_system_prompt=custom_system_prompt,
+        append_system_prompt=append_system_prompt,
+        default_prompt_factory=lambda: build_system_prompt(
+            tools,
+            prompt,
+            context,
+            additional_instructions=all_instructions or None,
+            mcp_instructions=mcp_instructions,
+            output_style=output_style,
+            output_language=output_language,
+            project_path=project_path,
+        ),
     )
 
 

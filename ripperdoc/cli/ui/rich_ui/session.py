@@ -32,6 +32,7 @@ from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.tool import ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.core.system_prompt_overrides import compose_system_prompt
 from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
@@ -78,6 +79,7 @@ from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     AttachmentMessage,
+    ConversationMessage,
     ProgressMessage,
     UserMessage,
     create_hook_additional_context_message,
@@ -112,9 +114,6 @@ from ripperdoc.cli.ui.rich_ui.rendering import (
     handle_tool_result_message,
 )
 
-
-# Type alias for conversation messages
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 console = Console()
 logger = get_logger()
@@ -1312,18 +1311,11 @@ class RichUI:
         # Build system prompt based on options:
         # - custom_system_prompt: replaces the default entirely
         # - append_system_prompt: appends to the default system prompt
-        if self.custom_system_prompt:
-            # Complete replacement
-            system_prompt = self.custom_system_prompt
-            # Still append if both are provided
-            if self.append_system_prompt:
-                system_prompt = f"{system_prompt}\n\n{self.append_system_prompt}"
-        else:
-            # Build default with optional append
-            all_instructions = list(additional_instructions) if additional_instructions else []
-            if self.append_system_prompt:
-                all_instructions.append(self.append_system_prompt)
-            system_prompt = build_system_prompt(
+        all_instructions = list(additional_instructions) if additional_instructions else []
+        system_prompt = compose_system_prompt(
+            base_system_prompt=self.custom_system_prompt,
+            append_system_prompt=self.append_system_prompt,
+            default_prompt_factory=lambda: build_system_prompt(
                 self.query_context.tools if self.query_context else [],
                 user_input,
                 context,
@@ -1332,7 +1324,8 @@ class RichUI:
                 output_style=self.output_style,
                 output_language=self.output_language,
                 project_path=self.project_path,
-            )
+            ),
+        )
 
         return system_prompt, context
 

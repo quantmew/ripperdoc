@@ -13,6 +13,7 @@ from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     AttachmentMessage,
+    ConversationMessage,
     MessageContent,
     ProgressMessage,
     UserMessage,
@@ -20,8 +21,6 @@ from ripperdoc.utils.messaging.messages import (
 )
 
 logger = get_logger()
-
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 # Thresholds.
 MAX_TOKENS_SOFT = 20_000

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any, Dict, List, Mapping, Optional, Union
 from uuid import uuid4
@@ -24,6 +25,8 @@ from ripperdoc.utils.messaging.messages import (
 )
 
 logger = get_logger()
+
+ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
 
 
 def _safe_int(value: object) -> int:
@@ -473,18 +476,26 @@ def build_full_system_prompt(
     context: Dict[str, str],
     tool_mode: str,
     tools: List[Tool[Any, Any]],
+    *,
+    include_anthropic_cache_boundary: bool = False,
 ) -> str:
     """Compose the final system prompt including context and tool hints."""
-    full_prompt = system_prompt
+    dynamic_segments: List[str] = []
     if context:
         context_reminder = format_context_as_system_reminder(context)
         if context_reminder:
-            full_prompt = f"{system_prompt}\n\n{context_reminder}"
+            dynamic_segments.append(context_reminder)
     if tool_mode == "text":
         tool_hint = _tool_prompt_for_text_mode(tools)
         if tool_hint:
-            full_prompt = f"{full_prompt}\n\n{tool_hint}"
-    return full_prompt
+            dynamic_segments.append(tool_hint)
+    if include_anthropic_cache_boundary and dynamic_segments:
+        return "\n\n".join(
+            [system_prompt, ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY, *dynamic_segments]
+        )
+    if dynamic_segments:
+        return "\n\n".join([system_prompt, *dynamic_segments])
+    return system_prompt
 
 
 def log_openai_messages(normalized_messages: List[Dict[str, Any]]) -> None:
@@ -521,6 +532,121 @@ async def build_anthropic_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict
             schema["input_examples"] = examples
         schemas.append(schema)
     return schemas
+
+
+def anthropic_prompt_caching_enabled() -> bool:
+    """Return whether Anthropic prompt caching should be enabled for request shaping."""
+    return not (
+        os.getenv("RIPPERDOC_DISABLE_PROMPT_CACHING")
+        or os.getenv("DISABLE_PROMPT_CACHING")
+    )
+
+
+def anthropic_cache_control() -> Dict[str, Any]:
+    """Default Anthropic cache control payload matching Claude Code's ephemeral strategy."""
+    ttl = (os.getenv("RIPPERDOC_PROMPT_CACHE_TTL") or "").strip()
+    payload: Dict[str, Any] = {"type": "ephemeral"}
+    if ttl == "1h":
+        payload["ttl"] = ttl
+    return payload
+
+
+def build_anthropic_system_blocks(
+    system_prompt: str, *, enable_prompt_caching: bool
+) -> str | List[Dict[str, Any]]:
+    """Render Anthropic system blocks with optional cache-aware segmentation."""
+    text = (system_prompt or "").strip()
+    if not text or not enable_prompt_caching:
+        return text
+
+    if ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY in text:
+        prefix, suffix = text.split(ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY, 1)
+        blocks: List[Dict[str, Any]] = []
+        prefix = prefix.strip()
+        suffix = suffix.strip()
+        if prefix:
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": prefix,
+                    "cache_control": anthropic_cache_control(),
+                }
+            )
+        if suffix:
+            blocks.append({"type": "text", "text": suffix})
+        return blocks
+
+    return [
+        {
+            "type": "text",
+            "text": text,
+            "cache_control": anthropic_cache_control(),
+        }
+    ]
+
+
+def apply_anthropic_prompt_cache_control_to_tool_schemas(
+    tool_schemas: List[Dict[str, Any]], *, enable_prompt_caching: bool
+) -> List[Dict[str, Any]]:
+    """Add Anthropic cache markers to tool definitions."""
+    if not enable_prompt_caching or not tool_schemas:
+        return list(tool_schemas)
+    cache_control = anthropic_cache_control()
+    return [{**schema, "cache_control": dict(cache_control)} for schema in tool_schemas]
+
+
+def apply_anthropic_prompt_cache_control_to_messages(
+    messages: List[Dict[str, Any]],
+    *,
+    enable_prompt_caching: bool,
+    recent_messages: int = 2,
+) -> List[Dict[str, Any]]:
+    """Attach cache markers to the tail of the Anthropic transcript."""
+    if not enable_prompt_caching or not messages:
+        return list(messages)
+
+    cache_control = anthropic_cache_control()
+    start_index = max(0, len(messages) - max(recent_messages, 1))
+    shaped_messages: List[Dict[str, Any]] = []
+
+    for index, message in enumerate(messages):
+        shaped_message = dict(message)
+        content = message.get("content")
+        if index < start_index:
+            shaped_messages.append(shaped_message)
+            continue
+
+        if isinstance(content, str):
+            shaped_message["content"] = [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": dict(cache_control),
+                }
+            ]
+            shaped_messages.append(shaped_message)
+            continue
+
+        if not isinstance(content, list):
+            shaped_messages.append(shaped_message)
+            continue
+
+        copied_content = [dict(item) if isinstance(item, dict) else item for item in content]
+        for content_index in range(len(copied_content) - 1, -1, -1):
+            item = copied_content[content_index]
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") in {"thinking", "redacted_thinking"}:
+                continue
+            copied_content[content_index] = {
+                **item,
+                "cache_control": dict(cache_control),
+            }
+            break
+        shaped_message["content"] = copied_content
+        shaped_messages.append(shaped_message)
+
+    return shaped_messages
 
 
 async def build_openai_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[str, Any]]:

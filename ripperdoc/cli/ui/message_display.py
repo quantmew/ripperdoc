@@ -16,12 +16,11 @@ from ripperdoc.cli.ui.tool_renderers import ToolResultRendererRegistry
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     AttachmentMessage,
+    ConversationMessage,
     ProgressMessage,
     UserMessage,
 )
 from ripperdoc.utils.messaging.message_formatting import format_reasoning_preview
-
-ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 
 class MessageDisplay:

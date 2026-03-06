@@ -93,6 +93,7 @@ class StdioProtocolHandler(
         self._request_lock = asyncio.Lock()
         self._inflight_tasks: set[asyncio.Task[None]] = set()
         self._custom_system_prompt: str | None = None
+        self._append_system_prompt: str | None = None
         self._skill_instructions: str | None = None
         self._output_style: str = "default"
         self._output_language: str = "auto"

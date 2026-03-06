@@ -240,11 +240,13 @@ class StdioQueryMixin:
         servers = await load_mcp_servers_async(self._project_path)
         await self._refresh_query_context_dynamic_tools()
         mcp_instructions = format_mcp_instructions(servers)
-        system_prompt = sampling_request.systemPrompt or self._resolve_system_prompt(
+        system_prompt = self._resolve_system_prompt(
             self._query_context.tools if self._query_context else [],
             prompt,
             mcp_instructions,
             [],
+            custom_system_prompt=sampling_request.systemPrompt,
+            append_system_prompt=sampling_request.appendSystemPrompt,
         )
 
         if not self._init_stream_message_sent:

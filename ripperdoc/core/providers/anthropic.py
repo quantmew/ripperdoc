@@ -36,7 +36,11 @@ from ripperdoc.core.providers.error_mapping import (
     run_with_exception_mapper,
 )
 from ripperdoc.core.message_utils import (
+    anthropic_prompt_caching_enabled,
+    apply_anthropic_prompt_cache_control_to_messages,
+    apply_anthropic_prompt_cache_control_to_tool_schemas,
     anthropic_usage_tokens,
+    build_anthropic_system_blocks,
     build_anthropic_tool_schemas,
     estimate_cost_usd,
 )
@@ -358,7 +362,11 @@ class AnthropicClient(ProviderClient):
         start_time: float,
     ) -> ProviderResponse:
         """Internal implementation of call, may raise exceptions."""
-        tool_schemas = await build_anthropic_tool_schemas(tools)
+        prompt_caching_enabled = anthropic_prompt_caching_enabled()
+        tool_schemas = apply_anthropic_prompt_cache_control_to_tool_schemas(
+            await build_anthropic_tool_schemas(tools),
+            enable_prompt_caching=prompt_caching_enabled,
+        )
         response_metadata: Dict[str, Any] = {}
 
         logger.debug(
@@ -369,6 +377,7 @@ class AnthropicClient(ProviderClient):
                 "stream": stream,
                 "max_thinking_tokens": max_thinking_tokens,
                 "num_tools": len(tool_schemas),
+                "prompt_caching_enabled": prompt_caching_enabled,
             },
         )
 
@@ -400,7 +409,14 @@ class AnthropicClient(ProviderClient):
             # For non-streaming: use the provided timeout
             anthropic_kwargs["timeout"] = request_timeout
 
-        normalized_messages = sanitize_tool_history(list(normalized_messages))
+        normalized_messages = apply_anthropic_prompt_cache_control_to_messages(
+            sanitize_tool_history(list(normalized_messages)),
+            enable_prompt_caching=prompt_caching_enabled,
+        )
+        system_blocks = build_anthropic_system_blocks(
+            system_prompt,
+            enable_prompt_caching=prompt_caching_enabled,
+        )
 
         thinking_payload: Optional[Dict[str, Any]] = None
         if max_thinking_tokens > 0:
@@ -410,7 +426,7 @@ class AnthropicClient(ProviderClient):
         request_kwargs: Dict[str, Any] = {
             "model": model_profile.model,
             "max_tokens": model_profile.max_tokens,
-            "system": system_prompt,
+            "system": system_blocks,
             "messages": normalized_messages,
             "temperature": model_profile.temperature,
         }
@@ -428,6 +444,7 @@ class AnthropicClient(ProviderClient):
                     ensure_ascii=False,
                     default=str,
                 )[:1000],
+                "system_block_count": len(system_blocks) if isinstance(system_blocks, list) else 0,
                 "thinking_payload": json.dumps(thinking_payload, ensure_ascii=False)
                 if thinking_payload
                 else None,

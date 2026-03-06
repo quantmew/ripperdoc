@@ -40,6 +40,7 @@ from ripperdoc.cli.top_level_cli import config_cmd, update_cmd, version_cmd
 from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.config import get_effective_model_profile, get_project_config
 from ripperdoc.core.plugins import set_runtime_plugin_dirs
+from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
 from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.utils.filesystem.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
@@ -81,16 +82,15 @@ def _resolve_model_pointer_with_fallback(
     return resolved_model
 
 
-def _merge_append_system_prompt(
-    append_system_prompt: Optional[str],
+def _select_effective_system_prompt(
+    system_prompt: Optional[str],
     session_agent_prompt: Optional[str],
 ) -> Optional[str]:
-    """Compose agent prompt and append-system-prompt with deterministic order."""
-    if not session_agent_prompt:
-        return append_system_prompt
-    if not append_system_prompt:
-        return session_agent_prompt
-    return f"{session_agent_prompt}\n\n{append_system_prompt}"
+    """Resolve the base system prompt with session agent precedence."""
+    return select_base_system_prompt(
+        agent_system_prompt=session_agent_prompt,
+        custom_system_prompt=system_prompt,
+    )
 
 
 def _coerce_session_id(
@@ -642,8 +642,8 @@ def cli(
         sdk_url=sdk_url,
         session_persistence=session_persistence,
     )
-    effective_append_system_prompt = _merge_append_system_prompt(
-        append_system_prompt,
+    effective_system_prompt = _select_effective_system_prompt(
+        system_prompt,
         session_agent_prompt,
     )
     precreated_worktree = _register_precreated_worktree_from_env()
@@ -695,7 +695,8 @@ def cli(
         model=model,
         permission_mode=effective_permission_mode,
         max_turns=max_turns,
-        system_prompt=system_prompt,
+        system_prompt=effective_system_prompt,
+        append_system_prompt=append_system_prompt,
         verbose=verbose,
         allowed_tools_csv=allowed_tools_csv,
         disallowed_tools_csv=disallowed_tools_csv,
@@ -802,8 +803,8 @@ def cli(
                 "verbose": verbose,
                 "allowed_tools": allowed_tools,
                 "model": model,
-                "has_system_prompt": system_prompt is not None,
-                "has_append_system_prompt": effective_append_system_prompt is not None,
+                "has_system_prompt": effective_system_prompt is not None,
+                "has_append_system_prompt": append_system_prompt is not None,
                 "disable_slash_commands": disable_slash_commands,
                 "debug_mode": bool(debug_mode or debug_file),
                 "debug_filter": debug_filter,
@@ -823,8 +824,8 @@ def cli(
                     yolo_mode,
                     verbose,
                     session_id=session_id,
-                    custom_system_prompt=system_prompt,
-                    append_system_prompt=effective_append_system_prompt,
+                    custom_system_prompt=effective_system_prompt,
+                    append_system_prompt=append_system_prompt,
                     model=model,
                     fallback_model=fallback_model,
                     max_thinking_tokens=max_thinking_tokens,
@@ -854,8 +855,8 @@ def cli(
                 session_id=session_id,
                 log_file_path=log_file,
                 allowed_tools=allowed_tools,
-                custom_system_prompt=system_prompt,
-                append_system_prompt=effective_append_system_prompt,
+                custom_system_prompt=effective_system_prompt,
+                append_system_prompt=append_system_prompt,
                 model=interactive_model,
                 max_thinking_tokens=max_thinking_tokens,
                 max_turns=max_turns,

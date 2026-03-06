@@ -7,7 +7,10 @@ from typing import AsyncGenerator
 
 from pydantic import BaseModel
 
-from ripperdoc.core.message_utils import build_full_system_prompt
+from ripperdoc.core.message_utils import (
+    ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    build_full_system_prompt,
+)
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.tool import Tool, ToolOutput, ToolUseContext
 
@@ -177,3 +180,18 @@ def test_full_system_prompt_keeps_base_prompt_when_no_context_or_text_mode() -> 
     )
 
     assert prompt == "base prompt"
+
+
+def test_full_system_prompt_can_insert_anthropic_cache_boundary() -> None:
+    prompt = build_full_system_prompt(
+        "base prompt",
+        {"cwd": "/tmp/project"},
+        "text",
+        [DummyTool("Read"), DummyTool("Edit")],
+        include_anthropic_cache_boundary=True,
+    )
+
+    assert ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY in prompt
+    prefix, suffix = prompt.split(ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY, 1)
+    assert prefix.strip() == "base prompt"
+    assert "# cwd" in suffix

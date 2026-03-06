@@ -16,6 +16,13 @@ from ripperdoc.core.providers.anthropic import (
     _content_blocks_from_response,
     _content_blocks_from_stream_state,
 )
+from ripperdoc.core.message_utils import (
+    ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    anthropic_cache_control,
+    apply_anthropic_prompt_cache_control_to_messages,
+    apply_anthropic_prompt_cache_control_to_tool_schemas,
+    build_anthropic_system_blocks,
+)
 from ripperdoc.core.providers.errors import ProviderMappedError, ProviderTimeoutError
 from ripperdoc.tools.memory_tool import MemoryTool
 
@@ -202,3 +209,73 @@ async def test_build_anthropic_tool_schemas_keeps_function_tool_shape() -> None:
     assert schema["name"] == "DummyTool"
     assert "input_schema" in schema
     assert schema["input_schema"]["type"] == "object"
+
+
+def test_build_anthropic_system_blocks_marks_whole_prompt_cacheable() -> None:
+    blocks = build_anthropic_system_blocks(
+        "You are a coding assistant.",
+        enable_prompt_caching=True,
+    )
+
+    assert isinstance(blocks, list)
+    assert blocks == [
+        {
+            "type": "text",
+            "text": "You are a coding assistant.",
+            "cache_control": anthropic_cache_control(),
+        }
+    ]
+
+
+def test_build_anthropic_system_blocks_respects_dynamic_boundary() -> None:
+    system_prompt = (
+        "Static prelude\n"
+        f"{ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY}\n"
+        "Dynamic tail"
+    )
+
+    blocks = build_anthropic_system_blocks(system_prompt, enable_prompt_caching=True)
+
+    assert isinstance(blocks, list)
+    assert blocks[0]["text"] == "Static prelude"
+    assert blocks[0]["cache_control"] == anthropic_cache_control()
+    assert blocks[1] == {"type": "text", "text": "Dynamic tail"}
+
+
+def test_apply_anthropic_prompt_cache_control_to_messages_marks_last_two_messages() -> None:
+    messages = [
+        {"role": "user", "content": "old user"},
+        {"role": "assistant", "content": [{"type": "text", "text": "old assistant"}]},
+        {"role": "user", "content": "recent user"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "step", "signature": "sig"},
+                {"type": "text", "text": "recent assistant"},
+            ],
+        },
+    ]
+
+    shaped = apply_anthropic_prompt_cache_control_to_messages(
+        messages,
+        enable_prompt_caching=True,
+    )
+
+    assert shaped[0]["content"] == "old user"
+    assert shaped[1]["content"] == [{"type": "text", "text": "old assistant"}]
+    assert shaped[2]["content"][0]["cache_control"] == anthropic_cache_control()
+    assert shaped[3]["content"][0]["type"] == "thinking"
+    assert "cache_control" not in shaped[3]["content"][0]
+    assert shaped[3]["content"][1]["cache_control"] == anthropic_cache_control()
+
+
+def test_apply_anthropic_prompt_cache_control_to_tool_schemas_marks_all_tools() -> None:
+    schemas = [{"name": "Read", "input_schema": {"type": "object"}}]
+
+    shaped = apply_anthropic_prompt_cache_control_to_tool_schemas(
+        schemas,
+        enable_prompt_caching=True,
+    )
+
+    assert shaped[0]["cache_control"] == anthropic_cache_control()
+    assert "cache_control" not in schemas[0]
