@@ -106,7 +106,7 @@ def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
         model_profile: The model profile to analyze
 
     Returns:
-        Thinking mode string ("deepseek", "qwen", "openrouter", "gemini_openai")
+        Thinking mode string ("deepseek", "qwen", "openrouter", "openai")
         or None if no thinking mode should be applied.
     """
     explicit_mode = model_profile.thinking_mode
@@ -120,7 +120,7 @@ def infer_thinking_mode(model_profile: ModelProfile) -> Optional[str]:
         ("deepseek", lambda b, n: "deepseek" in b or n.startswith("deepseek")),
         ("qwen", lambda b, n: "dashscope" in b or "qwen" in n),
         ("openrouter", lambda b, n: "openrouter.ai" in b),
-        ("gemini_openai", lambda b, n: "generativelanguage.googleapis.com" in b or n.startswith("gemini")),
+        ("openai", lambda b, n: "generativelanguage.googleapis.com" in b or n.startswith("gemini")),
         ("openai", lambda b, n: "openai" in b),
     ]
 

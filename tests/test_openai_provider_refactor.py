@@ -15,6 +15,7 @@ from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
 from ripperdoc.core.providers.errors import ProviderMappedError
 from ripperdoc.core.providers.openai import (
     OpenAIClient,
+    _build_thinking_kwargs,
     _run_with_provider_error_mapping,
 )
 from ripperdoc.core.providers.openai_non_oauth_strategies import (
@@ -35,6 +36,34 @@ from ripperdoc.core.providers.openai_responses import (
     extract_content_blocks_from_output,
 )
 from ripperdoc.core.providers.openai_non_oauth_strategies import build_non_oauth_openai_strategy
+
+
+def test_build_thinking_kwargs_respects_explicit_none_effort() -> None:
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="gpt-5.2-2025-12-11",
+        thinking_mode="openai",
+        thinking_effort="none",
+    )
+
+    extra_body, top_level = _build_thinking_kwargs(profile, 8192)
+
+    assert extra_body == {}
+    assert top_level == {}
+
+
+def test_build_thinking_kwargs_uses_gemini_effort_levels() -> None:
+    profile = ModelProfile(
+        protocol=ProtocolType.OPENAI_COMPATIBLE,
+        model="gemini-3-flash-preview",
+        thinking_mode="openai",
+        thinking_effort="medium",
+    )
+
+    extra_body, top_level = _build_thinking_kwargs(profile, 0)
+
+    assert top_level == {}
+    assert extra_body["reasoning"]["effort"] == "medium"
 
 
 @pytest.mark.asyncio

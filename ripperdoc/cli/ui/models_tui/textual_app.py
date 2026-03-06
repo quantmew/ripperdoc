@@ -38,6 +38,12 @@ from ripperdoc.core.oauth import (
     list_oauth_tokens,
     oauth_models_for_type,
 )
+from ripperdoc.core.thinking_config import (
+    OPENAI_REASONING_OPTIONS,
+    ThinkingControlSpec,
+    default_thinking_effort,
+    thinking_control_spec,
+)
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.cli.ui.provider_options import KNOWN_PROVIDERS, ProviderOption
 
@@ -45,7 +51,8 @@ _KNOWN_THINKING_MODES = {
     "deepseek",
     "openrouter",
     "qwen",
-    "gemini_openai",
+    "gemini_level",
+    "gemini_budget",
     "openai",
     "off",
     "disabled",
@@ -169,6 +176,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         self._default_set_quick = default_set_quick
         self._error_text: Optional[str] = None
         self._last_provider_api_base_default: Optional[str] = None
+        self._last_thinking_control_signature: Optional[tuple[str, tuple[str, ...]]] = None
 
     def _api_base_normalized(self, value: Optional[str]) -> str:
         return (value or "").strip().rstrip("/")
@@ -444,6 +452,83 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             return "responses"
         return "legacy"
 
+    def _selected_api_base_for_form(self) -> str:
+        try:
+            api_base_input = self.query_one("#api_base_input", Input)
+            return (api_base_input.value or "").strip().lower()
+        except Exception:
+            return ((self._existing_profile.api_base or "") if self._existing_profile else "").strip().lower()
+
+    def _selected_model_name_for_form(self) -> str:
+        try:
+            model_input = self.query_one("#model_input", Input)
+            model_name = (model_input.value or "").strip()
+            if model_name:
+                return model_name
+        except Exception:
+            pass
+        return (self._existing_profile.model or "") if self._existing_profile else ""
+
+    def _selected_thinking_mode_value(self) -> str:
+        try:
+            thinking_mode_select = self.query_one("#thinking_mode_select", Select)
+            raw = thinking_mode_select.value
+            value = raw.strip().lower() if isinstance(raw, str) else ""
+            if value:
+                return value
+        except Exception:
+            pass
+        if self._existing_profile and self._existing_profile.thinking_mode:
+            lowered = self._existing_profile.thinking_mode.strip().lower()
+            if lowered in _KNOWN_THINKING_MODES:
+                return lowered
+        return "auto"
+
+    def _selected_custom_thinking_mode_value(self) -> str:
+        try:
+            custom_input = self.query_one("#thinking_mode_custom_input", Input)
+            return (custom_input.value or "").strip().lower()
+        except Exception:
+            if self._existing_profile and self._existing_profile.thinking_mode:
+                lowered = self._existing_profile.thinking_mode.strip().lower()
+                if lowered not in _KNOWN_THINKING_MODES:
+                    return lowered
+            return ""
+
+    def _effective_thinking_mode_for_form(self) -> Optional[str]:
+        selected_mode = self._selected_thinking_mode_value()
+        if selected_mode == _THINKING_MODE_CUSTOM:
+            custom_mode = self._selected_custom_thinking_mode_value()
+            return custom_mode or "custom"
+        return None if selected_mode == "auto" else selected_mode
+
+    def _thinking_effort_default(self, model_name: str) -> str:
+        return default_thinking_effort(
+            model_name=model_name,
+            thinking_effort=(
+                self._existing_profile.thinking_effort if self._existing_profile else None
+            ),
+            max_thinking_tokens=(
+                self._existing_profile.max_thinking_tokens if self._existing_profile else None
+            ),
+        )
+
+    def _thinking_control_spec_obj(self) -> ThinkingControlSpec:
+        return thinking_control_spec(
+            protocol=self._effective_protocol(),
+            model_name=self._selected_model_name_for_form(),
+            api_base=self._selected_api_base_for_form(),
+            thinking_mode=self._effective_thinking_mode_for_form(),
+        )
+
+    def _thinking_control_spec(self) -> tuple[str, str, list[tuple[str, str]], str]:
+        spec = self._thinking_control_spec_obj()
+        options = [
+            (("no thinking" if value == "none" else value), value)
+            for value in spec.options
+        ]
+        return spec.kind, spec.label, options, spec.hint
+
     def compose(self) -> ComposeResult:
         title = "Add model" if self._mode == "add" else "Edit model"
         with Container(id="form_dialog"):
@@ -651,18 +736,41 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                     ("deepseek", "deepseek"),
                     ("openrouter", "openrouter"),
                     ("qwen", "qwen"),
-                    ("gemini_openai", "gemini_openai"),
+                    ("gemini_level", "gemini_level"),
+                    ("gemini_budget", "gemini_budget"),
                     ("openai", "openai"),
                     ("off", "off"),
                     ("disabled", "disabled"),
                     ("custom", _THINKING_MODE_CUSTOM),
                 ]
                 yield Select(thinking_options, value=select_default, id="thinking_mode_select")
+                yield Static("Custom thinking mode", classes="field_label", id="thinking_mode_custom_label")
                 yield Input(
                     value=custom_default,
                     placeholder="Custom thinking mode (only used when 'custom' is selected)",
                     id="thinking_mode_custom_input",
                 )
+                yield Static("Reasoning effort", classes="field_label", id="thinking_effort_label")
+                yield Select(
+                    [
+                        (("no thinking" if value == "none" else value), value)
+                        for value in OPENAI_REASONING_OPTIONS
+                    ],
+                    value=self._thinking_effort_default(model_default),
+                    id="thinking_effort_select",
+                )
+                max_thinking_tokens_default = (
+                    self._existing_profile.max_thinking_tokens
+                    if self._existing_profile and self._existing_profile.max_thinking_tokens is not None
+                    else ""
+                )
+                yield Static("Max thinking tokens", classes="field_label", id="max_thinking_tokens_label")
+                yield Input(
+                    value=str(max_thinking_tokens_default),
+                    placeholder="Max thinking tokens",
+                    id="max_thinking_tokens_input",
+                )
+                yield Static("", classes="field_label", id="thinking_hint")
 
                 input_price_default = (
                     self._existing_profile.price.input if self._existing_profile else 0.0
@@ -727,33 +835,115 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         self._refresh_provider_model_options()
         self._refresh_provider_fields()
         self._refresh_oauth_model_options()
+        self._refresh_thinking_fields()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "setup_mode_select":
             self._refresh_provider_fields()
+            self._refresh_thinking_fields()
             if self._effective_protocol() == ProtocolType.OAUTH:
                 self._refresh_oauth_model_options()
             return
         if event.select.id == "provider_preset_select":
             self._refresh_provider_model_options()
             self._refresh_provider_fields()
+            self._refresh_thinking_fields()
             return
         if event.select.id == "provider_model_select":
             self._sync_model_input_with_provider_model()
             self._refresh_provider_fields()
+            self._refresh_thinking_fields()
             return
         if event.select.id == "provider_select":
             self._refresh_provider_fields()
+            self._refresh_thinking_fields()
             if self._effective_protocol() == ProtocolType.OAUTH:
                 self._refresh_oauth_model_options()
             return
         if event.select.id == "oauth_token_select":
             self._refresh_oauth_model_options()
             self._refresh_provider_fields()
+            self._refresh_thinking_fields()
             return
         if event.select.id == "oauth_model_select":
             self._sync_model_input_with_oauth_model()
             self._refresh_provider_fields()
+            self._refresh_thinking_fields()
+            return
+        if event.select.id == "thinking_mode_select":
+            self._refresh_thinking_fields()
+            return
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id in {
+            "model_input",
+            "api_base_input",
+            "thinking_mode_custom_input",
+        }:
+            self._refresh_thinking_fields()
+
+    def _refresh_thinking_fields(self) -> None:
+        selected_mode = self._selected_thinking_mode_value()
+        show_custom = selected_mode == _THINKING_MODE_CUSTOM
+        spec = self._thinking_control_spec_obj()
+        control_type = spec.kind
+        label_text = spec.label
+        hint_text = spec.hint
+
+        self._set_widget_visible("#thinking_mode_custom_label", show_custom)
+        self._set_widget_visible("#thinking_mode_custom_input", show_custom)
+        self._set_widget_visible("#thinking_effort_label", control_type == "select")
+        self._set_widget_visible("#thinking_effort_select", control_type == "select")
+        self._set_widget_visible("#max_thinking_tokens_label", control_type == "input")
+        self._set_widget_visible("#max_thinking_tokens_input", control_type == "input")
+        self._set_widget_visible("#thinking_hint", control_type != "none")
+
+        try:
+            effort_label = self.query_one("#thinking_effort_label", Static)
+            effort_label.update(label_text or "Reasoning effort")
+        except Exception:
+            pass
+        try:
+            tokens_label = self.query_one("#max_thinking_tokens_label", Static)
+            tokens_label.update(label_text or "Max thinking tokens")
+        except Exception:
+            pass
+        try:
+            hint = self.query_one("#thinking_hint", Static)
+            hint.update(hint_text)
+        except Exception:
+            pass
+
+        if control_type == "select":
+            try:
+                effort_select = self.query_one("#thinking_effort_select", Select)
+                current_raw = effort_select.value
+                current_value = current_raw.strip().lower() if isinstance(current_raw, str) else ""
+                options = [(("no thinking" if value == "none" else value), value) for value in spec.options]
+                allowed_values = {value for _label, value in options}
+                default_value = self._thinking_effort_default(self._selected_model_name_for_form())
+                selected_value = (
+                    current_value
+                    if current_value in allowed_values
+                    else (default_value if default_value in allowed_values else options[0][1])
+                )
+                signature = (label_text, tuple(value for _label, value in options))
+                if self._last_thinking_control_signature != signature:
+                    effort_select.set_options(options)
+                    self._last_thinking_control_signature = signature
+                if effort_select.value != selected_value:
+                    effort_select.value = selected_value
+            except Exception:
+                pass
+        elif control_type == "input":
+            try:
+                budget_input = self.query_one("#max_thinking_tokens_input", Input)
+                budget_input.placeholder = label_text or "Max thinking tokens"
+                self._last_thinking_control_signature = None
+            except Exception:
+                pass
+        else:
+            self._last_thinking_control_signature = None
 
     def _set_widget_visible(self, selector: str, visible: bool) -> None:
         try:
@@ -854,6 +1044,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         temperature_input = self.query_one("#temperature_input", Input)
         thinking_mode_select = self.query_one("#thinking_mode_select", Select)
         thinking_mode_custom_input = self.query_one("#thinking_mode_custom_input", Input)
+        thinking_effort_select = self.query_one("#thinking_effort_select", Select)
+        max_thinking_tokens_input = self.query_one("#max_thinking_tokens_input", Input)
         input_price_input = self.query_one("#input_price_input", Input)
         output_price_input = self.query_one("#output_price_input", Input)
         currency_input = self.query_one("#currency_input", Input)
@@ -1011,6 +1203,33 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         if thinking_mode is None and select_value == _THINKING_MODE_CUSTOM:
             return
 
+        thinking_spec = self._thinking_control_spec_obj()
+        thinking_control_type = thinking_spec.kind
+        if thinking_control_type == "select":
+            effort_raw = thinking_effort_select.value
+            thinking_effort = effort_raw.strip().lower() if isinstance(effort_raw, str) else ""
+            if not thinking_effort:
+                self._set_error("Select a reasoning effort.")
+                return
+            max_thinking_tokens = 0 if thinking_effort == "none" else None
+        elif thinking_control_type == "input":
+            max_thinking_tokens_raw = (max_thinking_tokens_input.value or "").strip()
+            max_thinking_tokens = self._parse_int(
+                max_thinking_tokens_raw,
+                "Max thinking tokens",
+                default_value=(
+                    self._existing_profile.max_thinking_tokens
+                    if self._existing_profile
+                    else None
+                ),
+            )
+            if max_thinking_tokens is None and max_thinking_tokens_raw:
+                return
+            thinking_effort = None
+        else:
+            thinking_effort = None
+            max_thinking_tokens = None
+
         input_price_default = (
             self._existing_profile.price.input if self._existing_profile else inferred_profile.price.input
         )
@@ -1071,6 +1290,8 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             temperature=temperature,
             openai_mode=openai_mode,
             thinking_mode=thinking_mode,
+            max_thinking_tokens=max_thinking_tokens,
+            thinking_effort=thinking_effort,
             supports_vision=supports_vision,
             price={"input": input_price, "output": output_price},
             currency=currency,
@@ -1548,6 +1769,10 @@ class ModelsApp(App[None]):
             table.add_row("OpenAI tool mode", profile.openai_tool_mode)
         if profile.thinking_mode:
             table.add_row("Thinking mode", profile.thinking_mode)
+        if profile.thinking_effort:
+            table.add_row("Thinking effort", profile.thinking_effort)
+        if profile.max_thinking_tokens is not None:
+            table.add_row("Max thinking tokens", str(profile.max_thinking_tokens))
 
         details.update(Panel(table, title=f"Model: {self._selected_name}", box=box.ROUNDED))
 

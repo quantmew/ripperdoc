@@ -25,6 +25,11 @@ from ripperdoc.core.oauth import (
     list_oauth_tokens,
     oauth_models_for_type,
 )
+from ripperdoc.core.thinking_config import (
+    default_thinking_effort,
+    format_thinking_summary,
+    thinking_control_spec,
+)
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.prompt import prompt_secret
 
@@ -36,13 +41,12 @@ _KNOWN_THINKING_MODES = {
     "deepseek",
     "openrouter",
     "qwen",
-    "gemini_openai",
+    "gemini_level",
+    "gemini_budget",
     "openai",
     "off",
     "disabled",
 }
-
-
 def _default_openai_mode(profile: Optional[ModelProfile]) -> str:
     if profile is None:
         return "legacy"
@@ -200,7 +204,7 @@ def _prompt_thinking_mode_add(console: Any, default_value: Optional[str]) -> Opt
     default_display = default_value or "auto"
     raw = console.input(
         "Thinking mode override "
-        f"[{default_display}] (auto/deepseek/openrouter/qwen/gemini_openai/openai/off): "
+        f"[{default_display}] (auto/deepseek/openrouter/qwen/gemini_level/gemini_budget/openai/off): "
     )
     thinking_mode = _resolve_thinking_mode_input(
         raw_input=raw,
@@ -230,6 +234,93 @@ def _prompt_thinking_mode_edit(console: Any, current_value: Optional[str]) -> Op
             f"[yellow]Using custom thinking_mode '{escape(thinking_mode)}'.[/yellow]"
         )
     return thinking_mode
+
+
+def _thinking_prompt_kind(protocol: ProtocolType, model_name: str, api_base: Optional[str], thinking_mode: Optional[str]) -> tuple[str, str]:
+    spec = thinking_control_spec(protocol, model_name, api_base, thinking_mode)
+    if spec.kind == "none":
+        return "none", ""
+    if spec.kind == "input":
+        return "tokens", "Max thinking tokens [0]: "
+    return "effort", f"{spec.label} [none] ({'/'.join(spec.options)}): "
+
+
+def _prompt_thinking_config_add(
+    console: Any,
+    *,
+    protocol: ProtocolType,
+    model_name: str,
+    api_base: Optional[str],
+    thinking_mode: Optional[str],
+    existing_profile: Optional[ModelProfile],
+) -> tuple[Optional[int], Optional[str]]:
+    prompt_kind, prompt_text = _thinking_prompt_kind(protocol, model_name, api_base, thinking_mode)
+    if prompt_kind == "none":
+        return None, None
+    if prompt_kind == "effort":
+        spec = thinking_control_spec(protocol, model_name, api_base, thinking_mode)
+        default_effort = default_thinking_effort(
+            model_name=model_name,
+            thinking_effort=(existing_profile.thinking_effort if existing_profile else None),
+            max_thinking_tokens=(
+                existing_profile.max_thinking_tokens if existing_profile else None
+            ),
+        )
+        prompt_text = (
+            f"{spec.label} [{default_effort}] ({'/'.join(spec.options)}): "
+        )
+        raw = console.input(prompt_text).strip().lower()
+        selected = raw or default_effort
+        allowed = set(spec.options)
+        if selected not in allowed:
+            console.print("[yellow]Invalid thinking level, keeping default.[/yellow]")
+            selected = default_effort
+        return (0 if selected == "none" else None), selected
+
+    default_tokens = (
+        existing_profile.max_thinking_tokens
+        if existing_profile and existing_profile.max_thinking_tokens is not None
+        else 0
+    )
+    tokens = _parse_int(console, f"Max thinking tokens [{default_tokens}]: ", default_tokens)
+    return tokens, None
+
+
+def _prompt_thinking_config_edit(
+    console: Any,
+    *,
+    protocol: ProtocolType,
+    model_name: str,
+    api_base: Optional[str],
+    thinking_mode: Optional[str],
+    existing_profile: ModelProfile,
+) -> tuple[Optional[int], Optional[str]]:
+    prompt_kind, _prompt_text = _thinking_prompt_kind(protocol, model_name, api_base, thinking_mode)
+    if prompt_kind == "none":
+        return None, None
+    if prompt_kind == "effort":
+        spec = thinking_control_spec(protocol, model_name, api_base, thinking_mode)
+        default_effort = default_thinking_effort(
+            model_name=model_name,
+            thinking_effort=existing_profile.thinking_effort,
+            max_thinking_tokens=existing_profile.max_thinking_tokens,
+        )
+        prompt_text = f"{spec.label} [{default_effort}] ({'/'.join(spec.options)}): "
+        allowed = set(spec.options)
+        raw = console.input(prompt_text).strip().lower()
+        selected = raw or default_effort
+        if selected not in allowed:
+            console.print("[yellow]Invalid thinking level, keeping previous value.[/yellow]")
+            selected = default_effort
+        return (0 if selected == "none" else None), selected
+
+    default_tokens = (
+        existing_profile.max_thinking_tokens
+        if existing_profile.max_thinking_tokens is not None
+        else 0
+    )
+    tokens = _parse_int(console, f"Max thinking tokens [{default_tokens}]: ", default_tokens)
+    return tokens, None
 
 
 def _parse_int(console: Any, prompt_text: str, default_value: Optional[int]) -> Optional[int]:
@@ -436,6 +527,14 @@ def _collect_add_profile_input(
         existing_profile.thinking_mode if existing_profile else inferred_profile.thinking_mode
     )
     thinking_mode = _prompt_thinking_mode_add(console, thinking_mode_default)
+    max_thinking_tokens, thinking_effort = _prompt_thinking_config_add(
+        console,
+        protocol=protocol,
+        model_name=model_name,
+        api_base=api_base,
+        thinking_mode=thinking_mode,
+        existing_profile=existing_profile,
+    )
 
     supports_vision_default = (
         existing_profile.supports_vision if existing_profile else inferred_profile.supports_vision
@@ -487,6 +586,8 @@ def _collect_add_profile_input(
         max_tokens=max_tokens,
         temperature=temperature,
         thinking_mode=thinking_mode,
+        max_thinking_tokens=max_thinking_tokens,
+        thinking_effort=thinking_effort,
         auth_token=auth_token,
         oauth_token_name=oauth_token_name,
         oauth_token_type=oauth_token_type,
@@ -607,6 +708,14 @@ def _collect_edit_profile_input(
         existing_profile.temperature,
     )
     thinking_mode = _prompt_thinking_mode_edit(console, existing_profile.thinking_mode)
+    max_thinking_tokens, thinking_effort = _prompt_thinking_config_edit(
+        console,
+        protocol=protocol,
+        model_name=model_name,
+        api_base=api_base,
+        thinking_mode=thinking_mode,
+        existing_profile=existing_profile,
+    )
 
     supports_vision = _prompt_supports_vision_edit(console, existing_profile.supports_vision)
 
@@ -637,6 +746,8 @@ def _collect_edit_profile_input(
         max_tokens=max_tokens,
         temperature=temperature,
         thinking_mode=thinking_mode,
+        max_thinking_tokens=max_thinking_tokens,
+        thinking_effort=thinking_effort,
         auth_token=auth_token,
         oauth_token_name=oauth_token_name,
         oauth_token_type=oauth_token_type,
@@ -720,6 +831,13 @@ def _render_models_plain(console: Any, config: Any) -> None:
             console.print(f"      openai_tool_mode: {profile.openai_tool_mode}", markup=False)
         if profile.thinking_mode:
             console.print(f"      thinking_mode: {profile.thinking_mode}", markup=False)
+        if profile.thinking_effort:
+            console.print(f"      thinking_effort: {profile.thinking_effort}", markup=False)
+        if profile.max_thinking_tokens is not None:
+            console.print(
+                f"      max_thinking_tokens: {profile.max_thinking_tokens}",
+                markup=False,
+            )
         if profile.supports_vision is None:
             vision_display = "auto-detect"
         elif profile.supports_vision:
@@ -751,7 +869,7 @@ def _render_models_table(console: Any, config: Any) -> None:
         pointer_label = ",".join(markers) if markers else "-"
         context_display = str(profile.max_input_tokens) if profile.max_input_tokens else "-"
         vision_display = _vision_labels(profile)[0]
-        thinking_display = profile.thinking_mode or "auto"
+        thinking_display = format_thinking_summary(profile)
         api_base = profile.api_base or "-"
         if profile.protocol == ProtocolType.OAUTH:
             api_base = "-"
@@ -837,6 +955,10 @@ def _build_model_details_panel(
         details.add_row("OpenAI tool mode", escape(profile.openai_tool_mode))
     if profile.thinking_mode:
         details.add_row("Thinking mode", escape(profile.thinking_mode))
+    if profile.thinking_effort:
+        details.add_row("Thinking effort", escape(profile.thinking_effort))
+    if profile.max_thinking_tokens is not None:
+        details.add_row("Max thinking tokens", escape(str(profile.max_thinking_tokens)))
 
     return Panel(
         details,
@@ -882,7 +1004,7 @@ def _build_models_list_panel(
         markers = _pointer_markers(pointer_map, name)
         pointer_label = ",".join(markers) if markers else "-"
         pointer_text = Text(pointer_label, style="magenta" if markers else "dim")
-        thinking_text = Text(profile.thinking_mode or "auto", style="blue")
+        thinking_text = Text(format_thinking_summary(profile), style="blue")
         model_label = f"{profile.protocol.value} • {profile.model}"
         model_text = Text(model_label, style="dim")
         table.add_row(index_text, marker_text, name_text, pointer_text, thinking_text, model_text)

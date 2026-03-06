@@ -11,6 +11,12 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, cast
 from uuid import uuid4
 
 from ripperdoc.core.config import ModelProfile
+from ripperdoc.core.thinking_config import (
+    GEMINI_BUDGET_MODES,
+    GEMINI_LEVEL_MODES,
+    effort_to_budget,
+    thinking_effort_from_tokens,
+)
 from ripperdoc.core.providers.base import (
     ProgressCallback,
     ProviderClient,
@@ -252,16 +258,44 @@ def _supports_stream_arg(fn: Any) -> bool:
     return False
 
 
-def _build_thinking_config(max_thinking_tokens: int, model_name: str) -> Dict[str, Any]:
-    """Map max_thinking_tokens to Gemini thinking_config settings."""
-    if max_thinking_tokens <= 0:
+def _build_thinking_config(model_profile: ModelProfile, max_thinking_tokens: int) -> Dict[str, Any]:
+    """Map profile/runtime thinking settings to Gemini thinking_config."""
+    explicit_effort = (getattr(model_profile, "thinking_effort", None) or "").strip().lower()
+    thinking_mode = (getattr(model_profile, "thinking_mode", None) or "").strip().lower()
+    if explicit_effort in {"none", "off", "disabled"}:
         return {}
-    name = (model_name or "").lower()
+
+    name = (model_profile.model or "").lower()
+    effective_tokens = (
+        max_thinking_tokens
+        if max_thinking_tokens > 0
+        else max(0, int(getattr(model_profile, "max_thinking_tokens", None) or 0))
+    )
     config: Dict[str, Any] = {"include_thoughts": True}
-    if "gemini-3" in name:
-        config["thinking_level"] = "low" if max_thinking_tokens <= 2048 else "high"
-    else:
-        config["thinking_budget"] = max_thinking_tokens
+
+    if thinking_mode in GEMINI_LEVEL_MODES:
+        resolved_effort = explicit_effort or thinking_effort_from_tokens(name, effective_tokens)
+        if not resolved_effort:
+            return {}
+        config["thinking_level"] = resolved_effort
+        return config
+
+    if explicit_effort:
+        budget = effort_to_budget(explicit_effort)
+        if budget <= 0:
+            return {}
+        config["thinking_budget"] = budget
+        return config
+
+    if thinking_mode in GEMINI_BUDGET_MODES:
+        if effective_tokens <= 0:
+            return {}
+        config["thinking_budget"] = effective_tokens
+        return config
+
+    if effective_tokens <= 0:
+        return {}
+    config["thinking_budget"] = effective_tokens
     return config
 
 
@@ -503,7 +537,7 @@ class GeminiClient(ProviderClient):
         config: Dict[str, Any] = {"system_instruction": system_prompt}
         if model_profile.max_tokens:
             config["max_output_tokens"] = model_profile.max_tokens
-        thinking_config = _build_thinking_config(max_thinking_tokens, model_profile.model)
+        thinking_config = _build_thinking_config(model_profile, max_thinking_tokens)
         if thinking_config:
             try:
                 from google.genai import types as genai_types  # type: ignore

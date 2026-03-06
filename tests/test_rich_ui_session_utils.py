@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ripperdoc.cli.ui.rich_ui import session as session_module
 from ripperdoc.cli.ui.rich_ui.session import RichUI, _replace_surrogate_codepoints
+from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.query import QueryContext
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
@@ -214,6 +215,46 @@ def test_get_rprompt_keeps_permission_mode_label_when_thinking_unsupported(monke
 
     fragments = list(ui._get_rprompt())
     assert fragments == [("class:rprompt-mode-plan", "⏸ plan mode on")]
+
+
+def test_get_thinking_tokens_prefers_model_profile_budget(monkeypatch: Any) -> None:
+    ui = _new_ui()
+    ui.model = "main"
+    ui.project_path = Path.cwd()
+    ui._max_thinking_tokens_override = None
+    ui._thinking_mode_enabled = True
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.get_profile_for_pointer",
+        lambda _name: ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="gpt-5.2-2025-12-11",
+            max_thinking_tokens=4096,
+        ),
+    )
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.get_effective_config",
+        lambda _project_path: type("Cfg", (), {"default_thinking_tokens": 10240})(),
+    )
+
+    assert ui._get_thinking_tokens() == 4096
+
+
+def test_get_thinking_tokens_returns_zero_for_none_effort(monkeypatch: Any) -> None:
+    ui = _new_ui()
+    ui.model = "main"
+    ui.project_path = Path.cwd()
+    ui._max_thinking_tokens_override = None
+    ui._thinking_mode_enabled = True
+    monkeypatch.setattr(
+        "ripperdoc.cli.ui.rich_ui.session.get_profile_for_pointer",
+        lambda _name: ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="gpt-5.2-2025-12-11",
+            thinking_effort="none",
+        ),
+    )
+
+    assert ui._get_thinking_tokens() == 0
 
 
 @pytest.mark.asyncio

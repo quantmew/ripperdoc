@@ -112,8 +112,15 @@ class ModelProfile(BaseModel):
     # interactions into plain text to support providers that reject tool roles.
     openai_tool_mode: Literal["native", "text"] = "native"
     # Optional override for thinking protocol handling (e.g., "deepseek", "openrouter",
-    # "qwen", "gemini_openai", "openai"). When unset, provider heuristics are used.
+    # "qwen", "gemini_level", "gemini_budget", "openai").
+    # When unset, provider heuristics are used.
     thinking_mode: Optional[str] = None
+    # Optional per-profile thinking budget override used by providers that accept numeric
+    # reasoning/thinking token budgets.
+    max_thinking_tokens: Optional[int] = None
+    # Optional per-profile effort/level override for providers that expose discrete
+    # reasoning presets (for example OpenAI's low/medium/high or Gemini's thinking levels).
+    thinking_effort: Optional[str] = None
     # Optional reasoning capability flag from model catalog.
     supports_reasoning: Optional[bool] = None
     # Vision support flag. None = infer from packaged model catalog when available.

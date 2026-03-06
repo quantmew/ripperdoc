@@ -115,7 +115,7 @@ def test_infer_thinking_mode_respects_explicit_disable() -> None:
         ("https://api.deepseek.com", "deepseek-chat", "deepseek"),
         ("https://dashscope.aliyuncs.com", "qwen-max", "qwen"),
         ("https://openrouter.ai/api/v1", "openai/gpt-4o", "openrouter"),
-        ("https://generativelanguage.googleapis.com", "gemini-2.5-pro", "gemini_openai"),
+        ("https://generativelanguage.googleapis.com", "gemini-2.5-pro", "openai"),
     ],
 )
 def test_infer_thinking_mode_auto_detection(api_base: str, model_name: str, expected: str) -> None:

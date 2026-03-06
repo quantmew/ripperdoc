@@ -42,6 +42,7 @@ def test_collect_add_profile_input_sets_thinking_mode(monkeypatch) -> None:
             "",  # max_tokens
             "",  # temperature
             "openrouter",  # thinking_mode
+            "",  # max_thinking_tokens
             "auto",  # supports_vision
             "",  # currency
             "",  # input_price
@@ -84,6 +85,7 @@ def test_collect_edit_profile_input_can_clear_thinking_mode(monkeypatch) -> None
             "",  # max_tokens
             "",  # temperature
             "-",  # thinking_mode clear
+            "",  # max_thinking_tokens
             "",  # supports_vision
             "",  # currency
             "",  # input_price
@@ -114,6 +116,112 @@ def test_models_tui_parse_thinking_mode_values() -> None:
         screen._resolve_thinking_mode(selected_value="__custom__", custom_value="Vendor_Mode")
         == "vendor_mode"
     )
+
+
+def test_models_tui_openai_thinking_uses_effort_select() -> None:
+    screen = ModelFormScreen(
+        "edit",
+        existing_profile=ModelProfile(
+            protocol=ProtocolType.OPENAI_COMPATIBLE,
+            model="gpt-5.2-2025-12-11",
+        ),
+    )
+
+    control_type, label, options, hint = screen._thinking_control_spec()
+
+    assert control_type == "select"
+    assert label == "Reasoning effort"
+    assert [value for _text, value in options] == ["none", "low", "medium", "high"]
+    assert "OpenAI reasoning" in hint
+
+
+def test_models_tui_gemini_3_flash_uses_level_select() -> None:
+    screen = ModelFormScreen(
+        "edit",
+        existing_profile=ModelProfile(
+            protocol=ProtocolType.GEMINI,
+            model="gemini-3-flash-preview",
+            thinking_mode="gemini_level",
+        ),
+    )
+
+    control_type, label, options, hint = screen._thinking_control_spec()
+
+    assert control_type == "select"
+    assert label == "Gemini thinking level"
+    assert [value for _text, value in options] == ["minimal", "low", "medium", "high"]
+    assert "named levels" in hint
+
+
+def test_models_tui_gemini_25_uses_numeric_budget() -> None:
+    screen = ModelFormScreen(
+        "edit",
+        existing_profile=ModelProfile(
+            protocol=ProtocolType.GEMINI,
+            model="gemini-2.5-pro",
+            thinking_mode="gemini_budget",
+        ),
+    )
+
+    control_type, label, options, hint = screen._thinking_control_spec()
+
+    assert control_type == "input"
+    assert label == "Max thinking tokens"
+    assert options == []
+    assert "numeric token budget" in hint
+
+
+def test_models_tui_gemini_without_explicit_mode_defaults_to_budget() -> None:
+    screen = ModelFormScreen(
+        "edit",
+        existing_profile=ModelProfile(
+            protocol=ProtocolType.GEMINI,
+            model="gemini-3-flash-preview",
+        ),
+    )
+
+    control_type, label, options, hint = screen._thinking_control_spec()
+
+    assert control_type == "input"
+    assert label == "Max thinking tokens"
+    assert options == []
+    assert "numeric token budget" in hint
+
+
+def test_models_cmd_openai_thinking_uses_effort() -> None:
+    kind, prompt = models_cmd._thinking_prompt_kind(
+        ProtocolType.OPENAI_COMPATIBLE,
+        "gpt-5.2-2025-12-11",
+        "https://api.openai.com/v1",
+        "openai",
+    )
+
+    assert kind == "effort"
+    assert "none/low/medium/high" in prompt
+
+
+def test_models_cmd_gemini_25_thinking_uses_tokens() -> None:
+    kind, prompt = models_cmd._thinking_prompt_kind(
+        ProtocolType.GEMINI,
+        "gemini-2.5-pro",
+        "https://generativelanguage.googleapis.com/v1beta",
+        "gemini_budget",
+    )
+
+    assert kind == "tokens"
+    assert prompt == "Max thinking tokens [0]: "
+
+
+def test_models_cmd_openai_gemini_compat_uses_effort() -> None:
+    kind, prompt = models_cmd._thinking_prompt_kind(
+        ProtocolType.OPENAI_COMPATIBLE,
+        "gemini-2.5-pro",
+        "https://generativelanguage.googleapis.com/v1beta",
+        "openai",
+    )
+
+    assert kind == "effort"
+    assert "none/low/medium/high" in prompt
 
 
 def test_models_tui_copy_name_increments() -> None:
@@ -320,6 +428,7 @@ def test_collect_add_profile_input_oauth_uses_token_and_curated_model(monkeypatc
             "",  # max_tokens
             "",  # temperature
             "",  # thinking_mode
+            "",  # max_thinking_tokens
             "auto",  # supports_vision
             "",  # currency
             "",  # input_price
@@ -368,6 +477,7 @@ def test_collect_add_profile_input_oauth_supports_non_codex_token(monkeypatch) -
             "",  # max_tokens
             "",  # temperature
             "",  # thinking_mode
+            "",  # max_thinking_tokens
             "auto",  # supports_vision
             "",  # currency
             "",  # input_price

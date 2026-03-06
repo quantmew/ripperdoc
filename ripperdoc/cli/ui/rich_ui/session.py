@@ -592,6 +592,13 @@ class RichUI:
             return self._max_thinking_tokens_override
         if not self._thinking_mode_enabled:
             return 0
+        model_profile = get_profile_for_pointer(self.model)
+        if model_profile is not None:
+            effort = (getattr(model_profile, "thinking_effort", None) or "").strip().lower()
+            if effort in {"none", "off", "disabled"}:
+                return 0
+            if isinstance(getattr(model_profile, "max_thinking_tokens", None), int):
+                return max(0, int(model_profile.max_thinking_tokens or 0))
         config = get_effective_config(self.project_path)
         return config.default_thinking_tokens
 

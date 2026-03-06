@@ -16,6 +16,7 @@ from ripperdoc.core.oauth import (
     add_oauth_token,
     get_oauth_token,
 )
+from ripperdoc.core.thinking_config import default_thinking_effort
 from ripperdoc.core.oauth.gitlab import (
     GitLabOAuthError,
     refresh_gitlab_access_token,
@@ -170,6 +171,18 @@ def _effort_from_tokens(max_thinking_tokens: int) -> Optional[str]:
     return "high"
 
 
+def _resolve_reasoning_effort(
+    model_profile: ModelProfile,
+    max_thinking_tokens: int,
+) -> Optional[str]:
+    """Resolve a discrete reasoning effort from profile settings or token budget."""
+    return default_thinking_effort(
+        model_name=model_profile.model,
+        thinking_effort=getattr(model_profile, "thinking_effort", None),
+        max_thinking_tokens=max_thinking_tokens,
+    )
+
+
 def _detect_openai_vendor(model_profile: ModelProfile) -> str:
     """Best-effort vendor hint for OpenAI-compatible endpoints.
 
@@ -192,7 +205,7 @@ def _detect_openai_vendor(model_profile: ModelProfile) -> str:
     if "dashscope" in base or "qwen" in name:
         return "qwen"
     if "generativelanguage.googleapis.com" in base or name.startswith("gemini"):
-        return "gemini_openai"
+        return "openai"
     if "gpt-5" in name:
         return "openai"
     return "openai"
@@ -229,30 +242,13 @@ def _apply_openrouter_thinking(
         extra_body["reasoning"] = {"max_tokens": max_thinking_tokens}
 
 
-def _apply_gemini_openai_thinking(
-    extra_body: Dict[str, Any],
-    top_level: Dict[str, Any],
-    max_thinking_tokens: int,
-    effort: Optional[str],
-) -> None:
-    google_cfg: Dict[str, Any] = {}
-    if max_thinking_tokens > 0:
-        google_cfg["thinking_budget"] = max_thinking_tokens
-        google_cfg["include_thoughts"] = True
-    if google_cfg:
-        extra_body["google"] = {"thinking_config": google_cfg}
-    if effort:
-        top_level["reasoning_effort"] = effort
-        extra_body.setdefault("reasoning", {"effort": effort})
-
-
 def _apply_default_reasoning_thinking(
     extra_body: Dict[str, Any],
     _top_level: Dict[str, Any],
     _max_thinking_tokens: int,
     effort: Optional[str],
 ) -> None:
-    if effort:
+    if effort and effort not in {"none", "off", "disabled"}:
         extra_body["reasoning"] = {"effort": effort}
 
 
@@ -268,13 +264,14 @@ def _build_thinking_kwargs(
     if vendor == "none":
         return extra_body, top_level
 
-    effort = _effort_from_tokens(max_thinking_tokens)
+    effort = _resolve_reasoning_effort(model_profile, max_thinking_tokens)
+    if effort in {"none", "off", "disabled"}:
+        return extra_body, top_level
 
     handlers: Dict[str, Any] = {
         "deepseek": _apply_deepseek_thinking,
         "qwen": _apply_qwen_thinking,
         "openrouter": _apply_openrouter_thinking,
-        "gemini_openai": _apply_gemini_openai_thinking,
     }
     handler = handlers.get(vendor, _apply_default_reasoning_thinking)
     handler(extra_body, top_level, max_thinking_tokens, effort)
