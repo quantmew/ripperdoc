@@ -152,6 +152,9 @@ class StdioQueryMixin:
             await self._fail_query_request(request_id, state, "Not initialized")
             return None
 
+        if self._query_context is not None and hasattr(self._query_context, "abort_controller"):
+            self._query_context.abort_controller.clear()
+
         try:
             coerce_request = self._coerce_query_request(request)
             sampling_request = SamplingRequest.model_validate(coerce_request)

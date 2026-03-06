@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import signal
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import click
 from ripperdoc import __version__
 from ripperdoc.protocol.models import DEFAULT_PROTOCOL_VERSION
+from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.sessions.session_history import (
     load_session_messages,
     list_session_summaries,
 )
 
 from .handler import StdioProtocolHandler
+
+logger = get_logger()
 
 
 def _coerce_print_messages_for_query(messages: list[Any]) -> list[dict[str, Any]]:
@@ -197,6 +201,59 @@ async def _read_stream_json_messages_from_stdin() -> list[dict[str, Any]]:
     return _coerce_stream_messages_for_query(parsed_payload)
 
 
+def _install_stdio_shutdown_signal_handlers(
+    cancel_main_task: Callable[[], None],
+) -> Callable[[], None]:
+    """Translate process termination signals into cooperative task cancellation."""
+    installed: list[tuple[signal.Signals, Any]] = []
+
+    def _handle_signal(signum: int, _frame: Any) -> None:
+        try:
+            signal_name = signal.Signals(signum).name
+        except ValueError:
+            signal_name = str(signum)
+        logger.info("[stdio] Received %s; cancelling stdio task", signal_name)
+        cancel_main_task()
+
+    for signal_name in ("SIGTERM", "SIGINT"):
+        raw_signal = getattr(signal, signal_name, None)
+        if raw_signal is None:
+            continue
+        try:
+            previous_handler = signal.getsignal(raw_signal)
+            signal.signal(raw_signal, _handle_signal)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        installed.append((raw_signal, previous_handler))
+
+    def _restore() -> None:
+        for raw_signal, previous_handler in installed:
+            try:
+                signal.signal(raw_signal, previous_handler)
+            except (OSError, RuntimeError, ValueError):
+                continue
+
+    return _restore
+
+
+async def _run_stdio_with_signal_handling(**kwargs: Any) -> None:
+    """Run stdio mode while converting SIGTERM/SIGINT into graceful cancellation."""
+    main_task = asyncio.create_task(run_stdio(**kwargs))
+
+    def _cancel_main_task() -> None:
+        if not main_task.done():
+            main_task.cancel()
+
+    restore_signal_handlers = _install_stdio_shutdown_signal_handlers(_cancel_main_task)
+    try:
+        await main_task
+    except asyncio.CancelledError:
+        if not main_task.cancelled():
+            raise
+    finally:
+        restore_signal_handlers()
+
+
 @click.command(name="stdio")
 @click.option(
     "--input-format",
@@ -313,7 +370,7 @@ def stdio_cmd(
     """
     # Set up async event loop
     asyncio.run(
-        run_stdio(
+        _run_stdio_with_signal_handling(
             input_format=input_format,
             output_format=output_format,
             model=model,

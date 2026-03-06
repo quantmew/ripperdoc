@@ -601,17 +601,44 @@ class StdioControlMixin:
         )
 
     async def _handle_interrupt(self, _request: dict[str, Any], request_id: str) -> None:
-        """Attempt to interrupt in-flight tasks."""
+        """Interrupt the active turn."""
         current_task = asyncio.current_task()
         cancelled = 0
-        for task in list(self._inflight_tasks):
-            if task is current_task:
+        interrupt_signaled = False
+
+        query_context = getattr(self, "_query_context", None)
+        if query_context is not None and hasattr(query_context, "abort_controller"):
+            abort_controller = getattr(query_context, "abort_controller", None)
+            if abort_controller is not None and not abort_controller.is_set():
+                abort_controller.set()
+                interrupt_signaled = True
+
+        request_tasks = getattr(self, "_request_tasks", {})
+        request_subtypes = getattr(self, "_request_subtypes", {})
+
+        for tracked_request_id, task in list(request_tasks.items()):
+            if task is current_task or task.done():
+                continue
+            subtype = str(request_subtypes.get(tracked_request_id) or "").strip().lower()
+            if subtype in {"query", "sampling/createmessage"}:
                 continue
             task.cancel()
             cancelled += 1
+
+        tracked_tasks = {task for task in request_tasks.values()}
+        for task in list(self._inflight_tasks):
+            if task is current_task or task.done() or task in tracked_tasks:
+                continue
+            task.cancel()
+            cancelled += 1
+
         await self._write_control_response(
             request_id,
-            response={"status": "interrupt", "cancelled_tasks": cancelled},
+            response={
+                "status": "interrupt",
+                "cancelled_tasks": cancelled,
+                "interrupt_signaled": interrupt_signaled,
+            },
         )
 
     async def _handle_set_output_style(self, request: dict[str, Any], request_id: str) -> None:

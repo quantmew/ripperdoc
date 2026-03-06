@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import asyncio
 
 import pytest
 
@@ -175,3 +176,84 @@ async def test_summarize_query_stage_marks_error_during_execution() -> None:
     assert result["type"] == "result"
     assert result["subtype"] == "error_during_execution"
     assert result["is_error"] is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_query_stage_clears_stale_abort_signal(monkeypatch) -> None:
+    handler = _DummyHandler()
+    abort_controller = asyncio.Event()
+    abort_controller.set()
+    handler._initialized = True
+    handler._session_id = "session-3"
+    handler._project_path = "."
+    handler._query_context = type(
+        "QueryContextStub",
+        (),
+        {
+            "abort_controller": abort_controller,
+            "tools": [],
+        },
+    )()
+    handler._conversation_messages = []
+    handler._init_stream_message_sent = True
+
+    monkeypatch.setattr(
+        handler,
+        "_validate_tool_message_sequence",
+        lambda _messages: True,
+    )
+    monkeypatch.setattr(
+        handler,
+        "_coerce_sampling_messages",
+        lambda _messages: [],
+    )
+    monkeypatch.setattr(
+        handler,
+        "_extract_latest_user_prompt",
+        lambda _messages, _request_messages: "hello",
+    )
+    monkeypatch.setattr(
+        handler,
+        "_ensure_session_history",
+        lambda: type("History", (), {"path": "history.jsonl", "append": lambda self, _msg: None})(),
+    )
+    monkeypatch.setattr(
+        handler,
+        "_collect_prepare_inputs",
+        lambda _prompt: asyncio.sleep(0, result=([], [], None)),
+    )
+    monkeypatch.setattr(
+        handler,
+        "_refresh_query_context_dynamic_tools",
+        lambda: asyncio.sleep(0),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handler,
+        "_resolve_system_prompt",
+        lambda *_args, **_kwargs: "system",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handler,
+        "_emit_hook_notices",
+        lambda _notices: asyncio.sleep(0),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "ripperdoc.protocol.stdio.handler_query.load_mcp_servers_async",
+        lambda _project_path: asyncio.sleep(0, result=[]),
+    )
+    monkeypatch.setattr(
+        "ripperdoc.protocol.stdio.handler_query.format_mcp_instructions",
+        lambda _servers: "",
+    )
+
+    prepared = await handler._prepare_query_stage(
+        {"messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]},
+        "q-clear",
+        _QueryRuntimeState(start_time=0.0),
+    )
+
+    assert prepared is not None
+    assert abort_controller.is_set() is False

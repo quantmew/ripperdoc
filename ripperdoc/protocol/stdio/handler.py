@@ -90,6 +90,7 @@ class StdioProtocolHandler(
         self._sdk_hook_scope: HooksConfig | None = None
         self._pending_requests: dict[str, Any] = {}
         self._request_tasks: dict[str, asyncio.Task[None]] = {}
+        self._request_subtypes: dict[str, str] = {}
         self._request_lock = asyncio.Lock()
         self._inflight_tasks: set[asyncio.Task[None]] = set()
         self._custom_system_prompt: str | None = None

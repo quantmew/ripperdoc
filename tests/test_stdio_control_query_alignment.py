@@ -11,6 +11,7 @@ import pytest
 
 from ripperdoc.utils.mcp import McpServerInfo
 from ripperdoc.utils.mcp import parse_mcp_config_option
+from ripperdoc.utils.mcp import _SdkMcpSession, _coerce_sdk_schema
 
 from ripperdoc.protocol.models import DEFAULT_PROTOCOL_VERSION, JsonRpcErrorCodes
 from ripperdoc import __version__
@@ -164,6 +165,52 @@ def test_parse_mcp_config_option_accepts_inline_json() -> None:
 
     assert "localtools" in parsed
     assert parsed["localtools"].type == "sdk"
+
+
+def test_coerce_sdk_schema_converts_shorthand_object_shape() -> None:
+    schema = _coerce_sdk_schema({"numbers": list, "label": str, "count": int})
+
+    assert schema == {
+        "type": "object",
+        "properties": {
+            "numbers": {"type": "array", "items": {}},
+            "label": {"type": "string"},
+            "count": {"type": "integer"},
+        },
+        "required": ["numbers", "label", "count"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_sdk_mcp_session_list_tools_normalizes_shorthand_input_schema() -> None:
+    async def fake_sender(_server_name: str, message: dict[str, Any]) -> dict[str, Any]:
+        method = message.get("method")
+        if method == "tools/list":
+            return {
+                "result": {
+                    "tools": [
+                        {
+                            "name": "add_numbers",
+                            "description": "Add numbers",
+                            "inputSchema": {"numbers": list},
+                            "annotations": {"readOnlyHint": True},
+                        }
+                    ]
+                }
+            }
+        return {"result": {}}
+
+    session = _SdkMcpSession("calc", fake_sender)
+    result = await session.list_tools()
+
+    assert len(result.tools) == 1
+    assert result.tools[0].inputSchema == {
+        "type": "object",
+        "properties": {
+            "numbers": {"type": "array", "items": {}},
+        },
+        "required": ["numbers"],
+    }
 
 
 @pytest.mark.asyncio
@@ -636,6 +683,7 @@ async def test_control_request_handles_sdk_mcp_status_shape(monkeypatch) -> None
 async def test_control_request_interrupt_cancels_other_tasks(monkeypatch) -> None:
     handler = handler_module.StdioProtocolHandler()
     written: list[dict[str, Any]] = []
+    handler._query_context = type("QueryContextStub", (), {"abort_controller": asyncio.Event()})()
 
     async def fake_task() -> None:
         await asyncio.Future()
@@ -662,8 +710,58 @@ async def test_control_request_interrupt_cancels_other_tasks(monkeypatch) -> Non
 
     assert written
     assert written[0]["response"]["status"] == "interrupt"
+    assert written[0]["response"]["interrupt_signaled"] is True
     assert written[0]["response"]["cancelled_tasks"] >= 1
+    assert handler._query_context.abort_controller.is_set() is True
     other_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_control_request_interrupt_does_not_cancel_query_task(monkeypatch) -> None:
+    handler = handler_module.StdioProtocolHandler()
+    written: list[dict[str, Any]] = []
+    handler._query_context = type("QueryContextStub", (), {"abort_controller": asyncio.Event()})()
+
+    cancelled = asyncio.Event()
+
+    async def fake_query_task() -> None:
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    query_task = asyncio.create_task(fake_query_task())
+    handler._inflight_tasks.add(query_task)
+    handler._request_tasks["query-1"] = query_task
+    handler._request_subtypes["query-1"] = "query"
+
+    async def fake_write_control_response(
+        request_id: str,
+        response: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        written.append({"id": request_id, "response": response, "error": error})
+
+    monkeypatch.setattr(handler, "_write_control_response", fake_write_control_response)
+
+    await handler._handle_control_request(
+        {
+            "type": "control_request",
+            "request_id": "interrupt-2",
+            "request": {"subtype": "interrupt"},
+        }
+    )
+    await asyncio.sleep(0)
+
+    assert written
+    assert written[0]["response"]["status"] == "interrupt"
+    assert written[0]["response"]["interrupt_signaled"] is True
+    assert written[0]["response"]["cancelled_tasks"] == 0
+    assert handler._query_context.abort_controller.is_set() is True
+    assert cancelled.is_set() is False
+
+    query_task.cancel()
 
 
 def test_sdk_transport_builds_command_with_cli_path() -> None:

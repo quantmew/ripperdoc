@@ -14,7 +14,7 @@ import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TextIO, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TextIO, cast, get_args, get_origin
 
 from ripperdoc import __version__
 from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
@@ -92,6 +92,93 @@ class McpServerInfo:
     instructions: Optional[str] = None
     server_version: Optional[str] = None
     capabilities: Dict[str, Any] = field(default_factory=dict)
+
+
+def _looks_like_json_schema(value: Any) -> bool:
+    """Return True when a dict already resembles a JSON Schema object."""
+    if not isinstance(value, dict):
+        return False
+    schema_keys = {
+        "$schema",
+        "$defs",
+        "$ref",
+        "type",
+        "properties",
+        "required",
+        "items",
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "enum",
+        "additionalProperties",
+    }
+    return any(key in value for key in schema_keys)
+
+
+def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
+    """Coerce Claude Agent SDK shorthand schemas into JSON Schema.
+
+    The SDK accepts compact shapes like ``{"numbers": list}``, while MCP tool
+    definitions must expose standard JSON Schema for the model to understand the
+    expected argument structure.
+    """
+    if value is None:
+        return {}
+
+    if hasattr(value, "model_json_schema") and callable(value.model_json_schema):
+        try:
+            schema = value.model_json_schema()
+            if isinstance(schema, dict):
+                return schema
+        except (TypeError, ValueError, AttributeError):
+            pass
+
+    if _looks_like_json_schema(value):
+        return cast(dict[str, Any], value)
+
+    origin = get_origin(value)
+    if origin is not None:
+        args = [arg for arg in get_args(value) if arg is not type(None)]
+        if origin in (list, List):
+            items = _coerce_sdk_schema(args[0]) if args else {}
+            return {"type": "array", "items": items}
+        if origin in (dict, Dict):
+            additional = _coerce_sdk_schema(args[1]) if len(args) > 1 else {}
+            return {"type": "object", "additionalProperties": additional}
+
+    if isinstance(value, dict):
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for key, item in value.items():
+            key_str = str(key)
+            properties[key_str] = _coerce_sdk_schema(item)
+            required.append(key_str)
+        schema: dict[str, Any] = {"type": "object", "properties": properties}
+        if required:
+            schema["required"] = required
+        return schema
+
+    if isinstance(value, (list, tuple)):
+        items = _coerce_sdk_schema(value[0]) if len(value) == 1 else {}
+        return {"type": "array", "items": items}
+
+    if value in (str,):
+        return {"type": "string"}
+    if value in (int,):
+        return {"type": "integer"}
+    if value in (float,):
+        return {"type": "number"}
+    if value in (bool,):
+        return {"type": "boolean"}
+    if value in (list, List):
+        return {"type": "array", "items": {}}
+    if value in (dict, Dict):
+        return {"type": "object", "additionalProperties": {}}
+
+    if isinstance(value, type):
+        return {}
+
+    return {}
 
 
 def _get_sdk_mcp_request_sender() -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None:
@@ -509,9 +596,7 @@ class _SdkMcpSession:
                 _SdkMcpToolDefinition(
                     name=str(tool.get("name") or ""),
                     description=str(tool.get("description") or ""),
-                    inputSchema=tool.get("inputSchema")
-                    if isinstance(tool.get("inputSchema"), dict)
-                    else {},
+                    inputSchema=_coerce_sdk_schema(tool.get("inputSchema")),
                     annotations=tool.get("annotations")
                     if isinstance(tool.get("annotations"), dict)
                     else {},

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from click.testing import CliRunner
 import click
 import pytest
@@ -9,6 +10,7 @@ from typing import Any
 from pathlib import Path
 import subprocess
 import re
+import signal
 from types import SimpleNamespace
 
 from ripperdoc.cli import cli as cli_module
@@ -132,6 +134,86 @@ async def test_run_stdio_replay_user_messages_requires_stream_json_modes():
             print_mode=False,
             replay_user_messages=True,
         )
+
+
+def test_install_stdio_shutdown_signal_handlers_restores_previous_handlers(monkeypatch):
+    captured: dict[int, Any] = {}
+    restored: dict[int, Any] = {}
+    previous = object()
+    cancelled: list[str] = []
+
+    def fake_getsignal(sig: int) -> Any:
+        return previous
+
+    def fake_signal(sig: int, handler: Any) -> None:
+        if sig not in captured:
+            captured[sig] = handler
+        else:
+            restored[sig] = handler
+
+    monkeypatch.setattr(stdio_command.signal, "getsignal", fake_getsignal)
+    monkeypatch.setattr(stdio_command.signal, "signal", fake_signal)
+
+    restore = stdio_command._install_stdio_shutdown_signal_handlers(
+        lambda: cancelled.append("cancelled")
+    )
+
+    assert signal.SIGTERM in captured
+    assert signal.SIGINT in captured
+
+    captured[signal.SIGTERM](signal.SIGTERM, None)
+    assert cancelled == ["cancelled"]
+
+    restore()
+
+    assert restored[signal.SIGTERM] is previous
+    assert restored[signal.SIGINT] is previous
+
+
+@pytest.mark.asyncio
+async def test_run_stdio_with_signal_handling_swallows_signal_cancellation(monkeypatch):
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_run_stdio(**_kwargs: Any) -> None:
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(stdio_command, "run_stdio", fake_run_stdio)
+
+    installed_cancel: dict[str, Any] = {}
+
+    def fake_install(cancel_main_task):
+        installed_cancel["cancel"] = cancel_main_task
+
+        def _restore() -> None:
+            installed_cancel["restored"] = True
+
+        return _restore
+
+    monkeypatch.setattr(
+        stdio_command,
+        "_install_stdio_shutdown_signal_handlers",
+        fake_install,
+    )
+
+    runner = asyncio.create_task(
+        stdio_command._run_stdio_with_signal_handling(
+            input_format="stream-json",
+            output_format="stream-json",
+            model=None,
+            permission_mode="default",
+            max_turns=None,
+            system_prompt=None,
+            print_mode=False,
+        )
+    )
+
+    await started.wait()
+    installed_cancel["cancel"]()
+    await runner
+
+    assert installed_cancel["restored"] is True
 
 
 def test_cli_rejects_sdk_only_options_outside_stdio(monkeypatch, tmp_path):

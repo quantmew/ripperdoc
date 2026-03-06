@@ -56,6 +56,7 @@ class StdioRuntimeMixin:
     _query_in_progress: bool
     _inflight_tasks: set[asyncio.Task[None]]
     _pending_requests: dict[str, Any]
+    _request_subtypes: dict[str, str]
     _idle_exit_delay_ms: int | None
     _idle_exit_task: asyncio.Task[None] | None
     _runtime_task: asyncio.Task[Any] | None
@@ -246,13 +247,22 @@ class StdioRuntimeMixin:
         if request_id is None:
             request_id = message.get("id")
         tracked_request_id = str(request_id) if request_id is not None else None
+        request_payload = message.get("request")
+        request_subtype = ""
+        if isinstance(request_payload, dict):
+            request_subtype = str(request_payload.get("subtype") or "").strip().lower()
+        elif isinstance(message.get("method"), str):
+            request_subtype = str(message.get("method") or "").strip().lower()
         if tracked_request_id:
             self._request_tasks[tracked_request_id] = task
+            self._request_subtypes[tracked_request_id] = request_subtype
 
         def _cleanup_task(t: asyncio.Task[None]) -> None:
             self._inflight_tasks.discard(t)
             if tracked_request_id and self._request_tasks.get(tracked_request_id) is t:
                 self._request_tasks.pop(tracked_request_id, None)
+            if tracked_request_id:
+                self._request_subtypes.pop(tracked_request_id, None)
             if t.cancelled():
                 return
             exc = t.exception()
