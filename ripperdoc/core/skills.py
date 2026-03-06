@@ -29,7 +29,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, cast
 
 import yaml
 
@@ -256,12 +256,12 @@ def _load_skill_file(
         isinstance(raw_description, str) and raw_description.strip()
     )
     if has_user_specified_description:
-        description = raw_description.strip()
+        description = cast(str, raw_description).strip()
     else:
         description = _derive_skill_description(body, resolved_name)
 
     allowed_tools = _normalize_allowed_tools(
-        frontmatter.get("allowed-tools") or frontmatter.get("allowed_tools")
+        (frontmatter.get("allowed-tools") or frontmatter.get("allowed_tools")) or ""
     )
     argument_hint = _normalize_optional_string(
         frontmatter.get("argument-hint") or frontmatter.get("argument_hint")

@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional
 
 from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger

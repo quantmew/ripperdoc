@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ripperdoc.core.tool import Tool
 from ripperdoc.core.plan_mode import resolve_plan_file_path
@@ -10,7 +10,8 @@ from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.file_watch import BoundedFileCache
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messaging.messages import ProgressMessage, UserMessage
+from ripperdoc.utils.messaging.messages import AttachmentMessage, ProgressMessage, UserMessage
+from ripperdoc.utils.messaging.message_types import ConversationMessage
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 
 logger = get_logger()
@@ -134,12 +135,14 @@ class ToolRegistry:
 
 
 def _apply_skill_context_updates(
-    tool_results: List[UserMessage],
+    tool_results: Sequence[ConversationMessage],
     query_context: "QueryContext",
     shared_context: Optional[Dict[str, str]] = None,
 ) -> None:
     """Update query context based on Skill tool outputs."""
     for message in tool_results:
+        if not isinstance(message, UserMessage):
+            continue
         data = getattr(message, "tool_use_result", None)
         if not isinstance(data, dict):
             continue
@@ -399,7 +402,7 @@ class QueryContext:
             "active_tool_count": len(self.tool_registry.active_tools),
         }
 
-    def drain_pending_messages(self) -> List[UserMessage | ProgressMessage]:
+    def drain_pending_messages(self) -> List[UserMessage | ProgressMessage | AttachmentMessage]:
         """Drain queued messages waiting to be injected into the conversation."""
         return self.pending_message_queue.drain()
 

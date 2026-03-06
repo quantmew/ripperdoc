@@ -1,3 +1,5 @@
+# mypy: disable-error-code=misc
+
 """Session-scoped websocket manager for remote control / REPL bridge."""
 
 from __future__ import annotations
@@ -7,7 +9,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from ripperdoc.utils.log import get_logger
 
@@ -20,13 +22,23 @@ from .constants import (
 
 logger = get_logger()
 
+if TYPE_CHECKING:
+    from websockets.sync.client import ClientConnection as WebSocketConnection
+else:
+    WebSocketConnection = Any
+
+WebSocketClosed: type[Exception]
+websocket_connect: Any | None
+
 try:
-    from websockets.exceptions import ConnectionClosed  # type: ignore
-    from websockets.sync.client import ClientConnection, connect  # type: ignore
+    from websockets.exceptions import ConnectionClosed as _WebSocketClosed
+    from websockets.sync.client import connect as _websocket_connect
+
+    WebSocketClosed = _WebSocketClosed
+    websocket_connect = _websocket_connect
 except Exception:  # pragma: no cover - optional runtime dependency
-    ConnectionClosed = Exception  # type: ignore[assignment]
-    ClientConnection = Any  # type: ignore[misc,assignment]
-    connect = None  # type: ignore[assignment]
+    WebSocketClosed = Exception
+    websocket_connect = None
 
 
 def _is_valid_message_type(message: Any) -> bool:
@@ -63,7 +75,7 @@ class SessionsWebSocketManager:
         self._reconnect_attempts = 0
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._ws: ClientConnection | None = None
+        self._ws: WebSocketConnection | None = None
         self._ws_lock = threading.Lock()
 
     def _build_ws_url(self) -> str:
@@ -82,7 +94,7 @@ class SessionsWebSocketManager:
         self._thread.start()
 
     def _run_loop(self) -> None:
-        if connect is None:
+        if websocket_connect is None:
             err = RuntimeError("websockets.sync.client is unavailable")
             logger.error("[SessionsWebSocket] %s", err)
             self.callbacks.on_error(err) if self.callbacks.on_error else None
@@ -97,13 +109,13 @@ class SessionsWebSocketManager:
             }
             try:
                 logger.info("[SessionsWebSocket] Connecting to %s", url)
-                with connect(
+                with websocket_connect(
                     url,
                     additional_headers=headers,
                     ping_interval=SESSIONS_WS_PING_INTERVAL_SEC,
                 ) as ws:
                     with self._ws_lock:
-                        self._ws = ws
+                        self._ws = cast("WebSocketConnection", ws)
                     self._state = "connected"
                     self._reconnect_attempts = 0
                     if self.callbacks.on_connected:
@@ -112,8 +124,9 @@ class SessionsWebSocketManager:
                     for raw in ws:
                         if self._stop_event.is_set():
                             break
-                        self._handle_message(raw)
-            except ConnectionClosed as exc:  # type: ignore[misc]
+                        if isinstance(raw, str):
+                            self._handle_message(raw)
+            except WebSocketClosed as exc:
                 close_code = getattr(exc, "code", None)
                 logger.warning("[SessionsWebSocket] Closed code=%s", close_code)
                 if isinstance(close_code, int) and close_code in SESSIONS_WS_PERMANENT_CLOSE_CODES:

@@ -7,7 +7,7 @@ for communication with AI models.
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Sequence, Type, Union
+from typing import Any, Dict, List, Optional, Sequence, Type, Union, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from uuid import uuid4
 from enum import Enum
@@ -396,7 +396,7 @@ FileAttachmentContentModel = Union[
 
 def _coerce_file_attachment_content(content: Any) -> FileAttachmentContentModel:
     if isinstance(content, FileAttachmentContent):
-        return content
+        return cast(FileAttachmentContentModel, content)
     if not isinstance(content, dict):
         return UnknownFileAttachmentContent(type="unknown", value=str(content))
 
@@ -408,7 +408,7 @@ def _coerce_file_attachment_content(content: Any) -> FileAttachmentContentModel:
         "pdf": FilePdfAttachmentContent,
     }
     model = model_by_type.get(content_type, UnknownFileAttachmentContent)
-    return model(**content)
+    return cast(FileAttachmentContentModel, model(**content))
 
 
 class FileAttachmentPayload(AttachmentPayload):
@@ -770,12 +770,12 @@ ATTACHMENT_PAYLOAD_MODEL_BY_TYPE: Dict[str, Type[AttachmentPayload]] = {
 
 def _coerce_attachment_payload(payload: Any) -> AttachmentPayloadModel:
     if isinstance(payload, AttachmentPayload):
-        return payload
+        return cast(AttachmentPayloadModel, payload)
     if not isinstance(payload, dict):
         return UnknownAttachmentPayload(type="unknown", content=str(payload))
     attachment_type = str(payload.get("type") or "unknown")
     payload_model = ATTACHMENT_PAYLOAD_MODEL_BY_TYPE.get(attachment_type, UnknownAttachmentPayload)
-    return payload_model(**payload)
+    return cast(AttachmentPayloadModel, payload_model(**payload))
 
 
 class AttachmentMessage(BaseModel):
@@ -2243,15 +2243,15 @@ def render_attachment_message(message: AttachmentMessage) -> UserMessage:
         str(getattr(message.attachment, "content", "") or ""),
         attachment=message,
     )
-    return fallback[0]
+    return cast(UserMessage, fallback[0])
 
 
 def expand_attachment_messages(
     messages: Sequence[UserMessage | AssistantMessage | ProgressMessage | AttachmentMessage],
-) -> List[UserMessage | AssistantMessage | ProgressMessage]:
+) -> List[UserMessage | AssistantMessage | ProgressMessage | AttachmentMessage]:
     """Expand attachment items into model-visible user/meta messages."""
 
-    expanded: List[UserMessage | AssistantMessage | ProgressMessage] = []
+    expanded: List[UserMessage | AssistantMessage | ProgressMessage | AttachmentMessage] = []
     for message in messages:
         if getattr(message, "type", None) == "attachment" and isinstance(message, AttachmentMessage):
             expanded.extend(parse_attachment_message(message))

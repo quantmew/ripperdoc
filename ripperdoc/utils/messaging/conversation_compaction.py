@@ -17,11 +17,7 @@ from ripperdoc.utils.messaging.message_formatting import (
     extract_assistant_text,
 )
 from ripperdoc.utils.messaging.messages import (
-    AssistantMessage,
-    AttachmentMessage,
     ConversationMessage,
-    ProgressMessage,
-    UserMessage,
     create_user_message,
 )
 

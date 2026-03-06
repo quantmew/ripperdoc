@@ -1042,7 +1042,7 @@ class McpRuntime:
             info.capabilities = (
                 capabilities.model_dump() if hasattr(capabilities, "model_dump") else {}
             )
-            self.sessions[config.name] = session
+            self.sessions[config.name] = cast(ClientSession, session)
 
             tools_result = await session.list_tools()
             info.tools = [

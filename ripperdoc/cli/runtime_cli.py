@@ -39,6 +39,7 @@ from ripperdoc.utils.mcp import (
 )
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.messaging.messages import (
+    AttachmentMessage,
     UserMessage,
     create_hook_additional_context_message,
     create_user_message,
@@ -138,8 +139,8 @@ async def _run_prompt_submission_hooks(
     prompt: str,
     query_context: QueryContext,
     additional_instructions: List[str],
-) -> tuple[bool, List[UserMessage]]:
-    hook_context_messages: List[UserMessage] = []
+) -> tuple[bool, List[UserMessage | AttachmentMessage]]:
+    hook_context_messages: List[UserMessage | AttachmentMessage] = []
     with bind_pending_message_queue(query_context.pending_message_queue):
         session_start_result = await hook_manager.run_session_start_async("startup")
         _print_hook_system_message(session_start_result, "SessionStart")

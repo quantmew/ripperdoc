@@ -17,6 +17,7 @@ from ripperdoc.utils.json_utils import safe_parse_json
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
+    AttachmentMessage,
     MessageContent,
     ProgressMessage,
     UserMessage,
@@ -301,7 +302,7 @@ def _tool_prompt_for_text_mode(tools: List[Tool[Any, Any]]) -> str:
 
 
 def text_mode_history(
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]],
 ) -> List[Union[UserMessage, AssistantMessage]]:
     """Convert a message history into text-only form for text mode."""
 

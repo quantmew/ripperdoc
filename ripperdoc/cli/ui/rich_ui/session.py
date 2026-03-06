@@ -253,7 +253,7 @@ class RichUI:
             },
         )
         self._session_history = SessionHistory(self.project_path, self.session_id)
-        self._session_hook_messages: List[UserMessage] = []
+        self._session_hook_messages: List[UserMessage | AttachmentMessage] = []
         self._session_start_time = time.time()
         self._session_end_sent = False
         self._exit_reason: Optional[str] = None
@@ -700,8 +700,10 @@ class RichUI:
             contexts.append(str(additional_context))
         return contexts
 
-    def _collect_hook_context_messages(self, hook_result: Any, hook_event: str) -> List[UserMessage]:
-        messages: List[UserMessage] = []
+    def _collect_hook_context_messages(
+        self, hook_result: Any, hook_event: str
+    ) -> List[UserMessage | AttachmentMessage]:
+        messages: List[UserMessage | AttachmentMessage] = []
         additional_context = getattr(hook_result, "additional_context", None)
         if additional_context:
             message = create_hook_additional_context_message(

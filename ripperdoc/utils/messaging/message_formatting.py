@@ -5,18 +5,15 @@ with support for detailed tool information extraction. Used primarily for
 conversation summarization and compaction.
 """
 
-from typing import Any, List, Union
+from typing import Any, List
 import re
 
 from ripperdoc.utils.messaging.messages import (
     ATTACHMENT_EXPORT_HIDDEN_TYPES,
     ATTACHMENT_IGNORED_TYPES,
     ATTACHMENT_SUMMARY_HIDDEN_TYPES,
-    AssistantMessage,
     AttachmentMessage,
     ConversationMessage,
-    ProgressMessage,
-    UserMessage,
     parse_attachment_message,
 )
 _SYSTEM_REMINDER_EXTRACT_RE = re.compile(r"</?system-reminder>\n?")

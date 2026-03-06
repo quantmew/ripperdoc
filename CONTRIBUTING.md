@@ -75,7 +75,7 @@ pytest --cov=ripperdoc
 ### Core Modules
 
 - `ripperdoc/core/` - Core functionality (config, agents, permissions, providers)
-- `ripperdoc/tools/` - Built-in tools (26+ tools for file ops, shell, search, etc.)
+- `ripperdoc/tools/` - Built-in tools (30+ tools for file ops, shell, search, etc.)
 - `ripperdoc/cli/` - CLI commands and TUI interfaces
 - `ripperdoc/protocol/` - SDK protocol implementation
 - `ripperdoc/utils/` - Utility functions and helpers

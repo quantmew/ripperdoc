@@ -15,7 +15,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
   <a href="https://pypi.org/project/ripperdoc/">
-    <img src="https://img.shields.io/badge/version-0.4.4-orange.svg">
+    <img src="https://img.shields.io/badge/version-0.5.1-orange.svg">
   </a>
 </p>
 
@@ -26,7 +26,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
 ## Ripperdoc 的独特之处?
 
 - **🔌 模型无关** - 支持 Anthropic Claude、OpenAI、Google Gemini、DeepSeek 以及任何 OpenAI 兼容 API
-- **🎣 可扩展架构** - 26+ 内置工具,配备 hooks 系统用于自定义工作流
+- **🎣 可扩展架构** - 30+ 内置工具,配备 hooks 系统用于自定义工作流
 - **🤖 多代理协调** - 内置任务图和团队协作,支持复杂工作流
 - **📚 技能系统** - 按需加载能力包(PDF、Excel、PowerPoint、自定义语言)
 - **🔌 MCP 集成** - 一流支持的模型上下文协议服务器
@@ -39,7 +39,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
 ## 核心功能
 
 ### 🛠️ 强大的工具系统
-- **26+ 内置工具** - 文件操作(Read、Write、Edit、MultiEdit)、代码搜索(Grep、Glob)、shell 执行(Bash、Background)、LSP 集成等
+- **30+ 内置工具** - 文件操作(Read、Write、Edit、MultiEdit)、代码搜索(Grep、Glob)、shell 执行(Bash、Background)、LSP 集成等
 - **Jupyter 支持** - 直接编辑 .ipynb 笔记本,支持单元格操作
 - **后台任务** - 异步运行命令,监控输出和跟踪状态
 
@@ -320,7 +320,7 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 
 - **CLI 层** (`ripperdoc/cli/`) - 终端界面、UI 组件、命令处理器
 - **核心层** (`ripperdoc/core/`) - 代理定义、配置、hooks、提供商
-- **工具层** (`ripperdoc/tools/`) - 26+ 用于文件操作、代码分析等的内置工具
+- **工具层** (`ripperdoc/tools/`) - 30+ 用于文件操作、代码分析等的内置工具
 - **协议层** (`ripperdoc/protocol/`) - 用于 SDK 通信的 Stdio 协议处理器
 - **工具层** (`ripperdoc/utils/`) - 用于日志记录、权限、文件操作的共享工具
 

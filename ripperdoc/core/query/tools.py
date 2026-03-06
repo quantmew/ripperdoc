@@ -232,7 +232,7 @@ async def _run_tool_use_generator(
     parsed_input: Any,
     sibling_ids: set[str],
     tool_context: ToolUseContext,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Execute a single tool_use and yield progress/results."""
     logger.debug(
         "[query] _run_tool_use_generator ENTER: tool='%s' tool_use_id=%s",

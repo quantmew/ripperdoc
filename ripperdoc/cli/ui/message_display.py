@@ -6,20 +6,13 @@ This module handles rendering conversation messages to the terminal, including:
 - Reasoning block rendering
 """
 
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
 
 from ripperdoc.cli.ui.tool_renderers import ToolResultRendererRegistry
-from ripperdoc.utils.messaging.messages import (
-    AssistantMessage,
-    AttachmentMessage,
-    ConversationMessage,
-    ProgressMessage,
-    UserMessage,
-)
 from ripperdoc.utils.messaging.message_formatting import format_reasoning_preview
 
 

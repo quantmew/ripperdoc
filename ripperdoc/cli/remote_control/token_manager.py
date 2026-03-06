@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable
+from typing import Callable, Protocol, cast
 
 from ripperdoc.utils.log import get_logger
 
@@ -19,13 +19,21 @@ from .utils import format_iso_from_epoch, get_token_expiration_epoch
 logger = get_logger()
 
 
+class SessionTokenSupplier(Protocol):
+    def __call__(self, session_id: str) -> str | None: ...
+
+
+class StatelessTokenSupplier(Protocol):
+    def __call__(self) -> str | None: ...
+
+
 class TokenSessionManager:
     """Manage per-session token refresh timers with generation guards."""
 
     def __init__(
         self,
         *,
-        get_access_token: Callable[[str], str | None] | Callable[[], str | None],
+        get_access_token: SessionTokenSupplier | StatelessTokenSupplier,
         on_refresh: Callable[[str, str], None],
         label: str = "bridge",
         refresh_buffer_sec: int = TOKEN_REFRESH_BUFFER_SEC,
@@ -120,9 +128,9 @@ class TokenSessionManager:
         new_token = None
         try:
             try:
-                new_token = self._get_access_token(session_id)  # type: ignore[misc]
+                new_token = cast(SessionTokenSupplier, self._get_access_token)(session_id)
             except TypeError:
-                new_token = self._get_access_token()  # type: ignore[call-arg]
+                new_token = cast(StatelessTokenSupplier, self._get_access_token)()
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "[%s:token] get_access_token failed for sessionId=%s: %s",

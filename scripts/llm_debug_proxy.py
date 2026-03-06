@@ -13,7 +13,6 @@ import hashlib
 import http.client
 import http.server
 import json
-import os
 import socketserver
 import threading
 import time
@@ -21,7 +20,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from urllib.parse import urlsplit
 
 
@@ -375,7 +374,7 @@ class LlmProxyHandler(http.server.BaseHTTPRequestHandler):
 
     @property
     def proxy_config(self) -> ProxyConfig:
-        return self.server.proxy_config  # type: ignore[attr-defined]
+        return cast(ProxyConfig, self.server.proxy_config)
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle_proxy()
@@ -596,7 +595,7 @@ class LlmProxyHandler(http.server.BaseHTTPRequestHandler):
             self._send_error_text(502, error_text)
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        record = {
+        record: Dict[str, Any] = {
             "ts": utc_now_iso(),
             "request_id": request_id,
             "method": self.command,
@@ -689,7 +688,7 @@ def resolve_upstream_from_config(
         raise ValueError(
             f"profile '{profile_name}' has empty api_base; pass --upstream-base explicitly"
         )
-    return api_base.strip(), profile_name, profile_data
+    return api_base.strip(), profile_name, cast(Dict[str, Any], profile_data)
 
 
 def parse_args() -> argparse.Namespace:

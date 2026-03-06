@@ -1052,17 +1052,19 @@ def install_marketplace_plugin(
 
     source_value = (entry.plugin_source or "").strip()
     if source_value:
-        clone_url: Optional[str] = None
+        source_clone_url: Optional[str] = None
         normalized_source = normalize_marketplace_source(source_value)
         if normalized_source.startswith("github:"):
-            clone_url = f"https://github.com/{normalized_source.removeprefix('github:')}.git"
+            source_clone_url = (
+                f"https://github.com/{normalized_source.removeprefix('github:')}.git"
+            )
         elif (
             source_value.startswith(("http://", "https://", "git@"))
             or source_value.endswith(".git")
         ):
-            clone_url = source_value
+            source_clone_url = source_value
 
-        if clone_url:
+        if source_clone_url:
             if target.exists():
                 shutil.rmtree(target)
             with ripperdoc_temporary_directory(prefix="ripperdoc-plugin-") as temp_dir:
@@ -1070,7 +1072,7 @@ def install_marketplace_plugin(
                 clone_cmd = ["git", "clone", "--depth", "1"]
                 if entry.github_ref:
                     clone_cmd.extend(["--branch", entry.github_ref])
-                clone_cmd.extend([clone_url, str(repo_dir)])
+                clone_cmd.extend([source_clone_url, str(repo_dir)])
                 subprocess.run(
                     clone_cmd,
                     check=True,

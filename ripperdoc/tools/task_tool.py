@@ -55,6 +55,7 @@ from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
     AttachmentMessage,
+    ConversationMessage,
     UserMessage,
     create_hook_additional_context_message,
     create_hook_notice_payload,
@@ -89,7 +90,7 @@ from ripperdoc.utils.collaboration.worktree import (
 logger = get_logger()
 
 
-MessageType = Union[UserMessage, AssistantMessage]
+MessageType = ConversationMessage
 
 
 @dataclass

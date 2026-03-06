@@ -380,7 +380,7 @@ class RemoteControlBridgeRunner:
                     },
                 }
             else:
-                payload_response = {
+                payload_response: dict[str, Any] = {
                     "subtype": str(response.get("subtype") or "success"),
                     "request_id": request_id,
                 }

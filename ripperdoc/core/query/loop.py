@@ -139,10 +139,10 @@ def _prepare_request_messages(
     protocol = provider_protocol(model_profile.protocol)
     tool_mode = determine_tool_mode(model_profile)
     if tool_mode == "text":
-        messages_for_model = cast(
-            List[Union[UserMessage, AssistantMessage, ProgressMessage]],
-            text_mode_history(messages),
-        )
+        # text_mode_history returns List[Union[UserMessage, AssistantMessage, ProgressMessage]]
+        # but we need to cast it to List[ConversationMessage] which includes AttachmentMessage
+        text_messages = text_mode_history(messages)
+        messages_for_model = cast(List[ConversationMessage], text_messages)
     else:
         messages_for_model = messages
     return protocol, tool_mode, messages_for_model
@@ -407,7 +407,7 @@ class IterationResult:
     """
 
     assistant_message: Optional[AssistantMessage] = None
-    tool_results: List[ConversationMessage] = field(default_factory=list)
+    tool_results: List[UserMessage | AttachmentMessage] = field(default_factory=list)
     should_stop: bool = False  # True means exit the query loop entirely
 
 
@@ -416,7 +416,7 @@ class _PreparedToolCalls:
     """Intermediate state while preparing tool calls for execution."""
 
     prepared_calls: List[Dict[str, Any]] = field(default_factory=list)
-    tool_results: List[ConversationMessage] = field(default_factory=list)
+    tool_results: List[UserMessage | AttachmentMessage] = field(default_factory=list)
     permission_denied: bool = False
 
 
@@ -448,9 +448,7 @@ class _AssistantWaitState:
     aborted: bool = False
 
 
-def _extract_latest_user_prompt_text(
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
-) -> str:
+def _extract_latest_user_prompt_text(messages: Sequence[ConversationMessage]) -> str:
     """Best-effort extraction of the latest plain user prompt text."""
     for message in reversed(messages):
         if not isinstance(message, UserMessage):
@@ -534,14 +532,16 @@ def _build_plan_mode_messages(
 
 
 def _collect_skill_fork_requests(
-    tool_results: List[UserMessage],
-    messages: List[ConversationMessage],
+    tool_results: Sequence[ConversationMessage],
+    messages: Sequence[ConversationMessage],
 ) -> List[_SkillForkRequest]:
     """Build Task tool requests for skills that require forked execution."""
     latest_user_prompt = _extract_latest_user_prompt_text(messages)
     requests: List[_SkillForkRequest] = []
 
     for message in tool_results:
+        if not isinstance(message, UserMessage):
+            continue
         data = getattr(message, "tool_use_result", None)
         if not isinstance(data, dict):
             continue
@@ -872,8 +872,10 @@ def _classify_hook_phase(message: ConversationMessage) -> Optional[str]:
         return None
     if isinstance(message, AttachmentMessage):
         metadata = getattr(message, "metadata", {}) or {}
-    else:
+    elif isinstance(message, UserMessage):
         metadata = getattr(message.message, "metadata", {}) or {}
+    else:
+        return None
     event = str(metadata.get("hook_event") or "")
     if event == "PreToolUse":
         return "pre"
@@ -944,25 +946,25 @@ def _reorder_tool_lifecycle_messages(
                 if tool_id in emitted_ids:
                     continue
                 emitted_ids.add(tool_id)
-                slot = tool_data.get(tool_id)
-                if not slot or slot.get("tool_use") is None:
+                slot_data = tool_data.get(tool_id)
+                if not slot_data or slot_data.get("tool_use") is None:
                     continue
                 if not has_emitted_tool_use:
-                    _emit(cast(ConversationMessage, slot["tool_use"]))
+                    _emit(cast(ConversationMessage, slot_data["tool_use"]))
                     has_emitted_tool_use = True
-                for pre_message in cast(list[ConversationMessage], slot["pre"]):
+                for pre_message in cast(list[ConversationMessage], slot_data["pre"]):
                     _emit(pre_message)
-                for result_message in cast(list[ConversationMessage], slot["result"]):
+                for result_message in cast(list[ConversationMessage], slot_data["result"]):
                     _emit(result_message)
-                for post_message in cast(list[ConversationMessage], slot["post"]):
+                for post_message in cast(list[ConversationMessage], slot_data["post"]):
                     _emit(post_message)
             continue
 
         hook_phase = _classify_hook_phase(message)
         if hook_phase:
             parent_id = str(getattr(message, "parent_tool_use_id", None) or "").strip()
-            slot = tool_data.get(parent_id)
-            if parent_id and slot and slot.get("tool_use") is not None:
+            slot_data = tool_data.get(parent_id)
+            if parent_id and slot_data and slot_data.get("tool_use") is not None:
                 continue
 
         result_ids = _extract_tool_result_ids(message)
@@ -970,8 +972,8 @@ def _reorder_tool_lifecycle_messages(
             # Keep orphan tool_result messages; drop only those attached to known tool_use.
             keep_orphan = False
             for tool_id in result_ids:
-                slot = tool_data.get(tool_id)
-                if slot is None or slot.get("tool_use") is None:
+                slot_data = tool_data.get(tool_id)
+                if slot_data is None or slot_data.get("tool_use") is None:
                     keep_orphan = True
                     break
             if not keep_orphan:
@@ -1240,7 +1242,7 @@ def _apply_tool_input_aliases(tool: Tool[Any, Any], tool_input: Dict[str, Any]) 
 
 
 def _append_changed_file_notice_if_needed(
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
     query_context: QueryContext,
 ) -> None:
     """Inject a user-visible changed-file notice at iteration start when needed."""
@@ -1482,13 +1484,13 @@ async def _wait_for_assistant_with_progress(
 async def _process_iteration_assistant_message(
     *,
     assistant_message: AssistantMessage,
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
     context: Dict[str, str],
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable],
     result: IterationResult,
     model_name: Optional[str],
-) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
+) -> AsyncGenerator[ConversationMessage, None]:
     """Process assistant tool calls, including hooks, permissions, and tool execution."""
     tool_use_blocks: List[MessageContent] = extract_tool_use_blocks(assistant_message)
     text_blocks = (
@@ -1599,7 +1601,7 @@ async def _process_iteration_assistant_message(
 async def _handle_iteration_stop_hook(
     query_context: QueryContext,
     result: IterationResult,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Run stop hook when assistant response has no tool calls."""
     logger.debug("[query] No tool_use blocks; running stop hook and returning response to user.")
     stop_hook = query_context.stop_hook
@@ -1616,7 +1618,7 @@ async def _handle_iteration_stop_hook(
     logger.debug("[query] AFTER calling hook_manager.run_stop_async")
     logger.debug("[query] Checking additional_context")
     hook_event = "SubagentStop" if stop_hook == "subagent" else "Stop"
-    additional_context_messages: List[ConversationMessage] = []
+    additional_context_messages: List[UserMessage | AttachmentMessage] = []
     if stop_result.additional_context:
         additional_context_message = create_hook_additional_context_message(
             str(stop_result.additional_context),
@@ -1654,7 +1656,7 @@ async def _handle_iteration_stop_hook(
 async def _prepare_iteration_tool_calls(
     *,
     tool_use_blocks: List[MessageContent],
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
     context: Dict[str, str],
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable],
@@ -1688,12 +1690,12 @@ async def _prepare_single_iteration_tool_call(
     *,
     tool_use: MessageContent,
     sibling_ids: set[str],
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
     context: Dict[str, str],
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable],
     out: _PreparedToolCalls,
-) -> AsyncGenerator[Union[UserMessage, ProgressMessage], None]:
+) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Prepare one tool_use block for execution (resolve, validate, hook, permissions)."""
     tool_name = cast(str, tool_use.name)
     tool_use_id = getattr(tool_use, "tool_use_id", None) or getattr(tool_use, "id", None) or ""
@@ -1843,7 +1845,7 @@ async def _parse_and_validate_tool_input_for_call(
     tool_input: Dict[str, Any],
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable],
-    messages: List[Union[UserMessage, AssistantMessage, ProgressMessage]],
+    messages: List[ConversationMessage],
 ) -> tuple[Any, ToolUseContext, Dict[str, Any], Optional[UserMessage]]:
     """Parse tool input and run the first validation pass."""
     normalized_input = _apply_tool_input_aliases(tool, tool_input)
@@ -2216,7 +2218,7 @@ async def query(
     context: Dict[str, str],
     query_context: QueryContext,
     can_use_tool_fn: Optional[ToolPermissionCallable] = None,
-) -> AsyncGenerator[Union[UserMessage, AssistantMessage, ProgressMessage], None]:
+) -> AsyncGenerator[ConversationMessage, None]:
     """Execute a query with tool support.
 
     This is the main query loop that:

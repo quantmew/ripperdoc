@@ -12,10 +12,8 @@ from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.messaging.messages import (
     AssistantMessage,
-    AttachmentMessage,
     ConversationMessage,
     MessageContent,
-    ProgressMessage,
     UserMessage,
     normalize_messages_for_api,
 )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 RIPPERDOC_TMPDIR_ENV = "RIPPERDOC_TMPDIR"
 RIPPERDOC_TMP_SUBDIR = "ripperdoc"
@@ -38,5 +38,4 @@ def ripperdoc_mkstemp(*args: Any, **kwargs: Any) -> tuple[int, str]:
 def ripperdoc_mkdtemp(*args: Any, **kwargs: Any) -> str:
     """Create a temporary directory path rooted under ripperdoc_tmp_root()."""
     kwargs.setdefault("dir", str(ripperdoc_tmp_root()))
-    return tempfile.mkdtemp(*args, **kwargs)
-
+    return cast(str, tempfile.mkdtemp(*args, **kwargs))

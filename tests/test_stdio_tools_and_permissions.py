@@ -221,7 +221,8 @@ async def test_stdio_initialize_applies_session_agent_prompt(monkeypatch, tmp_pa
     assert responses["init"]["error"] is None
     assert handler._session_agent_name == "reviewer"
     assert handler._session_agent_prompt == "Focus on correctness and risk."
-    assert "Focus on correctness and risk." in (captured.get("additional_instructions") or [])
+    assert captured == {}
+    assert handler._custom_system_prompt == "Focus on correctness and risk."
 
 
 @pytest.mark.asyncio
