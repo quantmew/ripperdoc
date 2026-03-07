@@ -127,9 +127,9 @@ def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
 
     if hasattr(value, "model_json_schema") and callable(value.model_json_schema):
         try:
-            schema = value.model_json_schema()
-            if isinstance(schema, dict):
-                return schema
+            json_schema = value.model_json_schema()
+            if isinstance(json_schema, dict):
+                return json_schema
         except (TypeError, ValueError, AttributeError):
             pass
 
@@ -153,10 +153,10 @@ def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
             key_str = str(key)
             properties[key_str] = _coerce_sdk_schema(item)
             required.append(key_str)
-        schema: dict[str, Any] = {"type": "object", "properties": properties}
+        schema_dict: dict[str, Any] = {"type": "object", "properties": properties}
         if required:
-            schema["required"] = required
-        return schema
+            schema_dict["required"] = required
+        return schema_dict
 
     if isinstance(value, (list, tuple)):
         items = _coerce_sdk_schema(value[0]) if len(value) == 1 else {}

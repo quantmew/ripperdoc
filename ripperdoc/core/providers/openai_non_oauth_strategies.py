@@ -24,6 +24,7 @@ from ripperdoc.core.providers.base import (
     ProviderResponse,
     call_with_timeout_and_retries,
     iter_with_timeout,
+    sanitize_openai_tool_history,
     sanitize_tool_history,
 )
 from ripperdoc.core.providers.openai_responses import (
@@ -499,9 +500,12 @@ class OpenAIChatStrategy(_BaseNonOAuthStrategy):
         default_headers: Optional[Dict[str, str]] = None,
     ) -> ProviderResponse:
         openai_tools = await build_openai_tool_schemas(tools)
+        sanitized_messages = sanitize_openai_tool_history(
+            sanitize_tool_history(list(normalized_messages))
+        )
         openai_messages: List[Dict[str, object]] = [
             {"role": "system", "content": system_prompt}
-        ] + sanitize_tool_history(list(normalized_messages))
+        ] + sanitized_messages
 
         logger.debug(
             "[openai_client] Preparing request",
@@ -716,7 +720,9 @@ class OpenAIResponsesStrategy(_BaseNonOAuthStrategy):
     ) -> ProviderResponse:
         openai_tools = await build_openai_tool_schemas(tools)
         response_tools = convert_chat_function_tools_to_responses_tools(openai_tools)
-        sanitized_messages = sanitize_tool_history(list(normalized_messages))
+        sanitized_messages = sanitize_openai_tool_history(
+            sanitize_tool_history(list(normalized_messages))
+        )
         response_input = build_input_from_normalized_messages(
             cast(List[Dict[str, Any]], sanitized_messages),
             assistant_text_type="output_text",

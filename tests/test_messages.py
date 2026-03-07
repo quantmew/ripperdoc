@@ -88,7 +88,7 @@ from ripperdoc.utils.messaging.messages import (
     is_hidden_meta_message,
     normalize_messages_for_api,
 )
-from ripperdoc.core.providers.base import sanitize_tool_history
+from ripperdoc.core.providers.base import sanitize_openai_tool_history, sanitize_tool_history
 
 
 def test_create_user_message():
@@ -760,6 +760,117 @@ def test_sanitize_tool_history_replays_real_session_parallel_git_tool_calls():
         "call_01_MPKMZePGjQafIWuHMFXqbkoY",
         "call_02_eDQKzu84FV4zS4JtuDUutT2p",
         "call_03_nBli3PtFi7ptFNSh12Iput45",
+    ]
+
+
+def test_sanitize_openai_tool_history_drops_unpaired_assistant_tool_calls():
+    normalized = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "Read", "arguments": '{"path":"README.md"}'},
+                }
+            ],
+        }
+    ]
+
+    sanitized = sanitize_openai_tool_history(normalized)
+
+    assert sanitized == []
+
+
+def test_sanitize_openai_tool_history_drops_orphan_tool_messages():
+    normalized = [
+        {"role": "user", "content": "hello"},
+        {"role": "tool", "tool_call_id": "orphan_call", "content": "result"},
+    ]
+
+    sanitized = sanitize_openai_tool_history(normalized)
+
+    assert sanitized == [{"role": "user", "content": "hello"}]
+
+
+def test_sanitize_openai_tool_history_keeps_only_paired_assistant_tool_calls():
+    normalized = [
+        {
+            "role": "assistant",
+            "content": "running tools",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "Read", "arguments": '{"path":"README.md"}'},
+                },
+                {
+                    "id": "call_2",
+                    "type": "function",
+                    "function": {"name": "Glob", "arguments": '{"pattern":"*.py"}'},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_2", "content": "matched files"},
+    ]
+
+    sanitized = sanitize_openai_tool_history(normalized)
+
+    assert len(sanitized) == 2
+    assert sanitized[0]["role"] == "assistant"
+    assert [call["id"] for call in sanitized[0]["tool_calls"]] == ["call_2"]
+    assert sanitized[1] == {"role": "tool", "tool_call_id": "call_2", "content": "matched files"}
+
+
+def test_sanitize_openai_tool_history_preserves_valid_tool_chain():
+    normalized = [
+        {"role": "user", "content": "read the file"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "Read", "arguments": '{"path":"README.md"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "file contents"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    sanitized = sanitize_openai_tool_history(normalized)
+
+    assert sanitized == normalized
+
+
+def test_sanitize_openai_tool_history_reorders_intervening_messages_after_tool_results():
+    normalized = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "Read", "arguments": '{"path":"README.md"}'},
+                }
+            ],
+        },
+        {"role": "user", "content": "PreToolUse:Read hook additional context"},
+        {"role": "tool", "tool_call_id": "call_1", "content": "file contents"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    sanitized = sanitize_openai_tool_history(normalized)
+
+    assert sanitized == [
+        normalized[0],
+        normalized[2],
+        normalized[1],
+        normalized[3],
     ]
 
 

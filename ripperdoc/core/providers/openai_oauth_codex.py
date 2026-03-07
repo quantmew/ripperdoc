@@ -21,6 +21,7 @@ from ripperdoc.core.providers.base import (
     ProgressCallback,
     ProviderResponse,
     call_with_timeout_and_retries,
+    sanitize_openai_tool_history,
     sanitize_tool_history,
 )
 from ripperdoc.core.providers.error_mapping import (
@@ -147,7 +148,9 @@ async def call_oauth_codex(
         )
 
     openai_tools = await build_openai_tool_schemas(tools)
-    sanitized_messages = sanitize_tool_history(list(normalized_messages))
+    sanitized_messages = sanitize_openai_tool_history(
+        sanitize_tool_history(list(normalized_messages))
+    )
     response_input = _build_codex_responses_input(
         cast(List[Dict[str, Any]], sanitized_messages),
         assistant_text_type="output_text",

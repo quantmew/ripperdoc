@@ -226,6 +226,123 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
     return sanitized
 
 
+def sanitize_openai_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize OpenAI chat-completions tool-call history.
+
+    Enforces strict pairing for OpenAI-compatible message sequences:
+    1. Drop assistant tool_calls that have no later matching role=tool response.
+    2. Drop role=tool messages that do not correspond to an earlier assistant tool_call.
+    3. If an assistant message mixes paired and unpaired tool_calls, keep only the paired subset.
+    4. Fold matching role=tool messages to immediately follow the assistant tool_call turn.
+    """
+    tool_response_indices: Dict[str, List[int]] = {}
+    for idx, message in enumerate(normalized_messages):
+        if message.get("role") != "tool":
+            continue
+        tool_call_id = str(message.get("tool_call_id") or "").strip()
+        if tool_call_id:
+            tool_response_indices.setdefault(tool_call_id, []).append(idx)
+
+    sanitized: List[Dict[str, Any]] = []
+    consumed_tool_indices: set[int] = set()
+    i = 0
+
+    while i < len(normalized_messages):
+        message = normalized_messages[i]
+        role = message.get("role")
+
+        if role == "tool":
+            tool_call_id = str(message.get("tool_call_id") or "").strip()
+            if i in consumed_tool_indices:
+                i += 1
+                continue
+            logger.debug(
+                "[provider_clients] Dropped orphan OpenAI tool response",
+                extra={"message_index": i, "tool_call_id": tool_call_id},
+            )
+            i += 1
+            continue
+
+        if role != "assistant":
+            sanitized.append(message)
+            i += 1
+            continue
+
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            sanitized.append(message)
+            i += 1
+            continue
+
+        paired_tool_calls: List[Dict[str, Any]] = []
+        paired_ids: List[str] = []
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            tool_call_id = str(tool_call.get("id") or "").strip()
+            if not tool_call_id:
+                continue
+            response_positions = tool_response_indices.get(tool_call_id, [])
+            if any(response_idx > i and response_idx not in consumed_tool_indices for response_idx in response_positions):
+                paired_tool_calls.append(tool_call)
+                paired_ids.append(tool_call_id)
+
+        if not paired_tool_calls:
+            logger.debug(
+                "[provider_clients] Dropped OpenAI assistant message with unpaired tool_calls",
+                extra={"message_index": i},
+            )
+            i += 1
+            continue
+
+        if len(paired_tool_calls) != len(tool_calls):
+            logger.debug(
+                "[provider_clients] Sanitized OpenAI assistant tool_calls to paired subset",
+                extra={
+                    "message_index": i,
+                    "before_count": len(tool_calls),
+                    "after_count": len(paired_tool_calls),
+                },
+            )
+
+        sanitized.append({**message, "tool_calls": paired_tool_calls})
+
+        expected_ids = set(paired_ids)
+        seen_ids: set[str] = set()
+        deferred_messages: List[Dict[str, Any]] = []
+        j = i + 1
+        while j < len(normalized_messages):
+            next_message = normalized_messages[j]
+            next_role = next_message.get("role")
+            if next_role == "assistant":
+                break
+
+            if next_role == "tool":
+                tool_call_id = str(next_message.get("tool_call_id") or "").strip()
+                if tool_call_id in expected_ids and tool_call_id not in seen_ids:
+                    sanitized.append(next_message)
+                    consumed_tool_indices.add(j)
+                    seen_ids.add(tool_call_id)
+                else:
+                    logger.debug(
+                        "[provider_clients] Dropped orphan or duplicate OpenAI tool response",
+                        extra={"message_index": j, "tool_call_id": tool_call_id},
+                    )
+                if expected_ids.issubset(seen_ids):
+                    j += 1
+                    break
+                j += 1
+                continue
+
+            deferred_messages.append(next_message)
+            j += 1
+
+        sanitized.extend(deferred_messages)
+        i = j
+
+    return sanitized
+
+
 def _retry_delay_seconds(attempt: int, base_delay: float = 0.5, max_delay: float = 32.0) -> float:
     """Calculate exponential backoff with jitter."""
     capped_base: float = float(min(base_delay * (2 ** max(0, attempt - 1)), max_delay))
