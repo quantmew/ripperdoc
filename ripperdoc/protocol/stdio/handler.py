@@ -103,6 +103,7 @@ class StdioProtocolHandler(
         self._disallowed_tools: list[str] | None = None
         self._sdk_transport: _SDKWebSocketTransport | None = None
         self._tools_list: list[str] | None = None
+        self._tools_preset: str | None = None
         self._session_additional_working_dirs: set[str] = set()
         self._fallback_model: str | None = None
         self._max_budget_usd: float | None = None
