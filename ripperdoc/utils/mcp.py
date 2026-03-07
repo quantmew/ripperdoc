@@ -748,6 +748,7 @@ class McpRuntime:
 
     def __init__(self, project_path: Path):
         self.project_path = project_path
+        self._owner_loop = asyncio.get_running_loop()
         self._exit_stack = AsyncExitStack()
         self._exit_stack_lock = asyncio.Lock()
         self.sessions: Dict[str, ClientSession] = {}
@@ -768,6 +769,9 @@ class McpRuntime:
         self._raw_async_generators: List[Any] = []
         # Keep opened stderr log handles for stdio MCP servers.
         self._mcp_stderr_logs: List[TextIO] = []
+
+    def belongs_to_loop(self, loop: asyncio.AbstractEventLoop) -> bool:
+        return self._owner_loop is loop
 
     async def connect(
         self,
@@ -1249,16 +1253,38 @@ _runtime_init_task: Optional[asyncio.Task[McpRuntime]] = None
 _runtime_init_project: Optional[Path] = None
 
 
-def _get_runtime() -> Optional[McpRuntime]:
+def _current_loop_or_none() -> Optional[asyncio.AbstractEventLoop]:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
+def _runtime_matches_current_loop(runtime: McpRuntime) -> bool:
+    loop = _current_loop_or_none()
+    return loop is not None and runtime.belongs_to_loop(loop)
+
+
+def _clear_foreign_global_runtime_reference() -> None:
+    global _global_runtime
+    if _global_runtime is not None and not _runtime_matches_current_loop(_global_runtime):
+        _global_runtime = None
+
+
+def _get_runtime(*, require_current_loop: bool = False) -> Optional[McpRuntime]:
     runtime = _runtime_var.get()
-    if runtime:
+    if runtime and (not require_current_loop or _runtime_matches_current_loop(runtime)):
         return runtime
-    return _global_runtime
+    if _global_runtime and (
+        not require_current_loop or _runtime_matches_current_loop(_global_runtime)
+    ):
+        return _global_runtime
+    return None
 
 
-def get_existing_mcp_runtime() -> Optional[McpRuntime]:
+def get_existing_mcp_runtime(*, require_current_loop: bool = False) -> Optional[McpRuntime]:
     """Return the current MCP runtime if it has already been initialized."""
-    return _get_runtime()
+    return _get_runtime(require_current_loop=require_current_loop)
 
 
 async def ensure_mcp_runtime(
@@ -1268,7 +1294,8 @@ async def ensure_mcp_runtime(
     wait_timeout: Optional[float] = None,
 ) -> McpRuntime:
     global _runtime_init_task, _runtime_init_project
-    runtime = _get_runtime()
+    _clear_foreign_global_runtime_reference()
+    runtime = _get_runtime(require_current_loop=True)
     project_path = project_path or Path.cwd()
     if runtime and not runtime._closed and runtime.project_path == project_path:
         _runtime_var.set(runtime)
@@ -1296,7 +1323,7 @@ async def ensure_mcp_runtime(
             return runtime
 
     async def _initialize_runtime() -> McpRuntime:
-        existing = _get_runtime()
+        existing = _get_runtime(require_current_loop=True)
         if existing and not existing._closed:
             await existing.aclose()
 
@@ -1370,7 +1397,8 @@ async def shutdown_mcp_runtime() -> None:
         _runtime_init_task = None
         _runtime_init_project = None
 
-    runtime = _get_runtime()
+    _clear_foreign_global_runtime_reference()
+    runtime = _get_runtime(require_current_loop=True)
     if not runtime:
         return
     try:
@@ -1417,13 +1445,17 @@ def load_mcp_servers(
     except RuntimeError:
         pass
 
-    return asyncio.run(
-        load_mcp_servers_async(
-            project_path,
-            wait_for_connections=wait_for_connections,
-            wait_timeout=wait_timeout,
-        )
-    )
+    async def _load_and_shutdown() -> List[McpServerInfo]:
+        try:
+            return await load_mcp_servers_async(
+                project_path,
+                wait_for_connections=wait_for_connections,
+                wait_timeout=wait_timeout,
+            )
+        finally:
+            await shutdown_mcp_runtime()
+
+    return asyncio.run(_load_and_shutdown())
 
 
 def find_mcp_resource(

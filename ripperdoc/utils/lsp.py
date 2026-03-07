@@ -712,9 +712,13 @@ class LspManager:
 
     def __init__(self, project_path: Path) -> None:
         self.project_path = project_path
+        self._owner_loop = asyncio.get_running_loop()
         self.configs = load_lsp_server_configs(project_path)
         self._servers: Dict[Tuple[str, Path], LspServer] = {}
         self._closed = False
+
+    def belongs_to_loop(self, loop: asyncio.AbstractEventLoop) -> bool:
+        return self._owner_loop is loop
 
     def _match_config(self, file_path: Path) -> Optional[LspServerConfig]:
         if not self.configs:
@@ -795,13 +799,38 @@ _runtime_var: contextvars.ContextVar[Optional[LspManager]] = contextvars.Context
 _global_runtime: Optional[LspManager] = None
 
 
-def get_existing_lsp_manager() -> Optional[LspManager]:
+def _current_loop_or_none() -> Optional[asyncio.AbstractEventLoop]:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
+def _runtime_matches_current_loop(runtime: LspManager) -> bool:
+    loop = _current_loop_or_none()
+    return loop is not None and runtime.belongs_to_loop(loop)
+
+
+def _clear_foreign_global_runtime_reference() -> None:
+    global _global_runtime
+    if _global_runtime is not None and not _runtime_matches_current_loop(_global_runtime):
+        _global_runtime = None
+
+
+def get_existing_lsp_manager(*, require_current_loop: bool = False) -> Optional[LspManager]:
     runtime = _runtime_var.get()
-    return runtime or _global_runtime
+    if runtime and (not require_current_loop or _runtime_matches_current_loop(runtime)):
+        return runtime
+    if _global_runtime and (
+        not require_current_loop or _runtime_matches_current_loop(_global_runtime)
+    ):
+        return _global_runtime
+    return None
 
 
 async def ensure_lsp_manager(project_path: Optional[Path] = None) -> LspManager:
-    runtime = get_existing_lsp_manager()
+    _clear_foreign_global_runtime_reference()
+    runtime = get_existing_lsp_manager(require_current_loop=True)
     if runtime and not runtime._closed:
         return runtime
 
@@ -814,7 +843,8 @@ async def ensure_lsp_manager(project_path: Optional[Path] = None) -> LspManager:
 
 
 async def shutdown_lsp_manager() -> None:
-    runtime = get_existing_lsp_manager()
+    _clear_foreign_global_runtime_reference()
+    runtime = get_existing_lsp_manager(require_current_loop=True)
     if not runtime:
         return
     try:

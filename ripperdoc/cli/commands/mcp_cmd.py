@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shlex
 import sys
@@ -19,6 +18,7 @@ from ripperdoc.utils.mcp import (
     McpServerInfo,
     get_mcp_stderr_log_path,
     get_mcp_stderr_mode,
+    load_mcp_servers,
     load_mcp_servers_async,
 )
 
@@ -27,14 +27,6 @@ from .base import SlashCommand
 _DEFAULT_LOG_LINES = 80
 _MAX_LOG_LINES = 2000
 _FOLLOW_POLL_SECONDS = 0.25
-
-
-def _run_in_ui(ui: Any, coro: Any) -> Any:
-    runner = getattr(ui, "run_async", None)
-    if callable(runner):
-        return runner(coro)
-    # Fallback for non-UI contexts.
-    return asyncio.run(coro)
 
 
 def _print_usage(ui: Any) -> None:
@@ -47,10 +39,12 @@ def _print_usage(ui: Any) -> None:
 
 
 def _load_servers(ui: Any) -> list[McpServerInfo]:
+    runner = getattr(ui, "run_async", None)
+    if not callable(runner):
+        return load_mcp_servers(ui.project_path)
     async def _load() -> list[McpServerInfo]:
         return await load_mcp_servers_async(ui.project_path)
-
-    return cast(list[McpServerInfo], _run_in_ui(ui, _load()))
+    return cast(list[McpServerInfo], runner(_load()))
 
 
 def _show_server_overview(ui: Any, servers: list[McpServerInfo]) -> bool:

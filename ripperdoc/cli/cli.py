@@ -41,7 +41,7 @@ from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.config import get_effective_model_profile, get_project_config
 from ripperdoc.core.plugins import set_runtime_plugin_dirs
 from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
-from ripperdoc.core.tool_defaults import get_default_tools
+from ripperdoc.core.tool_defaults import get_default_tools_async
 from ripperdoc.utils.filesystem.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
 from ripperdoc.utils.sessions.session_history import SessionHistory
@@ -814,11 +814,14 @@ def cli(
         )
 
         if prompt:
-            tool_list = get_default_tools(allowed_tools=allowed_tools)
-            if disable_slash_commands:
-                tool_list = [t for t in tool_list if getattr(t, "name", None) != "Skill"]
-            asyncio.run(
-                run_query(
+            async def _run_prompt_query() -> None:
+                tool_list = await get_default_tools_async(
+                    project_path=Path.cwd(),
+                    allowed_tools=allowed_tools,
+                )
+                if disable_slash_commands:
+                    tool_list = [t for t in tool_list if getattr(t, "name", None) != "Skill"]
+                await run_query(
                     prompt,
                     tool_list,
                     yolo_mode,
@@ -836,7 +839,8 @@ def cli(
                     disable_skills=disable_slash_commands,
                     session_persistence=session_persistence,
                 )
-            )
+
+            asyncio.run(_run_prompt_query())
             return
 
         if ctx.invoked_subcommand is None:

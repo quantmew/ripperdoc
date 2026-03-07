@@ -9,6 +9,7 @@ import pytest
 
 from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.hooks.manager import hook_manager
+from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_config, handler_query, handler_session
 from ripperdoc.utils.messaging.messages import create_assistant_message, create_progress_message
@@ -18,7 +19,7 @@ from ripperdoc.core.message_utils import tool_result_message
 def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
     monkeypatch.setattr(handler_session, "get_project_config", lambda _path: None)
     monkeypatch.setattr(handler_session, "get_effective_model_profile", lambda _model: object())
-    monkeypatch.setattr(handler_session, "get_default_tools", lambda **_: tools)
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: tools)
     monkeypatch.setattr(handler_session, "format_mcp_instructions", lambda _servers: "")
     monkeypatch.setattr(handler_query, "format_mcp_instructions", lambda _servers: "")
     monkeypatch.setattr(handler_config, "build_system_prompt", lambda *_args, **_kwargs: "system")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, List, Optional
 
 from ripperdoc.core.tool import Tool
@@ -38,7 +39,11 @@ from ripperdoc.tools.mcp_tools import (
     ListMcpServersTool,
     ReadMcpResourceTool,
 )
-from ripperdoc.tools.dynamic_mcp_tool import load_dynamic_mcp_tools_sync
+from ripperdoc.tools.dynamic_mcp_tool import (
+    load_dynamic_mcp_tools_async,
+    load_dynamic_mcp_tools_sync,
+    merge_tools_with_dynamic,
+)
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.collaboration.tasks import is_task_system_enabled
 
@@ -120,8 +125,8 @@ def filter_tools_by_names(
     return filtered
 
 
-def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[Any, Any]]:
-    """Construct the default tool set (base tools + Task subagent launcher)."""
+def _build_base_tools() -> List[Tool[Any, Any]]:
+    """Construct builtin tools without runtime-dependent MCP tool discovery."""
     tasks_enabled = is_task_system_enabled()
     base_tools: List[Tool[Any, Any]] = [
         BashTool(),
@@ -161,6 +166,45 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
         )
     else:
         base_tools.extend([TodoReadTool(), TodoWriteTool()])
+    return base_tools
+
+
+def _finalize_tool_list(
+    base_tools: List[Tool[Any, Any]],
+    *,
+    allowed_tools: Optional[List[str]] = None,
+    dynamic_tool_count: int = 0,
+) -> List[Tool[Any, Any]]:
+    """Append Task and apply allowed-tools filtering."""
+    task_tool = TaskTool(lambda: base_tools)
+    all_tools = base_tools + [task_tool]
+
+    if allowed_tools is not None:
+        all_tools = filter_tools_by_names(all_tools, allowed_tools)
+        logger.debug(
+            "[tool_defaults] Filtered tool inventory",
+            extra={
+                "allowed_tools": allowed_tools,
+                "filtered_tools": len(all_tools),
+            },
+        )
+    else:
+        logger.debug(
+            "[tool_defaults] Built tool inventory",
+            extra={
+                "tasks_enabled": is_task_system_enabled(),
+                "base_tools": len(base_tools),
+                "dynamic_mcp_tools": dynamic_tool_count,
+                "total_tools": len(all_tools),
+            },
+        )
+
+    return all_tools
+
+
+def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[Any, Any]]:
+    """Construct the default tool set for synchronous callers."""
+    base_tools = _build_base_tools()
 
     dynamic_tools: List[Tool[Any, Any]] = []
     try:
@@ -185,29 +229,43 @@ def get_default_tools(allowed_tools: Optional[List[str]] = None) -> List[Tool[An
             type(exc).__name__,
             exc,
         )
+    return _finalize_tool_list(
+        base_tools,
+        allowed_tools=allowed_tools,
+        dynamic_tool_count=len(dynamic_tools),
+    )
 
-    task_tool = TaskTool(lambda: base_tools)
-    all_tools = base_tools + [task_tool]
 
-    # Apply allowed_tools filter if specified
-    if allowed_tools is not None:
-        all_tools = filter_tools_by_names(all_tools, allowed_tools)
-        logger.debug(
-            "[tool_defaults] Filtered tool inventory",
-            extra={
-                "allowed_tools": allowed_tools,
-                "filtered_tools": len(all_tools),
-            },
+async def get_default_tools_async(
+    *,
+    project_path: Optional[Path] = None,
+    allowed_tools: Optional[List[str]] = None,
+) -> List[Tool[Any, Any]]:
+    """Construct the default tool set using the active event loop for MCP discovery."""
+    base_tools = _build_base_tools()
+    dynamic_tools: List[Tool[Any, Any]] = []
+    try:
+        mcp_tools = await load_dynamic_mcp_tools_async(project_path)
+        typed_dynamic_tools = [tool for tool in mcp_tools if isinstance(tool, Tool)]
+        if typed_dynamic_tools:
+            base_tools = merge_tools_with_dynamic(base_tools, typed_dynamic_tools)[:-1]
+            dynamic_tools = typed_dynamic_tools
+    except (
+        ImportError,
+        ModuleNotFoundError,
+        OSError,
+        RuntimeError,
+        ConnectionError,
+        ValueError,
+        TypeError,
+    ) as exc:
+        logger.warning(
+            "[tool_defaults] Failed to load dynamic MCP tools asynchronously: %s: %s",
+            type(exc).__name__,
+            exc,
         )
-    else:
-        logger.debug(
-            "[tool_defaults] Built tool inventory",
-            extra={
-                "tasks_enabled": tasks_enabled,
-                "base_tools": len(base_tools),
-                "dynamic_mcp_tools": len(dynamic_tools),
-                "total_tools": len(all_tools),
-            },
-        )
-
-    return all_tools
+    return _finalize_tool_list(
+        base_tools,
+        allowed_tools=allowed_tools,
+        dynamic_tool_count=len(dynamic_tools),
+    )

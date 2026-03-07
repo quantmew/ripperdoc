@@ -392,7 +392,7 @@ def load_dynamic_mcp_tools_sync(
     wait_timeout: Optional[float] = None,
 ) -> List[DynamicMcpTool]:
     """Best-effort synchronous loader for MCP tools."""
-    runtime = get_existing_mcp_runtime()
+    runtime = get_existing_mcp_runtime(require_current_loop=False)
     if runtime and not getattr(runtime, "_closed", False):
         return _build_dynamic_mcp_tools(runtime)
 
@@ -403,28 +403,9 @@ def load_dynamic_mcp_tools_sync(
     except RuntimeError:
         pass
 
-    async def _load_and_keep() -> List[DynamicMcpTool]:
-        runtime = await ensure_mcp_runtime(
-            project_path,
-            wait_for_connections=wait_for_connections,
-            wait_timeout=wait_timeout,
-        )
-        return _build_dynamic_mcp_tools(runtime)
-
-    try:
-        return asyncio.run(_load_and_keep())
-    except (
-        OSError,
-        RuntimeError,
-        ConnectionError,
-        ValueError,
-    ) as exc:  # pragma: no cover - SDK/runtime failures
-        logger.warning(
-            "Failed to initialize MCP runtime for dynamic tools (sync): %s: %s",
-            type(exc).__name__,
-            exc,
-        )
-        return []
+    # Avoid creating MCP runtimes inside ad-hoc synchronous loops. That leaks
+    # loop-bound tasks/streams into module globals and breaks later shutdown.
+    return []
 
 
 async def load_dynamic_mcp_tools_async(

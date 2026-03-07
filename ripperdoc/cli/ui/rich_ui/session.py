@@ -26,7 +26,11 @@ from ripperdoc.core.config import (
     get_project_local_config,
     provider_protocol,
 )
-from ripperdoc.core.tool_defaults import filter_tools_by_names, get_default_tools
+from ripperdoc.core.tool_defaults import (
+    filter_tools_by_names,
+    get_default_tools,
+    get_default_tools_async,
+)
 from ripperdoc.core.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.tool import ToolProgress, ToolResult, ToolUseContext
@@ -1205,7 +1209,24 @@ class RichUI:
 
     def get_default_tools(self) -> list:
         """Get the default set of tools, filtered by allowed_tools if specified."""
+        if (
+            threading.current_thread() is not self._loop_thread
+            and not self._loop.is_closed()
+        ):
+            return self._run_async(self._get_default_tools_async())
         tools = get_default_tools(allowed_tools=self.allowed_tools)
+        if self.disable_slash_commands:
+            return [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
+        return tools
+
+    async def _get_default_tools_async(self) -> list:
+        if self.query_context is not None:
+            tools = self.query_context.tool_registry.all_tools
+        else:
+            tools = await get_default_tools_async(
+                project_path=self.project_path,
+                allowed_tools=self.allowed_tools,
+            )
         if self.disable_slash_commands:
             return [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
         return tools

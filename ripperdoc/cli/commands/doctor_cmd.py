@@ -23,7 +23,7 @@ from ripperdoc.core.config import (
 from ripperdoc.core.oauth import get_oauth_token
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.mcp import load_mcp_servers_async
+from ripperdoc.utils.mcp import load_mcp_servers, load_mcp_servers_async
 from ripperdoc.utils.self_update import get_install_metadata
 from ripperdoc.utils.shell.sandbox_utils import is_sandbox_available
 
@@ -143,9 +143,7 @@ def _mcp_status(
 
     try:
         if runner is None:
-            import asyncio
-
-            servers = asyncio.run(_load())
+            servers = load_mcp_servers(project_path)
         else:
             servers = runner(_load())
     except (

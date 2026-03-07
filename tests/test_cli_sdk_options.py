@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 from ripperdoc.cli import cli as cli_module
 from ripperdoc.protocol.stdio import command as stdio_command
+from ripperdoc.core.tool_defaults import get_default_tools
 
 
 def test_cli_forwards_hidden_sdk_options_to_stdio_defaults(monkeypatch, tmp_path):
@@ -277,7 +278,7 @@ def test_cli_agent_overrides_settings_agent_for_prompt(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.chdir(tmp_path)
 
     runner = CliRunner()
@@ -312,7 +313,7 @@ def test_cli_preserves_append_system_prompt_after_agent_override(monkeypatch, tm
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.chdir(tmp_path)
 
     runner = CliRunner()
@@ -349,7 +350,7 @@ def test_cli_debug_with_filter(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.setattr(cli_module, "configure_debug_logging", fake_configure_debug_logging)
     monkeypatch.chdir(tmp_path)
 
@@ -493,7 +494,7 @@ def test_cli_debug_file_implies_debug_and_skips_session_log_path(monkeypatch, tm
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.setattr(cli_module, "configure_debug_logging", fake_configure_debug_logging)
     monkeypatch.setattr(cli_module, "enable_session_file_logging", fail_enable_session_file_logging)
     monkeypatch.chdir(tmp_path)
@@ -544,8 +545,7 @@ def test_cli_disable_slash_commands_disables_skills_for_prompt(monkeypatch, tmp_
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
     monkeypatch.setattr(
-        cli_module,
-        "get_default_tools",
+        "ripperdoc.core.tool_defaults.get_default_tools",
         lambda **_: [DummyTool("Skill"), DummyTool("Read")],
     )
     monkeypatch.chdir(tmp_path)
@@ -572,7 +572,7 @@ def test_cli_prompt_forwards_permission_mode_and_max_turns(monkeypatch, tmp_path
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.chdir(tmp_path)
 
     runner = CliRunner()
@@ -598,7 +598,7 @@ def test_cli_prompt_accepts_dont_ask_permission_mode(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.chdir(tmp_path)
 
     runner = CliRunner()
@@ -622,7 +622,7 @@ def test_cli_yolo_overrides_permission_mode_for_prompt(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.chdir(tmp_path)
 
     runner = CliRunner()
@@ -742,7 +742,7 @@ def test_cli_worktree_creates_and_switches_directory(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.chdir(repo)
 
     runner = CliRunner()
@@ -787,7 +787,7 @@ def test_cli_worktree_pr_shorthand_hash(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.setattr(cli_module, "get_git_root", lambda _p: repo)
     monkeypatch.setattr(cli_module, "create_task_worktree", fake_create_task_worktree)
     monkeypatch.chdir(repo)
@@ -822,7 +822,7 @@ def test_cli_worktree_pr_shorthand_url(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_module, "run_query", fake_run_query)
     monkeypatch.setattr(cli_module, "check_onboarding", lambda: True)
-    monkeypatch.setattr(cli_module, "get_default_tools", lambda **_: [])
+    monkeypatch.setattr("ripperdoc.core.tool_defaults.get_default_tools", lambda **_: [])
     monkeypatch.setattr(cli_module, "get_git_root", lambda _p: repo)
     monkeypatch.setattr(cli_module, "create_task_worktree", fake_create_task_worktree)
     monkeypatch.chdir(repo)

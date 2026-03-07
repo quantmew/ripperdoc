@@ -31,7 +31,7 @@ from ripperdoc.core.session_agents import (
 from ripperdoc.core.output_styles import load_all_output_styles, resolve_output_style
 from ripperdoc.core.plugins import discover_plugins, set_runtime_plugin_dirs
 from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
-from ripperdoc.core.tool_defaults import get_default_tools
+from ripperdoc.core.tool_defaults import get_default_tools_async
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
@@ -463,7 +463,7 @@ class StdioSessionMixin:
             self._tools_list = self._normalize_tool_list(options.get("tools"))
 
             # Get the tool list (apply SDK filters)
-            tools = get_default_tools()
+            tools = await get_default_tools_async(project_path=self._project_path)
             if self._disable_slash_commands:
                 tools = [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
             tools = self._apply_tool_filters(

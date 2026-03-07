@@ -1,5 +1,6 @@
 """CLI slash command surface tests."""
 
+import asyncio
 from uuid import UUID
 
 from rich.console import Console
@@ -25,6 +26,15 @@ from ripperdoc.utils.collaboration.tasks import create_task
 class _DummyUI:
     """Minimal UI stub for slash command handlers."""
 
+    def __init__(self, console: Console, project_path):
+        self.console = console
+        self.project_path = project_path
+
+    def run_async(self, coro):
+        return asyncio.run(coro)
+
+
+class _NoRunnerUI:
     def __init__(self, console: Console, project_path):
         self.console = console
         self.project_path = project_path
@@ -505,6 +515,20 @@ def test_mcp_list_subcommand_shows_plain_overview(tmp_path, monkeypatch):
     assert "MCP servers" in output
     assert "context7" in output
     assert "Command: npx" in output
+
+
+def test_mcp_list_subcommand_uses_sync_loader_without_ui_runner(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "ripperdoc.cli.commands.mcp_cmd.load_mcp_servers",
+        lambda _project_path: [McpServerInfo(name="context7", status="connected", command="npx")],
+    )
+
+    ui = _NoRunnerUI(Console(record=True, width=120), tmp_path)
+    mcp_command.handler(ui, "list")
+
+    output = ui.console.export_text()
+    assert "MCP servers" in output
+    assert "context7" in output
 
 
 def test_mcp_logs_show_last_lines_for_server(tmp_path, monkeypatch):

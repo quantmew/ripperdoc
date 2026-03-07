@@ -11,7 +11,7 @@ from typing import Any, cast
 from pydantic import ValidationError
 
 from ripperdoc.core.hooks.manager import hook_manager
-from ripperdoc.core.tool_defaults import get_default_tools
+from ripperdoc.core.tool_defaults import get_default_tools_async
 from ripperdoc.core.message_utils import format_pydantic_errors
 from ripperdoc.core.output_styles import resolve_output_style
 from ripperdoc.core.permission_engine import PermissionResult
@@ -281,7 +281,7 @@ class StdioControlMixin:
     async def _refresh_query_context_dynamic_tools(self) -> None:
         if not self._query_context:
             return
-        tools = get_default_tools()
+        tools = await get_default_tools_async(project_path=self._project_path)
         if self._disable_slash_commands:
             tools = [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
         tools = self._apply_tool_filters(
