@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from ripperdoc import __version__
 from ripperdoc.core.agents import load_agent_definitions
 from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
+from ripperdoc.core import tool_defaults as tool_defaults_module
 from ripperdoc.core.config import (
     ProtocolType,
     get_effective_model_profile,
@@ -31,7 +32,6 @@ from ripperdoc.core.session_agents import (
 from ripperdoc.core.output_styles import load_all_output_styles, resolve_output_style
 from ripperdoc.core.plugins import discover_plugins, set_runtime_plugin_dirs
 from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
-from ripperdoc.core.tool_defaults import get_default_tools_async
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
@@ -66,6 +66,12 @@ from ripperdoc.utils.filesystem.working_directories import coerce_directory_list
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC
 
 logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
+
+# Keep these module-level aliases patchable for tests and other callers that
+# inject deterministic tool lists during stdio initialization.
+get_default_tools = tool_defaults_module.get_default_tools
+get_default_tools_async = tool_defaults_module.get_default_tools_async
+_DEFAULT_SYNC_TOOL_LOADER = tool_defaults_module.get_default_tools
 
 
 class StdioSessionMixin:
@@ -113,6 +119,12 @@ class StdioSessionMixin:
             if "wait_for_connections" not in str(exc):
                 raise
             return await load_dynamic_mcp_tools_async(self._project_path)
+
+    async def _get_initialize_tools(self) -> list[Any]:
+        """Resolve the initialize-time tool list with a patchable sync fallback."""
+        if get_default_tools is not _DEFAULT_SYNC_TOOL_LOADER:
+            return list(get_default_tools())
+        return await get_default_tools_async(project_path=self._project_path)
 
     async def _send_sdk_mcp_message(self, server_name: str, message: dict[str, Any]) -> dict[str, Any]:
         """Bridge SDK-backed MCP traffic over stdio control requests."""
@@ -463,7 +475,7 @@ class StdioSessionMixin:
             self._tools_list = self._normalize_tool_list(options.get("tools"))
 
             # Get the tool list (apply SDK filters)
-            tools = await get_default_tools_async(project_path=self._project_path)
+            tools = await self._get_initialize_tools()
             if self._disable_slash_commands:
                 tools = [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
             tools = self._apply_tool_filters(

@@ -17,6 +17,7 @@ from rich.markup import escape
 
 from ripperdoc import __version__
 from ripperdoc.cli import worktree_tmux
+from ripperdoc.core import tool_defaults as tool_defaults_module
 from ripperdoc.cli.agents_cli import agents_cmd
 from ripperdoc.cli.bootstrap_cli import (
     _change_cwd_if_requested,
@@ -41,7 +42,6 @@ from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.config import get_effective_model_profile, get_project_config
 from ripperdoc.core.plugins import set_runtime_plugin_dirs
 from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
-from ripperdoc.core.tool_defaults import get_default_tools_async
 from ripperdoc.utils.filesystem.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
 from ripperdoc.utils.sessions.session_history import SessionHistory
@@ -55,6 +55,22 @@ from ripperdoc.utils.collaboration.worktree import (
 
 console = Console()
 logger = get_logger()
+_DEFAULT_SYNC_TOOL_LOADER = tool_defaults_module.get_default_tools
+
+
+async def _load_prompt_tools(
+    *,
+    project_path: Path,
+    allowed_tools: Optional[list[str]],
+) -> list:
+    """Use async discovery by default, but honor patched sync loaders in tests."""
+    sync_loader = tool_defaults_module.get_default_tools
+    if sync_loader is not _DEFAULT_SYNC_TOOL_LOADER:
+        return list(sync_loader(allowed_tools=allowed_tools))
+    return await tool_defaults_module.get_default_tools_async(
+        project_path=project_path,
+        allowed_tools=allowed_tools,
+    )
 
 
 def _resolve_model_pointer_with_fallback(
@@ -815,7 +831,7 @@ def cli(
 
         if prompt:
             async def _run_prompt_query() -> None:
-                tool_list = await get_default_tools_async(
+                tool_list = await _load_prompt_tools(
                     project_path=Path.cwd(),
                     allowed_tools=allowed_tools,
                 )
