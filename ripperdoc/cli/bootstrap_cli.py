@@ -389,6 +389,11 @@ def _run_stdio_mode_if_requested(
     allowed_tools = parse_csv_option(allowed_tools_csv)
     disallowed_tools = parse_csv_option(disallowed_tools_csv)
     tools_list = parse_tools_option(tools)
+    # Track whether the "default" preset was explicitly requested
+    # so that `allowed_tools` only restricts MCP tools, not built-in ones.
+    tools_preset_default = (
+        tools is not None and tools.strip().lower() == "default"
+    )
 
     if effective_print_mode:
         stdin_prompt = _read_stdin_prompt_for_headless(
@@ -414,6 +419,8 @@ def _run_stdio_mode_if_requested(
         default_options["disallowed_tools"] = disallowed_tools
     if tools_list is not None:
         default_options["tools"] = tools_list
+    if tools_preset_default:
+        default_options["tools_preset"] = "default"
     if additional_working_dirs:
         default_options["additional_directories"] = additional_working_dirs
     default_options["session_persistence"] = session_persistence

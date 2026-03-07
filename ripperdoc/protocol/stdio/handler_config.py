@@ -82,7 +82,12 @@ class StdioConfigMixin:
         disallowed_tools: list[str] | None,
         tools_list: list[str] | None,
     ) -> list[Any]:
-        """Apply SDK tool filters while keeping Task tool consistent."""
+        """Apply SDK tool filters while keeping Task tool consistent.
+
+        When the ``default`` tools preset is active
+        (``self._tools_preset == "default"``), ``allowed_tools`` only
+        restricts MCP tools – built-in tools are always preserved.
+        """
         if tools_list is None and allowed_tools is None and not disallowed_tools:
             return tools
 
@@ -101,6 +106,15 @@ class StdioConfigMixin:
 
         if allow_set is None:
             return tools
+
+        # When the "default" preset is active, built-in tools are part of
+        # the base tool set and should not be removed by allowed_tools.  Only
+        # MCP tools (mcp__*) are subject to the whitelist.
+        preset = getattr(self, "_tools_preset", None)
+        if preset == "default" and allowed_tools is not None:
+            for name in tool_names:
+                if not name.startswith("mcp__"):
+                    allow_set.add(name)
 
         return filter_tools_by_names(tools, list(allow_set))
 

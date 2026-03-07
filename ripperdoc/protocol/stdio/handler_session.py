@@ -473,6 +473,7 @@ class StdioSessionMixin:
             self._allowed_tools = self._normalize_tool_list(options.get("allowed_tools"))
             self._disallowed_tools = self._normalize_tool_list(options.get("disallowed_tools"))
             self._tools_list = self._normalize_tool_list(options.get("tools"))
+            self._tools_preset = options.get("tools_preset")  # "default" or None
 
             # Get the tool list (apply SDK filters)
             tools = await self._get_initialize_tools()
