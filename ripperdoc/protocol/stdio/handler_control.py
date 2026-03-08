@@ -284,6 +284,10 @@ class StdioControlMixin:
         tools = await get_default_tools_async(project_path=self._project_path)
         if self._disable_slash_commands:
             tools = [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
+        if self._input_format == "stream-json" and (
+            self._tools_list is None or "AskUserQuestion" not in (self._tools_list or [])
+        ):
+            tools = [tool for tool in tools if getattr(tool, "name", None) != "AskUserQuestion"]
         tools = self._apply_tool_filters(
             tools,
             allowed_tools=self._allowed_tools,

@@ -98,25 +98,31 @@ def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
     "options,expected",
     [
         (
+            # tools_list restricts the tool set
+            {"tools": ["Read", "Bash", "Task"]},
+            ["Read", "Bash", "Task"],
+        ),
+        (
+            # allowed_tools / disallowed_tools are permission-only; tool set unchanged
+            {
+                "allowed_tools": ["Read", "Bash", "Task"],
+                "disallowed_tools": ["Bash"],
+            },
+            ["Read", "Edit", "Bash", "Task"],
+        ),
+        (
+            # tools_list restricts; allowed/disallowed don't shrink it further
             {
                 "tools": ["Read", "Bash", "Task"],
                 "allowed_tools": ["Read", "Edit", "Task"],
                 "disallowed_tools": ["Bash"],
             },
-            ["Read", "Task"],
-        ),
-        (
-            {
-                "allowed_tools": ["Read", "Bash", "Task"],
-                "disallowed_tools": ["Bash"],
-            },
-            ["Read", "Task"],
-        ),
-        (
-            {
-                "disallowed_tools": ["Edit"],
-            },
             ["Read", "Bash", "Task"],
+        ),
+        (
+            # empty tools list means no tools
+            {"tools": []},
+            [],
         ),
     ],
 )
@@ -367,7 +373,7 @@ async def test_stdio_sdk_can_use_tool_bridges_ask_user_question(monkeypatch, tmp
     monkeypatch.setattr(handler, "_write_control_response", capture_control_response)
     monkeypatch.setattr(handler, "_send_control_request", fake_send_control_request)
 
-    await handler._handle_initialize({"options": {"sdk_can_use_tool": True}}, "init")
+    await handler._handle_initialize({"options": {"sdk_can_use_tool": True, "tools": ["AskUserQuestion"]}}, "init")
 
     tool = handler._query_context.tool_registry.get("AskUserQuestion")
     assert tool is not None
@@ -718,3 +724,74 @@ async def test_stdio_initialize_output_language_option_overrides_project(monkeyp
 
     assert captured_language["value"] == "Japanese"
     assert handler._output_language == "Japanese"
+
+
+@pytest.mark.asyncio
+async def test_stdio_sdk_mode_excludes_ask_user_question(monkeypatch, tmp_path):
+    """In SDK mode (stream-json), AskUserQuestion should not be in the tool set."""
+    tools = [DummyTool("Read"), DummyAskTool("AskUserQuestion")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+    assert handler._input_format == "stream-json"
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize({"options": {}}, "init")
+
+    assert responses["init"]["error"] is None
+    assert handler._query_context is not None
+    tool_names = [tool.name for tool in handler._query_context.tools]
+    assert "AskUserQuestion" not in tool_names
+    assert "Read" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_stdio_yolo_mode_with_disallowed_tools_creates_checker(monkeypatch, tmp_path):
+    """bypassPermissions + disallowed_tools should still create a permission checker."""
+    tools = [DummyTool("Read"), DummyTool("Bash")]
+    _patch_stdio_dependencies(monkeypatch, tools)
+
+    checker_created = {"called": False}
+
+    async def fake_checker(_tool, _parsed_input):
+        return PermissionResult(result=True)
+
+    def fake_make_permission_checker(*_args, **kwargs):
+        checker_created["called"] = True
+        checker_created["yolo_mode"] = kwargs.get("yolo_mode")
+        checker_created["disallowed_tools"] = kwargs.get("session_disallowed_tools")
+        return fake_checker
+
+    monkeypatch.setattr(handler_config, "make_permission_checker", fake_make_permission_checker)
+
+    handler = handler_module.StdioProtocolHandler()
+    handler._project_path = tmp_path
+
+    responses: dict[str, dict[str, Any]] = {}
+
+    async def capture(request_id: str, response: dict[str, Any] | None = None, error: str | None = None):
+        responses[request_id] = {"response": response, "error": error}
+
+    monkeypatch.setattr(handler, "_write_control_response", capture)
+
+    await handler._handle_initialize(
+        {
+            "options": {
+                "permission_mode": "bypassPermissions",
+                "disallowed_tools": ["Bash"],
+            }
+        },
+        "init",
+    )
+
+    assert responses["init"]["error"] is None
+    assert checker_created["called"] is True
+    assert checker_created["yolo_mode"] is True
+    assert checker_created["disallowed_tools"] == ["Bash"]

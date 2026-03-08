@@ -741,3 +741,142 @@ def test_write_permission_prompt_shows_diff_preview_before_apply(tmp_path: Path,
     assert re.search(r"<diff-add>\s*1 \+ alpha</diff-add>", preview)
     assert re.search(r"<diff-add>\s*2 \+ beta</diff-add>", preview)
     assert not target.exists()
+
+
+def test_session_allowed_tools_auto_approves_without_prompt(tmp_path: Path):
+    """Tools listed in session_allowed_tools should be auto-approved."""
+    tool = DummyTool()
+    parsed_input = DummyInput(command="echo hello")
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+        session_allowed_tools=["DummyTool"],
+    )
+    result = asyncio.run(checker(tool, parsed_input))
+    assert result.result is True
+
+
+def test_session_allowed_tools_does_not_approve_unlisted_tool(tmp_path: Path):
+    """Tools NOT listed in session_allowed_tools should still require prompting."""
+    prompt_calls = 0
+
+    def prompt_fn(_: str) -> str:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "n"
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        prompt_fn=prompt_fn,
+        session_allowed_tools=["OtherTool"],
+    )
+    result = asyncio.run(checker(DummyTool(), DummyInput(command="echo test")))
+    assert result.result is False
+    assert prompt_calls == 1
+
+
+def test_session_disallowed_tools_auto_denies_without_prompt(tmp_path: Path):
+    """Tools listed in session_disallowed_tools should be auto-denied."""
+    tool = DummyTool()
+    parsed_input = DummyInput(command="echo hello")
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+        session_disallowed_tools=["DummyTool"],
+    )
+    result = asyncio.run(checker(tool, parsed_input))
+    assert result.result is False
+    assert result.message is not None
+    assert "disallowed" in result.message.lower()
+
+
+def test_session_disallowed_tools_does_not_deny_unlisted_tool(tmp_path: Path):
+    """Tools NOT listed in session_disallowed_tools should not be auto-denied."""
+    tool = DummyTool()
+    parsed_input = DummyInput(command="echo hello")
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        prompt_fn=lambda _: "y",
+        session_disallowed_tools=["OtherTool"],
+    )
+    result = asyncio.run(checker(tool, parsed_input))
+    assert result.result is True
+
+
+def test_session_disallowed_overrides_session_allowed(tmp_path: Path):
+    """When a tool is in both allowed and disallowed, disallowed should win."""
+    tool = DummyTool()
+    parsed_input = DummyInput(command="echo hello")
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+        session_allowed_tools=["DummyTool"],
+        session_disallowed_tools=["DummyTool"],
+    )
+    result = asyncio.run(checker(tool, parsed_input))
+    assert result.result is False
+    assert result.message is not None
+    assert "disallowed" in result.message.lower()
+
+
+def test_session_disallowed_tools_overrides_yolo_mode(tmp_path: Path):
+    """disallowed_tools should deny even in yolo mode."""
+    tool = DummyTool()
+    parsed_input = DummyInput(command="echo hello")
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=True,
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+        session_disallowed_tools=["DummyTool"],
+    )
+    result = asyncio.run(checker(tool, parsed_input))
+    assert result.result is False
+    assert result.message is not None
+    assert "disallowed" in result.message.lower()
+
+
+def test_session_allowed_tools_with_mcp_tool_name(tmp_path: Path):
+    """MCP tool names (mcp__server__tool) should work in session_allowed_tools."""
+
+    class McpDummyTool(DummyTool):
+        @property
+        def name(self) -> str:
+            return "mcp__calc__add_numbers"
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+        session_allowed_tools=["mcp__calc__add_numbers"],
+    )
+    result = asyncio.run(checker(McpDummyTool(), DummyInput(command="1+1")))
+    assert result.result is True
+
+
+def test_session_disallowed_tools_with_mcp_tool_name(tmp_path: Path):
+    """MCP tool names (mcp__server__tool) should work in session_disallowed_tools."""
+
+    class McpDummyTool(DummyTool):
+        @property
+        def name(self) -> str:
+            return "mcp__calc__add_numbers"
+
+    checker = make_permission_checker(
+        tmp_path,
+        yolo_mode=False,
+        prompt_fn=lambda _: pytest.fail("prompted unexpectedly"),
+        session_disallowed_tools=["mcp__calc__add_numbers"],
+    )
+    result = asyncio.run(checker(McpDummyTool(), DummyInput(command="1+1")))
+    assert result.result is False
+    assert "disallowed" in result.message.lower()

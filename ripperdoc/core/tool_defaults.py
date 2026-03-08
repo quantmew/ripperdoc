@@ -172,32 +172,27 @@ def _build_base_tools() -> List[Tool[Any, Any]]:
 def _finalize_tool_list(
     base_tools: List[Tool[Any, Any]],
     *,
-    allowed_tools: Optional[List[str]] = None,
+    allowed_tools: Optional[List[str]] = None,  # noqa: ARG001 – kept for API compat
     dynamic_tool_count: int = 0,
 ) -> List[Tool[Any, Any]]:
-    """Append Task and apply allowed-tools filtering."""
+    """Append Task tool to the base tool list.
+
+    ``allowed_tools`` is accepted for backward compatibility but is **not**
+    used for tool-set filtering.  It controls auto-approval permissions and
+    is handled by the permission engine.
+    """
     task_tool = TaskTool(lambda: base_tools)
     all_tools = base_tools + [task_tool]
 
-    if allowed_tools is not None:
-        all_tools = filter_tools_by_names(all_tools, allowed_tools)
-        logger.debug(
-            "[tool_defaults] Filtered tool inventory",
-            extra={
-                "allowed_tools": allowed_tools,
-                "filtered_tools": len(all_tools),
-            },
-        )
-    else:
-        logger.debug(
-            "[tool_defaults] Built tool inventory",
-            extra={
-                "tasks_enabled": is_task_system_enabled(),
-                "base_tools": len(base_tools),
-                "dynamic_mcp_tools": dynamic_tool_count,
-                "total_tools": len(all_tools),
-            },
-        )
+    logger.debug(
+        "[tool_defaults] Built tool inventory",
+        extra={
+            "tasks_enabled": is_task_system_enabled(),
+            "base_tools": len(base_tools),
+            "dynamic_mcp_tools": dynamic_tool_count,
+            "total_tools": len(all_tools),
+        },
+    )
 
     return all_tools
 

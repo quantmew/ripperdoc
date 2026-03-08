@@ -1115,6 +1115,7 @@ def make_permission_checker(
     prompt_session: Optional["PromptSession"] = None,  # noqa: ARG001 (kept for backward compatibility)
     session_additional_working_dirs: Optional[Iterable[str]] = None,
     session_allowed_tools: Optional[Iterable[str]] = None,
+    session_disallowed_tools: Optional[Iterable[str]] = None,
 ) -> Callable[[Tool[Any, Any], Any], Awaitable[PermissionResult]]:
     """Create a permission checking function for the current project.
 
@@ -1144,6 +1145,11 @@ def make_permission_checker(
     session_allowed_tools_set: Set[str] = {
         str(name).strip()
         for name in (session_allowed_tools or [])
+        if str(name).strip()
+    }
+    session_disallowed_tools_set: Set[str] = {
+        str(name).strip()
+        for name in (session_disallowed_tools or [])
         if str(name).strip()
     }
     session_tool_rules: dict[str, Set[str]] = defaultdict(set)
@@ -1236,6 +1242,16 @@ def make_permission_checker(
             )
             if plan_mode_preview is not None:
                 return plan_mode_preview
+
+        # Auto-deny takes precedence over auto-approve.
+        if tool.name in session_disallowed_tools_set:
+            return PermissionPreview(
+                requires_user_input=False,
+                result=PermissionResult(
+                    result=False,
+                    message=f"Tool '{tool.name}' is disallowed by session configuration.",
+                ),
+            )
 
         policy = _build_permission_policy(
             project_path=project_path,

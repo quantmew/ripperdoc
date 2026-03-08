@@ -489,22 +489,42 @@ def _build_tool_usage_section(
             "- Use the Memory tool for persistent cross-session memory files. Prefer it over generic file tools when saving, editing, or deleting memory notes."
         )
 
+    # Build a "prefer specialized tools" hint only for tools that are actually available.
+    file_tool_hints: list[str] = []
+    if read_tool_name in tool_names:
+        file_tool_hints.append(f"{read_tool_name} for reading files")
+    if file_edit_tool_name in tool_names:
+        file_tool_hints.append(f"{file_edit_tool_name} for editing")
+    if file_write_tool_name in tool_names:
+        file_tool_hints.append(f"{file_write_tool_name} for creating files")
+    specialized_tools_hint = ", ".join(file_tool_hints) if file_tool_hints else ""
+
     if shell_tool_name:
         tool_usage_lines.extend(
             [
                 f'- You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. When making multiple {shell_tool_name} tool calls, you MUST send a single message with multiple tools calls to run the calls in parallel. For example, if you need to run "git status" and "git diff", send a single message with two tool calls to run the calls in parallel.',
                 "- If the user asks to run tools in parallel and there are no dependencies, include multiple tool calls in a single message; sequence dependent calls instead of guessing values.",
-                f"- Use specialized tools instead of {shell_tool_name} when possible: use {read_tool_name} for reading files, {file_edit_tool_name} for editing, and {file_write_tool_name} for creating files. Do not use shell echo or other command-line tools to communicate with the user; reply in text.",
             ]
         )
+        if specialized_tools_hint:
+            tool_usage_lines.append(
+                f"- Use specialized tools instead of {shell_tool_name} when possible: use {specialized_tools_hint}. Do not use shell echo or other command-line tools to communicate with the user; reply in text."
+            )
+        else:
+            tool_usage_lines.append(
+                f"- Do not use {shell_tool_name} or other command-line tools to communicate with the user; reply in text."
+            )
     else:
         tool_usage_lines.extend(
             [
                 "- You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance.",
                 "- If the task requires shell, git, or gh commands, state that this session has no shell tool and ask the user to run those commands and share outputs.",
-                f"- Use specialized tools directly: use {read_tool_name} for reading files, {file_edit_tool_name} for editing, and {file_write_tool_name} for creating files.",
             ]
         )
+        if specialized_tools_hint:
+            tool_usage_lines.append(
+                f"- Use specialized tools directly: use {specialized_tools_hint}."
+            )
     if include_efficiency_instructions:
         tool_usage_lines.append(
             "You MUST answer concisely with fewer than 4 lines of text (not including tool use or code generation), unless user asks for detail."

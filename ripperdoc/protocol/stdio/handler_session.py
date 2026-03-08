@@ -121,10 +121,21 @@ class StdioSessionMixin:
             return await load_dynamic_mcp_tools_async(self._project_path)
 
     async def _get_initialize_tools(self) -> list[Any]:
-        """Resolve the initialize-time tool list with a patchable sync fallback."""
+        """Resolve the initialize-time tool list with a patchable sync fallback.
+
+        Only returns built-in tools here.  MCP tools are loaded separately
+        in ``_load_dynamic_mcp_tools_for_initialize`` which runs **after**
+        SDK MCP server configuration (``set_mcp_runtime_overrides``) has been
+        applied.  Calling ``get_default_tools_async`` here would prematurely
+        create an MCP runtime that lacks SDK-provided server entries, and
+        ``ensure_mcp_runtime`` would then reuse that incomplete runtime for
+        all subsequent calls – effectively hiding SDK MCP tools.
+        """
         if get_default_tools is not _DEFAULT_SYNC_TOOL_LOADER:
             return list(get_default_tools())
-        return await get_default_tools_async(project_path=self._project_path)
+        return tool_defaults_module._finalize_tool_list(
+            tool_defaults_module._build_base_tools(),
+        )
 
     async def _send_sdk_mcp_message(self, server_name: str, message: dict[str, Any]) -> dict[str, Any]:
         """Bridge SDK-backed MCP traffic over stdio control requests."""
@@ -479,6 +490,13 @@ class StdioSessionMixin:
             tools = await self._get_initialize_tools()
             if self._disable_slash_commands:
                 tools = [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
+            # In SDK mode (stream-json), AskUserQuestion is not useful since
+            # the SDK handles user interaction programmatically.  Exclude it
+            # from the default tool set unless explicitly requested via tools_list.
+            if self._input_format == "stream-json" and (
+                self._tools_list is None or "AskUserQuestion" not in self._tools_list
+            ):
+                tools = [tool for tool in tools if getattr(tool, "name", None) != "AskUserQuestion"]
             tools = self._apply_tool_filters(
                 tools,
                 allowed_tools=self._allowed_tools,

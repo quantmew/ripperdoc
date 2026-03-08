@@ -78,17 +78,22 @@ class StdioConfigMixin:
         self,
         tools: list[Any],
         *,
-        allowed_tools: list[str] | None,
-        disallowed_tools: list[str] | None,
+        allowed_tools: list[str] | None,  # noqa: ARG002 – permission: auto-approve
+        disallowed_tools: list[str] | None,  # noqa: ARG002 – permission: auto-deny
         tools_list: list[str] | None,
     ) -> list[Any]:
-        """Apply SDK tool filters while keeping Task tool consistent.
+        """Apply tool-set filters while keeping Task tool consistent.
 
-        When the ``default`` tools preset is active
-        (``self._tools_preset == "default"``), ``allowed_tools`` only
-        restricts MCP tools – built-in tools are always preserved.
+        ``allowed_tools`` and ``disallowed_tools`` control permission
+        auto-approval / auto-denial and do **not** affect the tool set.
+
+        The tool set is determined by:
+
+        * ``tools_list`` – explicit tool list (e.g. ``--tools`` CLI flag).
+        * ``preset == "default"`` – adds all built-in tools.
         """
-        if tools_list is None and allowed_tools is None and not disallowed_tools:
+        preset = getattr(self, "_tools_preset", None)
+        if tools_list is None and preset is None:
             return tools
 
         tool_names = [getattr(tool, "name", tool.__class__.__name__) for tool in tools]
@@ -96,25 +101,14 @@ class StdioConfigMixin:
 
         if tools_list is not None:
             allow_set = set(tools_list)
-        if allowed_tools is not None:
-            allow_set = set(allowed_tools) if allow_set is None else allow_set & set(allowed_tools)
 
-        if disallowed_tools:
-            if allow_set is None:
-                allow_set = set(tool_names)
-            allow_set -= set(disallowed_tools)
+        # "default" preset independently adds all built-in tools.
+        if preset == "default":
+            builtin_names = {name for name in tool_names if not name.startswith("mcp__")}
+            allow_set = builtin_names if allow_set is None else allow_set | builtin_names
 
         if allow_set is None:
             return tools
-
-        # When the "default" preset is active, built-in tools are part of
-        # the base tool set and should not be removed by allowed_tools.  Only
-        # MCP tools (mcp__*) are subject to the whitelist.
-        preset = getattr(self, "_tools_preset", None)
-        if preset == "default" and allowed_tools is not None:
-            for name in tool_names:
-                if not name.startswith("mcp__"):
-                    allow_set.add(name)
 
         return filter_tools_by_names(tools, list(allow_set))
 
@@ -139,14 +133,14 @@ class StdioConfigMixin:
 
         hook_manager.set_permission_mode(normalized_mode)
 
-        if yolo_mode:
+        if yolo_mode and not self._disallowed_tools:
             self._local_can_use_tool = None
             self._can_use_tool = None
             self._sdk_can_use_tool_supported = True
         else:
             self._local_can_use_tool = make_permission_checker(
                 self._project_path,
-                yolo_mode=False,
+                yolo_mode=yolo_mode,
                 permission_mode=normalized_mode,
                 is_bypass_permissions_mode_available=self._is_bypass_permissions_mode_available(),
                 plan_file_path=(
@@ -156,6 +150,7 @@ class StdioConfigMixin:
                 ),
                 session_additional_working_dirs=self._session_additional_working_dirs,
                 session_allowed_tools=self._allowed_tools,
+                session_disallowed_tools=self._disallowed_tools,
             )
             self._sdk_can_use_tool_supported = True
 
