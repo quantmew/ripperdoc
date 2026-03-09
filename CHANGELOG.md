@@ -5,6 +5,29 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-03-09
+
+### Added
+- **SOCKS proxy support** - Added `httpx[socks]` dependency for SOCKS proxy support
+- **Anthropic prompt caching** - Unified system prompt handling with Anthropic prompt caching support
+- **Enhanced export formats** - Improved export formats with plan mode and MCP SDK support enhancements
+- **OAuth customization** - Expanded OAuth customization options for providers
+- **Graceful abort support** - Support for graceful abort and foreground-to-background subagent handoff
+
+### Changed
+- **Tool defaults enhancement** - Enhanced tool defaults with async support and expanded LSP/MCP capabilities
+- **Thinking mode controls** - Enhanced thinking mode controls with provider-specific configuration
+- **Stdio signal handling** - Improved stdio signal handling and MCP schema coercion
+- **Type safety improvements** - Enhanced type safety throughout the codebase
+- **Message handling alignment** - Aligned message handling with Claude Code patterns
+- **Session message handling** - Cache attribute lookups in session message handling for better performance
+
+### Fixed
+- **Tool-set filtering** - Decoupled tool-set filtering from permission controls and wired disallowed_tools properly
+- **Built-in tools preservation** - Fixed built-in tools preservation when "default" tools preset is active
+- **Tmux worktree support** - Synchronized tmux worktree support with CLI main function
+- **OpenAI tool history** - Enhanced OpenAI tool history sanitization
+
 ## [0.5.1] - 2026-03-05
 
 ### Added
@@ -503,6 +526,7 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.5.2]: https://github.com/quantmew/Ripperdoc/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/quantmew/Ripperdoc/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/quantmew/Ripperdoc/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/quantmew/Ripperdoc/compare/v0.4.4...v0.4.5
