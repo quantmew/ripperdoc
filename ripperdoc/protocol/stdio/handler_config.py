@@ -102,10 +102,14 @@ class StdioConfigMixin:
         if tools_list is not None:
             allow_set = set(tools_list)
 
-        # "default" preset independently adds all built-in tools.
+        # "default" preset adds all built-in tools to the allow set.
+        # When no explicit tools_list is provided, preserve all registered
+        # tools (built-in + MCP) so that MCP servers aren't silently stripped.
         if preset == "default":
+            if allow_set is None:
+                return tools
             builtin_names = {name for name in tool_names if not name.startswith("mcp__")}
-            allow_set = builtin_names if allow_set is None else allow_set | builtin_names
+            allow_set = allow_set | builtin_names
 
         if allow_set is None:
             return tools

@@ -1488,7 +1488,7 @@ def format_mcp_instructions(servers: List[McpServerInfo]) -> str:
     lines: List[str] = []
     if connected_count > 0:
         lines.append(
-            "Connected MCP servers are available. Call tools via CallMcpTool by specifying server, tool, and arguments."
+            "Connected MCP servers are available."
         )
     else:
         lines.append(
