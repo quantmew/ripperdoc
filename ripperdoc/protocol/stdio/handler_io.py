@@ -25,7 +25,7 @@ from ripperdoc.protocol.models import (
 )
 from ripperdoc.utils.coerce import parse_boolish
 
-from .timeouts import STDIO_HOOK_TIMEOUT_SEC, STDIO_READ_TIMEOUT_SEC
+from .timeouts import STDIO_HOOK_TIMEOUT_SEC
 
 _httpx_module: Any | None
 try:
@@ -1057,7 +1057,14 @@ class StdioIOMixin:
         await self._write_message(message_dict)
 
     async def _read_line(self) -> str | None:
-        """Read a single line from stdin with timeout."""
+        """Read a single line from stdin.
+
+        Uses ``run_in_executor`` to avoid blocking the event loop.  The call is
+        never wrapped in ``wait_for`` because cancelling an executor future does
+        NOT cancel the underlying ``readline`` thread — it keeps blocking on
+        stdin.  A subsequent retry would spawn a second thread, and the zombie
+        thread would silently swallow the next line written to stdin.
+        """
 
         if self._is_sdk_transport_enabled():
             await self._start_sdk_transport()
@@ -1066,33 +1073,18 @@ class StdioIOMixin:
                 return None
             return await transport.read_line()
 
-        while True:
-            try:
-                if STDIO_READ_TIMEOUT_SEC <= 0:
-                    line = cast(
-                        str,
-                        await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
-                    )
-                else:
-                    line = cast(
-                        str,
-                        await asyncio.wait_for(
-                            asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
-                            timeout=STDIO_READ_TIMEOUT_SEC,
-                        ),
-                    )
-                if not line:
-                    return None
-                return line.rstrip("\n\r")
-            except asyncio.TimeoutError:
-                logger.debug(
-                    "[stdio] stdin read timed out after %ds; continuing to wait",
-                    STDIO_READ_TIMEOUT_SEC,
-                )
-                continue
-            except (OSError, IOError) as e:
-                logger.error("Error reading from stdin: %s", e)
-                return None
+        try:
+            line = cast(
+                str,
+                await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline),
+            )
+        except (OSError, IOError) as e:
+            logger.error("Error reading from stdin: %s", e)
+            return None
+
+        if not line:
+            return None
+        return line.rstrip("\n\r")
 
     async def _read_messages(self) -> AsyncIterator[dict[str, Any]]:
         """Read and parse JSON messages from stdin with incremental buffering."""
