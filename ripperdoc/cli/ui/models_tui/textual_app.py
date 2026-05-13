@@ -33,12 +33,12 @@ from ripperdoc.core.config import (
     rename_model_profile,
     set_model_pointer,
 )
-from ripperdoc.core.oauth import (
+from ripperdoc.services.oauth import (
     OAuthTokenType,
     list_oauth_tokens,
     oauth_models_for_type,
 )
-from ripperdoc.core.thinking_config import (
+from ripperdoc.services.thinking_config import (
     OPENAI_REASONING_OPTIONS,
     ThinkingControlSpec,
     default_thinking_effort,

@@ -7,9 +7,9 @@ import asyncio
 import pytest
 
 from ripperdoc.core.config import ModelProfile, ProtocolType
-from ripperdoc.core.providers.base import call_with_timeout_and_retries
-from ripperdoc.core.providers.errors import ProviderMappedError, ProviderTimeoutError
-from ripperdoc.core.providers.gemini import (
+from ripperdoc.services.providers.base import call_with_timeout_and_retries
+from ripperdoc.services.providers.errors import ProviderMappedError, ProviderTimeoutError
+from ripperdoc.services.providers.gemini import (
     _build_thinking_config,
     _classify_gemini_error,
     _map_gemini_exception,
@@ -76,7 +76,7 @@ async def test_gemini_timeout_mapping_reuses_shared_retry_logic(monkeypatch) -> 
     async def _no_sleep(_delay: float) -> None:
         return None
 
-    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+    monkeypatch.setattr("ripperdoc.services.providers.base.asyncio.sleep", _no_sleep)
 
     async def flaky_request() -> str:
         attempts["count"] += 1

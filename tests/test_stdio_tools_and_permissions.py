@@ -15,7 +15,7 @@ from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_control
 from ripperdoc.protocol.stdio import handler_config, handler_session
 from ripperdoc.protocol.models import JsonRpcErrorCodes
-from ripperdoc.tools.task_tool import TaskTool
+from ripperdoc.tools.task import TaskTool
 
 
 class DummyInput(BaseModel):
@@ -84,7 +84,7 @@ def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
     monkeypatch.setattr(handler_session, "load_mcp_servers_async", fake_load_mcp_servers_async)
     monkeypatch.setattr(handler_session, "load_dynamic_mcp_tools_async", fake_load_dynamic_mcp_tools_async)
 
-    from ripperdoc.core import skills as skills_module
+    from ripperdoc.services import skills as skills_module
 
     class DummySkillResult:
         skills: list = []

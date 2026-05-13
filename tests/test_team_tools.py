@@ -8,8 +8,8 @@ import json
 import pytest
 
 from ripperdoc.core.tool import ToolUseContext
-from ripperdoc.tools.task_graph_tool import TaskCreateInput, TaskCreateTool, TaskUpdateInput, TaskUpdateTool
-from ripperdoc.tools.team_tool import (
+from ripperdoc.tools.task.task_graph import TaskCreateInput, TaskCreateTool, TaskUpdateInput, TaskUpdateTool
+from ripperdoc.tools.team import (
     SendMessageInput,
     SendMessageTool,
     TeamCreateInput,
@@ -197,7 +197,7 @@ def test_team_delete_requires_no_active_members(tmp_path, monkeypatch):
     delete_tool = TeamDeleteTool()
     context = ToolUseContext(agent_id="team-lead")
     monkeypatch.setattr(
-        "ripperdoc.tools.task_tool.list_running_team_members",
+        "ripperdoc.tools.task.list_running_team_members",
         lambda _team_name=None: ["dev-a"],
     )
 

@@ -344,7 +344,7 @@ class PlanModeAttachmentPayload(AttachmentPayload):
     type: str
     content: str
     plan_file_path: str
-    plan_exists: bool | None = None
+    plan_exists: Optional[bool] = None
     reminder_type: str
 
 
@@ -1424,7 +1424,7 @@ def create_plan_mode_attachment_message(
     plan_file_path: str,
     reminder_type: str,
     attachment_type: str = "plan_mode",
-    plan_exists: bool | None = None,
+    plan_exists: Optional[bool] = None,
 ) -> AttachmentMessage:
     """Create a plan-mode attachment entry."""
     return _create_typed_attachment_message(
@@ -1925,7 +1925,7 @@ def _parse_output_style_attachment(attachment: AttachmentMessage) -> List[UserMe
     if not style:
         return []
     try:
-        from ripperdoc.core.output_styles import resolve_output_style
+        from ripperdoc.services.output_styles import resolve_output_style
 
         resolved_style, _ = resolve_output_style(style)
         style_name = resolved_style.name

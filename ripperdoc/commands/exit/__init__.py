@@ -1,0 +1,20 @@
+from typing import Any
+from ripperdoc.commands.base import SlashCommand
+
+
+def _handle(ui: Any, _: str) -> bool:
+    ui.console.print("[yellow]Goodbye![/yellow]")
+    ui._exit_reason = "prompt_input_exit"
+    ui._should_exit = True
+    return True
+
+
+command = SlashCommand(
+    name="exit",
+    description="Exit Ripperdoc",
+    handler=_handle,
+    aliases=("quit",),
+)
+
+
+__all__ = ["command"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ripperdoc.core.oauth import (
+from ripperdoc.services.oauth import (
     OAuthToken,
     OAuthTokenType,
     add_oauth_token,
@@ -22,7 +22,7 @@ from ripperdoc.core.oauth import (
     ],
 )
 def test_oauth_token_store_roundtrip(tmp_path, monkeypatch, token_name, token_type):
-    monkeypatch.setattr("ripperdoc.core.oauth.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.services.oauth.Path.home", lambda: tmp_path)
 
     token = OAuthToken(
         type=token_type,
@@ -44,6 +44,6 @@ def test_oauth_token_store_roundtrip(tmp_path, monkeypatch, token_name, token_ty
 
 
 def test_delete_missing_oauth_token_raises(tmp_path, monkeypatch):
-    monkeypatch.setattr("ripperdoc.core.oauth.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("ripperdoc.services.oauth.Path.home", lambda: tmp_path)
     with pytest.raises(KeyError):
         delete_oauth_token("missing")

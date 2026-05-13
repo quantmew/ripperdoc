@@ -8,11 +8,11 @@ import pytest
 from pydantic import BaseModel
 
 from ripperdoc.core.config import ModelProfile, ProtocolType
-from ripperdoc.core.providers.base import ProviderResponse
+from ripperdoc.services.providers.base import ProviderResponse
 from ripperdoc.core.tool import Tool, ToolOutput, ToolResult, ToolUseContext
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.query import loop as loop_module
-from ripperdoc.tools.tool_search_tool import ToolSearchTool
+from ripperdoc.tools.tool_search import ToolSearchTool
 from ripperdoc.utils.messaging.messages import (
     create_assistant_message,
     create_hook_additional_context_message,

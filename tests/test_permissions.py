@@ -23,11 +23,11 @@ from ripperdoc.core.config import (
     save_project_local_config,
 )
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
-from ripperdoc.tools.bash_tool import BashTool, BashToolInput
-from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
-from ripperdoc.tools.file_edit_tool import FileEditTool, FileEditToolInput
-from ripperdoc.tools.file_write_tool import FileWriteTool, FileWriteToolInput
-from ripperdoc.tools.multi_edit_tool import MultiEditTool, MultiEditToolInput
+from ripperdoc.tools.bash import BashTool, BashToolInput
+from ripperdoc.tools.file_read import FileReadTool, FileReadToolInput
+from ripperdoc.tools.file_edit import FileEditTool, FileEditToolInput
+from ripperdoc.tools.file_write import FileWriteTool, FileWriteToolInput
+from ripperdoc.tools.multi_edit import MultiEditTool, MultiEditToolInput
 from ripperdoc.utils.memory import auto_memory_file_path
 
 
@@ -150,7 +150,7 @@ def test_session_always_allows_similar_commands(tmp_path: Path):
 
 def test_yolo_mode_off_respects_read_only_tools(tmp_path: Path):
     """Read-only tools should bypass permission prompts even when prompts are on."""
-    from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
+    from ripperdoc.tools.file_read import FileReadTool, FileReadToolInput
 
     temp_file = tmp_path / "file.txt"
     temp_file.write_text("hello")
@@ -544,7 +544,7 @@ async def test_glob_rules_in_permission_checker(tmp_path: Path):
     """Permission checker should handle glob-format allow rules."""
     from ripperdoc.core.config import save_project_config, ProjectConfig
     from ripperdoc.core.permission_engine import make_permission_checker
-    from ripperdoc.tools.bash_tool import BashTool, BashToolInput
+    from ripperdoc.tools.bash import BashTool, BashToolInput
 
     # Setup config with glob rules.
     config = ProjectConfig(

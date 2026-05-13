@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Optional, 
 from ripperdoc.cli.ui.choice import prompt_choice
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.hooks.manager import hook_manager
-from ripperdoc.core.managed_settings import get_managed_setting
-from ripperdoc.core.plan_mode import is_plan_file_path
+from ripperdoc.services.managed_settings import get_managed_setting
+from ripperdoc.plan_mode import is_plan_file_path
 from ripperdoc.core.tool import Tool
-from ripperdoc.tools.file_read_tool import detect_file_encoding
+from ripperdoc.tools.file_read import detect_file_encoding
 from ripperdoc.utils.diff_rendering import build_numbered_diff_layout, format_numbered_diff_text
 from ripperdoc.utils.memory import is_auto_memory_enabled, is_auto_memory_path
 from ripperdoc.utils.permissions import PermissionDecision, ToolRule
@@ -35,17 +35,31 @@ if TYPE_CHECKING:
     from prompt_toolkit import PromptSession
 
 logger = get_logger()
+from ripperdoc.constants.permissions import (
+    EDIT_PREVIEW_MAX_DIFF_LINES,
+    EDIT_PREVIEW_MAX_BYTES,
+    EDIT_PREVIEW_MATCH_SNIPPET_MAX,
+    EDIT_PREVIEW_SEPARATOR,
+    PERMISSION_PROMPT_RESERVED_LINES,
+    PERMISSION_PROMPT_MIN_DIFF_LINES,
+    PERMISSION_MODES,
+    AUTO_MEMORY_WRITE_TOOLS,
+    PLAN_MODE_SPECIAL_ALLOWED_TOOLS,
+    PLAN_MODE_PLAN_FILE_EDIT_TOOLS,
+)
+
+# Backward-compatible aliases (prefixed with underscore)
 _TOOL_RULE_HINT_RE = re.compile(r"^[A-Za-z0-9_-]+\s*\(.*\)\s*$")
-_EDIT_PREVIEW_MAX_DIFF_LINES = 30
-_EDIT_PREVIEW_MAX_BYTES = 1_500_000
-_EDIT_PREVIEW_MATCH_SNIPPET_MAX = 140
-_EDIT_PREVIEW_SEPARATOR = "-------------------"
-_PERMISSION_PROMPT_RESERVED_LINES = 14
-_PERMISSION_PROMPT_MIN_DIFF_LINES = 4
-_PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"}
-_AUTO_MEMORY_WRITE_TOOLS = {"Write", "Edit", "MultiEdit"}
-_PLAN_MODE_SPECIAL_ALLOWED_TOOLS = {"AskUserQuestion", "ExitPlanMode"}
-_PLAN_MODE_PLAN_FILE_EDIT_TOOLS = {"Write", "Edit", "MultiEdit"}
+_EDIT_PREVIEW_MAX_DIFF_LINES = EDIT_PREVIEW_MAX_DIFF_LINES
+_EDIT_PREVIEW_MAX_BYTES = EDIT_PREVIEW_MAX_BYTES
+_EDIT_PREVIEW_MATCH_SNIPPET_MAX = EDIT_PREVIEW_MATCH_SNIPPET_MAX
+_EDIT_PREVIEW_SEPARATOR = EDIT_PREVIEW_SEPARATOR
+_PERMISSION_PROMPT_RESERVED_LINES = PERMISSION_PROMPT_RESERVED_LINES
+_PERMISSION_PROMPT_MIN_DIFF_LINES = PERMISSION_PROMPT_MIN_DIFF_LINES
+_PERMISSION_MODES = PERMISSION_MODES
+_AUTO_MEMORY_WRITE_TOOLS = AUTO_MEMORY_WRITE_TOOLS
+_PLAN_MODE_SPECIAL_ALLOWED_TOOLS = PLAN_MODE_SPECIAL_ALLOWED_TOOLS
+_PLAN_MODE_PLAN_FILE_EDIT_TOOLS = PLAN_MODE_PLAN_FILE_EDIT_TOOLS
 
 
 def _as_str_set(raw: Any) -> Set[str]:

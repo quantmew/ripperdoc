@@ -15,7 +15,7 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 from prompt_toolkit.lexers import SimpleLexer
 
-from ripperdoc.cli.commands import CustomCommandDefinition, slash_command_completions
+from ripperdoc.commands import CustomCommandDefinition, slash_command_completions
 from ripperdoc.cli.ui.file_mention_completer import FileMentionCompleter
 from ripperdoc.utils.log import get_logger
 

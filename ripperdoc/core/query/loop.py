@@ -28,8 +28,8 @@ from ripperdoc.core.agents import TOOL_SEARCH_TOOL_NAME
 from ripperdoc.core.config import ModelProfile, provider_protocol
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
 from ripperdoc.core.hooks.state import bind_hook_scopes, bind_pending_message_queue
-from ripperdoc.core.providers import ProviderClient, get_provider_client
-from ripperdoc.core.message_utils import (
+from ripperdoc.services.providers import ProviderClient, get_provider_client
+from ripperdoc.message_utils import (
     build_full_system_prompt,
     determine_tool_mode,
     extract_tool_use_blocks,
@@ -39,7 +39,7 @@ from ripperdoc.core.message_utils import (
     text_mode_history,
     tool_result_message,
 )
-from ripperdoc.core.plan_mode import (
+from ripperdoc.plan_mode import (
     build_plan_mode_full_system_prompt,
     build_plan_mode_reentry_system_prompt,
     build_plan_mode_sparse_system_prompt,

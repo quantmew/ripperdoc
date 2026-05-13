@@ -8,7 +8,7 @@ import time
 import pytest
 
 from ripperdoc.core.query import QueryContext
-from ripperdoc.tools.task_tool import AgentRunRecord, TaskTool
+from ripperdoc.tools.task import AgentRunRecord, TaskTool
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.collaboration.task_notifications import parse_task_notification
 

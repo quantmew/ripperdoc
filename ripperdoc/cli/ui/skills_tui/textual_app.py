@@ -10,7 +10,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
-from ripperdoc.core.skills import (
+from ripperdoc.services.skills import (
     SkillDefinition,
     SkillLocation,
     get_disabled_skill_names,

@@ -12,8 +12,8 @@ from pydantic import ValidationError
 
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool_defaults import get_default_tools_async
-from ripperdoc.core.message_utils import format_pydantic_errors
-from ripperdoc.core.output_styles import resolve_output_style
+from ripperdoc.message_utils import format_pydantic_errors
+from ripperdoc.services.output_styles import resolve_output_style
 from ripperdoc.core.permission_engine import PermissionResult
 from ripperdoc.protocol.models import (
     JsonRpcErrorCodes,
@@ -23,7 +23,7 @@ from ripperdoc.protocol.models import (
     model_to_dict,
 )
 from ripperdoc.utils.permissions import ToolRule
-from ripperdoc.tools.dynamic_mcp_tool import (
+from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
 )

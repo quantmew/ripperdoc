@@ -6,7 +6,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ripperdoc.cli.commands.output_language_cmd import command as output_language_command
+from ripperdoc.commands.output_language import command as output_language_command
 from ripperdoc.core.config import get_project_local_config
 
 

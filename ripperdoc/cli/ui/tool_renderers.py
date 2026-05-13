@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.text import Text
 
-from ripperdoc.core.theme import theme_color
+from ripperdoc.services.theme import theme_color
 from ripperdoc.utils.diff_rendering import build_numbered_diff_layout, format_numbered_diff_text
 from ripperdoc.utils.collaboration.tasks import (
     list_tasks,

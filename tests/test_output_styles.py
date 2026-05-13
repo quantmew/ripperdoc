@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ripperdoc.core.output_styles import (
+from ripperdoc.services.output_styles import (
     OutputStyleLocation,
     find_output_style,
     load_all_output_styles,

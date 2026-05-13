@@ -44,15 +44,17 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from ripperdoc.core.hooks.events import HookEvent
-from ripperdoc.core.managed_settings import load_managed_settings
-from ripperdoc.core.plugins import discover_plugins, expand_plugin_root_vars
+from ripperdoc.services.managed_settings import load_managed_settings
+from ripperdoc.services.plugins import discover_plugins, expand_plugin_root_vars
 from ripperdoc.utils.filesystem.config_paths import config_file_for_scope
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
-# Default timeout for hook commands (in seconds)
-DEFAULT_HOOK_TIMEOUT = 60
+from ripperdoc.constants.hooks import DEFAULT_HOOK_TIMEOUT
+
+# Re-export for backward compatibility
+__all__ = ["DEFAULT_HOOK_TIMEOUT"]
 
 # Prompt/agent hooks are supported for all hook events.
 PROMPT_SUPPORTED_EVENTS = {event.value for event in HookEvent}

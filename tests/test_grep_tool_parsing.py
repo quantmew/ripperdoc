@@ -1,6 +1,6 @@
 """Tests for grep output parsing with Windows paths."""
 
-from ripperdoc.tools.grep_tool import (
+from ripperdoc.tools.grep import (
     _normalize_glob_for_grep,
     _parse_content_line,
     _parse_count_line,

@@ -4,7 +4,7 @@ import json
 import os
 from unittest.mock import MagicMock
 
-from ripperdoc.tools.notebook_edit_tool import NotebookEditInput, NotebookEditTool
+from ripperdoc.tools.notebook_edit import NotebookEditInput, NotebookEditTool
 
 
 class TestNotebookEditValidation:

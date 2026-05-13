@@ -24,13 +24,13 @@ from ripperdoc.core.hooks.events import (
     SessionStartInput,
 )
 from ripperdoc.core.hooks.state import suspend_hooks
-from ripperdoc.core.system_prompt import build_environment_prompt
-from ripperdoc.tools.bash_tool import BashTool
-from ripperdoc.tools.file_read_tool import FileReadTool
-from ripperdoc.tools.glob_tool import GlobTool
-from ripperdoc.tools.grep_tool import GrepTool
-from ripperdoc.tools.ls_tool import LSTool
-from ripperdoc.tools.lsp_tool import LspTool
+from ripperdoc.system_prompt import build_environment_prompt
+from ripperdoc.tools.bash import BashTool
+from ripperdoc.tools.file_read import FileReadTool
+from ripperdoc.tools.glob import GlobTool
+from ripperdoc.tools.grep import GrepTool
+from ripperdoc.tools.ls import LSTool
+from ripperdoc.tools.lsp import LspTool
 from ripperdoc.utils.messaging.messages import AssistantMessage, create_user_message
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.filesystem.temp_paths import ripperdoc_mkstemp
@@ -60,8 +60,8 @@ def _extract_message_text(message: AssistantMessage) -> str:
 def _build_hook_agent_tools() -> list[Any]:
     """Create a constrained toolset for agent-based hooks."""
     # Lazily import task tools to avoid import cycles during hooks bootstrap.
-    from ripperdoc.tools.task_output_tool import TaskOutputTool
-    from ripperdoc.tools.task_stop_tool import TaskStopTool
+    from ripperdoc.tools.task_output import TaskOutputTool
+    from ripperdoc.tools.task_stop import TaskStopTool
 
     return [
         FileReadTool(),

@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 from ripperdoc.core.tool import ToolUseContext
-from ripperdoc.tools.todo_tool import (
+from ripperdoc.tools.todo import (
     TodoInputItem,
     TodoReadTool,
     TodoReadToolInput,

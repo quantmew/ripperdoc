@@ -7,7 +7,7 @@ from ripperdoc.cli.ui.rich_ui.commands import (
     ForkedCustomCommandRequest,
     handle_slash_command,
 )
-from ripperdoc.core.custom_commands import CommandExecutionContext
+from ripperdoc.commands.custom_commands import CommandExecutionContext
 
 
 class _DummyUI:

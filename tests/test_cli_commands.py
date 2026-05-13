@@ -5,16 +5,16 @@ from uuid import UUID
 
 from rich.console import Console
 
-from ripperdoc.cli.commands.add_dir_cmd import command as add_dir_command
-from ripperdoc.cli.commands.clear_cmd import command as clear_command
-from ripperdoc.cli.commands import get_slash_command
-from ripperdoc.cli.commands.memory_cmd import command as memory_command
-from ripperdoc.cli.commands.mcp_cmd import command as mcp_command
-from ripperdoc.cli.commands.plugins_cmd import command as plugins_command
-from ripperdoc.cli.commands.rename_cmd import command as rename_command
-from ripperdoc.cli.commands.tasks_cmd import command as tasks_command
-from ripperdoc.cli.commands.todos_cmd import command as todos_command
-from ripperdoc.core.plugins import clear_runtime_plugin_dirs
+from ripperdoc.commands.add_dir import command as add_dir_command
+from ripperdoc.commands.clear import command as clear_command
+from ripperdoc.commands import get_slash_command
+from ripperdoc.commands.memory import command as memory_command
+from ripperdoc.commands.mcp import command as mcp_command
+from ripperdoc.commands.plugins import command as plugins_command
+from ripperdoc.commands.rename import command as rename_command
+from ripperdoc.commands.tasks import command as tasks_command
+from ripperdoc.commands.todos import command as todos_command
+from ripperdoc.services.plugins import clear_runtime_plugin_dirs
 from ripperdoc.tools import background_shell
 from ripperdoc.utils.mcp import McpServerInfo
 from ripperdoc.utils.messaging.messages import create_user_message
@@ -111,7 +111,7 @@ class _RenameUI(_DummyUI):
 
 def test_clear_command_switches_session_and_resets_messages(tmp_path, monkeypatch):
     fixed_uuid = UUID("11111111-2222-3333-4444-555555555555")
-    monkeypatch.setattr("ripperdoc.cli.commands.clear_cmd.uuid4", lambda: fixed_uuid)
+    monkeypatch.setattr("ripperdoc.commands.clear.uuid4", lambda: fixed_uuid)
 
     ui = _ClearUI(Console(record=True, width=120), tmp_path)
     clear_command.handler(ui, "")
@@ -326,7 +326,7 @@ def test_memory_command_existing_file_editor_not_opened(tmp_path, monkeypatch):
 
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: False
+        "ripperdoc.commands.memory._open_in_editor", lambda *_args, **_kwargs: False
     )
     memory_command.handler(ui, "project")
 
@@ -341,7 +341,7 @@ def test_memory_command_existing_file_editor_opened(tmp_path, monkeypatch):
 
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: True
+        "ripperdoc.commands.memory._open_in_editor", lambda *_args, **_kwargs: True
     )
     memory_command.handler(ui, "project")
 
@@ -353,7 +353,7 @@ def test_memory_command_created_file_editor_opened(tmp_path, monkeypatch):
     """Memory command should report created+opened state for new files."""
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.memory_cmd._open_in_editor", lambda *_args, **_kwargs: True
+        "ripperdoc.commands.memory._open_in_editor", lambda *_args, **_kwargs: True
     )
     memory_command.handler(ui, "project")
 
@@ -437,9 +437,9 @@ def test_mcp_logs_lists_targets(tmp_path, monkeypatch):
     def _fake_log_path(_project_path, server_name):
         return log_a if server_name == "context7" else log_b
 
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_mode", lambda: "log")
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_log_path", _fake_log_path)
+    monkeypatch.setattr("ripperdoc.commands.mcp.load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr("ripperdoc.commands.mcp.get_mcp_stderr_mode", lambda: "log")
+    monkeypatch.setattr("ripperdoc.commands.mcp.get_mcp_stderr_log_path", _fake_log_path)
 
     ui = _DummyUI(Console(record=True, width=160), tmp_path)
     mcp_command.handler(ui, "logs")
@@ -491,7 +491,7 @@ def test_mcp_tui_falls_back_to_plain_overview_without_tty(tmp_path, monkeypatch)
         return [McpServerInfo(name="context7", status="connected")]
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr("ripperdoc.commands.mcp.load_mcp_servers_async", _fake_load)
 
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
     mcp_command.handler(ui, "tui")
@@ -506,7 +506,7 @@ def test_mcp_list_subcommand_shows_plain_overview(tmp_path, monkeypatch):
     async def _fake_load(_project_path):
         return [McpServerInfo(name="context7", status="connected", command="npx")]
 
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr("ripperdoc.commands.mcp.load_mcp_servers_async", _fake_load)
 
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
     mcp_command.handler(ui, "list")
@@ -519,7 +519,7 @@ def test_mcp_list_subcommand_shows_plain_overview(tmp_path, monkeypatch):
 
 def test_mcp_list_subcommand_uses_sync_loader_without_ui_runner(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.mcp_cmd.load_mcp_servers",
+        "ripperdoc.commands.mcp.load_mcp_servers",
         lambda _project_path: [McpServerInfo(name="context7", status="connected", command="npx")],
     )
 
@@ -540,8 +540,8 @@ def test_mcp_logs_show_last_lines_for_server(tmp_path, monkeypatch):
     log_path = tmp_path / "context7.log"
     log_path.write_text("line-1\nline-2\nline-3\n", encoding="utf-8")
 
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_log_path", lambda *_: log_path)
+    monkeypatch.setattr("ripperdoc.commands.mcp.load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr("ripperdoc.commands.mcp.get_mcp_stderr_log_path", lambda *_: log_path)
 
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
     mcp_command.handler(ui, "logs context7 --lines 2")
@@ -559,10 +559,10 @@ def test_mcp_logs_reports_unknown_server(tmp_path, monkeypatch):
     async def _fake_load(_project_path):
         return [McpServerInfo(name="context7", status="connected")]
 
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.load_mcp_servers_async", _fake_load)
-    monkeypatch.setattr("ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_mode", lambda: "log")
+    monkeypatch.setattr("ripperdoc.commands.mcp.load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr("ripperdoc.commands.mcp.get_mcp_stderr_mode", lambda: "log")
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.mcp_cmd.get_mcp_stderr_log_path",
+        "ripperdoc.commands.mcp.get_mcp_stderr_log_path",
         lambda project_path, server_name: project_path / f"{server_name}.log",
     )
 

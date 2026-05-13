@@ -25,7 +25,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from ripperdoc.core.custom_commands import (
+from ripperdoc.commands.custom_commands import (
     CommandLocation,
     CustomCommandDefinition,
     command_name_to_path,

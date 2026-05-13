@@ -12,7 +12,7 @@ from rich.console import Console
 
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
-from ripperdoc.core.session_agents import (
+from ripperdoc.services.session_agents import (
     merge_session_agents,
     normalize_agent_name,
     parse_session_agents,

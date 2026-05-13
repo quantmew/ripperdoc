@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from ripperdoc.core.query import ToolRegistry
 from ripperdoc.core.tool import ToolResult, ToolUseContext
-from ripperdoc.tools.memory_tool import MemoryTool, MemoryToolInput, MemoryToolOutput
+from ripperdoc.tools.memory import MemoryTool, MemoryToolInput, MemoryToolOutput
 
 
 async def _run_memory_tool(tool: MemoryTool, payload: dict) -> MemoryToolOutput:

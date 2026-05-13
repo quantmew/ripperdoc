@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from ripperdoc import __version__
 from ripperdoc.core.agents import load_agent_definitions
-from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
+from ripperdoc.commands import list_custom_commands, list_slash_commands
 from ripperdoc.core import tool_defaults as tool_defaults_module
 from ripperdoc.core.config import (
     ProtocolType,
@@ -23,15 +23,15 @@ from ripperdoc.core.config import (
     get_project_config,
     get_project_local_config,
 )
-from ripperdoc.core.oauth import get_oauth_token
-from ripperdoc.core.session_agents import (
+from ripperdoc.services.oauth import get_oauth_token
+from ripperdoc.services.session_agents import (
     normalize_agent_name,
     parse_session_agents,
     resolve_session_agent_prompt,
 )
-from ripperdoc.core.output_styles import load_all_output_styles, resolve_output_style
-from ripperdoc.core.plugins import discover_plugins, set_runtime_plugin_dirs
-from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
+from ripperdoc.services.output_styles import load_all_output_styles, resolve_output_style
+from ripperdoc.services.plugins import discover_plugins, set_runtime_plugin_dirs
+from ripperdoc.system_prompt_overrides import select_base_system_prompt
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
@@ -46,7 +46,7 @@ from ripperdoc.protocol.models import (
     model_to_dict,
 )
 from .error_codes import resolve_protocol_request_error_code
-from ripperdoc.tools.dynamic_mcp_tool import (
+from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
 )
@@ -633,7 +633,7 @@ class StdioSessionMixin:
             mcp_instructions = format_mcp_instructions(servers)
 
             # Build system prompt components
-            from ripperdoc.core.skills import (
+            from ripperdoc.services.skills import (
                 build_skill_summary,
                 filter_enabled_skills,
                 load_all_skills,

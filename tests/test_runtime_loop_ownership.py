@@ -2,15 +2,15 @@ import asyncio
 
 import pytest
 
-from ripperdoc.tools import dynamic_mcp_tool
+from ripperdoc.tools.mcp import dynamic_mcp
 from ripperdoc.utils import lsp, mcp
 
 
 def test_sync_dynamic_mcp_loader_never_boots_runtime(monkeypatch):
-    monkeypatch.setattr(dynamic_mcp_tool, "get_existing_mcp_runtime", lambda **_: None)
-    monkeypatch.setattr(dynamic_mcp_tool.asyncio, "run", lambda _coro: (_ for _ in ()).throw(AssertionError("asyncio.run should not be used")))
+    monkeypatch.setattr(dynamic_mcp, "get_existing_mcp_runtime", lambda **_: None)
+    monkeypatch.setattr(dynamic_mcp.asyncio, "run", lambda _coro: (_ for _ in ()).throw(AssertionError("asyncio.run should not be used")))
 
-    assert dynamic_mcp_tool.load_dynamic_mcp_tools_sync() == []
+    assert dynamic_mcp.load_dynamic_mcp_tools_sync() == []
 
 
 def test_sync_mcp_server_loader_shuts_down_runtime(monkeypatch):

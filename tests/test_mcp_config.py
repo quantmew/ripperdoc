@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ripperdoc.utils import mcp
-from ripperdoc.core.managed_settings import reset_managed_settings_cache
+from ripperdoc.services.managed_settings import reset_managed_settings_cache
 
 
 @pytest.mark.parametrize(

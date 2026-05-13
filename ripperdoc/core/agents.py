@@ -10,27 +10,27 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import yaml
 
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
-from ripperdoc.core.plugins import discover_plugins
+from ripperdoc.services.plugins import discover_plugins
 from ripperdoc.utils.filesystem.config_paths import project_config_dir, user_config_dir
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.log import get_logger
-from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
-from ripperdoc.tools.bash_tool import BashTool
-from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
-from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool
-from ripperdoc.tools.file_edit_tool import FileEditTool
-from ripperdoc.tools.file_read_tool import FileReadTool
-from ripperdoc.tools.file_write_tool import FileWriteTool
-from ripperdoc.tools.glob_tool import GlobTool
-from ripperdoc.tools.grep_tool import GrepTool
-from ripperdoc.tools.ls_tool import LSTool
-from ripperdoc.tools.lsp_tool import LspTool
-from ripperdoc.tools.multi_edit_tool import MultiEditTool
-from ripperdoc.tools.notebook_edit_tool import NotebookEditTool
-from ripperdoc.tools.skill_tool import SkillTool
-from ripperdoc.tools.todo_tool import TodoReadTool, TodoWriteTool
-from ripperdoc.tools.tool_search_tool import ToolSearchTool
-from ripperdoc.tools.mcp_tools import (
+from ripperdoc.tools.ask_user_question import AskUserQuestionTool
+from ripperdoc.tools.bash import BashTool
+from ripperdoc.tools.enter_plan_mode import EnterPlanModeTool
+from ripperdoc.tools.exit_plan_mode import ExitPlanModeTool
+from ripperdoc.tools.file_edit import FileEditTool
+from ripperdoc.tools.file_read import FileReadTool
+from ripperdoc.tools.file_write import FileWriteTool
+from ripperdoc.tools.glob import GlobTool
+from ripperdoc.tools.grep import GrepTool
+from ripperdoc.tools.ls import LSTool
+from ripperdoc.tools.lsp import LspTool
+from ripperdoc.tools.multi_edit import MultiEditTool
+from ripperdoc.tools.notebook_edit import NotebookEditTool
+from ripperdoc.tools.skill import SkillTool
+from ripperdoc.tools.todo import TodoReadTool, TodoWriteTool
+from ripperdoc.tools.tool_search import ToolSearchTool
+from ripperdoc.tools.mcp import (
     ListMcpResourcesTool,
     ListMcpServersTool,
     ReadMcpResourceTool,

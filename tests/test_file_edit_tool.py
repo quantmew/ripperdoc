@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ripperdoc.tools.file_edit_tool import (
+from ripperdoc.tools.file_edit import (
     _file_lock,
     FileEditTool,
     FileEditToolInput,
@@ -128,7 +128,7 @@ class TestFileLock:
 
     def test_lock_on_windows_no_fcntl(self, monkeypatch):
         """On Windows (no fcntl), should skip locking gracefully."""
-        monkeypatch.setattr("ripperdoc.tools.file_edit_tool.HAS_FCNTL", False)
+        monkeypatch.setattr("ripperdoc.tools.file_edit.HAS_FCNTL", False)
 
         test_file = tempfile.NamedTemporaryFile(delete=False)
         test_file.write(b"content")

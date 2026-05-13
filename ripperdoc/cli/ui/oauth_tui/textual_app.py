@@ -24,7 +24,7 @@ from textual.widgets import (
     Static,
 )
 
-from ripperdoc.core.oauth import (
+from ripperdoc.services.oauth import (
     OAuthToken,
     OAuthTokenType,
     add_oauth_token,
@@ -32,18 +32,18 @@ from ripperdoc.core.oauth import (
     get_oauth_tokens_path,
     list_oauth_tokens,
 )
-from ripperdoc.core.oauth.codex import (
+from ripperdoc.services.oauth.codex import (
     CodexOAuthError,
     complete_codex_browser_auth_from_callback_url,
     login_codex_with_device_code,
     start_codex_browser_auth,
 )
-from ripperdoc.core.oauth.copilot import (
+from ripperdoc.services.oauth.copilot import (
     COPILOT_DEFAULT_DOMAIN,
     CopilotOAuthError,
     login_copilot_with_device_code,
 )
-from ripperdoc.core.oauth.gitlab import (
+from ripperdoc.services.oauth.gitlab import (
     GITLAB_DEFAULT_INSTANCE_URL,
     GitLabOAuthError,
     complete_gitlab_browser_auth_from_callback_url,

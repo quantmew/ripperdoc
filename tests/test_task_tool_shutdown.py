@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ripperdoc.core.message_utils import tool_result_message
-from ripperdoc.tools.task_tool import TaskTool
+from ripperdoc.message_utils import tool_result_message
+from ripperdoc.tools.task import TaskTool
 from ripperdoc.utils.messaging.messages import create_assistant_message
 
 

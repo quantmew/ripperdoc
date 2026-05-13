@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 
 from ripperdoc.core.agents import AgentLocation, load_agent_definitions
-from ripperdoc.core.custom_commands import CommandLocation, load_all_custom_commands
+from ripperdoc.commands.custom_commands import CommandLocation, load_all_custom_commands
 from ripperdoc.core.hooks.config import get_merged_hooks_config
 from ripperdoc.core.hooks.events import HookEvent
-from ripperdoc.core.plugins import (
+from ripperdoc.services.plugins import (
     PluginSettingsScope,
     add_enabled_plugin_for_scope,
     clear_runtime_plugin_dirs,
@@ -18,7 +18,7 @@ from ripperdoc.core.plugins import (
     remove_enabled_plugin_for_scope,
     set_runtime_plugin_dirs,
 )
-from ripperdoc.core.skills import SkillLocation, load_all_skills
+from ripperdoc.services.skills import SkillLocation, load_all_skills
 from ripperdoc.utils.lsp import load_lsp_server_configs
 from ripperdoc.utils.mcp import _load_server_configs
 
@@ -195,7 +195,7 @@ def test_plugin_settings_add_and_remove(tmp_path: Path, monkeypatch) -> None:
     )
     assert entries == ["./plugins/ops-plugin"]
 
-    monkeypatch.setattr("ripperdoc.core.plugins.Path.home", lambda: home_dir)
+    monkeypatch.setattr("ripperdoc.services.plugins.Path.home", lambda: home_dir)
     discovered = discover_plugins(project_path=project_dir, home=home_dir).plugins
     assert any(plugin.name == "ops" for plugin in discovered)
 

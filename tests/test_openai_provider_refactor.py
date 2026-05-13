@@ -9,33 +9,33 @@ import httpx
 import openai
 import pytest
 
-from ripperdoc.core.providers.base import ProviderResponse, call_with_timeout_and_retries
+from ripperdoc.services.providers.base import ProviderResponse, call_with_timeout_and_retries
 from ripperdoc.core.config import ModelProfile, ProtocolType
-from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
-from ripperdoc.core.providers.errors import ProviderMappedError
-from ripperdoc.core.providers.openai import (
+from ripperdoc.services.oauth import OAuthToken, OAuthTokenType
+from ripperdoc.services.providers.errors import ProviderMappedError
+from ripperdoc.services.providers.openai import (
     OpenAIClient,
     _build_thinking_kwargs,
     _run_with_provider_error_mapping,
 )
-from ripperdoc.core.providers.openai_non_oauth_strategies import (
+from ripperdoc.services.providers.openai_non_oauth_strategies import (
     _StreamAccumulator,
     _build_non_stream_empty_or_error_response,
     _build_stream_content_blocks,
     _consume_stream_chunk,
 )
-from ripperdoc.core.providers.openai_oauth_codex import (
+from ripperdoc.services.providers.openai_oauth_codex import (
     _build_codex_oauth_tools,
     _build_codex_responses_input,
     _extract_content_blocks_from_responses_payload,
     _extract_from_codex_sse_events,
     _parse_sse_json_events,
 )
-from ripperdoc.core.providers.openai_responses import (
+from ripperdoc.services.providers.openai_responses import (
     build_input_from_normalized_messages,
     extract_content_blocks_from_output,
 )
-from ripperdoc.core.providers.openai_non_oauth_strategies import build_non_oauth_openai_strategy
+from ripperdoc.services.providers.openai_non_oauth_strategies import build_non_oauth_openai_strategy
 
 
 def test_build_thinking_kwargs_respects_explicit_none_effort() -> None:
@@ -152,7 +152,7 @@ async def test_timeout_connection_error_reuses_shared_retry_logic(monkeypatch) -
     async def _no_sleep(_delay: float) -> None:
         return None
 
-    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+    monkeypatch.setattr("ripperdoc.services.providers.base.asyncio.sleep", _no_sleep)
 
     async def flaky_request() -> str:
         attempts["count"] += 1
@@ -180,7 +180,7 @@ async def test_non_timeout_connection_error_does_not_retry(monkeypatch) -> None:
     async def _no_sleep(_delay: float) -> None:
         return None
 
-    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+    monkeypatch.setattr("ripperdoc.services.providers.base.asyncio.sleep", _no_sleep)
 
     async def bad_request() -> str:
         attempts["count"] += 1
@@ -222,7 +222,7 @@ async def test_timeout_exhaustion_surfaces_as_provider_timeout(monkeypatch) -> N
     async def _no_sleep(_delay: float) -> None:
         return None
 
-    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+    monkeypatch.setattr("ripperdoc.services.providers.base.asyncio.sleep", _no_sleep)
 
     async def always_timeout() -> str:
         attempts["count"] += 1
@@ -249,7 +249,7 @@ async def test_remote_protocol_error_is_mapped_and_retried(monkeypatch) -> None:
     async def _no_sleep(_delay: float) -> None:
         return None
 
-    monkeypatch.setattr("ripperdoc.core.providers.base.asyncio.sleep", _no_sleep)
+    monkeypatch.setattr("ripperdoc.services.providers.base.asyncio.sleep", _no_sleep)
 
     async def flaky_request() -> str:
         attempts["count"] += 1
@@ -272,7 +272,7 @@ async def test_remote_protocol_error_is_mapped_and_retried(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_oauth_profile_missing_token_returns_auth_error(monkeypatch) -> None:
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_oauth_codex.get_oauth_token",
+        "ripperdoc.services.providers.openai_oauth_codex.get_oauth_token",
         lambda _name: None,
     )
 
@@ -342,7 +342,7 @@ async def test_non_oauth_mode_responses_uses_responses_api(monkeypatch) -> None:
             raise AssertionError("chat.completions.create should not be used for mode=responses")
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_non_oauth_strategies.AsyncOpenAI",
+        "ripperdoc.services.providers.openai_non_oauth_strategies.AsyncOpenAI",
         _FakeAsyncOpenAI,
     )
 
@@ -419,7 +419,7 @@ async def test_non_oauth_mode_responses_assistant_history_uses_output_text_and_p
             raise AssertionError("chat.completions.create should not be used for mode=responses")
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_non_oauth_strategies.AsyncOpenAI",
+        "ripperdoc.services.providers.openai_non_oauth_strategies.AsyncOpenAI",
         _FakeAsyncOpenAI,
     )
 
@@ -485,7 +485,7 @@ async def test_non_oauth_mode_responses_error_payload_returns_error(monkeypatch)
             raise AssertionError("chat.completions.create should not be used for mode=responses")
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_non_oauth_strategies.AsyncOpenAI",
+        "ripperdoc.services.providers.openai_non_oauth_strategies.AsyncOpenAI",
         _FakeAsyncOpenAI,
     )
 
@@ -551,7 +551,7 @@ async def test_non_oauth_mode_chat_uses_chat_completions_api(monkeypatch) -> Non
             )
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_non_oauth_strategies.AsyncOpenAI",
+        "ripperdoc.services.providers.openai_non_oauth_strategies.AsyncOpenAI",
         _FakeAsyncOpenAI,
     )
 
@@ -822,11 +822,11 @@ async def test_oauth_codex_payload_sets_store_false(monkeypatch) -> None:
             )
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_oauth_codex.httpx.AsyncClient",
+        "ripperdoc.services.providers.openai_oauth_codex.httpx.AsyncClient",
         _FakeAsyncClient,
     )
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_oauth_codex.get_oauth_token",
+        "ripperdoc.services.providers.openai_oauth_codex.get_oauth_token",
         lambda _name: OAuthToken(
             type=OAuthTokenType.CODEX,
             access_token="abcd1234efgh",
@@ -908,11 +908,11 @@ async def test_oauth_codex_unsupported_parameter_is_removed_and_retried(monkeypa
             )
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_oauth_codex.httpx.AsyncClient",
+        "ripperdoc.services.providers.openai_oauth_codex.httpx.AsyncClient",
         _FakeAsyncClient,
     )
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai_oauth_codex.get_oauth_token",
+        "ripperdoc.services.providers.openai_oauth_codex.get_oauth_token",
         lambda _name: OAuthToken(
             type=OAuthTokenType.CODEX,
             access_token="abcd1234efgh",
@@ -966,7 +966,7 @@ async def test_oauth_copilot_dispatch_uses_openai_strategy(monkeypatch) -> None:
             )
 
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai.get_oauth_token",
+        "ripperdoc.services.providers.openai.get_oauth_token",
         lambda _name: OAuthToken(
             type=OAuthTokenType.COPILOT,
             access_token="copilot_token",
@@ -976,7 +976,7 @@ async def test_oauth_copilot_dispatch_uses_openai_strategy(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai.build_non_oauth_openai_strategy",
+        "ripperdoc.services.providers.openai.build_non_oauth_openai_strategy",
         lambda **kwargs: _FakeStrategy(),  # noqa: ARG005
     )
 
@@ -1015,7 +1015,7 @@ async def test_oauth_gitlab_requires_gateway_base_url(monkeypatch) -> None:
     monkeypatch.delenv("GITLAB_AI_GATEWAY_URL", raising=False)
     monkeypatch.delenv("RIPPERDOC_GITLAB_API_BASE", raising=False)
     monkeypatch.setattr(
-        "ripperdoc.core.providers.openai.get_oauth_token",
+        "ripperdoc.services.providers.openai.get_oauth_token",
         lambda _name: OAuthToken(
             type=OAuthTokenType.GITLAB,
             access_token="gitlab_token",

@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 from rich.console import Console
 
-from ripperdoc.cli.commands import models_cmd
+import ripperdoc.commands.models as models_cmd
 from ripperdoc.cli.ui.models_tui.textual_app import (
     ModelFormScreen,
     ModelsApp,
     _next_copied_profile_name,
 )
 from ripperdoc.core.config import ModelProfile, ProtocolType
-from ripperdoc.core.oauth import OAuthToken, OAuthTokenType, oauth_models_for_type
+from ripperdoc.services.oauth import OAuthToken, OAuthTokenType, oauth_models_for_type
 
 
 class _FakeConsole:

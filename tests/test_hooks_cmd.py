@@ -5,7 +5,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ripperdoc.cli.commands.hooks_cmd import command as hooks_command
+from ripperdoc.commands.hooks import command as hooks_command
 
 
 class _DummyUI:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import httpx
 
-from ripperdoc.core.oauth import OAuthTokenType
-from ripperdoc.core.oauth.copilot import login_copilot_with_device_code
+from ripperdoc.services.oauth import OAuthTokenType
+from ripperdoc.services.oauth.copilot import login_copilot_with_device_code
 
 
 def test_login_copilot_with_device_code_success(monkeypatch) -> None:
@@ -46,10 +46,10 @@ def test_login_copilot_with_device_code_success(monkeypatch) -> None:
                 json={"access_token": "copilot_token_123"},
             )
 
-    monkeypatch.setattr("ripperdoc.core.oauth.copilot.httpx.Client", _FakeClient)
-    monkeypatch.setattr("ripperdoc.core.oauth.copilot.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("ripperdoc.services.oauth.copilot.httpx.Client", _FakeClient)
+    monkeypatch.setattr("ripperdoc.services.oauth.copilot.time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        "ripperdoc.core.oauth.copilot.webbrowser.open",
+        "ripperdoc.services.oauth.copilot.webbrowser.open",
         lambda _url, new=2: True,  # noqa: ARG005
     )
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import List, Optional
 from pathlib import Path
 
-from ripperdoc.cli.commands import slash_command_completions
+from ripperdoc.commands import slash_command_completions
 
 from ripperdoc.cli.ui.rich_ui.commands import suggest_slash_commands
 from ripperdoc.cli.ui.rich_ui.session import RichUI, check_onboarding_rich, main_rich

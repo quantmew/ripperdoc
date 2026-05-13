@@ -6,7 +6,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ripperdoc.cli.commands.output_style_cmd import command as output_style_command
+from ripperdoc.commands.output_style import command as output_style_command
 from ripperdoc.core.config import get_project_local_config
 
 
@@ -31,7 +31,7 @@ def test_output_style_command_direct_switch(tmp_path: Path) -> None:
 
 def test_output_style_command_menu_switch(tmp_path: Path, monkeypatch) -> None:
     ui = _DummyUI(Console(record=True, width=120), tmp_path)
-    monkeypatch.setattr("ripperdoc.cli.commands.output_style_cmd.prompt_choice", lambda **_kwargs: "learning")
+    monkeypatch.setattr("ripperdoc.commands.output_style.prompt_choice", lambda **_kwargs: "learning")
 
     output_style_command.handler(ui, "")
 
