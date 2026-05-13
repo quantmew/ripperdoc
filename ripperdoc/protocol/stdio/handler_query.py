@@ -17,6 +17,7 @@ from ripperdoc.core.query import query
 from ripperdoc.message_utils import estimate_cost_usd, resolve_model_profile
 from ripperdoc.protocol.models import (
     JsonRpcErrorCodes,
+    SDKResultMessage,
     SamplingRequest,
     SamplingResult,
     UsageInfo,
@@ -426,20 +427,20 @@ class StdioQueryMixin:
         result_subtype = "error_during_execution" if state.is_error else "success"
         session_id = self._session_id or str(uuid.uuid4())
 
-        await self._write_message_stream(
-            {
-                "type": "result",
-                "subtype": result_subtype,
-                "duration_ms": state.elapsed_ms(),
-                "duration_api_ms": state.elapsed_ms(),
-                "is_error": state.is_error,
-                "result": result_text,
-                "num_turns": state.num_turns,
-                "session_id": session_id,
-                "stop_reason": state.stop_reason,
-                "total_cost_usd": total_cost_usd,
-            }
+        result_message = SDKResultMessage(
+            subtype=result_subtype,
+            duration_ms=state.elapsed_ms(),
+            duration_api_ms=state.elapsed_ms(),
+            is_error=state.is_error,
+            result=result_text,
+            num_turns=state.num_turns,
+            session_id=session_id,
+            stop_reason=state.stop_reason,
+            total_cost_usd=total_cost_usd,
+            usage=usage,
+            uuid=str(uuid.uuid4()),
         )
+        await self._write_message_stream(model_to_dict(result_message))
         await self._write_control_response(request_id, response=model_to_dict(result))
         state.result_sent = True
 

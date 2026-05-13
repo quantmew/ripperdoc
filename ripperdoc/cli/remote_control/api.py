@@ -22,6 +22,7 @@ from .constants import (
 )
 from .errors import BridgeFatalError
 from .models import RegisteredEnvironment, RemoteControlConfig
+from .trusted_device import get_trusted_device_token
 from .utils import validate_identifier
 
 logger = get_logger()
@@ -65,6 +66,9 @@ class RemoteControlApiClient:
         token = bearer_token or self.access_token
         if token:
             headers["Authorization"] = f"Bearer {token}"
+        trusted_token = get_trusted_device_token()
+        if trusted_token:
+            headers["X-Trusted-Device-Token"] = trusted_token
         return headers
 
     def _request_json(
@@ -402,3 +406,87 @@ class RemoteControlApiClient:
             bearer_token=access_token.strip(),
         )
         self._raise_for_status(status, data, "SendPermissionResponseEvent")
+
+    def heartbeat_work(
+        self,
+        environment_id: str,
+        work_id: str,
+        session_token: str,
+    ) -> dict[str, Any]:
+        """Send a lightweight heartbeat for an active work item, extending its lease."""
+        safe_env = quote(validate_identifier(environment_id, "environmentId"), safe="")
+        safe_work = quote(validate_identifier(work_id, "workId"), safe="")
+        status, data = self._request_json(
+            "POST",
+            f"/v1/environments/{safe_env}/work/{safe_work}/heartbeat",
+            payload={},
+            timeout_sec=10.0,
+            bearer_token=session_token.strip(),
+        )
+        self._raise_for_status(status, data, "Heartbeat")
+        return data if isinstance(data, dict) else {}
+
+    def reconnect_session(
+        self,
+        environment_id: str,
+        session_id: str,
+    ) -> None:
+        """Force-stop stale worker instances and re-queue a session on an environment."""
+        safe_env = quote(validate_identifier(environment_id, "environmentId"), safe="")
+        safe_session = quote(validate_identifier(session_id, "sessionId"), safe="")
+        status, data = self._request_json_with_refresh(
+            "POST",
+            f"/v1/environments/{safe_env}/bridge/reconnect",
+            payload={"session_id": session_id},
+            timeout_sec=10.0,
+            operation_name="ReconnectSession",
+        )
+        self._raise_for_status(status, data, "ReconnectSession")
+
+    def create_code_session(
+        self,
+        base_url: str,
+        access_token: str,
+        title: str,
+        timeout_sec: float = 10.0,
+        tags: list[str] | None = None,
+    ) -> str | None:
+        """Create a session via the v2 /v1/code/sessions endpoint (no env_id)."""
+        payload: dict[str, Any] = {"title": title, "events": [], "source": "remote-control"}
+        if tags:
+            payload["tags"] = tags
+        status, data = self._request_json(
+            "POST",
+            f"{base_url}/v1/code/sessions",
+            payload=payload,
+            timeout_sec=timeout_sec,
+            bearer_token=access_token.strip(),
+        )
+        if status not in {200, 201}:
+            return None
+        if not isinstance(data, dict):
+            return None
+        session_id = data.get("id")
+        if isinstance(session_id, str) and session_id.strip():
+            return session_id.strip()
+        return None
+
+    def fetch_remote_credentials(
+        self,
+        session_id: str,
+        base_url: str,
+        access_token: str,
+        timeout_sec: float = 10.0,
+    ) -> dict[str, Any] | None:
+        """Fetch bridge credentials via POST /v1/code/sessions/{id}/bridge."""
+        safe_session = quote(validate_identifier(session_id, "sessionId"), safe="")
+        status, data = self._request_json(
+            "POST",
+            f"{base_url}/v1/code/sessions/{safe_session}/bridge",
+            payload={},
+            timeout_sec=timeout_sec,
+            bearer_token=access_token.strip(),
+        )
+        if status not in {200, 201}:
+            return None
+        return data if isinstance(data, dict) else None

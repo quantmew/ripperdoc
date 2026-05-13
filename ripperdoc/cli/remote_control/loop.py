@@ -34,6 +34,54 @@ from .utils import (
     jitter_delay,
 )
 
+
+class _HeartbeatWorker:
+    """Periodic heartbeat sender for an active work item to extend its lease."""
+
+    def __init__(
+        self,
+        api_client: RemoteControlApiClient,
+        environment_id: str,
+        work_id: str,
+        session_token: str,
+        interval_sec: float = 20.0,
+    ) -> None:
+        self._api = api_client
+        self._env_id = environment_id
+        self._work_id = work_id
+        self._token = session_token
+        self._interval = max(5.0, interval_sec)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="ripperdoc-bridge-heartbeat")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+            self._thread = None
+
+    def update_token(self, token: str) -> None:
+        self._token = token
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                result = self._api.heartbeat_work(self._env_id, self._work_id, self._token)
+                if not result.get("lease_extended"):
+                    logger.warning("[bridge:heartbeat] Lease not extended for work=%s", self._work_id)
+            except BridgeFatalError:
+                logger.warning("[bridge:heartbeat] Fatal error, stopping heartbeat")
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[bridge:heartbeat] Heartbeat failed: %s", exc)
+
 console = Console()
 logger = get_logger()
 
@@ -60,6 +108,7 @@ class RemoteControlBridgeRunner:
         self._sessions: dict[str, ActiveSession] = {}
         self._session_bridges: dict[str, RemoteSessionBridgeManager] = {}
         self._completed_work_ids: set[str] = set()
+        self._heartbeats: dict[str, _HeartbeatWorker] = {}
         self._token_supplier = token_supplier
         self._token_manager = (
             TokenSessionManager(
@@ -293,6 +342,10 @@ class RemoteControlBridgeRunner:
 
         if self._token_manager is not None:
             self._token_manager.cancel_all()
+
+        for heartbeat in list(self._heartbeats.values()):
+            heartbeat.stop()
+        self._heartbeats.clear()
 
         for bridge in list(self._session_bridges.values()):
             bridge.disconnect()
@@ -528,14 +581,26 @@ class RemoteControlBridgeRunner:
             logger.info("[bridge] Refreshed token for active session %s", session_id)
             return
 
+        # Multi-session: check capacity
         running_session_ids = [sid for sid, s in self._sessions.items() if s.process.is_running()]
-        if running_session_ids and session_id not in running_session_ids:
-            logger.warning(
-                "[bridge] Rejecting foreign session %s while active sessions exist: %s",
-                session_id,
-                ",".join(running_session_ids),
-            )
-            return
+        if self.config.max_sessions > 1:
+            if len(running_session_ids) >= self.config.max_sessions:
+                logger.debug(
+                    "[bridge] At capacity (%d/%d), rejecting session %s",
+                    len(running_session_ids),
+                    self.config.max_sessions,
+                    session_id,
+                )
+                return
+        else:
+            # Single-session mode: reject foreign sessions
+            if running_session_ids and session_id not in running_session_ids:
+                logger.warning(
+                    "[bridge] Rejecting foreign session %s while active sessions exist: %s",
+                    session_id,
+                    ",".join(running_session_ids),
+                )
+                return
 
         ingress_host = secret.api_base_url or self.config.session_ingress_url
         sdk_url = build_session_ingress_ws_url(ingress_host, session_id)
@@ -556,6 +621,15 @@ class RemoteControlBridgeRunner:
         self._attach_session_bridge(session_id)
         if self._token_manager is not None:
             self._token_manager.schedule(session_id, secret.session_ingress_token)
+
+        # Start heartbeat for lease extension
+        if work_id and env_id:
+            heartbeat = _HeartbeatWorker(
+                self.api_client, env_id, work_id, secret.session_ingress_token
+            )
+            self._heartbeats[session_id] = heartbeat
+            heartbeat.start()
+
         logger.info("[bridge] Started session %s (work_id=%s)", session_id, work_id or "unknown")
 
     def _reap_sessions(self) -> None:
@@ -601,6 +675,10 @@ class RemoteControlBridgeRunner:
             bridge = self._session_bridges.pop(session_id, None)
             if bridge is not None:
                 bridge.disconnect()
+
+            heartbeat = self._heartbeats.pop(session_id, None)
+            if heartbeat is not None:
+                heartbeat.stop()
 
             try:
                 self.api_client.archive_session(session_id)

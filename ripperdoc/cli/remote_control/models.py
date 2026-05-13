@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import enum
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+
+class SpawnMode(enum.Enum):
+    """How the bridge chooses session working directories."""
+
+    SINGLE_SESSION = "single-session"
+    WORKTREE = "worktree"
+    SAME_DIR = "same-dir"
 
 
 @dataclass(frozen=True)
@@ -41,6 +50,8 @@ class RemoteControlConfig:
     session_timeout_sec: int
     verbose: bool
     debug_file: Path | None
+    max_sessions: int = 1
+    spawn_mode: SpawnMode = SpawnMode.SINGLE_SESSION
 
 
 class BridgeChildProcess(Protocol):
@@ -70,3 +81,4 @@ class ActiveSession:
     work_id: str
     process: BridgeChildProcess
     started_at_monotonic: float = time.monotonic()
+    work_dir: Path | None = None

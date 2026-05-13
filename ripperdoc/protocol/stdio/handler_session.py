@@ -218,6 +218,24 @@ class StdioSessionMixin:
             "plugins": list(self._plugin_payloads),
             "uuid": str(uuid.uuid4()),
             "fast_mode_state": "off",
+            "thinkingConfig": {
+                "mode": "adaptive",
+            },
+            "models": [
+                {
+                    "value": model_name,
+                    "displayName": model_name,
+                    "description": "",
+                }
+            ],
+            "account": {
+                "email": None,
+                "organization": None,
+                "subscriptionType": None,
+                "tokenSource": api_key_source if api_key_source != "none" else None,
+                "apiKeySource": api_key_source if api_key_source != "none" else None,
+                "apiProvider": None,
+            },
         }
         if self._sdk_betas:
             payload["betas"] = list(self._sdk_betas)
@@ -710,26 +728,41 @@ class StdioSessionMixin:
             output_style_result = load_all_output_styles(self._project_path)
             available_styles = [style.key for style in output_style_result.styles]
 
-            # Build models info (simplified - just current model)
-            models_payload: dict[str, Any] = {}
-            if model_profile is not None and hasattr(model_profile, "model"):
-                models_payload = {
-                    "default": getattr(model_profile, "model", model),
-                    "current": model,
-                }
+            # Build models info with full ModelInfo metadata
+            models_payload: list[dict[str, Any]] = []
+            if model_profile is not None:
+                models_payload.append({
+                    "value": model,
+                    "displayName": getattr(model_profile, "display_name", model) or model,
+                    "description": getattr(model_profile, "description", "") or "",
+                    "supportsEffort": getattr(model_profile, "supports_effort", False) or False,
+                    "supportsFastMode": getattr(model_profile, "supports_fast_mode", False) or False,
+                    "supportsAutoMode": getattr(model_profile, "supports_auto_mode", False) or False,
+                    "maxTokens": getattr(model_profile, "max_tokens", None),
+                    "maxThinkingTokens": getattr(model_profile, "max_thinking_tokens", None),
+                })
             else:
-                models_payload = {
-                    "default": model,
-                    "current": model,
-                }
+                models_payload.append({
+                    "value": model,
+                    "displayName": model,
+                    "description": "",
+                })
 
-            # Account info placeholder (ripperdoc doesn't have account management)
+            # Account info with apiProvider
+            api_provider = None
+            if model_profile is not None:
+                protocol = getattr(model_profile, "protocol", None)
+                if protocol == ProtocolType.OAUTH:
+                    api_provider = "firstParty"
+                elif hasattr(model_profile, "api_provider"):
+                    api_provider = getattr(model_profile, "api_provider", None)
             account_payload: dict[str, Any] = {
                 "email": None,
                 "organization": None,
                 "subscriptionType": None,
                 "tokenSource": None,
                 "apiKeySource": None,
+                "apiProvider": api_provider,
             }
 
             # Build enhanced response
@@ -755,6 +788,10 @@ class StdioSessionMixin:
             response_dict["models"] = models_payload
             response_dict["account"] = account_payload
             response_dict["pid"] = os.getpid()
+            response_dict["fastModeState"] = "off"
+            response_dict["thinkingConfig"] = {
+                "mode": "adaptive",
+            }
 
             await self._write_control_response(
                 request_id,

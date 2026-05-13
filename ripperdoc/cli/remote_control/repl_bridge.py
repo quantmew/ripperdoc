@@ -23,6 +23,7 @@ class RemoteSessionConfig:
     org_uuid: str
     base_api_url: str
     has_initial_prompt: bool = False
+    viewer_only: bool = False
 
 
 @dataclass
@@ -253,6 +254,8 @@ class RemoteSessionBridgeManager:
         return self.websocket.is_connected() if self.websocket is not None else False
 
     def cancel_session(self) -> None:
+        if self.config.viewer_only:
+            return
         if self.websocket is None:
             return
         self.websocket.send_control_request({"subtype": "interrupt"})

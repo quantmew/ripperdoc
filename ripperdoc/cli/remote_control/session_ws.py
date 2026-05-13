@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import json
+import os
+import ssl
 import threading
 import time
 import uuid
@@ -14,6 +16,11 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 from ripperdoc.utils.log import get_logger
 
 from .constants import (
+    BRIDGE_NO_PROXY_ENV,
+    BRIDGE_PROXY_ENV,
+    BRIDGE_TLS_CA_ENV,
+    BRIDGE_TLS_CERT_ENV,
+    BRIDGE_TLS_KEY_ENV,
     SESSIONS_WS_MAX_RECONNECTS,
     SESSIONS_WS_PERMANENT_CLOSE_CODES,
     SESSIONS_WS_PING_INTERVAL_SEC,
@@ -84,6 +91,50 @@ class SessionsWebSocketManager:
             f"{base}/v1/sessions/ws/{self.session_id}/subscribe"
             f"?organization_uuid={self.org_uuid}"
         )
+
+    def _get_ssl_context(self) -> ssl.SSLContext | None:
+        """Build an SSL context with optional mTLS certificates from env vars."""
+        cert_path = os.getenv(BRIDGE_TLS_CERT_ENV, "").strip()
+        key_path = os.getenv(BRIDGE_TLS_KEY_ENV, "").strip()
+        ca_path = os.getenv(BRIDGE_TLS_CA_ENV, "").strip()
+
+        if not cert_path and not key_path and not ca_path:
+            return None
+
+        ctx = ssl.create_default_context()
+        if ca_path:
+            ctx.load_verify_locations(ca_path)
+        if cert_path and key_path:
+            ctx.load_cert_chain(cert_path, key_path)
+        elif cert_path:
+            ctx.load_cert_chain(cert_path)
+        return ctx
+
+    def _get_proxy_url(self) -> str | None:
+        """Get proxy URL from env vars, respecting no_proxy."""
+        proxy = os.getenv(BRIDGE_PROXY_ENV, "").strip()
+        if not proxy:
+            proxy = os.getenv("HTTPS_PROXY", os.getenv("https_proxy", "")).strip()
+        if not proxy:
+            proxy = os.getenv("HTTP_PROXY", os.getenv("http_proxy", "")).strip()
+        if not proxy:
+            return None
+
+        no_proxy = os.getenv(BRIDGE_NO_PROXY_ENV, "").strip()
+        if not no_proxy:
+            no_proxy = os.getenv("NO_PROXY", os.getenv("no_proxy", "")).strip()
+
+        if no_proxy:
+            from urllib.parse import urlparse
+            ws_url = self._build_ws_url()
+            parsed = urlparse(ws_url)
+            hostname = parsed.hostname or ""
+            for np_entry in no_proxy.split(","):
+                np_entry = np_entry.strip()
+                if np_entry and (hostname == np_entry or hostname.endswith("." + np_entry)):
+                    return None
+
+        return proxy
 
     def connect(self) -> None:
         if self._state in {"connecting", "connected"}:

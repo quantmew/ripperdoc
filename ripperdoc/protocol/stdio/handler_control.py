@@ -45,6 +45,32 @@ class _UnknownControlMethodError(RuntimeError):
     """Raised when a control request method is unsupported."""
 
 
+_CONTROL_HANDLER_MAP: dict[str, str] = {
+    "initialize": "_handle_initialize",
+    "sampling/createMessage": "_handle_query",
+    "query": "_handle_query",
+    "tools/call": "_handle_tools_call",
+    "mcp_status": "_handle_mcp_status",
+    "interrupt": "_handle_interrupt",
+    "set_permission_mode": "_handle_set_permission_mode",
+    "set_model": "_handle_set_model",
+    "set_output_style": "_handle_set_output_style",
+    "set_max_thinking_tokens": "_handle_set_max_thinking_tokens",
+    "get_context_usage": "_handle_get_context_usage",
+    "reload_plugins": "_handle_reload_plugins",
+    "stop_task": "_handle_stop_task",
+    "cancel_async_message": "_handle_cancel_async_message",
+    "seed_read_state": "_handle_seed_read_state",
+    "rewind_files": "_handle_rewind_files",
+    "mcp_set_servers": "_handle_mcp_set_servers",
+    "mcp_reconnect": "_handle_mcp_reconnect",
+    "mcp_toggle": "_handle_mcp_toggle",
+    "mcp_authenticate": "_handle_mcp_authenticate",
+    "mcp_clear_auth": "_handle_mcp_clear_auth",
+    "can_use_tool": "_handle_can_use_tool",
+}
+
+
 class StdioControlMixin:
     _mcp_server_overrides: dict[str, McpServerInfo] | None
 
@@ -108,40 +134,14 @@ class StdioControlMixin:
 
         async with self._request_lock:
             try:
-                if method == "initialize":
-                    await self._handle_initialize(request, str(request_id))
-                elif method in {"sampling/createMessage", "query"}:
-                    await self._handle_query(request, str(request_id))
-                elif method == "ping":
+                if method == "ping":
                     await self._write_control_response(str(request_id), response={})
-                elif method == "tools/call":
-                    await self._handle_tools_call(request, str(request_id))
-                elif method == "mcp_status":
-                    await self._handle_mcp_status(request, str(request_id))
-                elif method == "interrupt":
-                    await self._handle_interrupt(request, str(request_id))
-                elif method == "set_permission_mode":
-                    await self._handle_set_permission_mode(request, str(request_id))
-                elif method == "set_model":
-                    await self._handle_set_model(request, str(request_id))
-                elif method == "set_output_style":
-                    await self._handle_set_output_style(request, str(request_id))
-                elif method == "rewind_files":
-                    await self._handle_rewind_files(request, str(request_id))
-                elif method == "mcp_set_servers":
-                    await self._handle_mcp_set_servers(request, str(request_id))
-                elif method == "mcp_reconnect":
-                    await self._handle_mcp_reconnect(request, str(request_id))
-                elif method == "mcp_toggle":
-                    await self._handle_mcp_toggle(request, str(request_id))
-                elif method == "mcp_authenticate":
-                    await self._handle_mcp_authenticate(request, str(request_id))
-                elif method == "mcp_clear_auth":
-                    await self._handle_mcp_clear_auth(request, str(request_id))
-                elif method == "can_use_tool":
-                    await self._handle_can_use_tool(request, str(request_id))
                 else:
-                    raise _UnknownControlMethodError(f"Unknown control method '{method}'")
+                    handler_name = _CONTROL_HANDLER_MAP.get(method)
+                    if handler_name is None:
+                        raise _UnknownControlMethodError(f"Unknown control method '{method}'")
+                    handler = getattr(self, handler_name)
+                    await handler(request, str(request_id))
             except Exception as e:
                 logger.error("Error handling control request: %s", e, exc_info=True)
                 error_code = (
@@ -1148,3 +1148,302 @@ class StdioControlMixin:
                     "message": str(e),
                 },
             )
+
+    async def _handle_set_max_thinking_tokens(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Adjust max thinking tokens during an active session."""
+        raw_value = request.get("max_thinking_tokens")
+        if raw_value is None:
+            raw_value = request.get("maxThinkingTokens")
+        if raw_value is None:
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": int(JsonRpcErrorCodes.InvalidParams),
+                    "message": "Missing max_thinking_tokens",
+                },
+            )
+            return
+        try:
+            value = max(0, int(raw_value))
+        except (TypeError, ValueError):
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": int(JsonRpcErrorCodes.InvalidParams),
+                    "message": f"Invalid max_thinking_tokens value: {raw_value!r}",
+                },
+            )
+            return
+        if self._query_context:
+            self._query_context.max_thinking_tokens = value
+        await self._write_control_response(
+            request_id,
+            response={
+                "status": "max_thinking_tokens_set",
+                "max_thinking_tokens": value,
+            },
+        )
+
+    async def _handle_get_context_usage(
+        self, _request: dict[str, Any], request_id: str
+    ) -> None:
+        """Return context window usage breakdown."""
+        if not self._query_context:
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": int(JsonRpcErrorCodes.InvalidRequest),
+                    "message": "Session not initialized",
+                },
+            )
+            return
+
+        conversation_messages = getattr(self, "_conversation_messages", [])
+        total_tokens = 0
+        message_count = len(conversation_messages)
+
+        # Estimate token usage from conversation messages
+        for msg in conversation_messages:
+            content = getattr(msg, "message", None)
+            if content is None:
+                continue
+            text = ""
+            msg_content = getattr(content, "content", None)
+            if isinstance(msg_content, str):
+                text = msg_content
+            elif isinstance(msg_content, list):
+                for block in msg_content:
+                    if isinstance(block, dict):
+                        text += block.get("text", "") + " "
+            total_tokens += max(1, len(text) // 4)
+
+        max_context = getattr(self._query_context, "max_context_tokens", None)
+        if max_context is None:
+            max_context = 200_000
+
+        free_tokens = max(0, max_context - total_tokens)
+        percent_used = round((total_tokens / max_context) * 100, 1) if max_context > 0 else 0.0
+
+        categories = [
+            {"name": "conversation", "tokens": total_tokens, "isDeferred": False},
+        ]
+
+        await self._write_control_response(
+            request_id,
+            response={
+                "maxTokens": max_context,
+                "usedTokens": total_tokens,
+                "freeTokens": free_tokens,
+                "percentUsed": percent_used,
+                "categories": categories,
+                "grid": [],
+                "autoCompactEnabled": False,
+                "messageCount": message_count,
+            },
+        )
+
+    async def _handle_reload_plugins(
+        self, _request: dict[str, Any], request_id: str
+    ) -> None:
+        """Reload plugins and return updated commands, agents, plugins, mcpServers."""
+        from ripperdoc.core.agents import load_agent_definitions
+        from ripperdoc.commands import list_custom_commands, list_slash_commands
+        from ripperdoc.services.plugins import discover_plugins
+        from ripperdoc.services.skills import filter_enabled_skills, load_all_skills
+
+        error_count = 0
+
+        try:
+            agent_result = load_agent_definitions(project_path=self._project_path)
+            agents = sorted(
+                str(getattr(a, "agent_type", "")).strip()
+                for a in getattr(agent_result, "active_agents", [])
+                if str(getattr(a, "agent_type", "")).strip()
+            )
+        except Exception:
+            agents = list(getattr(self, "_active_agent_names", []))
+            error_count += 1
+
+        try:
+            commands_payload: list[dict[str, str]] = []
+            for cmd in list_slash_commands():
+                commands_payload.append({
+                    "name": getattr(cmd, "name", ""),
+                    "description": getattr(cmd, "description", "") or "",
+                    "argumentHint": "",
+                })
+            for custom_cmd in list_custom_commands(self._project_path):
+                commands_payload.append({
+                    "name": getattr(custom_cmd, "name", ""),
+                    "description": getattr(custom_cmd, "description", "") or "",
+                    "argumentHint": "",
+                })
+        except Exception:
+            commands_payload = []
+            error_count += 1
+
+        try:
+            plugin_result = discover_plugins(project_path=self._project_path)
+            plugins = sorted(
+                [
+                    {
+                        "name": str(getattr(p, "name", "")).strip(),
+                        "path": str(getattr(p, "root", "")),
+                    }
+                    for p in getattr(plugin_result, "plugins", [])
+                    if str(getattr(p, "name", "")).strip()
+                ],
+                key=lambda item: item["name"],
+            )
+        except Exception:
+            plugins = list(getattr(self, "_plugin_payloads", []))
+            error_count += 1
+
+        try:
+            servers = await self._load_mcp_servers_with_wait()
+            mcp_servers = [
+                {
+                    "name": s.name,
+                    "status": s.status,
+                }
+                for s in servers
+            ]
+        except Exception:
+            mcp_servers = []
+            error_count += 1
+
+        self._active_agent_names = agents
+        self._plugin_payloads = plugins
+
+        await self._write_control_response(
+            request_id,
+            response={
+                "status": "reload_plugins",
+                "commands": commands_payload,
+                "agents": agents,
+                "plugins": plugins,
+                "mcpServers": mcp_servers,
+                "error_count": error_count,
+            },
+        )
+
+    async def _handle_stop_task(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Stop a running task by task_id."""
+        task_id = request.get("task_id")
+        if not task_id:
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": int(JsonRpcErrorCodes.InvalidParams),
+                    "message": "Missing task_id",
+                },
+            )
+            return
+
+        task_id_str = str(task_id)
+        task = self._request_tasks.pop(task_id_str, None)
+        cancelled = False
+        if task is not None and not task.done():
+            task.cancel()
+            cancelled = True
+
+        if not cancelled:
+            for inflight in list(self._inflight_tasks):
+                tracked_id = None
+                for rid, t in list(self._request_tasks.items()):
+                    if t is inflight:
+                        tracked_id = rid
+                        break
+                if inflight.done():
+                    continue
+                inflight.cancel()
+                cancelled = True
+                break
+
+        await self._write_control_response(
+            request_id,
+            response={
+                "status": "stop_task",
+                "task_id": task_id_str,
+                "cancelled": cancelled,
+            },
+        )
+
+    async def _handle_cancel_async_message(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Cancel a pending async message by uuid."""
+        message_uuid = request.get("message_uuid") or request.get("uuid")
+        if not message_uuid:
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": int(JsonRpcErrorCodes.InvalidParams),
+                    "message": "Missing message_uuid",
+                },
+            )
+            return
+
+        message_key = str(message_uuid)
+        future = self._pending_requests.pop(message_key, None)
+        cancelled = False
+        if future is not None and not future.done():
+            future.cancel()
+            cancelled = True
+
+        await self._write_control_response(
+            request_id,
+            response={
+                "status": "cancel_async_message",
+                "cancelled": cancelled,
+                "message_uuid": message_key,
+            },
+        )
+
+    async def _handle_seed_read_state(
+        self, request: dict[str, Any], request_id: str
+    ) -> None:
+        """Seed file read state cache with provided entries."""
+        files = request.get("files")
+        if not isinstance(files, dict):
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": int(JsonRpcErrorCodes.InvalidParams),
+                    "message": "Missing or invalid 'files' payload",
+                },
+            )
+            return
+
+        if not self._query_context:
+            await self._write_control_response(
+                request_id,
+                error={
+                    "code": int(JsonRpcErrorCodes.InvalidRequest),
+                    "message": "Session not initialized",
+                },
+            )
+            return
+
+        seeded = 0
+        file_cache = getattr(self._query_context, "file_state_cache", None)
+        if file_cache is not None:
+            for path, content in files.items():
+                if isinstance(path, str) and path.strip():
+                    try:
+                        file_cache.put(path.strip(), content)
+                        seeded += 1
+                    except Exception:
+                        pass
+
+        await self._write_control_response(
+            request_id,
+            response={
+                "status": "seed_read_state",
+                "seeded_files": seeded,
+            },
+        )

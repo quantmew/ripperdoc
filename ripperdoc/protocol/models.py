@@ -549,6 +549,429 @@ class PermissionRequestPayload(BaseModel):
 
 
 # ============================================================================
+# SDK Session Metadata Models
+# ============================================================================
+
+
+class FastModeState(str):
+    """Fast mode state values."""
+
+    OFF = "off"
+    COOLDOWN = "cooldown"
+    ON = "on"
+
+
+class ThinkingConfig(BaseModel):
+    """Thinking/reasoning configuration."""
+
+    mode: Literal["adaptive", "enabled", "disabled"] = "adaptive"
+    budget_tokens: int | None = Field(default=None, alias="budgetTokens")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class ModelInfo(BaseModel):
+    """Model metadata for SDK initialize response."""
+
+    value: str
+    display_name: str | None = Field(default=None, alias="displayName")
+    description: str | None = None
+    supports_effort: bool = Field(default=False, alias="supportsEffort")
+    supported_effort_levels: list[str] | None = Field(
+        default=None, alias="supportedEffortLevels"
+    )
+    supports_adaptive_thinking: bool = Field(
+        default=False, alias="supportsAdaptiveThinking"
+    )
+    supports_fast_mode: bool = Field(default=False, alias="supportsFastMode")
+    supports_auto_mode: bool = Field(default=False, alias="supportsAutoMode")
+    max_tokens: int | None = Field(default=None, alias="maxTokens")
+    max_thinking_tokens: int | None = Field(
+        default=None, alias="maxThinkingTokens"
+    )
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class AccountInfo(BaseModel):
+    """Account metadata for SDK initialize response."""
+
+    email: str | None = None
+    organization: str | None = None
+    subscription_type: str | None = Field(default=None, alias="subscriptionType")
+    token_source: str | None = Field(default=None, alias="tokenSource")
+    api_key_source: str | None = Field(default=None, alias="apiKeySource")
+    api_provider: str | None = Field(default=None, alias="apiProvider")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class SlashCommandInfo(BaseModel):
+    """Slash command metadata for SDK responses."""
+
+    name: str
+    description: str = ""
+    argument_hint: str = Field(default="", alias="argumentHint")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class SdkBeta(str):
+    """SDK beta capability identifiers."""
+
+    CONTEXT_1M = "context-1m-2025-08-07"
+
+
+# ============================================================================
+# Permission Update Models
+# ============================================================================
+
+
+class PermissionRuleValue(BaseModel):
+    """A single permission rule with tool name and content."""
+
+    tool_name: str = Field(alias="toolName")
+    rule_content: str | None = Field(default=None, alias="ruleContent")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class PermissionUpdateDestination(str):
+    """Where to apply a permission update."""
+
+    USER_SETTINGS = "userSettings"
+    PROJECT_SETTINGS = "projectSettings"
+    LOCAL_SETTINGS = "localSettings"
+    SESSION = "session"
+    CLI_ARG = "cliArg"
+
+
+class PermissionDecisionClassification(str):
+    """Classification of a permission decision."""
+
+    USER_TEMPORARY = "user_temporary"
+    USER_PERMANENT = "user_permanent"
+    USER_REJECT = "user_reject"
+
+
+class PermissionUpdateAddRules(BaseModel):
+    """Permission update: add rules."""
+
+    type: Literal["addRules"] = "addRules"
+    rules: list[PermissionRuleValue]
+    behavior: Literal["allow", "deny", "ask"] = "allow"
+    destination: PermissionUpdateDestination | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class PermissionUpdateReplaceRules(BaseModel):
+    """Permission update: replace all rules."""
+
+    type: Literal["replaceRules"] = "replaceRules"
+    rules: list[PermissionRuleValue]
+    behavior: Literal["allow", "deny", "ask"] = "allow"
+    destination: PermissionUpdateDestination | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class PermissionUpdateRemoveRules(BaseModel):
+    """Permission update: remove rules."""
+
+    type: Literal["removeRules"] = "removeRules"
+    rules: list[PermissionRuleValue]
+    behavior: Literal["allow", "deny", "ask"] = "allow"
+    destination: PermissionUpdateDestination | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class PermissionUpdateSetMode(BaseModel):
+    """Permission update: set permission mode."""
+
+    type: Literal["setMode"] = "setMode"
+    mode: str
+    destination: PermissionUpdateDestination | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class PermissionUpdateAddDirectories(BaseModel):
+    """Permission update: add working directories."""
+
+    type: Literal["addDirectories"] = "addDirectories"
+    directories: list[str]
+    destination: PermissionUpdateDestination | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class PermissionUpdateRemoveDirectories(BaseModel):
+    """Permission update: remove working directories."""
+
+    type: Literal["removeDirectories"] = "removeDirectories"
+    directories: list[str]
+    destination: PermissionUpdateDestination | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+PermissionUpdate = (
+    PermissionUpdateAddRules
+    | PermissionUpdateReplaceRules
+    | PermissionUpdateRemoveRules
+    | PermissionUpdateSetMode
+    | PermissionUpdateAddDirectories
+    | PermissionUpdateRemoveDirectories
+)
+
+
+# ============================================================================
+# Enhanced MCP Status Models
+# ============================================================================
+
+
+class McpToolAnnotation(BaseModel):
+    """MCP tool annotation metadata."""
+
+    title: str | None = None
+    read_only_hint: bool | None = Field(default=None, alias="readOnlyHint")
+    destructive_hint: bool | None = Field(default=None, alias="destructiveHint")
+    idempotent_hint: bool | None = Field(default=None, alias="idempotentHint")
+    open_world_hint: bool | None = Field(default=None, alias="openWorldHint")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class McpToolInfo(BaseModel):
+    """MCP tool with annotations."""
+
+    name: str
+    description: str | None = None
+    annotations: McpToolAnnotation | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class McpServerCapabilities(BaseModel):
+    """MCP server capability set."""
+
+    tools: dict[str, Any] | None = None
+    resources: dict[str, Any] | None = None
+    prompts: dict[str, Any] | None = None
+    experimental: dict[str, Any] | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class McpServerStatusDetail(BaseModel):
+    """Enhanced MCP server status with full metadata."""
+
+    name: str
+    status: str
+    type: str | None = None
+    error: str | None = None
+    server_info: dict[str, Any] | None = Field(default=None, alias="serverInfo")
+    config: dict[str, Any] | None = None
+    tools: list[McpToolInfo] = Field(default_factory=list)
+    resources: int = 0
+    capabilities: McpServerCapabilities | None = None
+    scope: str | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+# ============================================================================
+# Context Usage Models
+# ============================================================================
+
+
+class ContextCategory(BaseModel):
+    """A category of context window usage."""
+
+    name: str
+    tokens: int
+    color: str | None = None
+    is_deferred: bool = Field(default=False, alias="isDeferred")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class ContextGridSquare(BaseModel):
+    """A single square in the context usage grid."""
+
+    color: str | None = None
+    is_filled: bool = Field(default=False, alias="isFilled")
+    category_name: str | None = Field(default=None, alias="categoryName")
+    tokens: int = 0
+    percentage: float = 0.0
+    square_fullness: float = Field(default=0.0, alias="squareFullness")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class ContextUsageResult(BaseModel):
+    """Full context usage breakdown returned by get_context_usage."""
+
+    max_tokens: int = Field(alias="maxTokens")
+    used_tokens: int = Field(alias="usedTokens")
+    free_tokens: int = Field(alias="freeTokens")
+    percent_used: float = Field(alias="percentUsed")
+    categories: list[ContextCategory] = Field(default_factory=list)
+    grid: list[ContextGridSquare] = Field(default_factory=list)
+    auto_compact_enabled: bool = Field(default=False, alias="autoCompactEnabled")
+    message_count: int = Field(default=0, alias="messageCount")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+# ============================================================================
+# SDK Stream Message Types
+# ============================================================================
+
+
+class SDKResultMessage(BaseModel):
+    """End-of-turn result with cost/usage summary."""
+
+    type: Literal["result"] = "result"
+    subtype: str = "success"
+    duration_ms: int = Field(default=0, alias="durationMs")
+    duration_api_ms: int = Field(default=0, alias="durationApiMs")
+    is_error: bool = Field(default=False, alias="isError")
+    result: str = ""
+    num_turns: int = Field(default=0, alias="numTurns")
+    session_id: str | None = Field(default=None, alias="sessionId")
+    stop_reason: str | None = Field(default="endTurn", alias="stopReason")
+    total_cost_usd: float = Field(default=0.0, alias="totalCostUsd")
+    usage: UsageInfo | None = None
+    model_usage: dict[str, Any] | None = Field(default=None, alias="modelUsage")
+    permission_denials: list[dict[str, Any]] | None = Field(
+        default=None, alias="permissionDenials"
+    )
+    structured_output: Any | None = Field(default=None, alias="structuredOutput")
+    uuid: str | None = None
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class SDKStatusMessage(BaseModel):
+    """Status update message (tool progress, etc.)."""
+
+    type: Literal["status"] = "status"
+    subtype: str = ""
+    message: str = ""
+    tool_use_id: str | None = Field(default=None, alias="toolUseID")
+    progress: float | None = None
+    session_id: str | None = Field(default=None, alias="sessionId")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class SDKToolProgressMessage(BaseModel):
+    """Tool execution progress update."""
+
+    type: Literal["tool_progress"] = "tool_progress"
+    tool_use_id: str = Field(alias="toolUseID")
+    progress: float | None = None
+    message: str | None = None
+    session_id: str | None = Field(default=None, alias="sessionId")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class SDKAuthStatusMessage(BaseModel):
+    """Auth status change notification."""
+
+    type: Literal["auth_status"] = "auth_status"
+    authenticated: bool = False
+    provider: str | None = None
+    message: str | None = None
+    session_id: str | None = Field(default=None, alias="sessionId")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+class SDKPromptSuggestionMessage(BaseModel):
+    """Prompt suggestion from the server."""
+
+    type: Literal["prompt_suggestion"] = "prompt_suggestion"
+    suggestions: list[str] = Field(default_factory=list)
+    session_id: str | None = Field(default=None, alias="sessionId")
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+
+
+# ============================================================================
 # Helpers
 # ============================================================================
 
@@ -586,6 +1009,10 @@ __all__ = [
     # MCP
     "MCPServerInfo",
     "MCPServerStatusInfo",
+    "McpToolAnnotation",
+    "McpToolInfo",
+    "McpServerCapabilities",
+    "McpServerStatusDetail",
     # Initialize
     "ProtocolCapabilities",
     "InitializeClientIcon",
@@ -604,6 +1031,33 @@ __all__ = [
     "PermissionResponseDeny",
     "PermissionRequestPayload",
     "ToolCallRequest",
+    "PermissionRuleValue",
+    "PermissionUpdateDestination",
+    "PermissionDecisionClassification",
+    "PermissionUpdateAddRules",
+    "PermissionUpdateReplaceRules",
+    "PermissionUpdateRemoveRules",
+    "PermissionUpdateSetMode",
+    "PermissionUpdateAddDirectories",
+    "PermissionUpdateRemoveDirectories",
+    "PermissionUpdate",
+    # SDK Session Metadata
+    "FastModeState",
+    "ThinkingConfig",
+    "ModelInfo",
+    "AccountInfo",
+    "SlashCommandInfo",
+    "SdkBeta",
+    # Context Usage
+    "ContextCategory",
+    "ContextGridSquare",
+    "ContextUsageResult",
+    # SDK Stream Messages
+    "SDKResultMessage",
+    "SDKStatusMessage",
+    "SDKToolProgressMessage",
+    "SDKAuthStatusMessage",
+    "SDKPromptSuggestionMessage",
     # Helpers
     "model_to_dict",
 ]
