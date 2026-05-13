@@ -5,6 +5,34 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-13
+
+### Added
+- **Multi-session, mTLS, and v2 protocol for remote control bridging** - Comprehensive upgrade of the remote control bridge with multi-session management, mutual TLS authentication, v2 protocol transport, trusted device support, direct connect mode, echo deduplication, flush gate, and environment-less bridge modes
+- **Visual line navigation for input** - Up/down arrow keys now navigate by visual line for soft-wrapped long text, while preserving original history navigation logic
+
+### Changed
+- **Codebase restructuring** - Major reorganization of the project structure:
+  - Moved `commands/` from `cli/` to top-level package
+  - Moved `services/` from `core/` to top-level package
+  - Reorganized tools into individual subpackages under `tools/`
+  - Moved `message_utils.py` and `plan_mode.py` from `core/` to top-level
+  - Extracted `managed_settings.py` and `model_catalog.py` into `services/`
+  - Split `utils/` into subpackages (`git/`, `lsp/`, `mcp/`, `memory/`, `messaging/`, `telemetry/`)
+  - Extracted constants into `constants/` subpackage
+  - Standardized import paths across the codebase
+
+## [0.5.3] - 2026-03-14
+
+### Fixed
+- **MCP tools preservation with default preset** - Preserve MCP tools when "default" tools preset is active without explicit `--tools` list; SDK agents using `ToolsPreset` no longer lose access to registered MCP tools
+- **Stdin message loss** - Prevent stdin message loss caused by zombie executor threads when readline timeout/retry loop left a blocking thread consuming the next message from stdin
+- **Built-in tools with allowed_tools** - Preserve built-in tools when using "default" preset with explicit `allowed_tools`; only MCP tools (`mcp__*`) are subject to whitelist restriction
+
+### Changed
+- **Model catalog update** - Updated model pricing and context window data
+- **Code cleanup** - Removed unused `STDIO_TOOL_TIMEOUT_SEC` constant
+
 ## [0.5.2] - 2026-03-09
 
 ### Added
@@ -526,6 +554,8 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.6.0]: https://github.com/quantmew/Ripperdoc/compare/v0.5.3...v0.6.0
+[0.5.3]: https://github.com/quantmew/Ripperdoc/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/quantmew/Ripperdoc/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/quantmew/Ripperdoc/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/quantmew/Ripperdoc/compare/v0.4.5...v0.5.0

@@ -813,6 +813,17 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
                 ]
                 yield Select(supports_options, value=supports_default, id="vision_select")
 
+                headers_default = ""
+                if self._existing_profile and self._existing_profile.headers:
+                    import json
+                    headers_default = json.dumps(self._existing_profile.headers, ensure_ascii=False)
+                yield Static("Custom headers (JSON, optional)", classes="field_label")
+                yield Input(
+                    value=headers_default,
+                    placeholder='{"User-Agent": "...", "X-Custom-Header": "..."}',
+                    id="custom_headers_input",
+                )
+
                 set_main_value = self._default_set_main
                 set_quick_value = self._default_set_quick
                 if self._mode == "edit" and self._existing_name:
@@ -1276,6 +1287,22 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         set_as_main = bool(self.query_one("#set_main", Checkbox).value)
         set_as_quick = bool(self.query_one("#set_quick", Checkbox).value)
 
+        # Parse custom headers
+        custom_headers = None
+        headers_raw = (self.query_one("#custom_headers_input", Input).value or "").strip()
+        if headers_raw:
+            import json as _json
+            try:
+                parsed_headers = _json.loads(headers_raw)
+                if isinstance(parsed_headers, dict):
+                    custom_headers = {str(k): str(v) for k, v in parsed_headers.items()}
+                else:
+                    self._set_error("Custom headers must be a JSON object.")
+                    return
+            except (_json.JSONDecodeError, TypeError):
+                self._set_error("Invalid JSON for custom headers.")
+                return
+
         profile = ModelProfile(
             protocol=protocol,
             model=model_name,
@@ -1295,6 +1322,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
             supports_vision=supports_vision,
             price={"input": input_price, "output": output_price},
             currency=currency,
+            headers=custom_headers,
         )
 
         self.dismiss(
@@ -1773,6 +1801,9 @@ class ModelsApp(App[None]):
             table.add_row("Thinking effort", profile.thinking_effort)
         if profile.max_thinking_tokens is not None:
             table.add_row("Max thinking tokens", str(profile.max_thinking_tokens))
+        if profile.headers:
+            import json as _json
+            table.add_row("Custom headers", _json.dumps(profile.headers, ensure_ascii=False))
 
         details.update(Panel(table, title=f"Model: {self._selected_name}", box=box.ROUNDED))
 

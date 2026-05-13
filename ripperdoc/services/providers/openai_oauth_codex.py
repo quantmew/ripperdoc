@@ -39,7 +39,7 @@ from ripperdoc.services.providers.openai_responses import (
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.sessions.session_usage import record_usage
-from ripperdoc.utils.user_agent import build_user_agent
+from ripperdoc.utils.user_agent import build_request_headers
 
 logger = get_logger()
 _CODEX_OAUTH_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
@@ -192,11 +192,11 @@ async def call_oauth_codex(
     if reasoning_obj:
         payload["reasoning"] = reasoning_obj
 
-    headers = {
+    headers = build_request_headers(profile_headers=model_profile.headers)
+    headers.update({
         "Authorization": f"Bearer {oauth_token.access_token}",
-        "User-Agent": build_user_agent(),
         "originator": "ripperdoc",
-    }
+    })
     if oauth_token.account_id:
         headers["ChatGPT-Account-Id"] = oauth_token.account_id
 

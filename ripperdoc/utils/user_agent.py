@@ -11,8 +11,9 @@ Examples:
 
 from __future__ import annotations
 
+import json
 import os
-from typing import Literal
+from typing import Any, Dict, Literal, Optional
 
 from ripperdoc import __version__
 
@@ -22,6 +23,8 @@ UserAgentSource = Literal["cli", "sdk-py", "sdk-ts", "sdk-cli", "vscode"]
 # Environment variables
 RIPPERDOC_CLIENT_SOURCE_ENV = "RIPPERDOC_CLIENT_SOURCE"
 RIPPERDOC_AGENT_SDK_VERSION_ENV = "RIPPERDOC_AGENT_SDK_VERSION"
+RIPPERDOC_CUSTOM_USER_AGENT_ENV = "RIPPERDOC_CUSTOM_USER_AGENT"
+RIPPERDOC_CUSTOM_HEADERS_ENV = "RIPPERDOC_CUSTOM_HEADERS"
 
 # Default source when not specified
 DEFAULT_SOURCE: UserAgentSource = "cli"
@@ -43,6 +46,8 @@ def get_client_source() -> UserAgentSource:
 def build_user_agent(source: UserAgentSource | None = None) -> str:
     """Build the User-Agent header value.
 
+    If RIPPERDOC_CUSTOM_USER_AGENT is set, returns that value directly.
+
     Args:
         source: Optional source type override. If not provided, uses environment
                 variable or defaults to "cli".
@@ -50,6 +55,10 @@ def build_user_agent(source: UserAgentSource | None = None) -> str:
     Returns:
         User-Agent string in format: ripperdoc-cli/{version} (external, {source}) agent-sdk/{sdk_version}
     """
+    custom = os.environ.get(RIPPERDOC_CUSTOM_USER_AGENT_ENV, "").strip()
+    if custom:
+        return custom
+
     if source is None:
         source = get_client_source()
 
@@ -59,6 +68,54 @@ def build_user_agent(source: UserAgentSource | None = None) -> str:
         return f"ripperdoc-cli/{version} (external, {source}, agent-sdk/{sdk_version})"
     else:
         return f"ripperdoc-cli/{version} (external, {source})"
+
+
+def load_custom_headers_env() -> Dict[str, str]:
+    """Load custom headers from the RIPPERDOC_CUSTOM_HEADERS environment variable.
+
+    The value should be a JSON object: '{"Header-Name": "value", ...}'
+
+    Returns:
+        Dictionary of custom headers, or empty dict if not set or invalid.
+    """
+    raw = os.environ.get(RIPPERDOC_CUSTOM_HEADERS_ENV, "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items() if isinstance(k, str)}
+
+
+def build_request_headers(
+    *,
+    profile_headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """Build merged headers for an outgoing API request.
+
+    Merge order (later wins):
+    1. Default User-Agent (from build_user_agent)
+    2. RIPPERDOC_CUSTOM_HEADERS env var (global extra headers)
+    3. Profile-level headers from config.json
+
+    Returns:
+        Merged header dict.
+    """
+    headers: Dict[str, Any] = {"User-Agent": build_user_agent()}
+
+    # Layer 2: global env var headers
+    env_headers = load_custom_headers_env()
+    if env_headers:
+        headers.update(env_headers)
+
+    # Layer 3: per-profile headers from config
+    if profile_headers:
+        headers.update(profile_headers)
+
+    return headers
 
 
 # Pre-built user-agents for common use cases

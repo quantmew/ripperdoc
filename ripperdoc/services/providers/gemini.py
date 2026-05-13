@@ -44,7 +44,7 @@ from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.sessions.session_usage import record_usage
 from ripperdoc.message_utils import estimate_cost_usd
-from ripperdoc.utils.user_agent import build_user_agent
+from ripperdoc.utils.user_agent import build_request_headers
 
 logger = get_logger()
 
@@ -451,7 +451,7 @@ class GeminiClient(ProviderClient):
 
         client_kwargs: Dict[str, Any] = {}
         api_key = model_profile.api_key
-        user_agent = build_user_agent()
+        headers = build_request_headers(profile_headers=model_profile.headers)
         if api_key:
             client_kwargs["api_key"] = api_key
         if model_profile.api_base:
@@ -459,14 +459,14 @@ class GeminiClient(ProviderClient):
 
             client_kwargs["http_options"] = genai_types.HttpOptions(
                 base_url=model_profile.api_base,
-                headers={"User-Agent": user_agent},
+                headers=headers,
             )
         else:
-            # Set user-agent via http_options even without custom base_url
+            # Set headers via http_options even without custom base_url
             from google.genai import types as genai_types  # type: ignore
 
             client_kwargs["http_options"] = genai_types.HttpOptions(
-                headers={"User-Agent": user_agent},
+                headers=headers,
             )
         return genai.Client(**client_kwargs)
 

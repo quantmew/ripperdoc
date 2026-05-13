@@ -36,7 +36,7 @@ from ripperdoc.services.providers.openai_responses import (
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.sessions.session_usage import record_usage
-from ripperdoc.utils.user_agent import build_user_agent
+from ripperdoc.utils.user_agent import build_request_headers
 
 logger = get_logger()
 
@@ -550,7 +550,7 @@ class OpenAIChatStrategy(_BaseNonOAuthStrategy):
             },
         )
 
-        headers = {"User-Agent": build_user_agent()}
+        headers = build_request_headers(profile_headers=model_profile.headers)
         if default_headers:
             headers.update(default_headers)
 
@@ -754,7 +754,7 @@ class OpenAIResponsesStrategy(_BaseNonOAuthStrategy):
             },
         )
 
-        headers = {"User-Agent": build_user_agent()}
+        headers = build_request_headers(profile_headers=model_profile.headers)
         if default_headers:
             headers.update(default_headers)
 

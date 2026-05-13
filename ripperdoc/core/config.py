@@ -128,6 +128,10 @@ class ModelProfile(BaseModel):
     # Pricing (per 1M tokens). Leave as 0 to skip cost calculation.
     price: ModelPrice = Field(default_factory=ModelPrice)
     currency: str = "USD"
+    # Optional custom headers to send with every API request for this profile.
+    # Keys are case-insensitive header names (e.g. "User-Agent", "X-Custom-Header").
+    # Merged on top of the default headers; User-Agent here overrides the built-in one.
+    headers: Optional[Dict[str, str]] = None
 
     @model_validator(mode="after")
     def _apply_catalog_defaults(self) -> "ModelProfile":

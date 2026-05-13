@@ -334,6 +334,56 @@ def _parse_int(console: Any, prompt_text: str, default_value: Optional[int]) -> 
         return default_value
 
 
+def _prompt_custom_headers_add(console: Any) -> Optional[dict[str, str]]:
+    """Prompt for custom headers during profile creation."""
+    raw = console.input(
+        "Custom headers (JSON or 'key:value,key:value', leave blank to skip): "
+    ).strip()
+    if not raw:
+        return None
+    return _parse_headers_input(raw)
+
+
+def _prompt_custom_headers_edit(
+    console: Any, current_headers: Optional[dict[str, str]]
+) -> Optional[dict[str, str]]:
+    """Prompt for custom headers during profile edit."""
+    current_label = ""
+    if current_headers:
+        current_label = " [" + ", ".join(f"{k}={v[:20]}" for k, v in current_headers.items()) + "]"
+    raw = console.input(
+        f"Custom headers{current_label} (JSON or 'key:value' pairs, '-'=clear, Enter=keep): "
+    ).strip()
+    if not raw:
+        return current_headers
+    if raw == "-":
+        return None
+    return _parse_headers_input(raw)
+
+
+def _parse_headers_input(raw: str) -> Optional[dict[str, str]]:
+    """Parse headers from JSON or key:value comma-separated format."""
+    # Try JSON first
+    import json
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return {str(k): str(v) for k, v in parsed.items()}
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # Try key:value,key:value format
+    headers: dict[str, str] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if ":" in pair:
+            key, _, value = pair.partition(":")
+            key = key.strip()
+            value = value.strip()
+            if key:
+                headers[key] = value
+    return headers if headers else None
+
+
 def _parse_float(console: Any, prompt_text: str, default_value: float) -> float:
     raw = console.input(prompt_text).strip()
     if not raw:
@@ -575,6 +625,8 @@ def _collect_add_profile_input(
     )
     set_as_main = set_main_input in ("y", "yes") if set_main_input else default_set_main
 
+    custom_headers = _prompt_custom_headers_add(console)
+
     profile = ModelProfile(
         protocol=protocol,
         model=model_name,
@@ -594,6 +646,7 @@ def _collect_add_profile_input(
         supports_vision=supports_vision,
         price={"input": input_price, "output": output_price},
         currency=currency,
+        headers=custom_headers,
     )
 
     return profile, set_as_main
@@ -735,6 +788,8 @@ def _collect_edit_profile_input(
         existing_profile.price.output,
     )
 
+    custom_headers = _prompt_custom_headers_edit(console, existing_profile.headers)
+
     updated_profile = ModelProfile(
         protocol=protocol,
         model=model_name,
@@ -754,6 +809,7 @@ def _collect_edit_profile_input(
         supports_vision=supports_vision,
         price={"input": input_price, "output": output_price},
         currency=currency,
+        headers=custom_headers,
     )
     return updated_profile
 
@@ -959,6 +1015,9 @@ def _build_model_details_panel(
         details.add_row("Thinking effort", escape(profile.thinking_effort))
     if profile.max_thinking_tokens is not None:
         details.add_row("Max thinking tokens", escape(str(profile.max_thinking_tokens)))
+    if profile.headers:
+        header_lines = [f"{k}: {v[:40]}{'…' if len(v) > 40 else ''}" for k, v in profile.headers.items()]
+        details.add_row("Custom headers", escape("\n".join(header_lines)))
 
     return Panel(
         details,
