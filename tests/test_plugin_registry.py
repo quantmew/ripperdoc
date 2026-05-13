@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ripperdoc.core.plugins import (
+from ripperdoc.services.plugins import (
     PluginSettingsScope,
     add_enabled_plugin_for_scope,
     discover_plugins,

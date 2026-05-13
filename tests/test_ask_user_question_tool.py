@@ -1,6 +1,6 @@
 import pytest
 
-from ripperdoc.tools.ask_user_question_tool import (
+from ripperdoc.tools.ask_user_question import (
     BACK_VALUE,
     NEXT_VALUE,
     OptionInput,
@@ -142,7 +142,7 @@ async def test_prompt_single_choice_with_ui_returns_selected_option(monkeypatch)
         return "2"
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_choice_async", fake_prompt_choice_async
+        "ripperdoc.tools.ask_user_question.prompt_choice_async", fake_prompt_choice_async
     )
 
     answer = await prompt_single_choice_with_ui(
@@ -171,7 +171,7 @@ async def test_prompt_single_choice_with_ui_supports_inline_custom_input(monkeyp
         return "custom text"
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_choice_async", fake_prompt_choice_async
+        "ripperdoc.tools.ask_user_question.prompt_choice_async", fake_prompt_choice_async
     )
 
     answer = await prompt_single_choice_with_ui(question, question_num=1, total=1)
@@ -194,7 +194,7 @@ async def test_prompt_single_choice_with_ui_back(monkeypatch):
         return BACK_VALUE
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_choice_async", fake_prompt_choice_async
+        "ripperdoc.tools.ask_user_question.prompt_choice_async", fake_prompt_choice_async
     )
 
     answer = await prompt_single_choice_with_ui(
@@ -224,7 +224,7 @@ async def test_prompt_user_for_answer_falls_back_when_choice_ui_fails(monkeypatc
         return next(responses)
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_choice_async", fake_prompt_choice_async
+        "ripperdoc.tools.ask_user_question.prompt_choice_async", fake_prompt_choice_async
     )
     monkeypatch.setattr("prompt_toolkit.prompt", fake_prompt)
 
@@ -254,7 +254,7 @@ async def test_prompt_multi_choice_with_ui_returns_selected_options(monkeypatch)
         return ["A", "C"]
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_checkbox_async", fake_prompt_checkbox_async
+        "ripperdoc.tools.ask_user_question.prompt_checkbox_async", fake_prompt_checkbox_async
     )
 
     answer = await prompt_multi_choice_with_ui(question, question_num=1, total=1)
@@ -280,7 +280,7 @@ async def test_prompt_multi_choice_with_ui_supports_inline_custom_input(monkeypa
         return ["A", "Custom feature"]
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_checkbox_async", fake_prompt_checkbox_async
+        "ripperdoc.tools.ask_user_question.prompt_checkbox_async", fake_prompt_checkbox_async
     )
 
     answer = await prompt_multi_choice_with_ui(question, question_num=1, total=1)
@@ -306,7 +306,7 @@ async def test_prompt_multi_choice_with_ui_back_from_left_key(monkeypatch):
         return [BACK_VALUE]
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_checkbox_async", fake_prompt_checkbox_async
+        "ripperdoc.tools.ask_user_question.prompt_checkbox_async", fake_prompt_checkbox_async
     )
 
     answer = await prompt_multi_choice_with_ui(question, question_num=2, total=3, allow_back=True)
@@ -333,7 +333,7 @@ async def test_prompt_multi_choice_with_ui_next_from_right_key(monkeypatch):
         return [NEXT_VALUE]
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_checkbox_async", fake_prompt_checkbox_async
+        "ripperdoc.tools.ask_user_question.prompt_checkbox_async", fake_prompt_checkbox_async
     )
 
     answer = await prompt_multi_choice_with_ui(question, question_num=1, total=3, allow_next=True)
@@ -362,7 +362,7 @@ async def test_prompt_user_for_answer_multiselect_falls_back_when_checkbox_ui_fa
         return next(responses)
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_checkbox_async", fake_prompt_checkbox_async
+        "ripperdoc.tools.ask_user_question.prompt_checkbox_async", fake_prompt_checkbox_async
     )
     monkeypatch.setattr("prompt_toolkit.prompt", fake_prompt)
 
@@ -393,13 +393,13 @@ async def test_collect_answers_supports_back_navigation(monkeypatch):
         return next(responses)
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_user_for_answer", fake_prompt_user_for_answer
+        "ripperdoc.tools.ask_user_question.prompt_user_for_answer", fake_prompt_user_for_answer
     )
     async def fake_confirm_submit(*args, **kwargs):  # noqa: ANN002, ANN003
         return "submit"
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_choice_async",
+        "ripperdoc.tools.ask_user_question.prompt_choice_async",
         fake_confirm_submit,
     )
 
@@ -431,13 +431,13 @@ async def test_collect_answers_allows_skip_with_next_and_submits(monkeypatch):
         return next(responses)
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_user_for_answer", fake_prompt_user_for_answer
+        "ripperdoc.tools.ask_user_question.prompt_user_for_answer", fake_prompt_user_for_answer
     )
     async def fake_confirm_submit(*args, **kwargs):  # noqa: ANN002, ANN003
         return "submit"
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_choice_async",
+        "ripperdoc.tools.ask_user_question.prompt_choice_async",
         fake_confirm_submit,
     )
 
@@ -461,13 +461,13 @@ async def test_collect_answers_cancelled_at_confirmation(monkeypatch):
         return "A"
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_user_for_answer", fake_prompt_user_for_answer
+        "ripperdoc.tools.ask_user_question.prompt_user_for_answer", fake_prompt_user_for_answer
     )
     async def fake_confirm_cancel(*args, **kwargs):  # noqa: ANN002, ANN003
         return "cancel"
 
     monkeypatch.setattr(
-        "ripperdoc.tools.ask_user_question_tool.prompt_choice_async",
+        "ripperdoc.tools.ask_user_question.prompt_choice_async",
         fake_confirm_cancel,
     )
 

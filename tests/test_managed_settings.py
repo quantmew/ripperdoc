@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ripperdoc.core.config import ConfigManager
-from ripperdoc.core.managed_settings import (
+from ripperdoc.services.managed_settings import (
     load_managed_settings_snapshot,
     reset_managed_settings_cache,
 )
@@ -51,7 +51,7 @@ def test_effective_config_managed_has_highest_precedence(monkeypatch, tmp_path: 
 
 def test_windows_hkcu_policy_ignored_when_admin_source_exists(monkeypatch) -> None:
     reset_managed_settings_cache()
-    import ripperdoc.core.managed_settings as managed_settings
+    import ripperdoc.services.managed_settings as managed_settings
 
     monkeypatch.setattr(managed_settings, "_load_file_managed_settings", lambda: {"x": "file"})
     monkeypatch.setattr(managed_settings, "_load_macos_mdm_settings", lambda: None)

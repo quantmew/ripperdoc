@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ripperdoc.tools.bash_tool import BashTool, BashToolInput
+from ripperdoc.tools.bash import BashTool, BashToolInput
 from ripperdoc.utils.permissions.path_validation_utils import validate_shell_command_paths
 from ripperdoc.utils.permissions.shell_command_validation import (
     validate_shell_command,

@@ -9,7 +9,7 @@ from typing import Callable, List, Optional
 
 from rich.markup import escape
 
-from ripperdoc.cli.commands import (
+from ripperdoc.commands import (
     get_custom_command,
     get_slash_command,
     expand_command_content,

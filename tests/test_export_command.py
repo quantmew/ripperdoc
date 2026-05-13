@@ -3,8 +3,8 @@ import json
 
 from rich.console import Console
 
-from ripperdoc.cli.commands import get_slash_command
-from ripperdoc.cli.commands.export_cmd import command as export_command
+from ripperdoc.commands import get_slash_command
+from ripperdoc.commands.export import command as export_command
 from ripperdoc.utils.messaging.messages import (
     create_assistant_message,
     create_plan_file_reference_attachment_message,
@@ -42,7 +42,7 @@ def test_export_command_empty_conversation(tmp_path):
 def test_export_command_cancelled(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
-    monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", lambda: "__cancel__")
+    monkeypatch.setattr("ripperdoc.commands.export._prompt_export_method", lambda: "__cancel__")
 
     export_command.handler(ui, "")
 
@@ -53,9 +53,9 @@ def test_export_command_cancelled(tmp_path, monkeypatch):
 def test_export_command_copy_to_clipboard_via_picker(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
-    monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", lambda: "clipboard")
+    monkeypatch.setattr("ripperdoc.commands.export._prompt_export_method", lambda: "clipboard")
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.export_cmd._copy_to_clipboard",
+        "ripperdoc.commands.export._copy_to_clipboard",
         lambda text: (("User: hello" in text and "Assistant: world" in text), ""),
     )
 
@@ -69,9 +69,9 @@ def test_export_command_save_to_default_file_from_picker(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", lambda: "file")
+    monkeypatch.setattr("ripperdoc.commands.export._prompt_export_method", lambda: "file")
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.export_cmd._default_export_path",
+        "ripperdoc.commands.export._default_export_path",
         lambda _ui: tmp_path / "conversation-export.txt",
     )
 
@@ -106,7 +106,7 @@ def test_export_command_filename_arg_bypasses_picker(tmp_path, monkeypatch):
         called["picker"] = True
         return "clipboard"
 
-    monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", _mark_picker)
+    monkeypatch.setattr("ripperdoc.commands.export._prompt_export_method", _mark_picker)
 
     export_command.handler(ui, "notes.md")
 
@@ -140,9 +140,9 @@ def test_export_command_picker_markdown_writes_markdown_export(tmp_path, monkeyp
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", lambda: "file_md")
+    monkeypatch.setattr("ripperdoc.commands.export._prompt_export_method", lambda: "file_md")
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.export_cmd._default_export_path",
+        "ripperdoc.commands.export._default_export_path",
         lambda _ui, extension=".txt": tmp_path / f"conversation-export{extension}",
     )
 
@@ -159,9 +159,9 @@ def test_export_command_picker_markdown_writes_markdown_export(tmp_path, monkeyp
 def test_export_command_clipboard_failure(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = _sample_messages()
-    monkeypatch.setattr("ripperdoc.cli.commands.export_cmd._prompt_export_method", lambda: "clipboard")
+    monkeypatch.setattr("ripperdoc.commands.export._prompt_export_method", lambda: "clipboard")
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.export_cmd._copy_to_clipboard",
+        "ripperdoc.commands.export._copy_to_clipboard",
         lambda _text: (False, "Failed to copy to clipboard."),
     )
 

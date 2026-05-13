@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from ripperdoc import __version__
 from ripperdoc.core.agents import load_agent_definitions
-from ripperdoc.cli.commands import list_custom_commands, list_slash_commands
+from ripperdoc.commands import list_custom_commands, list_slash_commands
 from ripperdoc.core import tool_defaults as tool_defaults_module
 from ripperdoc.core.config import (
     ProtocolType,
@@ -23,15 +23,15 @@ from ripperdoc.core.config import (
     get_project_config,
     get_project_local_config,
 )
-from ripperdoc.core.oauth import get_oauth_token
-from ripperdoc.core.session_agents import (
+from ripperdoc.services.oauth import get_oauth_token
+from ripperdoc.services.session_agents import (
     normalize_agent_name,
     parse_session_agents,
     resolve_session_agent_prompt,
 )
-from ripperdoc.core.output_styles import load_all_output_styles, resolve_output_style
-from ripperdoc.core.plugins import discover_plugins, set_runtime_plugin_dirs
-from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
+from ripperdoc.services.output_styles import load_all_output_styles, resolve_output_style
+from ripperdoc.services.plugins import discover_plugins, set_runtime_plugin_dirs
+from ripperdoc.system_prompt_overrides import select_base_system_prompt
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
@@ -46,7 +46,7 @@ from ripperdoc.protocol.models import (
     model_to_dict,
 )
 from .error_codes import resolve_protocol_request_error_code
-from ripperdoc.tools.dynamic_mcp_tool import (
+from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
 )
@@ -121,10 +121,21 @@ class StdioSessionMixin:
             return await load_dynamic_mcp_tools_async(self._project_path)
 
     async def _get_initialize_tools(self) -> list[Any]:
-        """Resolve the initialize-time tool list with a patchable sync fallback."""
+        """Resolve the initialize-time tool list with a patchable sync fallback.
+
+        Only returns built-in tools here.  MCP tools are loaded separately
+        in ``_load_dynamic_mcp_tools_for_initialize`` which runs **after**
+        SDK MCP server configuration (``set_mcp_runtime_overrides``) has been
+        applied.  Calling ``get_default_tools_async`` here would prematurely
+        create an MCP runtime that lacks SDK-provided server entries, and
+        ``ensure_mcp_runtime`` would then reuse that incomplete runtime for
+        all subsequent calls – effectively hiding SDK MCP tools.
+        """
         if get_default_tools is not _DEFAULT_SYNC_TOOL_LOADER:
             return list(get_default_tools())
-        return await get_default_tools_async(project_path=self._project_path)
+        return tool_defaults_module._finalize_tool_list(
+            tool_defaults_module._build_base_tools(),
+        )
 
     async def _send_sdk_mcp_message(self, server_name: str, message: dict[str, Any]) -> dict[str, Any]:
         """Bridge SDK-backed MCP traffic over stdio control requests."""
@@ -479,6 +490,13 @@ class StdioSessionMixin:
             tools = await self._get_initialize_tools()
             if self._disable_slash_commands:
                 tools = [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
+            # In SDK mode (stream-json), AskUserQuestion is not useful since
+            # the SDK handles user interaction programmatically.  Exclude it
+            # from the default tool set unless explicitly requested via tools_list.
+            if self._input_format == "stream-json" and (
+                self._tools_list is None or "AskUserQuestion" not in self._tools_list
+            ):
+                tools = [tool for tool in tools if getattr(tool, "name", None) != "AskUserQuestion"]
             tools = self._apply_tool_filters(
                 tools,
                 allowed_tools=self._allowed_tools,
@@ -615,7 +633,7 @@ class StdioSessionMixin:
             mcp_instructions = format_mcp_instructions(servers)
 
             # Build system prompt components
-            from ripperdoc.core.skills import (
+            from ripperdoc.services.skills import (
                 build_skill_summary,
                 filter_enabled_skills,
                 load_all_skills,

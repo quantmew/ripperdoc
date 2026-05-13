@@ -40,8 +40,8 @@ from ripperdoc.cli.runtime_cli import run_query
 from ripperdoc.cli.top_level_cli import config_cmd, update_cmd, version_cmd
 from ripperdoc.cli.ui.wizard import check_onboarding
 from ripperdoc.core.config import get_effective_model_profile, get_project_config
-from ripperdoc.core.plugins import set_runtime_plugin_dirs
-from ripperdoc.core.system_prompt_overrides import select_base_system_prompt
+from ripperdoc.services.plugins import set_runtime_plugin_dirs
+from ripperdoc.system_prompt_overrides import select_base_system_prompt
 from ripperdoc.utils.filesystem.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
 from ripperdoc.utils.sessions.session_history import SessionHistory

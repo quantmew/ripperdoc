@@ -1,7 +1,7 @@
 """Tests for packaged model catalog metadata lookup and defaults."""
 
 from ripperdoc.core.config import ModelProfile, ProtocolType
-from ripperdoc.core.model_catalog import get_catalog_size, lookup_model_metadata
+from ripperdoc.services.model_catalog import get_catalog_size, lookup_model_metadata
 
 
 def test_catalog_is_packaged_and_non_empty():

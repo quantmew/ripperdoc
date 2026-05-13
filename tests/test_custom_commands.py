@@ -8,7 +8,7 @@ from typing import Generator
 
 import pytest
 
-from ripperdoc.core.custom_commands import (
+from ripperdoc.commands.custom_commands import (
     CommandExecutionContext,
     CommandLocation,
     load_all_custom_commands,

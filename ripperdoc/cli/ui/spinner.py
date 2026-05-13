@@ -8,7 +8,7 @@ from rich.live import Live
 from rich.text import Text
 from rich.spinner import Spinner as RichSpinner
 
-from ripperdoc.core.theme import theme_color
+from ripperdoc.services.theme import theme_color
 
 # ANSI escape sequences for terminal control
 _CLEAR_LINE = "\r\033[K"  # Move to start of line and clear to end

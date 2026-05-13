@@ -12,8 +12,8 @@ from pydantic import ValidationError
 
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool_defaults import get_default_tools_async
-from ripperdoc.core.message_utils import format_pydantic_errors
-from ripperdoc.core.output_styles import resolve_output_style
+from ripperdoc.message_utils import format_pydantic_errors
+from ripperdoc.services.output_styles import resolve_output_style
 from ripperdoc.core.permission_engine import PermissionResult
 from ripperdoc.protocol.models import (
     JsonRpcErrorCodes,
@@ -23,7 +23,7 @@ from ripperdoc.protocol.models import (
     model_to_dict,
 )
 from ripperdoc.utils.permissions import ToolRule
-from ripperdoc.tools.dynamic_mcp_tool import (
+from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
 )
@@ -284,6 +284,10 @@ class StdioControlMixin:
         tools = await get_default_tools_async(project_path=self._project_path)
         if self._disable_slash_commands:
             tools = [tool for tool in tools if getattr(tool, "name", None) != "Skill"]
+        if self._input_format == "stream-json" and (
+            self._tools_list is None or "AskUserQuestion" not in (self._tools_list or [])
+        ):
+            tools = [tool for tool in tools if getattr(tool, "name", None) != "AskUserQuestion"]
         tools = self._apply_tool_filters(
             tools,
             allowed_tools=self._allowed_tools,

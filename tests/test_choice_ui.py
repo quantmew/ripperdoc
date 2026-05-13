@@ -2,7 +2,7 @@ from ripperdoc.cli.ui.choice import onboarding_style, resolve_choice_style
 import pytest
 
 from ripperdoc.cli.ui.choice import prompt_checkbox_async, prompt_choice_async
-from ripperdoc.core.theme import get_theme_manager
+from ripperdoc.services.theme import get_theme_manager
 
 
 def _style_dict(style) -> dict[str, str]:

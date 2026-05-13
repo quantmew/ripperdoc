@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import urllib.parse
 
-from ripperdoc.core.oauth import OAuthTokenType
-from ripperdoc.core.oauth.gitlab import (
+from ripperdoc.services.oauth import OAuthTokenType
+from ripperdoc.services.oauth.gitlab import (
     GITLAB_BUNDLED_CLIENT_ID,
     GitLabBrowserAuthContext,
     complete_gitlab_browser_auth_from_callback_url,
@@ -37,7 +37,7 @@ def test_start_gitlab_browser_auth_builds_context(monkeypatch) -> None:
     notices: list[str] = []
 
     monkeypatch.setattr(
-        "ripperdoc.core.oauth.gitlab.webbrowser.open",
+        "ripperdoc.services.oauth.gitlab.webbrowser.open",
         lambda url, new=2: opened.append(url),  # noqa: ARG005
     )
 
@@ -70,7 +70,7 @@ def test_complete_gitlab_browser_auth_from_callback_url(monkeypatch) -> None:
         client_id="client_123",
     )
     monkeypatch.setattr(
-        "ripperdoc.core.oauth.gitlab._exchange_authorization_code",
+        "ripperdoc.services.oauth.gitlab._exchange_authorization_code",
         lambda **kwargs: {  # noqa: ARG005
             "access_token": "access-123",
             "refresh_token": "refresh-123",

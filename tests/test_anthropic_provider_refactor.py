@@ -8,23 +8,23 @@ from typing import AsyncGenerator
 import pytest
 from pydantic import BaseModel
 
-from ripperdoc.core.message_utils import build_anthropic_tool_schemas
+from ripperdoc.message_utils import build_anthropic_tool_schemas
 from ripperdoc.core.tool import Tool, ToolOutput, ToolUseContext
-from ripperdoc.core.providers.anthropic import (
+from ripperdoc.services.providers.anthropic import (
     AnthropicClient,
     _classify_anthropic_error,
     _content_blocks_from_response,
     _content_blocks_from_stream_state,
 )
-from ripperdoc.core.message_utils import (
+from ripperdoc.message_utils import (
     ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     anthropic_cache_control,
     apply_anthropic_prompt_cache_control_to_messages,
     apply_anthropic_prompt_cache_control_to_tool_schemas,
     build_anthropic_system_blocks,
 )
-from ripperdoc.core.providers.errors import ProviderMappedError, ProviderTimeoutError
-from ripperdoc.tools.memory_tool import MemoryTool
+from ripperdoc.services.providers.errors import ProviderMappedError, ProviderTimeoutError
+from ripperdoc.tools.memory import MemoryTool
 
 
 class _DummyInput(BaseModel):

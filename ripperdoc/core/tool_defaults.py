@@ -7,39 +7,39 @@ from typing import Any, List, Optional
 
 from ripperdoc.core.tool import Tool
 
-from ripperdoc.tools.bash_tool import BashTool
-from ripperdoc.tools.task_output_tool import TaskOutputTool
-from ripperdoc.tools.task_stop_tool import TaskStopTool
-from ripperdoc.tools.file_read_tool import FileReadTool
-from ripperdoc.tools.file_edit_tool import FileEditTool
-from ripperdoc.tools.multi_edit_tool import MultiEditTool
-from ripperdoc.tools.notebook_edit_tool import NotebookEditTool
-from ripperdoc.tools.file_write_tool import FileWriteTool
-from ripperdoc.tools.glob_tool import GlobTool
-from ripperdoc.tools.ls_tool import LSTool
-from ripperdoc.tools.grep_tool import GrepTool
-from ripperdoc.tools.lsp_tool import LspTool
-from ripperdoc.tools.skill_tool import SkillTool
-from ripperdoc.tools.todo_tool import TodoReadTool, TodoWriteTool
-from ripperdoc.tools.task_graph_tool import TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool
-from ripperdoc.tools.team_tool import (
+from ripperdoc.tools.bash import BashTool
+from ripperdoc.tools.task_output import TaskOutputTool
+from ripperdoc.tools.task_stop import TaskStopTool
+from ripperdoc.tools.file_read import FileReadTool
+from ripperdoc.tools.file_edit import FileEditTool
+from ripperdoc.tools.multi_edit import MultiEditTool
+from ripperdoc.tools.notebook_edit import NotebookEditTool
+from ripperdoc.tools.file_write import FileWriteTool
+from ripperdoc.tools.glob import GlobTool
+from ripperdoc.tools.ls import LSTool
+from ripperdoc.tools.grep import GrepTool
+from ripperdoc.tools.lsp import LspTool
+from ripperdoc.tools.skill import SkillTool
+from ripperdoc.tools.todo import TodoReadTool, TodoWriteTool
+from ripperdoc.tools.task.task_graph import TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool
+from ripperdoc.tools.team import (
     SendMessageTool,
     TeamCreateTool,
     TeamDeleteTool,
 )
-from ripperdoc.tools.ask_user_question_tool import AskUserQuestionTool
-from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool
-from ripperdoc.tools.enter_worktree_tool import EnterWorktreeTool
-from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool
-from ripperdoc.tools.memory_tool import MemoryTool
-from ripperdoc.tools.task_tool import TaskTool
-from ripperdoc.tools.tool_search_tool import ToolSearchTool
-from ripperdoc.tools.mcp_tools import (
+from ripperdoc.tools.ask_user_question import AskUserQuestionTool
+from ripperdoc.tools.enter_plan_mode import EnterPlanModeTool
+from ripperdoc.tools.enter_worktree import EnterWorktreeTool
+from ripperdoc.tools.exit_plan_mode import ExitPlanModeTool
+from ripperdoc.tools.memory import MemoryTool
+from ripperdoc.tools.task import TaskTool
+from ripperdoc.tools.tool_search import ToolSearchTool
+from ripperdoc.tools.mcp import (
     ListMcpResourcesTool,
     ListMcpServersTool,
     ReadMcpResourceTool,
 )
-from ripperdoc.tools.dynamic_mcp_tool import (
+from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
     load_dynamic_mcp_tools_sync,
     merge_tools_with_dynamic,
@@ -172,32 +172,27 @@ def _build_base_tools() -> List[Tool[Any, Any]]:
 def _finalize_tool_list(
     base_tools: List[Tool[Any, Any]],
     *,
-    allowed_tools: Optional[List[str]] = None,
+    allowed_tools: Optional[List[str]] = None,  # noqa: ARG001 – kept for API compat
     dynamic_tool_count: int = 0,
 ) -> List[Tool[Any, Any]]:
-    """Append Task and apply allowed-tools filtering."""
+    """Append Task tool to the base tool list.
+
+    ``allowed_tools`` is accepted for backward compatibility but is **not**
+    used for tool-set filtering.  It controls auto-approval permissions and
+    is handled by the permission engine.
+    """
     task_tool = TaskTool(lambda: base_tools)
     all_tools = base_tools + [task_tool]
 
-    if allowed_tools is not None:
-        all_tools = filter_tools_by_names(all_tools, allowed_tools)
-        logger.debug(
-            "[tool_defaults] Filtered tool inventory",
-            extra={
-                "allowed_tools": allowed_tools,
-                "filtered_tools": len(all_tools),
-            },
-        )
-    else:
-        logger.debug(
-            "[tool_defaults] Built tool inventory",
-            extra={
-                "tasks_enabled": is_task_system_enabled(),
-                "base_tools": len(base_tools),
-                "dynamic_mcp_tools": dynamic_tool_count,
-                "total_tools": len(all_tools),
-            },
-        )
+    logger.debug(
+        "[tool_defaults] Built tool inventory",
+        extra={
+            "tasks_enabled": is_task_system_enabled(),
+            "base_tools": len(base_tools),
+            "dynamic_mcp_tools": dynamic_tool_count,
+            "total_tools": len(all_tools),
+        },
+    )
 
     return all_tools
 

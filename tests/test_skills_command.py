@@ -2,8 +2,8 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ripperdoc.cli.commands.skills_cmd import command as skills_command
-from ripperdoc.core.skills import SkillLocation, get_disabled_skill_names, save_disabled_skill_names
+from ripperdoc.commands.skills import command as skills_command
+from ripperdoc.services.skills import SkillLocation, get_disabled_skill_names, save_disabled_skill_names
 
 
 class _DummyUI:

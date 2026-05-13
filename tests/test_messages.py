@@ -88,7 +88,7 @@ from ripperdoc.utils.messaging.messages import (
     is_hidden_meta_message,
     normalize_messages_for_api,
 )
-from ripperdoc.core.providers.base import sanitize_openai_tool_history, sanitize_tool_history
+from ripperdoc.services.providers.base import sanitize_openai_tool_history, sanitize_tool_history
 
 
 def test_create_user_message():

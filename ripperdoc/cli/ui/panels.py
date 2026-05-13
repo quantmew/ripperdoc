@@ -13,7 +13,7 @@ from rich import box
 
 from ripperdoc import __version__
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
-from ripperdoc.core.theme import theme_color
+from ripperdoc.services.theme import theme_color
 
 
 def create_welcome_panel() -> Panel:

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from ripperdoc.core.query import ToolRegistry
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
-from ripperdoc.tools.tool_search_tool import ToolSearchInput, ToolSearchTool
+from ripperdoc.tools.tool_search import ToolSearchInput, ToolSearchTool
 
 
 class DummyInput(BaseModel):

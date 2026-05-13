@@ -24,7 +24,7 @@ from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Box, CheckboxList, Frame, Label, RadioList, TextArea
-from ripperdoc.core.theme import theme_color
+from ripperdoc.services.theme import theme_color
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 

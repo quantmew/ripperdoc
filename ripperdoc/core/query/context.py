@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ripperdoc.core.tool import Tool
-from ripperdoc.core.plan_mode import resolve_plan_file_path
+from ripperdoc.plan_mode import resolve_plan_file_path
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.file_watch import BoundedFileCache

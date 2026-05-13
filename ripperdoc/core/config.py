@@ -11,8 +11,8 @@ from typing import Any, Dict, Optional, Literal, TYPE_CHECKING, cast
 from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
-from ripperdoc.core.managed_settings import load_managed_settings_snapshot
-from ripperdoc.core.oauth import OAuthTokenType
+from ripperdoc.services.managed_settings import load_managed_settings_snapshot
+from ripperdoc.services.oauth import OAuthTokenType
 from ripperdoc.utils.filesystem.config_paths import (
     CONFIG_DIR_NAME,
     RIPPERDOC_CONFIG_DIR_ENV,
@@ -29,7 +29,7 @@ USER_CONFIG_DIR_NAME = CONFIG_DIR_NAME
 USER_CONFIG_FILE_NAME = "config.json"
 
 if TYPE_CHECKING:
-    from ripperdoc.core.model_catalog import ModelCatalogEntry
+    from ripperdoc.services.model_catalog import ModelCatalogEntry
 
 
 class ProtocolType(str, Enum):
@@ -72,7 +72,7 @@ def _lookup_model_metadata_safely(
 ) -> Optional["ModelCatalogEntry"]:
     """Best-effort model catalog lookup without importing model_catalog at module import time."""
     try:
-        from ripperdoc.core.model_catalog import lookup_model_metadata
+        from ripperdoc.services.model_catalog import lookup_model_metadata
 
         return lookup_model_metadata(model_name, protocol)
     except (ModuleNotFoundError, ImportError, ValueError, TypeError):
@@ -840,13 +840,15 @@ def save_project_local_config(
 # RIPPERDOC_* global environment variable support
 # ==============================================================================
 
-# Environment variable name constants
-RIPPERDOC_BASE_URL = "RIPPERDOC_BASE_URL"
-RIPPERDOC_AUTH_TOKEN = "RIPPERDOC_AUTH_TOKEN"
-RIPPERDOC_MODEL = "RIPPERDOC_MODEL"
-RIPPERDOC_SMALL_FAST_MODEL = "RIPPERDOC_SMALL_FAST_MODEL"
-RIPPERDOC_API_KEY = "RIPPERDOC_API_KEY"
-RIPPERDOC_PROTOCOL = "RIPPERDOC_PROTOCOL"
+from ripperdoc.constants.env import (  # noqa: E402
+    RIPPERDOC_BASE_URL,
+    RIPPERDOC_AUTH_TOKEN,
+    RIPPERDOC_MODEL,
+    RIPPERDOC_SMALL_FAST_MODEL,
+    RIPPERDOC_API_KEY,
+    RIPPERDOC_PROTOCOL,
+)
+
 RIPPERDOC_CONFIG_DIR = RIPPERDOC_CONFIG_DIR_ENV
 
 

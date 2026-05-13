@@ -3,7 +3,7 @@ from typing import Optional
 
 import pytest
 
-from ripperdoc.core.skills import (
+from ripperdoc.services.skills import (
     SKILL_STATE_FILE_NAME,
     SkillLocation,
     build_skill_summary,
@@ -13,9 +13,9 @@ from ripperdoc.core.skills import (
     save_disabled_skill_names,
 )
 from ripperdoc.core.query import QueryContext, _apply_skill_context_updates
-from ripperdoc.core.message_utils import tool_result_message
+from ripperdoc.message_utils import tool_result_message
 from ripperdoc.core.tool import ToolUseContext
-from ripperdoc.tools.skill_tool import SkillTool, SkillToolInput
+from ripperdoc.tools.skill import SkillTool, SkillToolInput
 
 
 def _write_skill(

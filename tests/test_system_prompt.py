@@ -7,11 +7,11 @@ from typing import AsyncGenerator
 
 from pydantic import BaseModel
 
-from ripperdoc.core.message_utils import (
+from ripperdoc.message_utils import (
     ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     build_full_system_prompt,
 )
-from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.system_prompt import build_system_prompt
 from ripperdoc.core.tool import Tool, ToolOutput, ToolUseContext
 
 

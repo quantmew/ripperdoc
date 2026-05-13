@@ -10,21 +10,21 @@ from pathlib import Path
 from types import SimpleNamespace
 from pydantic import BaseModel
 
-from ripperdoc.tools.file_read_tool import FileReadTool, FileReadToolInput
-from ripperdoc.tools.file_write_tool import FileWriteTool, FileWriteToolInput
-from ripperdoc.tools.file_edit_tool import FileEditTool, FileEditToolInput
-from ripperdoc.tools.multi_edit_tool import (
+from ripperdoc.tools.file_read import FileReadTool, FileReadToolInput
+from ripperdoc.tools.file_write import FileWriteTool, FileWriteToolInput
+from ripperdoc.tools.file_edit import FileEditTool, FileEditToolInput
+from ripperdoc.tools.multi_edit import (
     MultiEditTool,
     MultiEditToolInput,
     EditOperation,
 )
-from ripperdoc.tools.glob_tool import GlobTool, GlobToolInput
-from ripperdoc.tools.ls_tool import LSTool, LSToolInput
-from ripperdoc.tools.bash_tool import BashTool, BashToolInput
-from ripperdoc.tools.task_output_tool import TaskOutputTool, TaskOutputInput
-from ripperdoc.tools.task_stop_tool import TaskStopTool, TaskStopInput
-from ripperdoc.tools.task_tool import AgentRunRecord, TaskTool, TaskToolInput
-from ripperdoc.tools.enter_worktree_tool import EnterWorktreeTool, EnterWorktreeToolInput
+from ripperdoc.tools.glob import GlobTool, GlobToolInput
+from ripperdoc.tools.ls import LSTool, LSToolInput
+from ripperdoc.tools.bash import BashTool, BashToolInput
+from ripperdoc.tools.task_output import TaskOutputTool, TaskOutputInput
+from ripperdoc.tools.task_stop import TaskStopTool, TaskStopInput
+from ripperdoc.tools.task import AgentRunRecord, TaskTool, TaskToolInput
+from ripperdoc.tools.enter_worktree import EnterWorktreeTool, EnterWorktreeToolInput
 from ripperdoc.utils.collaboration.worktree import (
     WorktreeSession,
     cleanup_worktree_session,
@@ -36,7 +36,7 @@ from ripperdoc.utils.collaboration.worktree import (
 )
 from ripperdoc.core.tool import Tool, ToolUseContext, ToolProgress, ToolResult
 from ripperdoc.core.query import ToolRegistry
-from ripperdoc.tools.tool_search_tool import ToolSearchTool, ToolSearchInput
+from ripperdoc.tools.tool_search import ToolSearchTool, ToolSearchInput
 from ripperdoc.tools.background_shell import get_background_status
 
 
@@ -101,7 +101,7 @@ async def test_file_write_tool_disables_gitignore_warnings(monkeypatch, tmp_path
         captured["warn_on_gitignore"] = warn_on_gitignore
         return True, None
 
-    monkeypatch.setattr("ripperdoc.tools.file_write_tool.check_path_for_tool", fake_check_path_for_tool)
+    monkeypatch.setattr("ripperdoc.tools.file_write.check_path_for_tool", fake_check_path_for_tool)
 
     result = await tool.validate_input(input_data, context)
 

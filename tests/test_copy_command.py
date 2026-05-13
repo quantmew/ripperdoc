@@ -2,8 +2,8 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ripperdoc.cli.commands import get_slash_command
-from ripperdoc.cli.commands.copy_cmd import command as copy_command
+from ripperdoc.commands import get_slash_command
+from ripperdoc.commands.copy import command as copy_command
 from ripperdoc.utils.messaging.messages import create_assistant_message, create_user_message
 
 
@@ -59,7 +59,7 @@ def test_copy_command_copies_last_assistant_response(tmp_path, monkeypatch):
 
     copied = {"text": ""}
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.copy_cmd._copy_to_clipboard",
+        "ripperdoc.commands.copy._copy_to_clipboard",
         lambda text: (copied.update({"text": text}) or True, ""),
     )
 
@@ -74,7 +74,7 @@ def test_copy_command_clipboard_failure(tmp_path, monkeypatch):
     ui = _DummyUI(tmp_path)
     ui.conversation_messages = [create_assistant_message("hello")]
     monkeypatch.setattr(
-        "ripperdoc.cli.commands.copy_cmd._copy_to_clipboard",
+        "ripperdoc.commands.copy._copy_to_clipboard",
         lambda _text: (False, "Failed to copy to clipboard."),
     )
 

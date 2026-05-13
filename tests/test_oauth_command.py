@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from rich.console import Console
 
-from ripperdoc.cli.commands import oauth_cmd
-from ripperdoc.core.oauth import OAuthToken, OAuthTokenType
-from ripperdoc.core.oauth.codex import CodexBrowserAuthContext, CodexOAuthPendingCallback
+import ripperdoc.commands.oauth as oauth_cmd
+from ripperdoc.services.oauth import OAuthToken, OAuthTokenType
+from ripperdoc.services.oauth.codex import CodexBrowserAuthContext, CodexOAuthPendingCallback
 
 
 class _DummyUI:

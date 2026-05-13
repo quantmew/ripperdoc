@@ -19,14 +19,14 @@ from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.core.query import QueryContext, query
-from ripperdoc.core.skills import build_skill_summary, filter_enabled_skills, load_all_skills
-from ripperdoc.core.system_prompt import build_system_prompt
-from ripperdoc.core.system_prompt_overrides import compose_system_prompt
+from ripperdoc.services.skills import build_skill_summary, filter_enabled_skills, load_all_skills
+from ripperdoc.system_prompt import build_system_prompt
+from ripperdoc.system_prompt_overrides import compose_system_prompt
 from ripperdoc.core.tool_defaults import filter_tools_by_names
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.tools.background_shell import shutdown_background_shell
-from ripperdoc.tools.task_tool import list_running_agent_worktree_paths
-from ripperdoc.tools.dynamic_mcp_tool import (
+from ripperdoc.tools.task import list_running_agent_worktree_paths
+from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
 )

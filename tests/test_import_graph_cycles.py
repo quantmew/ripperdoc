@@ -7,10 +7,10 @@ from pathlib import Path
 
 
 TARGET_MODULES = [
-    "ripperdoc.tools.mcp_tools",
-    "ripperdoc.tools.dynamic_mcp_tool",
-    "ripperdoc.tools.task_tool",
-    "ripperdoc.core.system_prompt",
+    "ripperdoc.tools.mcp",
+    "ripperdoc.tools.mcp.dynamic_mcp",
+    "ripperdoc.tools.task",
+    "ripperdoc.system_prompt",
     "ripperdoc.core.agents",
 ]
 
@@ -18,7 +18,11 @@ TARGET_MODULES = [
 def _module_path(module_name: str) -> Path:
     root = Path(__file__).resolve().parents[1]
     rel = module_name.replace(".", "/") + ".py"
-    return root / rel
+    candidate = root / rel
+    if candidate.is_file():
+        return candidate
+    # Package: try __init__.py
+    return root / module_name.replace(".", "/") / "__init__.py"
 
 
 def _collect_edges(module_name: str, all_modules: set[str]) -> set[tuple[str, str]]:

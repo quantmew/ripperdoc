@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ripperdoc.core.plugin_marketplaces import (
+from ripperdoc.services.plugin_marketplaces import (
     MarketplaceSource,
     PluginCatalogEntry,
     add_marketplace,
@@ -15,8 +15,8 @@ from ripperdoc.core.plugin_marketplaces import (
     normalize_marketplace_source,
     remove_marketplace,
 )
-from ripperdoc.core.managed_settings import reset_managed_settings_cache
-from ripperdoc.core.plugins import PluginSettingsScope
+from ripperdoc.services.managed_settings import reset_managed_settings_cache
+from ripperdoc.services.plugins import PluginSettingsScope
 
 
 def test_normalize_marketplace_source_github_forms() -> None:

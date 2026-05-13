@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
-from ripperdoc.core.plugin_marketplaces import (
+from ripperdoc.services.plugin_marketplaces import (
     MarketplaceSource,
     PluginCatalogEntry,
     add_marketplace,
@@ -25,7 +25,7 @@ from ripperdoc.core.plugin_marketplaces import (
     resolve_marketplace_entry,
     update_marketplace,
 )
-from ripperdoc.core.plugins import PluginSettingsScope, discover_plugins, plugin_scopes_for_path
+from ripperdoc.services.plugins import PluginSettingsScope, discover_plugins, plugin_scopes_for_path
 
 
 @dataclass(frozen=True)
@@ -921,7 +921,7 @@ class PluginsApp(App[None]):
                 )
 
     def _uninstall_from_known_scopes(self, plugin_path: Path) -> tuple[bool, str]:
-        from ripperdoc.core.plugin_marketplaces import uninstall_plugin_by_path
+        from ripperdoc.services.plugin_marketplaces import uninstall_plugin_by_path
 
         errors: List[str] = []
         for scope in (

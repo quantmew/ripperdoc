@@ -9,8 +9,8 @@ from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.query import QueryContext
 from ripperdoc.core.query import loop as loop_module
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext
-from ripperdoc.tools.enter_plan_mode_tool import EnterPlanModeTool, EnterPlanModeToolInput
-from ripperdoc.tools.exit_plan_mode_tool import ExitPlanModeTool, ExitPlanModeToolInput
+from ripperdoc.tools.enter_plan_mode import EnterPlanModeTool, EnterPlanModeToolInput
+from ripperdoc.tools.exit_plan_mode import ExitPlanModeTool, ExitPlanModeToolInput
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 
 

@@ -34,7 +34,7 @@ async def test_stdio_permission_mode_switch(monkeypatch, tmp_path):
     monkeypatch.setattr(handler_session, "load_dynamic_mcp_tools_async", fake_load_dynamic_mcp_tools_async)
 
     # Patch skill helpers to avoid filesystem access.
-    from ripperdoc.core import skills as skills_module
+    from ripperdoc.services import skills as skills_module
 
     class DummySkillResult:
         skills = []

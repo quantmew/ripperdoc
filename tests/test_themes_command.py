@@ -6,9 +6,9 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ripperdoc.cli.commands.themes_cmd import command as themes_command
+from ripperdoc.commands.themes import command as themes_command
 from ripperdoc.core.config import config_manager, get_global_config
-from ripperdoc.core.theme import get_theme_manager
+from ripperdoc.services.theme import get_theme_manager
 
 
 class _DummyUI:

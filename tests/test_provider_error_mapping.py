@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from ripperdoc.core.providers.error_mapping import (
+from ripperdoc.services.providers.error_mapping import (
     classify_mapped_error,
     map_bad_request_error,
     map_connection_error,
     map_permission_denied_error,
     run_with_exception_mapper,
 )
-from ripperdoc.core.providers.errors import (
+from ripperdoc.services.providers.errors import (
     ProviderConnectionError,
     ProviderContentPolicyViolationError,
     ProviderContextLengthExceededError,

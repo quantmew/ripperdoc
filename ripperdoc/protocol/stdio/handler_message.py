@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ripperdoc.core.message_utils import resolve_model_profile
+from ripperdoc.message_utils import resolve_model_profile
 from ripperdoc.protocol.models import (
     AssistantMessageData,
     AssistantStreamMessage,

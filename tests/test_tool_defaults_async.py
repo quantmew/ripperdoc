@@ -36,7 +36,8 @@ async def test_get_default_tools_async_merges_dynamic_tools(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_get_default_tools_async_applies_allowed_tools(monkeypatch, tmp_path):
+async def test_get_default_tools_async_ignores_allowed_tools_for_tool_set(monkeypatch, tmp_path):
+    """allowed_tools controls permissions, not the tool set."""
     monkeypatch.setattr(tool_defaults, "Tool", object)
     monkeypatch.setattr(
         tool_defaults,
@@ -54,4 +55,5 @@ async def test_get_default_tools_async_applies_allowed_tools(monkeypatch, tmp_pa
         project_path=tmp_path,
         allowed_tools=["Base", "Task"],
     )
-    assert [tool.name for tool in result] == ["Base", "Task"]
+    # All tools are returned; allowed_tools does not filter the tool set.
+    assert [tool.name for tool in result] == ["Base", "Extra", "Task"]
