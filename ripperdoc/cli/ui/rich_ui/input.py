@@ -144,6 +144,154 @@ def build_prompt_session(
         """Insert newline on Alt+Enter."""
         event.current_buffer.insert_text("\n")
 
+    # -- visual line helpers --
+
+    def _get_render_info(event: Any) -> Any:
+        """Safely get render_info from the current window."""
+        return getattr(event.app.layout.current_window, "render_info", None)
+
+    def _char_width(ch: str) -> int:
+        """Return the display width of a character (CJK=2, control→1, else 1)."""
+        from prompt_toolkit.utils import get_cwidth
+        return max(1, get_cwidth(ch))
+
+    def _text_col_at(buf: Any, row_start: int) -> int:
+        """Return the cursor's visual column within its visual row,
+        measured as the sum of character widths from *row_start*."""
+        col = 0
+        for i in range(row_start, buf.cursor_position):
+            col += _char_width(buf.text[i])
+        return col
+
+    def _pos_at_text_col(text: str, row_start: int, row_end: int,
+                         target_col: int) -> int:
+        """Walk from *row_start* to *row_end* (exclusive) summing char widths,
+        and return the position closest to visual column *target_col*."""
+        col = 0
+        pos = row_start
+        best = row_start
+        while pos < row_end:
+            cw = _char_width(text[pos])
+            # Place cursor past this char if its center is ≤ target_col.
+            midpoint = col + cw // 2
+            if midpoint <= target_col:
+                best = pos + 1
+            else:
+                break
+            col += cw
+            pos += 1
+        return min(best, row_end)
+
+    def _visual_row_boundaries(info: Any, buf: Any) -> list[tuple[int, int]] | None:
+        """Return [(start, end), ...] for each visual row of the current
+        logical line, using prompt_toolkit's render_info.  Returns None if
+        the information is not available."""
+        if info is None:
+            return None
+        vis = info.visible_line_to_row_col
+        if not vis:
+            return None
+        cursor_row = buf.document.cursor_position_row
+        # Build (start, end) pairs from the col values that belong to
+        # the cursor's logical row.  The entries in vis may interleave
+        # with other logical rows, so we verify each one.
+        starts = []
+        for vline in range(max(vis.keys()) + 1):
+            if vline in vis:
+                row, col = vis[vline]
+                if row == cursor_row:
+                    starts.append(col)
+        if not starts:
+            return None
+        starts.sort()
+        boundaries = []
+        for i, s in enumerate(starts):
+            e = starts[i + 1] if i + 1 < len(starts) else len(buf.text)
+            boundaries.append((s, e))
+        # If there's only one boundary it means no wrapping detected in
+        # visible lines — but there might be invisible rows above/below.
+        return boundaries
+
+    def _find_current_row(boundaries: list[tuple[int, int]],
+                          cursor_pos: int) -> int | None:
+        """Return the index into *boundaries* that contains *cursor_pos*."""
+        for i, (s, e) in enumerate(boundaries):
+            if s <= cursor_pos <= e:
+                return i
+        return None
+
+    # -- key handlers --
+
+    @key_bindings.add("up")
+    def _(event: Any) -> None:
+        """Move cursor up visually; navigate history only at the visual top."""
+        buf = event.current_buffer
+        if buf.complete_state:
+            buf.complete_previous(count=event.arg)
+            return
+
+        info = _get_render_info(event)
+        # Multi-logical-line: let prompt_toolkit handle logical row movement.
+        if buf.document.cursor_position_row > 0:
+            buf.auto_up(count=event.arg)
+            return
+
+        # Single logical line (or first logical row) — check for soft wrapping.
+        boundaries = _visual_row_boundaries(info, buf)
+        if boundaries and len(boundaries) > 1:
+            idx = _find_current_row(boundaries, buf.cursor_position)
+            if idx is not None and idx > 0:
+                target_col = _text_col_at(buf, boundaries[idx][0])
+                buf.cursor_position = _pos_at_text_col(
+                    buf.text, boundaries[idx - 1][0], boundaries[idx - 1][1],
+                    target_col,
+                )
+                return
+        # At visual top or can't determine rows — check scroll state.
+        win = event.app.layout.current_window
+        if info is not None and (
+            not info.top_visible
+            or getattr(win, "vertical_scroll_2", 0) > 0
+            or (info.cursor_position.y > 0)
+        ):
+            buf.auto_up(count=event.arg)
+        elif not buf.selection_state:
+            buf.history_backward(count=event.arg)
+
+    @key_bindings.add("down")
+    def _(event: Any) -> None:
+        """Move cursor down visually; navigate history only at the visual bottom."""
+        buf = event.current_buffer
+        if buf.complete_state:
+            buf.complete_next(count=event.arg)
+            return
+
+        info = _get_render_info(event)
+        # Multi-logical-line: let prompt_toolkit handle logical row movement.
+        if buf.document.cursor_position_row < buf.document.line_count - 1:
+            buf.auto_down(count=event.arg)
+            return
+
+        # Last logical row — check for soft wrapping via render_info.
+        boundaries = _visual_row_boundaries(info, buf)
+        if boundaries and len(boundaries) > 1:
+            idx = _find_current_row(boundaries, buf.cursor_position)
+            if idx is not None and idx < len(boundaries) - 1:
+                target_col = _text_col_at(buf, boundaries[idx][0])
+                buf.cursor_position = _pos_at_text_col(
+                    buf.text, boundaries[idx + 1][0], boundaries[idx + 1][1],
+                    target_col,
+                )
+                return
+        # At visual bottom or can't determine rows.
+        if info is not None and (
+            not info.bottom_visible
+            or info.cursor_position.y < info.window_height - 1
+        ):
+            buf.auto_down(count=event.arg)
+        elif not buf.selection_state:
+            buf.history_forward(count=event.arg)
+
     # Capture self for use in key binding closures
     ui_instance = ui
 
