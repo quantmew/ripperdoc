@@ -30,6 +30,23 @@ from ripperdoc.utils.collaboration.tasks import ensure_task_list_dir, sanitize_i
 
 logger = get_logger()
 
+# ---------------------------------------------------------------------------
+# Shared constants for team coordination
+# ---------------------------------------------------------------------------
+
+TEAM_LEAD_NAME: str = "team-lead"
+
+
+def format_agent_id(name: str, team_name: str) -> str:
+    """Deterministic agent ID: ``{name}@{team_name}``."""
+    return f"{name}@{team_name}"
+
+
+def participant_color(name: str) -> str:
+    """Deterministic color hex for a participant name."""
+    return _participant_color(name)
+
+
 TeamMessageType = Literal[
     "message",
     "broadcast",
@@ -950,11 +967,108 @@ def find_team_by_task_list_id(task_list_id: str) -> Optional[TeamConfig]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Session cleanup registry
+# ---------------------------------------------------------------------------
+
+_SESSION_TEAMS: dict[str, str] = {}  # team_name -> lead_session_id
+_SESSION_TEAMS_LOCK = threading.Lock()
+
+
+def register_team_for_session_cleanup(team_name: str, lead_session_id: str) -> None:
+    """Track a team for automatic cleanup when the process exits."""
+    clean_name = (team_name or "").strip()
+    if not clean_name:
+        return
+    with _SESSION_TEAMS_LOCK:
+        _SESSION_TEAMS[clean_name] = lead_session_id
+
+
+def unregister_team_for_session_cleanup(team_name: str) -> None:
+    """Remove a team from the session cleanup registry."""
+    clean_name = (team_name or "").strip()
+    if not clean_name:
+        return
+    with _SESSION_TEAMS_LOCK:
+        _SESSION_TEAMS.pop(clean_name, None)
+
+
+def cleanup_session_teams() -> list[str]:
+    """Clean up all teams registered for this session. Returns cleaned names."""
+    cleaned: list[str] = []
+    with _SESSION_TEAMS_LOCK:
+        names = list(_SESSION_TEAMS.keys())
+    for name in names:
+        try:
+            cleanup_team_directories(name)
+            unregister_team_for_session_cleanup(name)
+            cleaned.append(name)
+        except Exception as exc:
+            logger.warning(
+                "[teams] Failed cleaning up session team '%s': %s: %s",
+                name,
+                type(exc).__name__,
+                exc,
+            )
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Comprehensive team directory cleanup
+# ---------------------------------------------------------------------------
+
+
+def cleanup_team_directories(team_name: str, task_list_id: Optional[str] = None) -> None:
+    """Remove team directory, task directory, and inbox files.
+
+    Removes the team directory, task list directory, and inbox files.
+    """
+    clean_name = (team_name or "").strip()
+    if not clean_name:
+        return
+
+    # Load task_list_id before deleting the team config.
+    team = get_team(clean_name)
+    resolved_task_list = task_list_id or (team.task_list_id if team else None)
+
+    # Remove the entire team directory (config, messages, inboxes).
+    tdir = team_dir(clean_name, ensure=False)
+    if tdir.exists():
+        try:
+            shutil.rmtree(tdir, ignore_errors=True)
+        except OSError as exc:
+            logger.warning(
+                "[teams] Failed removing team directory: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"path": str(tdir)},
+            )
+
+    # Remove the task list directory.
+    if resolved_task_list:
+        from ripperdoc.utils.collaboration.tasks import task_list_dir
+
+        tdir_path = task_list_dir(task_list_id=resolved_task_list, ensure=False)
+        if tdir_path.exists():
+            try:
+                shutil.rmtree(tdir_path, ignore_errors=True)
+            except OSError as exc:
+                logger.warning(
+                    "[teams] Failed removing task directory: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                    extra={"path": str(tdir_path)},
+                )
+
+
 __all__ = [
+    "TEAM_LEAD_NAME",
     "TeamConfig",
     "TeamMember",
     "TeamMessage",
     "TeamMessageType",
+    "cleanup_session_teams",
+    "cleanup_team_directories",
     "clear_mailbox",
     "set_team_member_active",
     "clear_active_team_name",
@@ -962,6 +1076,7 @@ __all__ = [
     "delete_team",
     "drain_team_inbox_messages",
     "find_team_by_task_list_id",
+    "format_agent_id",
     "get_inbox_path",
     "get_active_team_name",
     "get_team",
@@ -969,14 +1084,17 @@ __all__ = [
     "list_teams",
     "mark_message_as_read_by_index",
     "mark_messages_as_read",
+    "participant_color",
     "read_mailbox",
     "read_unread_messages",
+    "register_team_for_session_cleanup",
     "register_team_message_listener",
     "remove_team_member",
     "send_team_message",
     "set_active_team_name",
     "team_config_path",
     "team_dir",
+    "unregister_team_for_session_cleanup",
     "unregister_team_message_listener",
     "upsert_team_member",
 ]

@@ -8,13 +8,13 @@ import time
 import pytest
 
 from ripperdoc.core.query import QueryContext
-from ripperdoc.tools.task import AgentRunRecord, TaskTool
+from ripperdoc.tools.agent import AgentRunRecord, AgentTool
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.collaboration.task_notifications import parse_task_notification
 
 
 def test_task_tool_background_completion_enqueues_task_notification() -> None:
-    tool = TaskTool(lambda: [])
+    tool = AgentTool(lambda: [])
     queue = PendingMessageQueue()
     record = AgentRunRecord(
         agent_id="agent_test1234",
@@ -84,7 +84,7 @@ def test_query_context_uses_dedicated_task_notification_queue_by_default() -> No
 
 @pytest.mark.asyncio
 async def test_task_tool_handoff_foreground_run_to_background_starts_task(monkeypatch) -> None:
-    tool = TaskTool(lambda: [])
+    tool = AgentTool(lambda: [])
     started = asyncio.Event()
 
     async def fake_run_background(

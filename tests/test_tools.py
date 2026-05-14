@@ -23,7 +23,7 @@ from ripperdoc.tools.ls import LSTool, LSToolInput
 from ripperdoc.tools.bash import BashTool, BashToolInput
 from ripperdoc.tools.task_output import TaskOutputTool, TaskOutputInput
 from ripperdoc.tools.task_stop import TaskStopTool, TaskStopInput
-from ripperdoc.tools.task import AgentRunRecord, TaskTool, TaskToolInput
+from ripperdoc.tools.agent import AgentRunRecord, AgentTool, AgentToolInput
 from ripperdoc.tools.enter_worktree import EnterWorktreeTool, EnterWorktreeToolInput
 from ripperdoc.utils.collaboration.worktree import (
     WorktreeSession,
@@ -676,9 +676,9 @@ async def test_task_stop_kills_background_bash():
     assert status["status"] == "killed"
 
 
-def test_task_tool_input_supports_name_alias_for_teammate() -> None:
-    """Task input should accept name field alias."""
-    parsed = TaskToolInput(
+def test_agent_tool_input_supports_name_alias_for_teammate() -> None:
+    """Agent tool input should accept name field alias."""
+    parsed = AgentToolInput(
         description="delegate auth review",
         prompt="Do work",
         subagent_type="general-purpose",
@@ -689,8 +689,8 @@ def test_task_tool_input_supports_name_alias_for_teammate() -> None:
     assert parsed.name == "researcher"
 
 
-def test_task_tool_input_accepts_worktree_isolation() -> None:
-    parsed = TaskToolInput(
+def test_agent_tool_input_accepts_worktree_isolation() -> None:
+    parsed = AgentToolInput(
         description="implement feature",
         prompt="Implement feature",
         subagent_type="general-purpose",
@@ -700,9 +700,9 @@ def test_task_tool_input_accepts_worktree_isolation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_task_tool_validate_input_requires_description() -> None:
-    tool = TaskTool(lambda: [])
-    payload = TaskToolInput(
+async def test_agent_tool_validate_input_requires_description() -> None:
+    tool = AgentTool(lambda: [])
+    payload = AgentToolInput(
         description="desc",
         prompt="Do work",
         subagent_type="general-purpose",
@@ -1226,7 +1226,7 @@ def test_has_worktree_changes_detects_dirty_and_committed_changes(tmp_path: Path
     consume_session_worktrees()
 
 
-def test_task_tool_autocleans_worktree_when_no_changes(tmp_path: Path) -> None:
+def test_agent_tool_autocleans_worktree_when_no_changes(tmp_path: Path) -> None:
     consume_session_worktrees()
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1249,7 +1249,7 @@ def test_task_tool_autocleans_worktree_when_no_changes(tmp_path: Path) -> None:
     _git("commit", "-m", "init")
 
     session = create_task_worktree(task_id="agent_autoclean", base_path=repo)
-    tool = TaskTool(lambda: [])
+    tool = AgentTool(lambda: [])
     record = AgentRunRecord(
         agent_id="agent_autoclean",
         agent_type="general-purpose",

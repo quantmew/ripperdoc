@@ -36,7 +36,9 @@ LSP_USAGE = (
     "- hover: Get hover information (documentation, type info) for a symbol\n"
     "- documentSymbol: Get all symbols (functions, classes, variables) in a document\n"
     "- workspaceSymbol: Search for symbols across the entire workspace\n"
-    "- goToImplementation: Find implementations of an interface or abstract method\n\n"
+    "- goToImplementation: Find implementations of an interface or abstract method\n"
+    "- codeAction: Get available code actions (quick fixes, refactors) at a position\n"
+    "- diagnostics: Get current diagnostics (errors, warnings) for a file\n\n"
     "All operations require:\n"
     "- filePath: The file to operate on\n"
     "- line: The line number (1-based, as shown in editors)\n"
@@ -308,6 +310,73 @@ def _format_workspace_symbols(result: Any) -> Tuple[str, int, int]:
     return f"{summary}\n\n" + "\n".join(lines), len(symbols), len(unique_files)
 
 
+_DIAGNOSTIC_SEVERITY = {
+    1: "Error",
+    2: "Warning",
+    3: "Information",
+    4: "Hint",
+}
+
+
+def _format_diagnostics(diagnostics: Any) -> Tuple[str, int, int]:
+    """Format LSP diagnostic items."""
+    if not diagnostics:
+        return "No diagnostics found.", 0, 0
+
+    items: List[Dict[str, Any]] = []
+    if isinstance(diagnostics, list):
+        items = [d for d in diagnostics if isinstance(d, dict)]
+    if not items:
+        return "No diagnostics found.", 0, 0
+
+    lines: List[str] = []
+    for diag in items[:MAX_RESULTS]:
+        severity = _DIAGNOSTIC_SEVERITY.get(diag.get("severity", 0), "Unknown")
+        range_info = diag.get("range", {})
+        start = range_info.get("start", {})
+        line_num = int(start.get("line", 0)) + 1
+        char_num = int(start.get("character", 0)) + 1
+        message = diag.get("message", "No message")
+        source = diag.get("source")
+        source_text = f" [{source}]" if source else ""
+        lines.append(f"  {severity}{source_text} @ line {line_num}:{char_num}: {message}")
+
+    omitted = len(items) - len(lines)
+    if omitted > 0:
+        lines.append(f"... {omitted} more diagnostic(s) not shown")
+
+    summary = f"{len(items)} diagnostic(s) found."
+    return f"{summary}\n" + "\n".join(lines), len(items), 1
+
+
+def _format_code_actions(actions: Any) -> Tuple[str, int, int]:
+    """Format LSP code action items."""
+    if not actions:
+        return "No code actions available.", 0, 0
+
+    items: List[Dict[str, Any]] = []
+    if isinstance(actions, list):
+        items = [a for a in actions if isinstance(a, dict)]
+    if not items:
+        return "No code actions available.", 0, 0
+
+    lines: List[str] = []
+    for action in items[:MAX_RESULTS]:
+        title = action.get("title", "Untitled action")
+        kind = action.get("kind", "")
+        is_preferred = action.get("isPreferred", False)
+        kind_text = f" ({kind})" if kind else ""
+        preferred_text = " [preferred]" if is_preferred else ""
+        lines.append(f"  - {title}{kind_text}{preferred_text}")
+
+    omitted = len(items) - len(lines)
+    if omitted > 0:
+        lines.append(f"... {omitted} more action(s) not shown")
+
+    summary = f"{len(items)} code action(s) available."
+    return f"{summary}\n" + "\n".join(lines), len(items), 1
+
+
 class LspToolInput(BaseModel):
     """Input schema for LspTool."""
 
@@ -320,6 +389,8 @@ class LspToolInput(BaseModel):
         "documentSymbol",
         "workspaceSymbol",
         "goToImplementation",
+        "codeAction",
+        "diagnostics",
     ] = Field(description="The LSP operation to perform.")
     file_path: str = Field(
         validation_alias="filePath",
@@ -454,6 +525,7 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
             "hover",
             "goToImplementation",
             "workspaceSymbol",
+            "codeAction",
         }:
             try:
                 text = _read_text(file_path)
@@ -531,6 +603,21 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
         elif operation == "goToImplementation":
             method = "textDocument/implementation"
             params = {"textDocument": text_document, "position": position}
+        elif operation == "codeAction":
+            method = "textDocument/codeAction"
+            # Scope to the current line for context
+            line_end = {"line": line_index, "character": len(line_text) if line_text else 0}
+            params = {
+                "textDocument": text_document,
+                "range": {"start": position, "end": line_end},
+                "context": {"diagnostics": []},
+            }
+        elif operation == "diagnostics":
+            # Diagnostics are pushed by the server, not requested directly.
+            # Use textDocument/diagnostic if available (LSP 3.17+), otherwise
+            # we'll handle it in the result formatting section.
+            method = "textDocument/diagnostic"
+            params = {"textDocument": text_document}
         else:
             output = LspToolOutput(
                 operation=operation,
@@ -596,6 +683,18 @@ class LspTool(Tool[LspToolInput, LspToolOutput]):
             formatted, result_count, file_count = _format_locations(
                 "implementation(s)", result or []
             )
+        elif operation == "codeAction":
+            formatted, result_count, file_count = _format_code_actions(result)
+        elif operation == "diagnostics":
+            # textDocument/diagnostic returns {"kind": "...", "items": [...]}
+            # or the server may not support it; try to extract items
+            if isinstance(result, dict):
+                diag_items = result.get("items", [])
+            elif isinstance(result, list):
+                diag_items = result
+            else:
+                diag_items = []
+            formatted, result_count, file_count = _format_diagnostics(diag_items)
         else:
             formatted = str(result)
 

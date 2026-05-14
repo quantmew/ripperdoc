@@ -175,6 +175,30 @@ class GrepToolInput(BaseModel):
         default=None,
         description="Limit output to the first N results (similar to piping to head -N) to avoid huge responses.",
     )
+    context_before: Optional[int] = Field(
+        default=None,
+        description="Number of lines of context to show before each match (maps to -B flag)",
+    )
+    context_after: Optional[int] = Field(
+        default=None,
+        description="Number of lines of context to show after each match (maps to -A flag)",
+    )
+    context: Optional[int] = Field(
+        default=None,
+        description="Number of lines of context to show around each match (maps to -C flag, alias for -B/-A)",
+    )
+    offset: Optional[int] = Field(
+        default=None,
+        description="Skip the first N results before applying head_limit (for pagination)",
+    )
+    multiline: bool = Field(
+        default=False,
+        description="Enable multiline mode for patterns spanning multiple lines",
+    )
+    type_filter: Optional[str] = Field(
+        default=None,
+        description="Ripgrep type filter (e.g., 'py', 'js', 'rust'). Maps to --type flag.",
+    )
 
 
 class GrepMatch(BaseModel):
@@ -195,6 +219,7 @@ class GrepToolOutput(BaseModel):
     total_matches: int
     output_mode: str = "files_with_matches"
     head_limit: Optional[int] = None
+    offset: Optional[int] = None
     omitted_results: int = 0
 
 
@@ -250,6 +275,10 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             )
         if input_data.head_limit is not None and input_data.head_limit <= 0:
             return ValidationResult(result=False, message="head_limit must be positive")
+        if input_data.offset is not None and input_data.offset < 0:
+            return ValidationResult(result=False, message="offset must be non-negative")
+        if input_data.context is not None and (input_data.context_before is not None or input_data.context_after is not None):
+            return ValidationResult(result=False, message="Cannot use context with context_before/context_after")
         return ValidationResult(result=True)
 
     def render_result_for_assistant(self, output: GrepToolOutput) -> str:
@@ -285,8 +314,10 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 lines.append(f"{match.file}{line_number}: {match.content}")
 
         if output.omitted_results:
+            offset_note = f" (offset={output.offset})" if output.offset else ""
             lines.append(
                 f"... and {output.omitted_results} more result(s) not shown"
+                f"{offset_note}"
                 f"{' (use head_limit to control output size)' if output.head_limit else ''}"
             )
 
@@ -306,8 +337,16 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
         msg = f"Grep: {input_data.pattern}"
         if input_data.glob:
             msg += f" in {input_data.glob}"
+        if input_data.type_filter:
+            msg += f" (type={input_data.type_filter})"
         if input_data.head_limit:
             msg += f" (head_limit={input_data.head_limit})"
+        if input_data.offset:
+            msg += f" (offset={input_data.offset})"
+        if input_data.multiline:
+            msg += " [multiline]"
+        if input_data.context:
+            msg += f" (context={input_data.context})"
         return msg
 
     async def call(
@@ -357,6 +396,23 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 else:
                     cmd.append("-n")
 
+                # Context lines
+                if input_data.context is not None:
+                    cmd.extend(["-C", str(input_data.context)])
+                else:
+                    if input_data.context_before is not None:
+                        cmd.extend(["-B", str(input_data.context_before)])
+                    if input_data.context_after is not None:
+                        cmd.extend(["-A", str(input_data.context_after)])
+
+                # Multiline support
+                if input_data.multiline:
+                    cmd.append("-U")
+
+                # Type filter
+                if input_data.type_filter:
+                    cmd.extend(["--type", input_data.type_filter])
+
                 for glob_pattern in _split_globs(input_data.glob or ""):
                     cmd.extend(["--glob", glob_pattern])
 
@@ -377,12 +433,36 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 if input_data.case_insensitive:
                     cmd.append("-i")
 
+                # Context lines for grep fallback
+                if input_data.context is not None:
+                    cmd.extend(["-C", str(input_data.context)])
+                else:
+                    if input_data.context_before is not None:
+                        cmd.extend(["-B", str(input_data.context_before)])
+                    if input_data.context_after is not None:
+                        cmd.extend(["-A", str(input_data.context_after)])
+
                 if input_data.output_mode == "files_with_matches":
                     cmd.extend(["-l"])  # Files with matches
                 elif input_data.output_mode == "count":
                     cmd.extend(["-c"])  # Count per file
                 else:
                     cmd.extend(["-n"])  # Line numbers
+
+                # Type filter → glob mapping for grep fallback
+                if input_data.type_filter:
+                    _TYPE_GLOB_MAP = {
+                        "py": "*.py", "js": "*.js", "ts": "*.ts", "tsx": "*.tsx",
+                        "jsx": "*.jsx", "rust": "*.rs", "go": "*.go", "java": "*.java",
+                        "c": "*.c", "cpp": "*.cpp *.cc *.cxx *.hpp",
+                        "rb": "*.rb", "rs": "*.rs", "swift": "*.swift",
+                        "html": "*.html *.htm", "css": "*.css",
+                        "sh": "*.sh *.bash", "sql": "*.sql",
+                    }
+                    mapped = _TYPE_GLOB_MAP.get(input_data.type_filter)
+                    if mapped:
+                        for g in mapped.split():
+                            cmd.extend(["--include", g])
 
                 for glob_pattern in _split_globs(input_data.glob or ""):
                     cmd.extend(["--include", _normalize_glob_for_grep(glob_pattern)])
@@ -443,14 +523,27 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
             lines = [line for line in stdout_text.split("\n") if line]
 
             if returncode in (0, 1):  # 0 = matches found, 1 = no matches (ripgrep/grep)
-                display_lines, omitted_results = apply_head_limit(lines, input_data.head_limit)
+                # Apply offset pagination before head_limit
+                offset = input_data.offset or 0
+                if offset > 0:
+                    lines = lines[offset:]
 
                 if input_data.output_mode == "files_with_matches":
-                    total_files = len(set(lines))
+                    # Deduplicate and sort by mtime descending for relevance
+                    unique_files = list(dict.fromkeys(lines))  # preserve order, deduplicate
+                    try:
+                        unique_files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+                    except OSError:
+                        pass  # If stat fails, keep original order
+
+                    total_files = len(unique_files)
                     total_matches = len(lines)
-                    matches = [GrepMatch(file=line) for line in display_lines]
+                    # Apply head_limit after sorting
+                    display_files, omitted_results = apply_head_limit(unique_files, input_data.head_limit)
+                    matches = [GrepMatch(file=line) for line in display_files]
 
                 elif input_data.output_mode == "count":
+                    display_lines, omitted_results = apply_head_limit(lines, input_data.head_limit)
                     parsed_files = []
                     for line in lines:
                         parsed = _parse_count_line(line, search_path)
@@ -475,6 +568,7 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                             )
 
                 else:  # content mode
+                    display_lines, omitted_results = apply_head_limit(lines, input_data.head_limit)
                     parsed_files = []
                     for line in lines:
                         parsed_content = _parse_content_line(line, search_path)
@@ -500,6 +594,7 @@ class GrepTool(Tool[GrepToolInput, GrepToolOutput]):
                 total_matches=total_matches,
                 output_mode=input_data.output_mode,
                 head_limit=input_data.head_limit,
+                offset=input_data.offset,
                 omitted_results=omitted_results,
             )
 

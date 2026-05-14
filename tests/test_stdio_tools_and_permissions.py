@@ -15,7 +15,7 @@ from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_control
 from ripperdoc.protocol.stdio import handler_config, handler_session
 from ripperdoc.protocol.models import JsonRpcErrorCodes
-from ripperdoc.tools.task import TaskTool
+from ripperdoc.tools.agent import AgentTool
 
 
 class DummyInput(BaseModel):
@@ -128,7 +128,7 @@ def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
 )
 async def test_stdio_initialize_tool_filters(monkeypatch, tmp_path, options, expected):
     base_tools = [DummyTool("Read"), DummyTool("Edit"), DummyTool("Bash")]
-    task_tool = TaskTool(lambda: base_tools)
+    task_tool = AgentTool(lambda: base_tools)
     tools = base_tools + [task_tool]
 
     _patch_stdio_dependencies(monkeypatch, tools)

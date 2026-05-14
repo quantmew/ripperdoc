@@ -73,7 +73,7 @@ from ripperdoc.utils.mcp import (
 )
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.tools.background_shell import shutdown_background_shell
-from ripperdoc.tools.task import list_running_agent_worktree_paths
+from ripperdoc.tools.agent import list_running_agent_worktree_paths
 from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,
@@ -2090,7 +2090,7 @@ class RichUI:
             return True
 
         try:
-            from ripperdoc.tools.task import TaskToolInput
+            from ripperdoc.tools.agent import AgentToolInput
         except (ImportError, ModuleNotFoundError) as exc:
             logger.warning(
                 "[ui] Failed to import TaskToolInput for forked command execution: %s: %s",
@@ -2101,7 +2101,7 @@ class RichUI:
             await self.process_query(request.expanded_content)
             return True
 
-        task_input = TaskToolInput(
+        task_input = AgentToolInput(
             description=f"Run {request.command_name}"[:64],
             prompt=request.expanded_content,
             subagent_type=request.subagent_type,

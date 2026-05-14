@@ -2,13 +2,13 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from ripperdoc.core.tool import Tool
 from ripperdoc.plan_mode import resolve_plan_file_path
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
 from ripperdoc.utils.coerce import parse_optional_int
-from ripperdoc.utils.file_watch import BoundedFileCache
+from ripperdoc.utils.fileStateCache import FileStateCache
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.messages import AttachmentMessage, ProgressMessage, UserMessage
 from ripperdoc.utils.messaging.message_types import ConversationMessage
@@ -23,6 +23,7 @@ class ToolRegistry:
     def __init__(self, tools: List[Tool[Any, Any]]) -> None:
         self._tool_map: Dict[str, Tool[Any, Any]] = {}
         self._tool_map_lower: Dict[str, str] = {}
+        self._alias_map: Dict[str, str] = {}
         self._order: List[str] = []
         self._deferred: set[str] = set()
         self._active: List[str] = []
@@ -34,6 +35,7 @@ class ToolRegistry:
         seen = set()
         self._tool_map.clear()
         self._tool_map_lower.clear()
+        self._alias_map.clear()
         self._order.clear()
         self._deferred.clear()
         self._active.clear()
@@ -48,6 +50,10 @@ class ToolRegistry:
             lower_name = name.lower()
             if lower_name not in self._tool_map_lower:
                 self._tool_map_lower[lower_name] = name
+            # Index aliases
+            for alias in getattr(tool, "aliases", []):
+                if alias not in self._alias_map:
+                    self._alias_map[alias] = name
             self._order.append(name)
             try:
                 deferred = tool.defer_loading()
@@ -81,13 +87,17 @@ class ToolRegistry:
         return set(self._deferred)
 
     def get(self, name: str) -> Optional[Tool[Any, Any]]:
-        """Lookup a tool by name."""
+        """Lookup a tool by name or alias."""
         tool = self._tool_map.get(name)
         if tool is not None:
             return tool
         canonical_name = self._tool_map_lower.get((name or "").strip().lower())
         if canonical_name:
             return self._tool_map.get(canonical_name)
+        # Check aliases
+        alias_target = self._alias_map.get(name)
+        if alias_target:
+            return self._tool_map.get(alias_target)
         return None
 
     def is_active(self, name: str) -> bool:
@@ -311,10 +321,10 @@ class QueryContext:
             if task_notification_queue is not None
             else PendingMessageQueue()
         )
-        # Use BoundedFileCache instead of plain Dict to prevent unbounded growth
-        self.file_state_cache: BoundedFileCache = BoundedFileCache(
+        # Use FileStateCache instead of plain Dict to prevent unbounded growth
+        self.file_state_cache: FileStateCache = FileStateCache(
             max_entries=file_cache_max_entries,
-            max_memory_mb=file_cache_max_memory_mb,
+            max_size_bytes=int(file_cache_max_memory_mb * 1024 * 1024),
         )
         self.pause_ui = pause_ui
         self.resume_ui = resume_ui
@@ -402,7 +412,7 @@ class QueryContext:
             "active_tool_count": len(self.tool_registry.active_tools),
         }
 
-    def drain_pending_messages(self) -> List[UserMessage | ProgressMessage | AttachmentMessage]:
+    def drain_pending_messages(self) -> List[Union[UserMessage, ProgressMessage, AttachmentMessage]]:
         """Drain queued messages waiting to be injected into the conversation."""
         return self.pending_message_queue.drain()
 

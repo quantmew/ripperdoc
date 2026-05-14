@@ -8,15 +8,10 @@ import json
 import pytest
 
 from ripperdoc.core.tool import ToolUseContext
-from ripperdoc.tools.task.task_graph import TaskCreateInput, TaskCreateTool, TaskUpdateInput, TaskUpdateTool
-from ripperdoc.tools.team import (
-    SendMessageInput,
-    SendMessageTool,
-    TeamCreateInput,
-    TeamCreateTool,
-    TeamDeleteInput,
-    TeamDeleteTool,
-)
+from ripperdoc.tools.agent.task_graph import TaskCreateInput, TaskCreateTool, TaskUpdateInput, TaskUpdateTool
+from ripperdoc.tools.SendMessageTool import SendMessageInput, SendMessageTool
+from ripperdoc.tools.TeamCreateTool import TeamCreateInput, TeamCreateTool
+from ripperdoc.tools.TeamDeleteTool import TeamDeleteInput, TeamDeleteTool
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.collaboration.teams import (
     TeamMember,
@@ -197,7 +192,7 @@ def test_team_delete_requires_no_active_members(tmp_path, monkeypatch):
     delete_tool = TeamDeleteTool()
     context = ToolUseContext(agent_id="team-lead")
     monkeypatch.setattr(
-        "ripperdoc.tools.task.list_running_team_members",
+        "ripperdoc.tools.agent.list_running_team_members",
         lambda _team_name=None: ["dev-a"],
     )
 

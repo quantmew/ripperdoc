@@ -92,8 +92,9 @@ class QuestionInput(BaseModel):
         "There should be no 'Other' option, that will be provided automatically.",
     )
     multiSelect: bool = Field(
+        default=False,
         description="Set to true to allow the user to select multiple options instead of just one. "
-        "Use when choices are not mutually exclusive."
+        "Use when choices are not mutually exclusive.",
     )
 
 

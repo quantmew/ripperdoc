@@ -128,7 +128,7 @@ class BashToolOutput(BaseModel):
     is_image: bool = False
     sandbox: Optional[bool] = None
     is_error: bool = False  # Whether this is considered an error
-    truncation_details: list[str] = Field(default_factory=list)
+    truncation_details: List[str] = Field(default_factory=list)
 
 
 class BashTool(Tool[BashToolInput, BashToolOutput]):

@@ -25,7 +25,7 @@ from ripperdoc.system_prompt_overrides import compose_system_prompt
 from ripperdoc.core.tool_defaults import filter_tools_by_names
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.tools.background_shell import shutdown_background_shell
-from ripperdoc.tools.task import list_running_agent_worktree_paths
+from ripperdoc.tools.agent import list_running_agent_worktree_paths
 from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
     merge_tools_with_dynamic,

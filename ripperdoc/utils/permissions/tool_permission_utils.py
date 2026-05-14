@@ -465,9 +465,94 @@ def is_command_read_only(command: str) -> bool:
     )
 
 
+# Command classification categories
+_READ_ONLY_COMMANDS = {
+    "cat", "head", "tail", "less", "more", "wc", "file", "stat",
+    "ls", "find", "locate", "which", "whereis", "type",
+    "echo", "printf", "date", "whoami", "hostname", "uname",
+    "env", "printenv", "id", "groups",
+    "git", "grep", "rg", "ag", "ack", "fd",
+    "diff", "comm", "sort", "uniq", "cut", "tr", "paste",
+    "curl", "wget",  # when used for reading (further checks needed)
+    "python", "python3", "node",  # typically for running scripts
+}
+_FILE_WRITE_COMMANDS = {
+    "rm", "mv", "cp", "mkdir", "rmdir", "touch", "ln",
+    "chmod", "chown", "chgrp",
+    "tee", "truncate", "dd",
+}
+_DESTRUCTIVE_COMMANDS = {
+    "rm", "rmdir", "mkfs", "dd", "shred",
+    "kill", "pkill", "killall",
+}
+_NETWORK_COMMANDS = {
+    "curl", "wget", "ssh", "scp", "rsync", "nc",
+    "ping", "traceroute", "dig", "nslookup", "host",
+    "docker", "kubectl",
+}
+_BUILD_COMMANDS = {
+    "make", "cmake", "cargo", "go", "npm", "yarn", "pnpm",
+    "pip", "pip3", "poetry", "conda",
+    "docker", "kubectl",
+}
+_TEST_COMMANDS = {
+    "pytest", "unittest", "nosetests", "jest", "mocha",
+    "go test", "cargo test", "mvn test", "gradle test",
+    "make test", "npm test",
+}
+
+
+def classify_command(command: str) -> str:
+    """Classify a shell command into a category for permission decisions.
+
+    Returns one of: "read_only", "file_write", "network", "destructive",
+    "build", "test", or "other".
+
+    Args:
+        command: The shell command string to classify.
+
+    Returns:
+        A category string.
+    """
+    tokens = parse_and_clean_shell_tokens(command)
+    if not tokens:
+        return "read_only"
+
+    first = tokens[0]
+
+    # Check destructive first (highest priority)
+    if first in _DESTRUCTIVE_COMMANDS:
+        return "destructive"
+
+    # Check file write operations
+    if first in _FILE_WRITE_COMMANDS:
+        return "file_write"
+
+    # Check network operations
+    if first in _NETWORK_COMMANDS:
+        return "network"
+
+    # Check test commands
+    cmd_str = command.strip()
+    for test_cmd in _TEST_COMMANDS:
+        if cmd_str.startswith(test_cmd):
+            return "test"
+
+    # Check build commands
+    if first in _BUILD_COMMANDS:
+        return "build"
+
+    # Check if it's a known read-only command
+    if is_command_read_only(command):
+        return "read_only"
+
+    return "other"
+
+
 __all__ = [
     "PermissionDecision",
     "ToolRule",
+    "classify_command",
     "create_tool_rule",
     "create_wildcard_tool_rule",
     "evaluate_shell_command_permissions",

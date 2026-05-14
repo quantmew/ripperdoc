@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from ripperdoc.core.tool import ToolUseContext
-from ripperdoc.tools.task.task_graph import (
+from ripperdoc.tools.agent.task_graph import (
     TaskCreateInput,
     TaskCreateTool,
     TaskListInput,

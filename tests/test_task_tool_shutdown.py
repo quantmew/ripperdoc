@@ -1,9 +1,9 @@
-"""Shutdown-response handling tests for TaskTool."""
+"""Shutdown-response handling tests for AgentTool."""
 
 from __future__ import annotations
 
 from ripperdoc.message_utils import tool_result_message
-from ripperdoc.tools.task import TaskTool
+from ripperdoc.tools.agent import AgentTool
 from ripperdoc.utils.messaging.messages import create_assistant_message
 
 
@@ -25,7 +25,7 @@ def test_extract_approved_shutdown_response_from_tool_result() -> None:
     )
     result_message = tool_result_message("tool-1", "ok", tool_use_result={"success": True})
 
-    payload = TaskTool._extract_approved_shutdown_response([assistant], result_message)
+    payload = AgentTool._extract_approved_shutdown_response([assistant], result_message)
     assert payload is not None
     assert payload.get("request_id") == "req_123"
     assert payload.get("content") == "Task complete, shutting down."
@@ -49,5 +49,5 @@ def test_extract_approved_shutdown_response_ignores_rejections() -> None:
     )
     result_message = tool_result_message("tool-2", "ok", tool_use_result={"success": True})
 
-    payload = TaskTool._extract_approved_shutdown_response([assistant], result_message)
+    payload = AgentTool._extract_approved_shutdown_response([assistant], result_message)
     assert payload is None

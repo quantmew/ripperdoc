@@ -14,7 +14,7 @@ from ripperdoc.core.agents import (
     save_agent_definition,
 )
 from ripperdoc.core.config import get_global_config
-from ripperdoc.tools.task import (
+from ripperdoc.tools.agent import (
     list_agent_runs,
     get_agent_run_snapshot,
     cancel_agent_run,

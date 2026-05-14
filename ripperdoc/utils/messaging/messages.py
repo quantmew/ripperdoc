@@ -4,6 +4,8 @@ This module provides utilities for creating and normalizing messages
 for communication with AI models.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -432,7 +434,7 @@ class PdfReferenceAttachmentPayload(AttachmentPayload):
     type: str = "pdf_reference"
     filename: str
     pageCount: int
-    fileSize: int | float
+    fileSize: Union[int, float]
 
 
 class SelectedLinesInIdeAttachmentPayload(AttachmentPayload):
@@ -779,7 +781,7 @@ def _coerce_attachment_payload(payload: Any) -> AttachmentPayloadModel:
 
 
 class AttachmentMessage(BaseModel):
-    """Internal attachment item aligned with Claude Code style transcript attachments."""
+    """Internal attachment item for transcript attachments."""
 
     type: str = "attachment"
     attachment: AttachmentPayloadModel
@@ -1205,7 +1207,7 @@ def create_pdf_reference_attachment_message(
     filename: str,
     *,
     page_count: int,
-    file_size: int | float,
+    file_size: Union[int, float],
 ) -> AttachmentMessage:
     return _create_typed_attachment_message(
         PdfReferenceAttachmentPayload(filename=filename, pageCount=page_count, fileSize=file_size)
@@ -2247,8 +2249,8 @@ def render_attachment_message(message: AttachmentMessage) -> UserMessage:
 
 
 def expand_attachment_messages(
-    messages: Sequence[UserMessage | AssistantMessage | ProgressMessage | AttachmentMessage],
-) -> List[UserMessage | AssistantMessage | ProgressMessage | AttachmentMessage]:
+    messages: Sequence[Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]],
+) -> List[Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]]:
     """Expand attachment items into model-visible user/meta messages."""
 
     expanded: List[UserMessage | AssistantMessage | ProgressMessage | AttachmentMessage] = []

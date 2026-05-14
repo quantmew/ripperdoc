@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Generator, Optional, TextIO, Union
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.file_watch import record_snapshot
+from ripperdoc.utils.fileStateCache import record_snapshot
 from ripperdoc.utils.platform import HAS_FCNTL
 
 logger = get_logger()

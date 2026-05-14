@@ -111,8 +111,8 @@ class MultiEditToolOutput(BaseModel):
     message: str
     additions: int = 0
     deletions: int = 0
-    diff_lines: list[str] = []
-    diff_with_line_numbers: list[str] = []
+    diff_lines: List[str] = []
+    diff_with_line_numbers: List[str] = []
     applied_edits: List[EditOperation] = []
     created: bool = False
 

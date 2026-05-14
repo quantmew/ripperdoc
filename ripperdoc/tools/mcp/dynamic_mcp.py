@@ -438,7 +438,7 @@ async def load_dynamic_mcp_tools_async(
 
 def merge_tools_with_dynamic(base_tools: List[Any], dynamic_tools: List[Any]) -> List[Any]:
     """Merge dynamic MCP tools into the existing tool list and rebuild the Task tool."""
-    from ripperdoc.tools.task import TaskTool  # Local import to avoid cycles
+    from ripperdoc.tools.agent import AgentTool  # Local import to avoid cycles
 
     base_without_task = [tool for tool in base_tools if getattr(tool, "name", None) != "Task"]
     existing_names = {getattr(tool, "name", None) for tool in base_without_task}
@@ -449,7 +449,7 @@ def merge_tools_with_dynamic(base_tools: List[Any], dynamic_tools: List[Any]) ->
         base_without_task.append(tool)
         existing_names.add(getattr(tool, "name", None))
 
-    task_tool = TaskTool(lambda: base_without_task)
+    task_tool = AgentTool(lambda: base_without_task)
     return base_without_task + [task_tool]
 
 

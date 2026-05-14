@@ -20,20 +20,31 @@ from ripperdoc.tools.ls import LSTool
 from ripperdoc.tools.grep import GrepTool
 from ripperdoc.tools.lsp import LspTool
 from ripperdoc.tools.skill import SkillTool
-from ripperdoc.tools.todo import TodoReadTool, TodoWriteTool
-from ripperdoc.tools.task.task_graph import TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool
-from ripperdoc.tools.team import (
-    SendMessageTool,
-    TeamCreateTool,
-    TeamDeleteTool,
-)
+from ripperdoc.tools.todo_write import TodoWriteTool
+from ripperdoc.tools.todo_read import TodoReadTool
+from ripperdoc.tools.task_create import TaskCreateTool
+from ripperdoc.tools.task_get import TaskGetTool
+from ripperdoc.tools.task_list import TaskListTool
+from ripperdoc.tools.task_update import TaskUpdateTool
+from ripperdoc.tools.SendMessageTool import SendMessageTool
+from ripperdoc.tools.TeamCreateTool import TeamCreateTool
+from ripperdoc.tools.TeamDeleteTool import TeamDeleteTool
 from ripperdoc.tools.ask_user_question import AskUserQuestionTool
 from ripperdoc.tools.enter_plan_mode import EnterPlanModeTool
 from ripperdoc.tools.enter_worktree import EnterWorktreeTool
 from ripperdoc.tools.exit_plan_mode import ExitPlanModeTool
+from ripperdoc.tools.exit_worktree import ExitWorktreeTool
 from ripperdoc.tools.memory import MemoryTool
-from ripperdoc.tools.task import TaskTool
+from ripperdoc.tools.agent import AgentTool
 from ripperdoc.tools.tool_search import ToolSearchTool
+from ripperdoc.tools.web_fetch import WebFetchTool
+from ripperdoc.tools.web_search import WebSearchTool
+from ripperdoc.tools.sleep import SleepTool
+from ripperdoc.tools.cron_create import CronCreateTool
+from ripperdoc.tools.cron_delete import CronDeleteTool
+from ripperdoc.tools.cron_list import CronListTool
+from ripperdoc.tools.config import ConfigTool
+from ripperdoc.tools.send_user_message import SendUserMessageTool
 from ripperdoc.tools.mcp import (
     ListMcpResourcesTool,
     ListMcpServersTool,
@@ -77,12 +88,21 @@ BUILTIN_TOOL_NAMES = [
     "EnterPlanMode",
     "EnterWorktree",
     "ExitPlanMode",
+    "ExitWorktree",
     "Memory",
     "ToolSearch",
     "ListMcpServers",
     "ListMcpResources",
     "ReadMcpResource",
-    "Task",
+    "WebFetch",
+    "WebSearch",
+    "Sleep",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "Config",
+    "SendUserMessage",
+    "Agent",
 ]
 
 
@@ -109,18 +129,18 @@ def filter_tools_by_names(
     for tool in tools:
         tool_name = getattr(tool, "name", tool.__class__.__name__)
         if tool_name in name_set:
-            if tool_name == "Task":
+            if tool_name == "Agent":
                 has_task = True
             else:
                 filtered.append(tool)
 
-    # If Task is requested, recreate it with the filtered base tools
+    # If Agent is requested, recreate it with the filtered base tools
     if has_task:
 
         def _filtered_base_provider() -> List[Tool[Any, Any]]:
-            return [t for t in filtered if getattr(t, "name", None) != "Task"]
+            return [t for t in filtered if getattr(t, "name", None) != "Agent"]
 
-        filtered.append(TaskTool(_filtered_base_provider))
+        filtered.append(AgentTool(_filtered_base_provider))
 
     return filtered
 
@@ -148,6 +168,15 @@ def _build_base_tools() -> List[Tool[Any, Any]]:
         ExitPlanModeTool(),
         MemoryTool(),
         ToolSearchTool(),
+        ExitWorktreeTool(),
+        WebFetchTool(),
+        WebSearchTool(),
+        SleepTool(),
+        CronCreateTool(),
+        CronDeleteTool(),
+        CronListTool(),
+        ConfigTool(),
+        SendUserMessageTool(),
         ListMcpServersTool(),
         ListMcpResourcesTool(),
         ReadMcpResourceTool(),
@@ -181,7 +210,7 @@ def _finalize_tool_list(
     used for tool-set filtering.  It controls auto-approval permissions and
     is handled by the permission engine.
     """
-    task_tool = TaskTool(lambda: base_tools)
+    task_tool = AgentTool(lambda: base_tools)
     all_tools = base_tools + [task_tool]
 
     logger.debug(

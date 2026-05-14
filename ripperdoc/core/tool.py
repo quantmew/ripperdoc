@@ -8,7 +8,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, TypeVar, Generic, Union
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation
-from ripperdoc.utils.file_watch import FileCacheType
+from ripperdoc.utils.fileStateCache import FileCacheType
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 
@@ -54,7 +54,7 @@ class ToolUseContext(BaseModel):
     read_file_timestamps: Dict[str, float] = Field(default_factory=dict)
     # SkipValidation prevents Pydantic from copying the cache during validation,
     # ensuring Read and Edit tools share the same cache instance.
-    # FileCacheType supports both Dict[str, FileSnapshot] and BoundedFileCache.
+    # FileCacheType supports both Dict[str, FileState] and FileStateCache.
     file_state_cache: Annotated[FileCacheType, SkipValidation] = Field(default_factory=dict)
     conversation_messages: Annotated[Optional[List[Any]], SkipValidation] = Field(
         default=None,
@@ -147,6 +147,11 @@ class Tool(ABC, Generic[TInput, TOutput]):
     async def prompt(self, yolo_mode: bool = False) -> str:
         """Get the system prompt for this tool."""
         pass
+
+    @property
+    def aliases(self) -> list[str]:
+        """Alternate names under which this tool can be invoked."""
+        return []
 
     def user_facing_name(self) -> str:
         """Get the user-facing name of the tool."""

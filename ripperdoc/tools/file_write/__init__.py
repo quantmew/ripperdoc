@@ -17,7 +17,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.file_watch import record_snapshot
+from ripperdoc.utils.fileStateCache import record_snapshot
 from ripperdoc.utils.filesystem.path_ignore import check_path_for_tool
 from ripperdoc.tools.file_read import detect_file_encoding
 
@@ -75,6 +75,7 @@ class FileWriteToolOutput(BaseModel):
     bytes_written: int
     success: bool
     message: str
+    is_new_file: bool = False
 
 
 class FileWriteTool(Tool[FileWriteToolInput, FileWriteToolOutput]):
@@ -195,13 +196,57 @@ NEVER write new files unless explicitly required by the user."""
         try:
             # Determine encoding based on target file and content
             file_path = os.path.abspath(input_data.file_path)
+            is_new_file = not os.path.exists(file_path)
             encoding = determine_write_encoding(file_path, input_data.content)
 
-            # Write the file with the appropriate encoding
-            with open(input_data.file_path, "w", encoding=encoding) as f:
-                f.write(input_data.content)
+            # Content staleness check for existing files
+            if not is_new_file:
+                file_state_cache = getattr(context, "file_state_cache", {})
+                file_snapshot = file_state_cache.get(file_path)
+                if file_snapshot:
+                    try:
+                        with open(file_path, "r", encoding=encoding, errors="replace") as f:
+                            current_content = f.read()
+                        if current_content != file_snapshot.content:
+                            output = FileWriteToolOutput(
+                                file_path=input_data.file_path,
+                                bytes_written=0,
+                                success=False,
+                                message="File content has changed since last read. Read it again before writing.",
+                                is_new_file=False,
+                            )
+                            yield ToolResult(
+                                data=output,
+                                result_for_assistant=self.render_result_for_assistant(output),
+                            )
+                            return
+                    except (OSError, UnicodeDecodeError):
+                        pass
 
-            bytes_written = len(input_data.content.encode(encoding))
+            # Detect line ending style of existing file, preserve it
+            line_ending = None
+            if not is_new_file:
+                try:
+                    with open(file_path, "rb") as f:
+                        raw_sample = f.read(4096)
+                    if b"\r\n" in raw_sample:
+                        line_ending = "\r\n"
+                    elif b"\r" in raw_sample:
+                        line_ending = "\r"
+                    else:
+                        line_ending = "\n"
+                except OSError:
+                    line_ending = "\n"
+
+            content_to_write = input_data.content
+            if line_ending and line_ending != "\n":
+                content_to_write = input_data.content.replace("\n", line_ending)
+
+            # Write the file with newline='' to prevent Python line ending translation
+            with open(input_data.file_path, "w", encoding=encoding, newline="") as f:
+                f.write(content_to_write)
+
+            bytes_written = len(content_to_write.encode(encoding))
 
             # Use absolute path to ensure consistency with validation lookup
             abs_file_path = os.path.abspath(input_data.file_path)
@@ -220,11 +265,13 @@ NEVER write new files unless explicitly required by the user."""
                     extra={"file_path": abs_file_path},
                 )
 
+            action = "Created" if is_new_file else "Updated"
             output = FileWriteToolOutput(
                 file_path=input_data.file_path,
                 bytes_written=bytes_written,
                 success=True,
-                message=f"Successfully wrote {bytes_written} bytes to {input_data.file_path}",
+                message=f"Successfully {action.lower()} {input_data.file_path} ({bytes_written} bytes)",
+                is_new_file=is_new_file,
             )
 
             yield ToolResult(

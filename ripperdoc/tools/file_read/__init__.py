@@ -4,6 +4,7 @@ Allows the AI to read file contents.
 """
 
 import itertools
+import json
 import os
 from pathlib import Path
 from typing import AsyncGenerator, List, Optional, Tuple
@@ -19,12 +20,15 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.file_watch import record_snapshot
+from ripperdoc.utils.fileStateCache import record_snapshot
+from ripperdoc.utils.file_watch import notify_file_read_listeners
 from ripperdoc.utils.filesystem.path_ignore import check_path_for_tool
 from ripperdoc.utils.messaging.messages import (
     format_empty_file_warning,
     format_offset_exceeded_warning,
 )
+from ripperdoc.utils.image_utils import is_image_file, read_image_as_base64
+from ripperdoc.utils.pdf_utils import read_pdf_text
 
 logger = get_logger()
 
@@ -206,6 +210,10 @@ class FileReadToolInput(BaseModel):
         default=None, description="Line number to start reading from (optional)"
     )
     limit: Optional[int] = Field(default=None, description="Number of lines to read (optional)")
+    pages: Optional[str] = Field(
+        default=None,
+        description="Page range for PDF files (e.g., '1-5', '3', '10-20'). Maximum 20 pages per request.",
+    )
 
 
 class FileReadToolOutput(BaseModel):
@@ -216,6 +224,7 @@ class FileReadToolOutput(BaseModel):
     line_count: int
     offset: int
     limit: Optional[int]
+    content_type: str = "text"  # "text", "image", "pdf", "notebook"
 
 
 class FileReadTool(Tool[FileReadToolInput, FileReadToolOutput]):
@@ -255,7 +264,9 @@ and limit to read only a portion of the file."""
             "- Lines longer than 2000 characters are truncated in the output.\n"
             "- Results are returned with cat -n style numbering: spaces + line number + tab, then the file content.\n"
             "- You can call multiple tools in a single response—speculatively read multiple potentially useful files together.\n"
-            "- It is okay to attempt reading a non-existent file; an error will be returned if the file is missing."
+            "- It is okay to attempt reading a non-existent file; an error will be returned if the file is missing.\n"
+            "- This tool is able to read images (PNG, JPG, GIF, WebP), PDFs (using 'pages' parameter), and Jupyter notebooks (.ipynb).\n"
+            "- For PDFs with 10+ pages, you MUST provide a 'pages' parameter specifying the range (e.g., pages='1-5'). Maximum 20 pages per request."
         )
 
     def is_read_only(self) -> bool:
@@ -329,6 +340,155 @@ and limit to read only a portion of the file."""
         """Read the file."""
 
         try:
+            file_path_obj = Path(input_data.file_path)
+            abs_file_path = os.path.abspath(input_data.file_path)
+
+            # --- PDF support ---
+            if file_path_obj.suffix.lower() == ".pdf":
+                pdf_text, pdf_error = read_pdf_text(file_path_obj, input_data.pages)
+                if pdf_error:
+                    error_output = FileReadToolOutput(
+                        content=pdf_error,
+                        file_path=input_data.file_path,
+                        line_count=0,
+                        offset=0,
+                        limit=None,
+                        content_type="pdf",
+                    )
+                    yield ToolResult(
+                        data=error_output,
+                        result_for_assistant=f"Error: {pdf_error}",
+                    )
+                    return
+
+                output = FileReadToolOutput(
+                    content=pdf_text,
+                    file_path=input_data.file_path,
+                    line_count=pdf_text.count("\n"),
+                    offset=0,
+                    limit=None,
+                    content_type="pdf",
+                )
+                yield ToolResult(
+                    data=output,
+                    result_for_assistant=self.render_result_for_assistant(output),
+                )
+                return
+
+            # --- Image support ---
+            if is_image_file(file_path_obj):
+                result = read_image_as_base64(file_path_obj)
+                if result is None:
+                    error_output = FileReadToolOutput(
+                        content=f"Failed to read image: {input_data.file_path}",
+                        file_path=input_data.file_path,
+                        line_count=0,
+                        offset=0,
+                        limit=None,
+                        content_type="image",
+                    )
+                    yield ToolResult(
+                        data=error_output,
+                        result_for_assistant=f"Error: Cannot read image file {input_data.file_path}",
+                    )
+                    return
+
+                base64_data, mime_type = result
+                # Return image info for the assistant
+                file_size = file_path_obj.stat().st_size
+                content = f"[Image: {file_path_obj.name}, type={mime_type}, size={file_size} bytes, base64 length={len(base64_data)}]"
+
+                output = FileReadToolOutput(
+                    content=content,
+                    file_path=input_data.file_path,
+                    line_count=1,
+                    offset=0,
+                    limit=None,
+                    content_type="image",
+                )
+                yield ToolResult(
+                    data=output,
+                    result_for_assistant=content,
+                )
+                return
+
+            # --- Jupyter Notebook (.ipynb) support ---
+            if file_path_obj.suffix.lower() == ".ipynb":
+                try:
+                    with open(input_data.file_path, "r", encoding="utf-8") as f:
+                        notebook = json.load(f)
+                except (json.JSONDecodeError, OSError) as exc:
+                    error_output = FileReadToolOutput(
+                        content=f"Error reading notebook: {exc}",
+                        file_path=input_data.file_path,
+                        line_count=0,
+                        offset=0,
+                        limit=None,
+                        content_type="notebook",
+                    )
+                    yield ToolResult(
+                        data=error_output,
+                        result_for_assistant=f"Error reading notebook {input_data.file_path}: {exc}",
+                    )
+                    return
+
+                parts: list[str] = []
+                for i, cell in enumerate(notebook.get("cells", [])):
+                    cell_type = cell.get("cell_type", "unknown")
+                    source = "".join(cell.get("source", []))
+                    parts.append(f"[Cell {i + 1}: {cell_type}]\n{source}")
+
+                    # Include outputs for code cells
+                    if cell_type == "code":
+                        for output_item in cell.get("outputs", []):
+                            output_type = output_item.get("output_type", "")
+                            if "text" in output_item:
+                                text = "".join(output_item["text"])
+                                parts.append(f"  Output ({output_type}):\n{text}")
+                            elif "data" in output_item:
+                                for mime, data in output_item["data"].items():
+                                    if mime == "text/plain":
+                                        text = data if isinstance(data, str) else "".join(data)
+                                        parts.append(f"  Output ({output_type}, {mime}):\n{text}")
+
+                nb_content = "\n\n".join(parts)
+                output = FileReadToolOutput(
+                    content=nb_content,
+                    file_path=input_data.file_path,
+                    line_count=nb_content.count("\n"),
+                    offset=0,
+                    limit=None,
+                    content_type="notebook",
+                )
+                yield ToolResult(
+                    data=output,
+                    result_for_assistant=self.render_result_for_assistant(output),
+                )
+                return
+
+            # --- Deduplication cache check ---
+            file_state_cache = getattr(context, "file_state_cache", {})
+            file_snapshot = file_state_cache.get(abs_file_path)
+            if file_snapshot:
+                try:
+                    current_mtime = os.path.getmtime(abs_file_path)
+                    if current_mtime == file_snapshot.timestamp:
+                        output = FileReadToolOutput(
+                            content="[File unchanged since last read]",
+                            file_path=input_data.file_path,
+                            line_count=0,
+                            offset=0,
+                            limit=None,
+                        )
+                        yield ToolResult(
+                            data=output,
+                            result_for_assistant=output.content,
+                        )
+                        return
+                except OSError:
+                    pass
+
+            # --- Regular text file reading ---
             # Check file size before reading to prevent memory exhaustion
             file_size = os.path.getsize(input_data.file_path)
             offset = max(input_data.offset or 0, 0)
@@ -399,7 +559,6 @@ and limit to read only a portion of the file."""
 
             # Remember what we read so we can detect user edits later.
             # Use absolute path to ensure consistency with Edit tool's lookup
-            abs_file_path = os.path.abspath(input_data.file_path)
             try:
                 record_snapshot(
                     abs_file_path,
@@ -407,7 +566,6 @@ and limit to read only a portion of the file."""
                     getattr(context, "file_state_cache", {}),
                     offset=offset,
                     limit=limit,
-                    encoding=used_encoding,
                 )
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(
@@ -416,6 +574,9 @@ and limit to read only a portion of the file."""
                     exc,
                     extra={"file_path": input_data.file_path},
                 )
+
+            # Notify file read listeners (e.g., skill discovery, diagnostics clearing)
+            notify_file_read_listeners(abs_file_path)
 
             output = FileReadToolOutput(
                 content=content,

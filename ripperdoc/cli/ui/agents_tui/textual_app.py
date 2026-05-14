@@ -39,7 +39,7 @@ from ripperdoc.core.agents import (
 from ripperdoc.core.config import get_global_config
 from ripperdoc.core.tool_defaults import BUILTIN_TOOL_NAMES
 from ripperdoc.core.query import query_llm
-from ripperdoc.tools.task import (
+from ripperdoc.tools.agent import (
     cancel_agent_run,
     get_agent_run_snapshot,
     list_agent_runs,

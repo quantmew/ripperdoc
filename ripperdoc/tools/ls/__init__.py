@@ -91,7 +91,7 @@ class LSToolInput(BaseModel):
     path: str = Field(
         description="The absolute path to the directory to list (must be absolute, not relative)"
     )
-    ignore: list[str] = Field(
+    ignore: List[str] = Field(
         default_factory=list,
         description="List of glob patterns to ignore (relative to the provided path)",
     )
@@ -101,11 +101,11 @@ class LSToolOutput(BaseModel):
     """Output from directory listing."""
 
     root: str
-    entries: list[str]
+    entries: List[str]
     tree: str
     truncated: bool = False
     aborted: bool = False
-    ignored: list[str] = Field(default_factory=list)
+    ignored: List[str] = Field(default_factory=list)
     warning: Optional[str] = None
     git_info: Optional[Dict[str, Any]] = Field(default_factory=dict)
     file_count: int = 0

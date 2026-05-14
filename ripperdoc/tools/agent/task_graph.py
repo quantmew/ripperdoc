@@ -1,9 +1,7 @@
-"""Task graph tool suite (TaskCreate/TaskGet/TaskUpdate/TaskList)."""
-
-from __future__ import annotations
+"""Task graph tool suite — re-exported from split modules for backward compatibility."""
 
 from textwrap import dedent
-from typing import Any, AsyncGenerator, Literal, Optional, TypeVar
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,8 +9,8 @@ from ripperdoc.core.tool import (
     Tool,
     ToolOutput,
     ToolResult,
-    ToolUseExample,
     ToolUseContext,
+    ToolUseExample,
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
@@ -27,8 +25,28 @@ from ripperdoc.utils.collaboration.tasks import (
     unresolved_blockers,
     update_task,
 )
-from ripperdoc.utils.collaboration.teams import find_team_by_task_list_id, get_active_team_name, get_team, send_team_message
+from ripperdoc.utils.collaboration.teams import (
+    find_team_by_task_list_id,
+    get_active_team_name,
+    get_team,
+    send_team_message,
+)
 
+from ripperdoc.tools.task_create import TaskCreateTool, TaskCreateInput
+from ripperdoc.tools.task_get import TaskGetTool, TaskGetInput
+from ripperdoc.tools.task_list import TaskListTool, TaskListInput
+from ripperdoc.tools.task_update import TaskUpdateTool, TaskUpdateInput
+
+__all__ = [
+    "TaskCreateTool",
+    "TaskGetTool",
+    "TaskUpdateTool",
+    "TaskListTool",
+    "TaskCreateInput",
+    "TaskGetInput",
+    "TaskUpdateInput",
+    "TaskListInput",
+]
 
 logger = get_logger()
 
@@ -274,7 +292,7 @@ class TaskCreateInput(BaseModel):
         validation_alias="activeForm",
         serialization_alias="activeForm",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
 
@@ -297,18 +315,18 @@ class TaskUpdateInput(BaseModel):
         serialization_alias="activeForm",
     )
     status: Optional[TaskStatusWithDelete] = None
-    add_blocks: list[str] = Field(
+    add_blocks: List[str] = Field(
         default_factory=list,
         validation_alias="addBlocks",
         serialization_alias="addBlocks",
     )
-    add_blocked_by: list[str] = Field(
+    add_blocked_by: List[str] = Field(
         default_factory=list,
         validation_alias="addBlockedBy",
         serialization_alias="addBlockedBy",
     )
     owner: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
 
@@ -332,8 +350,8 @@ class TaskGetEntry(BaseModel):
     subject: str
     description: str
     status: Literal["pending", "in_progress", "completed"]
-    blocks: list[str]
-    blocked_by: list[str] = Field(serialization_alias="blockedBy")
+    blocks: List[str]
+    blocked_by: List[str] = Field(serialization_alias="blockedBy")
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -349,7 +367,7 @@ class TaskUpdateStatusChange(BaseModel):
 class TaskUpdateOutput(BaseModel):
     success: bool
     task_id: str = Field(serialization_alias="taskId")
-    updated_fields: list[str] = Field(default_factory=list, serialization_alias="updatedFields")
+    updated_fields: List[str] = Field(default_factory=list, serialization_alias="updatedFields")
     error: Optional[str] = None
     status_change: Optional[TaskUpdateStatusChange] = Field(
         default=None,
@@ -362,12 +380,12 @@ class TaskListEntry(BaseModel):
     subject: str
     status: Literal["pending", "in_progress", "completed"]
     owner: Optional[str] = None
-    blocked_by: list[str] = Field(default_factory=list, serialization_alias="blockedBy")
+    blocked_by: List[str] = Field(default_factory=list, serialization_alias="blockedBy")
     model_config = ConfigDict(populate_by_name=True)
 
 
 class TaskListOutput(BaseModel):
-    tasks: list[TaskListEntry] = Field(default_factory=list)
+    tasks: List[TaskListEntry] = Field(default_factory=list)
 
 
 TaskGraphInputT = TypeVar("TaskGraphInputT", bound=BaseModel)

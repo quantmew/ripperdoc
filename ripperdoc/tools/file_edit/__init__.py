@@ -28,8 +28,29 @@ from ripperdoc.utils.file_editing import (
     select_write_encoding,
 )
 from ripperdoc.tools.file_read import detect_file_encoding
+from ripperdoc.utils.secret_detection import detect_secrets
 
 logger = get_logger()
+
+# Unicode curly/smart quote to ASCII mapping
+_QUOTE_MAP = str.maketrans({
+    "‘": "'",  # left single
+    "’": "'",  # right single
+    "“": '"',  # left double
+    "”": '"',  # right double
+    "‚": "'",  # single low-9
+    "„": '"',  # double low-9
+    "′": "'",  # prime
+    "″": '"',  # double prime
+})
+
+
+def _normalize_quotes(text: str) -> str:
+    """Normalize Unicode curly/smart quotes to ASCII equivalents."""
+    return text.translate(_QUOTE_MAP)
+
+
+_MAX_FILE_SIZE_BYTES = 1_000_000_000  # 1GB
 
 
 def determine_edit_encoding(file_path: str, new_content: str) -> str:
@@ -81,8 +102,8 @@ class FileEditToolOutput(BaseModel):
     message: str
     additions: int = 0
     deletions: int = 0
-    diff_lines: list[str] = []
-    diff_with_line_numbers: list[str] = []
+    diff_lines: List[str] = []
+    diff_with_line_numbers: List[str] = []
 
 
 class FileEditTool(Tool[FileEditToolInput, FileEditToolOutput]):
@@ -162,6 +183,16 @@ match exactly (including whitespace and indentation)."""
                 error_code=2,
             )
 
+        # Check file size limit
+        try:
+            if os.path.getsize(input_data.file_path) > _MAX_FILE_SIZE_BYTES:
+                return ValidationResult(
+                    result=False,
+                    message=f"File exceeds maximum size limit (1GB): {input_data.file_path}",
+                )
+        except OSError:
+            pass
+
         # Check that old_string and new_string are different
         if input_data.old_string == input_data.new_string:
             return ValidationResult(
@@ -213,9 +244,10 @@ match exactly (including whitespace and indentation)."""
 
     def render_result_for_assistant(self, output: FileEditToolOutput) -> str:
         """Format output for the AI."""
-        # Return simple message for AI, but include structured data for UI
-        # The UI will extract the structured data from the output object
-        return output.message
+        result = output.message
+        if output.success and output.diff_lines:
+            result += "\n\n" + "\n".join(output.diff_lines)
+        return result
 
     def render_tool_use_message(self, input_data: FileEditToolInput, verbose: bool = False) -> str:
         """Format the tool use for display."""
@@ -229,6 +261,21 @@ match exactly (including whitespace and indentation)."""
         abs_file_path = os.path.abspath(input_data.file_path)
         file_state_cache = getattr(context, "file_state_cache", {})
         file_snapshot = file_state_cache.get(abs_file_path)
+
+        # Secret detection on new content
+        secret_warning = detect_secrets(input_data.new_string)
+        if secret_warning:
+            output = FileEditToolOutput(
+                file_path=input_data.file_path,
+                replacements_made=0,
+                success=False,
+                message=f"Blocked: {secret_warning}. Remove sensitive data before editing.",
+            )
+            yield ToolResult(
+                data=output,
+                result_for_assistant=self.render_result_for_assistant(output),
+            )
+            return
 
         # Detect file encoding before opening
         file_encoding, _ = detect_file_encoding(abs_file_path)
@@ -274,7 +321,11 @@ match exactly (including whitespace and indentation)."""
 
                 content = f.read()
 
-                if input_data.old_string not in content:
+                # Apply quote normalization for matching
+                normalized_old = _normalize_quotes(input_data.old_string)
+                normalized_content = _normalize_quotes(content)
+
+                if normalized_old not in normalized_content:
                     output = FileEditToolOutput(
                         file_path=input_data.file_path,
                         replacements_made=0,
@@ -287,7 +338,7 @@ match exactly (including whitespace and indentation)."""
                     )
                     return
 
-                occurrence_count = content.count(input_data.old_string)
+                occurrence_count = normalized_content.count(normalized_old)
 
                 if not input_data.replace_all and occurrence_count > 1:
                     output = FileEditToolOutput(
@@ -304,10 +355,10 @@ match exactly (including whitespace and indentation)."""
                     return
 
                 if input_data.replace_all:
-                    new_content = content.replace(input_data.old_string, input_data.new_string)
+                    new_content = normalized_content.replace(normalized_old, input_data.new_string)
                     replacements = occurrence_count
                 else:
-                    new_content = content.replace(input_data.old_string, input_data.new_string, 1)
+                    new_content = normalized_content.replace(normalized_old, input_data.new_string, 1)
                     replacements = 1
 
                 write_encoding = select_write_encoding(
@@ -347,6 +398,31 @@ match exactly (including whitespace and indentation)."""
                 encoding=write_encoding,
                 log_prefix="[file_edit_tool]",
             )
+
+            # Notify LSP servers of the file change
+            try:
+                from pathlib import Path as _Path
+                from ripperdoc.utils.lsp import get_existing_lsp_manager
+
+                lsp_manager = get_existing_lsp_manager()
+                if lsp_manager:
+                    server_info = await lsp_manager.server_for_path(_Path(abs_file_path))
+                    if server_info:
+                        server, _cfg, language_id = server_info
+                        await server.ensure_document_open(
+                            _Path(abs_file_path), new_content, language_id
+                        )
+                        await server.notify(
+                            "textDocument/didSave",
+                            {"textDocument": {"uri": _Path(abs_file_path).resolve().as_uri()}},
+                        )
+            except Exception as lsp_exc:
+                logger.debug(
+                    "[file_edit_tool] LSP notification skipped: %s: %s",
+                    type(lsp_exc).__name__,
+                    lsp_exc,
+                    extra={"file_path": abs_file_path},
+                )
 
             # Generate diff for display
             import difflib

@@ -647,6 +647,58 @@ def format_task_summary(tasks: Sequence[TaskItem]) -> str:
     )
 
 
+def _leader_team_path() -> Path:
+    return _config_root() / "tasks" / ".leader_team"
+
+
+def set_leader_team_name(team_name: str) -> None:
+    """Persist the leader's active team name for task list resolution."""
+    clean = (team_name or "").strip()
+    if not clean:
+        return
+    path = _leader_team_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(clean + "\n", encoding="utf-8")
+
+
+def clear_leader_team_name() -> None:
+    """Remove the leader team name marker."""
+    path = _leader_team_path()
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def get_leader_team_name() -> Optional[str]:
+    """Read the persisted leader team name, if any."""
+    path = _leader_team_path()
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def reset_task_list(task_list_id: str) -> None:
+    """Clear all task files from a task list directory (keeps the directory)."""
+    resolved = sanitize_identifier(task_list_id, fallback="default")
+    directory = _config_root() / "tasks" / resolved
+    if not directory.exists():
+        return
+    for path in directory.glob("*.json"):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "[tasks] Failed removing task file during reset: %s: %s",
+                type(exc).__name__,
+                exc,
+                extra={"path": str(path)},
+            )
+
+
 def format_task_lines(tasks: Sequence[TaskItem]) -> List[str]:
     status_marker = {
         "completed": "●",
@@ -664,17 +716,21 @@ __all__ = [
     "TaskItem",
     "TaskPatch",
     "TaskStatus",
+    "clear_leader_team_name",
     "create_task",
     "delete_task",
     "ensure_task_list_dir",
     "format_task_lines",
     "format_task_summary",
+    "get_leader_team_name",
     "get_next_actionable_task",
     "get_task",
     "is_task_system_enabled",
     "list_tasks",
+    "reset_task_list",
     "resolve_task_list_id",
     "sanitize_identifier",
+    "set_leader_team_name",
     "set_runtime_task_scope",
     "should_show_completed_tasks_in_ui",
     "summarize_tasks",

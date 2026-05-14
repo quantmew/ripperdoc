@@ -7,7 +7,7 @@ finishes. Messages are drained in FIFO order.
 
 from collections import deque
 import threading
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Union
 
 from ripperdoc.utils.messaging.messages import (
     AttachmentMessage,
@@ -16,7 +16,7 @@ from ripperdoc.utils.messaging.messages import (
     create_user_message,
 )
 
-PendingMessage = UserMessage | ProgressMessage | AttachmentMessage
+PendingMessage = Union[UserMessage, ProgressMessage, AttachmentMessage]
 
 
 class PendingMessageQueue:
