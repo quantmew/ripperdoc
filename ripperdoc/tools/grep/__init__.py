@@ -4,6 +4,7 @@ Allows the AI to search for patterns in files.
 """
 
 import asyncio
+import os
 import re
 import shutil
 import subprocess

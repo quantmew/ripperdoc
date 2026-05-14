@@ -255,7 +255,6 @@ NEVER write new files unless explicitly required by the user."""
                     abs_file_path,
                     input_data.content,
                     getattr(context, "file_state_cache", {}),
-                    encoding=encoding,
                 )
             except (OSError, IOError, RuntimeError) as exc:
                 logger.warning(
