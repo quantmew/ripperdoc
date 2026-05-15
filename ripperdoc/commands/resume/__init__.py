@@ -2,6 +2,7 @@ from typing import Any
 from datetime import datetime
 from typing import Optional
 
+from xml.sax.saxutils import escape as xml_escape
 from rich.markup import escape
 
 from ripperdoc.utils.sessions.session_history import (
@@ -61,7 +62,7 @@ def _choose_session(ui: Any, arg: str) -> Optional[SessionSummary]:
                 f"<info>{summary.session_id[:8]}...</info> "
                 f"({summary.message_count} msgs) "
                 f"<dim>{_format_time(summary.created_at)}</dim> "
-                f"<dim>{escape(title_preview)}</dim>"
+                f"<dim>{xml_escape(title_preview)}</dim>"
             )
             options.append(ChoiceOption(summary.session_id, label))
 

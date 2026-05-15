@@ -12,6 +12,7 @@ from .clear import command as clear_command
 from .compact import command as compact_command
 from .commands import command as commands_command
 from .config import command as config_command
+from .btw import command as btw_command
 from .copy import command as copy_command
 from .cost import command as cost_command
 from .context import command as context_command
@@ -60,6 +61,7 @@ def _build_registry(commands: List[SlashCommand]) -> Dict[str, SlashCommand]:
 ALL_COMMANDS: List[SlashCommand] = [
     help_command,
     add_dir_command,
+    btw_command,
     clear_command,
     commands_command,
     config_command,

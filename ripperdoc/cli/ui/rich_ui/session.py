@@ -263,6 +263,7 @@ class RichUI:
         self._exit_reason: Optional[str] = None
         self._using_tty_input = False  # Track if we're using /dev/tty for input
         self._thinking_mode_enabled = False  # Toggle for extended thinking mode
+        self._thinking_mode_manually_set = False  # True after user explicitly toggled
         self._interrupt_listener = EscInterruptListener(self._schedule_esc_interrupt, logger=logger)
         self._esc_interrupt_seen = False
         self._query_in_progress = False
@@ -354,6 +355,9 @@ class RichUI:
                 },
             )
 
+        # Auto-enable thinking mode at startup if model supports reasoning
+        self._auto_init_thinking_mode()
+
     # ─────────────────────────────────────────────────────────────────────────────
     # Properties for backward compatibility with interrupt handler
     # ─────────────────────────────────────────────────────────────────────────────
@@ -361,6 +365,14 @@ class RichUI:
     # ─────────────────────────────────────────────────────────────────────────────
     # Thinking mode toggle
     # ─────────────────────────────────────────────────────────────────────────────
+
+    def _auto_init_thinking_mode(self) -> None:
+        """Enable thinking at startup when model supports reasoning.
+
+        Runs once during __init__ so the rprompt shows the correct state
+        before the first user message."""
+        if not self._thinking_mode_manually_set and self._profile_supports_reasoning():
+            self._thinking_mode_enabled = True
 
     def _create_permission_checker(self) -> Any:
         """Create a permission checker using current session directory scope."""
@@ -589,22 +601,65 @@ class RichUI:
             self.console.print("[yellow]Current model does not support thinking mode.[/yellow]")
             return
         self._thinking_mode_enabled = not self._thinking_mode_enabled
+        self._thinking_mode_manually_set = True
+
+    def _resolve_profile_thinking_tokens(self) -> int:
+        """Resolve thinking token budget from model profile config."""
+        model_profile = get_profile_for_pointer(self.model)
+        if model_profile is None:
+            return 0
+        effort = (getattr(model_profile, "thinking_effort", None) or "").strip().lower()
+        if effort in {"none", "off", "disabled"}:
+            return 0
+        # If thinking_effort is set (e.g. "medium"), map it to a token budget
+        if effort:
+            from ripperdoc.services.thinking_config import effort_to_budget
+            return effort_to_budget(effort)
+        # If max_thinking_tokens is explicitly configured, use it
+        if isinstance(getattr(model_profile, "max_thinking_tokens", None), int):
+            return max(0, int(model_profile.max_thinking_tokens or 0))
+        # No explicit config — return 0, caller will fall back to default_thinking_tokens
+        return 0
+
+    def _default_thinking_tokens_for_model(self) -> int:
+        """Return a default thinking token budget when model supports reasoning.
+
+        Priority: profile max_thinking_tokens > profile thinking_effort mapped > global default.
+        """
+        profile_tokens = self._resolve_profile_thinking_tokens()
+        if profile_tokens > 0:
+            return profile_tokens
+        config = get_effective_config(self.project_path)
+        return config.default_thinking_tokens
+
+    def _profile_supports_reasoning(self) -> bool:
+        """Check if the model profile explicitly supports reasoning."""
+        model_profile = get_profile_for_pointer(self.model)
+        if model_profile is None:
+            return False
+        supports = getattr(model_profile, "supports_reasoning", None)
+        if supports is True:
+            return True
+        # For Anthropic protocol, natively supports thinking
+        from ripperdoc.core.config import ProtocolType
+
+        if model_profile.protocol == ProtocolType.ANTHROPIC:
+            return True
+        return False
 
     def _get_thinking_tokens(self) -> int:
         """Get the thinking tokens budget based on current mode."""
         if self._max_thinking_tokens_override is not None:
             return self._max_thinking_tokens_override
+        # Auto-enable thinking when model supports reasoning, unless user
+        # manually toggled it off. The budget is resolved from profile config
+        # (max_thinking_tokens or thinking_effort) or global default_thinking_tokens.
+        if not self._thinking_mode_manually_set and self._profile_supports_reasoning():
+            self._thinking_mode_enabled = True
+            return self._default_thinking_tokens_for_model()
         if not self._thinking_mode_enabled:
             return 0
-        model_profile = get_profile_for_pointer(self.model)
-        if model_profile is not None:
-            effort = (getattr(model_profile, "thinking_effort", None) or "").strip().lower()
-            if effort in {"none", "off", "disabled"}:
-                return 0
-            if isinstance(getattr(model_profile, "max_thinking_tokens", None), int):
-                return max(0, int(model_profile.max_thinking_tokens or 0))
-        config = get_effective_config(self.project_path)
-        return config.default_thinking_tokens
+        return self._default_thinking_tokens_for_model()
 
     def _get_prompt(self) -> str:
         """Generate the input prompt."""
