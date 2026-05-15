@@ -75,7 +75,7 @@ class AddRuleScreen(ModalScreen[Optional[str]]):
                 id="add_hint",
             )
             yield Static(
-                "e.g., Bash, Bash(ls *), Bash(ls:*), Read(./.env), WebFetch(domain:example.com)",
+                "e.g., Bash, Bash(ls *), Bash(ls:*), Read(./.env)",
                 id="add_example",
             )
             yield Static("", id="add_error")

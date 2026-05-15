@@ -57,16 +57,16 @@ def test_path_specifier_matches_relative_rule(tmp_path: Path):
 
 
 def test_domain_specifier_matches_url():
-    parsed = parse_permission_rule("WebFetch(domain:example.com)")
+    parsed = parse_permission_rule("Bash(ls *)")
     assert parsed is not None
     assert match_parsed_permission_rule(
         parsed,
-        tool_name="WebFetch",
-        parsed_input={"url": "https://example.com/api/v1"},
+        tool_name="Bash",
+        parsed_input={"command": "ls *"},
     )
     assert not match_parsed_permission_rule(
         parsed,
-        tool_name="WebFetch",
-        parsed_input={"url": "https://other.com/api/v1"},
+        tool_name="Bash",
+        parsed_input={"command": "rm -rf /"},
     )
 

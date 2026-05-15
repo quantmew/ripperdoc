@@ -37,8 +37,6 @@ from ripperdoc.tools.exit_worktree import ExitWorktreeTool
 from ripperdoc.tools.memory import MemoryTool
 from ripperdoc.tools.agent import AgentTool
 from ripperdoc.tools.tool_search import ToolSearchTool
-from ripperdoc.tools.web_fetch import WebFetchTool
-from ripperdoc.tools.web_search import WebSearchTool
 from ripperdoc.tools.sleep import SleepTool
 from ripperdoc.tools.cron_create import CronCreateTool
 from ripperdoc.tools.cron_delete import CronDeleteTool
@@ -94,8 +92,6 @@ BUILTIN_TOOL_NAMES = [
     "ListMcpServers",
     "ListMcpResources",
     "ReadMcpResource",
-    "WebFetch",
-    "WebSearch",
     "Sleep",
     "CronCreate",
     "CronDelete",
@@ -169,8 +165,6 @@ def _build_base_tools() -> List[Tool[Any, Any]]:
         MemoryTool(),
         ToolSearchTool(),
         ExitWorktreeTool(),
-        WebFetchTool(),
-        WebSearchTool(),
         SleepTool(),
         CronCreateTool(),
         CronDeleteTool(),

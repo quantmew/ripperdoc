@@ -419,7 +419,7 @@ class UsageInfo(BaseModel):
 
     # SDK-compatible optional fields
     server_tool_use: dict[str, int] = Field(
-        default_factory=lambda: {"web_search_requests": 0, "web_fetch_requests": 0}
+        default_factory=lambda: {}
     )
     service_tier: str = "standard"
     cache_creation: dict[str, int] = Field(

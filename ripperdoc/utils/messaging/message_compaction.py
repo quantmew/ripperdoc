@@ -42,8 +42,6 @@ TOOL_COMMANDS: Set[str] = {
     "Grep",
     "Glob",
     "LS",
-    "WebSearch",
-    "WebFetch",
     "TaskOutput",
     "ListMcpServers",
     "ListMcpResources",
