@@ -1,4 +1,4 @@
-"""Direct-connect session manager for connecting to a remote Claude Code server.
+"""Direct-connect session manager for connecting to a remote server.
 
 Provides:
 - DirectConnectSessionManager: WebSocket-based session manager

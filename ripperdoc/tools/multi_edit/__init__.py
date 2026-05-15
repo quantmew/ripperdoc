@@ -398,7 +398,6 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
                 cache_key,
                 updated_content,
                 file_state_cache,
-                encoding=write_encoding,
                 log_prefix="[multi_edit_tool]",
             )
 
@@ -559,7 +558,6 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
             cache_key,
             updated_content,
             file_state_cache,
-            encoding=write_encoding,
             log_prefix="[multi_edit_tool]",
         )
 

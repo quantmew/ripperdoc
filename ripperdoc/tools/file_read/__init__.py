@@ -255,19 +255,8 @@ and limit to read only a portion of the file."""
         ]
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        return (
-            "Read a file from the local filesystem.\n\n"
-            "Usage:\n"
-            "- The file_path parameter must be an absolute path (not relative).\n"
-            "- Files larger than 256KB or with more than 2000 lines require using offset and limit parameters.\n"
-            "- By default, the entire file is read. You can optionally specify a line offset and limit (handy for long files); offset is zero-based and output line numbers start at 1.\n"
-            "- Lines longer than 2000 characters are truncated in the output.\n"
-            "- Results are returned with cat -n style numbering: spaces + line number + tab, then the file content.\n"
-            "- You can call multiple tools in a single response—speculatively read multiple potentially useful files together.\n"
-            "- It is okay to attempt reading a non-existent file; an error will be returned if the file is missing.\n"
-            "- This tool is able to read images (PNG, JPG, GIF, WebP), PDFs (using 'pages' parameter), and Jupyter notebooks (.ipynb).\n"
-            "- For PDFs with 10+ pages, you MUST provide a 'pages' parameter specifying the range (e.g., pages='1-5'). Maximum 20 pages per request."
-        )
+        from ripperdoc.tools.file_read._prompt import READ_PROMPT
+        return READ_PROMPT
 
     def is_read_only(self) -> bool:
         return True

@@ -41,7 +41,7 @@ class StdioProtocolHandler(
     - Executes core query logic
     - Writes JSON responses to stdout
 
-    Following Claude SDK's elegant patterns:
+    Following standard SDK patterns:
     - JSON messages separated by newlines
     - Control requests/responses for protocol management
     - Message streaming for query results

@@ -64,14 +64,8 @@ class WebSearchTool(Tool[WebSearchToolInput, WebSearchToolOutput]):
         return WebSearchToolInput
 
     async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
-        return (
-            "Use this tool to search the web for up-to-date information. "
-            "Returns search results formatted as markdown hyperlinks. "
-            "IMPORTANT: After answering the user's question using search results, "
-            "you MUST include a 'Sources:' section at the end of your response listing "
-            "all relevant URLs as markdown hyperlinks: [Title](URL). "
-            "This is MANDATORY — never skip including sources."
-        )
+        from ripperdoc.tools.web_search._prompt import WEB_SEARCH_PROMPT
+        return WEB_SEARCH_PROMPT
 
     def needs_permissions(self, _input_data: Optional[WebSearchToolInput] = None) -> bool:
         return True

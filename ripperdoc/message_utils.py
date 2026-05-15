@@ -13,6 +13,10 @@ from pydantic import ValidationError
 
 from ripperdoc.core.config import ModelProfile, ProtocolType, get_effective_config
 from ripperdoc.core.tool import Tool, build_tool_description, tool_input_examples
+from ripperdoc.utils.tool_schema_cache import (
+    get_cached_schema,
+    set_cached_schema,
+)
 from ripperdoc.utils.json_utils import safe_parse_json
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.messaging.messages import (
@@ -518,9 +522,19 @@ def log_openai_messages(normalized_messages: List[Dict[str, Any]]) -> None:
 
 
 async def build_anthropic_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict[str, Any]]:
-    """Render tool schemas in Anthropic format."""
+    """Render tool schemas in Anthropic format with session-level caching."""
     schemas = []
     for tool in tools:
+        input_schema_json = json.dumps(
+            tool.input_schema.model_json_schema(),
+            default=str,
+            sort_keys=True,
+        )
+        cached = get_cached_schema(tool.name, input_schema_json)
+        if cached is not None:
+            schemas.append(cached)
+            continue
+
         description = await build_tool_description(tool, include_examples=True, max_examples=2)
         schema: Dict[str, Any] = {
             "name": tool.name,
@@ -531,6 +545,8 @@ async def build_anthropic_tool_schemas(tools: List[Tool[Any, Any]]) -> List[Dict
         examples = tool_input_examples(tool, limit=5)
         if examples:
             schema["input_examples"] = examples
+
+        set_cached_schema(tool.name, input_schema_json, schema)
         schemas.append(schema)
     return schemas
 
@@ -544,7 +560,7 @@ def anthropic_prompt_caching_enabled() -> bool:
 
 
 def anthropic_cache_control() -> Dict[str, Any]:
-    """Default Anthropic cache control payload matching Claude Code's ephemeral strategy."""
+    """Default Anthropic cache control payload with ephemeral strategy."""
     ttl = (os.getenv("RIPPERDOC_PROMPT_CACHE_TTL") or "").strip()
     payload: Dict[str, Any] = {"type": "ephemeral"}
     if ttl == "1h":

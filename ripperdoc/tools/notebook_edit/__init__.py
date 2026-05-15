@@ -31,21 +31,7 @@ def _generate_cell_id() -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=12))
 
 
-NOTEBOOK_EDIT_DESCRIPTION = dedent(
-    """\
-    Replace, insert, or delete a specific cell in a Jupyter notebook (.ipynb file).
-    notebook_path must be an absolute path. cell_id may be a 0-based index or a cell id.
-    Use edit_mode=insert to add a new cell after the referenced cell (or at the start if omitted).
-    Use edit_mode=delete to delete the referenced cell. Defaults to edit_mode=replace.
-
-    Usage:
-    - cell_type: 'code' or 'markdown'. Required for insert; defaults to existing type for replace.
-    - new_source: New content for the cell.
-    - Edits are applied atomically; failures leave the file unchanged.
-    - Code cell replacements clear execution_count and outputs.
-    - Only use emojis if explicitly requested; avoid adding emojis otherwise.
-    """
-)
+from ripperdoc.tools.notebook_edit._prompt import NOTEBOOK_EDIT_PROMPT as NOTEBOOK_EDIT_DESCRIPTION
 
 
 class NotebookEditInput(BaseModel):

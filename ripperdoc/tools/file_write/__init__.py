@@ -112,13 +112,8 @@ the file if it already exists."""
         ]
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        prompt = """Use the Write tool to create new files. """
-
-        if not yolo_mode:
-            prompt += """IMPORTANT: You must ALWAYS prefer editing existing files.
-NEVER write new files unless explicitly required by the user."""
-
-        return prompt
+        from ripperdoc.tools.file_write._prompt import WRITE_PROMPT
+        return WRITE_PROMPT
 
     def is_read_only(self) -> bool:
         return False

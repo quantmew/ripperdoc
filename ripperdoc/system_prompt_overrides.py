@@ -17,7 +17,7 @@ def select_base_system_prompt(
     agent_system_prompt: str | None,
     custom_system_prompt: str | None,
 ) -> str | None:
-    """Resolve the base system prompt with Claude Code-compatible precedence."""
+    """Resolve the base system prompt with standard precedence."""
     return _normalize_prompt_text(agent_system_prompt) or _normalize_prompt_text(
         custom_system_prompt
     )

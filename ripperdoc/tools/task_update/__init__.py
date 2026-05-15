@@ -186,11 +186,10 @@ class TaskUpdateTool(Tool[TaskUpdateInput, TaskUpdateOutput]):
             ),
         ]
 
-    async def prompt(self, _yolo_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        from ripperdoc.tools.task_update._prompt import TASK_UPDATE_PROMPT
         return TASK_UPDATE_PROMPT
 
-    def needs_permissions(self, _input_data: Optional[TaskUpdateInput] = None) -> bool:
-        return False
 
     async def validate_input(
         self,

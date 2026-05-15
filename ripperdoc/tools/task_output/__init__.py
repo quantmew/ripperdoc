@@ -62,15 +62,8 @@ class TaskOutputTool(Tool[TaskOutputInput, TaskOutputData]):
         return "Retrieves output from a running or completed task."
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        del yolo_mode
-        return (
-            "- Retrieves output from a running or completed task (background shell or subagent)\n"
-            "- Takes task_id, optional block (default true), and timeout (ms)\n"
-            "- Returns retrieval_status with task details\n"
-            "- timeout only limits waiting; it does not terminate the underlying task\n"
-            "- Use block=false for non-blocking checks\n"
-            "- Works with Bash background tasks and Task subagent runs"
-        )
+        from ripperdoc.tools.task_output._prompt import TASK_OUTPUT_PROMPT
+        return TASK_OUTPUT_PROMPT
 
     @property
     def input_schema(self) -> type[TaskOutputInput]:

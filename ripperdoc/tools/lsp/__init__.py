@@ -28,24 +28,7 @@ from ripperdoc.utils.lsp import (
 
 logger = get_logger()
 
-LSP_USAGE = (
-    "Interact with Language Server Protocol (LSP) servers to get code intelligence features.\n\n"
-    "Supported operations:\n"
-    "- goToDefinition: Find where a symbol is defined\n"
-    "- findReferences: Find all references to a symbol\n"
-    "- hover: Get hover information (documentation, type info) for a symbol\n"
-    "- documentSymbol: Get all symbols (functions, classes, variables) in a document\n"
-    "- workspaceSymbol: Search for symbols across the entire workspace\n"
-    "- goToImplementation: Find implementations of an interface or abstract method\n"
-    "- codeAction: Get available code actions (quick fixes, refactors) at a position\n"
-    "- diagnostics: Get current diagnostics (errors, warnings) for a file\n\n"
-    "All operations require:\n"
-    "- filePath: The file to operate on\n"
-    "- line: The line number (1-based, as shown in editors)\n"
-    "- character: The character offset (1-based, as shown in editors)\n\n"
-    "Note: LSP servers must be configured for the file type. "
-    "If no server is available, an error will be returned."
-)
+from ripperdoc.tools.lsp._prompt import LSP_PROMPT as LSP_USAGE
 
 MAX_RESULTS = 50
 

@@ -188,11 +188,10 @@ class TaskCreateTool(Tool[TaskCreateInput, TaskCreateOutput]):
             ),
         ]
 
-    async def prompt(self, _yolo_mode: bool = False) -> str:
-        return TASK_CREATE_PROMPT_TEAM if _is_team_task_context() else TASK_CREATE_PROMPT
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        from ripperdoc.tools.task_create._prompt import TASK_CREATE_PROMPT
+        return TASK_CREATE_PROMPT
 
-    def needs_permissions(self, _input_data: Optional[TaskCreateInput] = None) -> bool:
-        return False
 
     async def validate_input(
         self,

@@ -1,4 +1,4 @@
-"""Plan mode helpers aligned with Claude Code style behavior."""
+"""Plan mode helpers."""
 
 from __future__ import annotations
 
@@ -152,7 +152,7 @@ def build_plan_mode_full_system_prompt(
     plan_file_path: str | Path,
     available_tool_names: Iterable[str],
 ) -> str:
-    """Build a Claude Code style system instruction block for plan mode."""
+    """Build system instruction block for plan mode."""
 
     tool_names = set(available_tool_names)
     read_tools = [name for name in ("Read", "Glob", "Grep") if name in tool_names]
@@ -242,7 +242,7 @@ def build_plan_mode_exit_system_prompt(*, plan_file_path: str | Path, plan_exist
 
 
 def build_rejected_plan_user_message(plan: str) -> str:
-    """Build the synthetic user message Claude Code uses after plan rejection."""
+    """Build the synthetic user message after plan rejection."""
 
     return (
         "The agent proposed a plan that was rejected by the user. The user chose to stay in plan mode rather than proceed with implementation.\n\n"

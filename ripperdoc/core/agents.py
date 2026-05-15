@@ -398,15 +398,15 @@ def clear_agent_cache() -> None:
 
 
 def summarize_agent(agent: AgentDefinition) -> str:
-    """Short human-readable summary."""
-    tool_label = "all tools" if "*" in agent.tools else ", ".join(agent.tools)
-    location = getattr(agent.location, "value", agent.location)
-    details = [f"tools: {tool_label}"]
-    if agent.fork_context:
-        details.append("context: forked")
-    if agent.model:
-        details.append(f"model: {agent.model}")
-    return f"- {agent.agent_type} ({location}): {agent.when_to_use} [{'; '.join(details)}]"
+    """Short human-readable agent summary."""
+    if "*" in agent.tools:
+        tools_description = "All tools"
+    elif agent.disallowed_tools:
+        disallowed = ", ".join(agent.disallowed_tools)
+        tools_description = f"All tools except {disallowed}"
+    else:
+        tools_description = ", ".join(agent.tools) if agent.tools else "None"
+    return f"- {agent.agent_type}: {agent.when_to_use} (Tools: {tools_description})"
 
 
 def resolve_agent_tools(

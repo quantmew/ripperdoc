@@ -83,12 +83,10 @@ class TodoReadTool(Tool[TodoReadToolInput, TodoToolOutput]):
             ),
         ]
 
-    async def prompt(self, _yolo_mode: bool = False) -> str:
-        return (
-            "Use TodoRead to fetch the current todo list before making progress or when you need "
-            "to confirm the next action. You can request only the next actionable item or filter "
-            "by status."
-        )
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        from ripperdoc.tools.todo_read._prompt import TODO_READ_PROMPT
+        return TODO_READ_PROMPT
+
 
     def is_read_only(self) -> bool:
         return True

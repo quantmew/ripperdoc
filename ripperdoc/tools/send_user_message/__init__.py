@@ -74,16 +74,8 @@ class SendUserMessageTool(Tool[SendUserMessageInput, SendUserMessageOutput]):
         return SendUserMessageInput
 
     async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
-        return (
-            "Sends a desktop notification to the user. "
-            "Unlike AskUserQuestion, this is one-way — no response required. "
-            "Use when a long task finishes while the user is away, or when there's "
-            "something worth coming back for.\n\n"
-            "Keep messages under 200 characters. Lead with what they'd act on.\n\n"
-            "- status='proactive': background notification (may push to phone)\n"
-            "- status='normal': standard in-session message\n"
-            "- attachments: optional file paths to include"
-        )
+        from ripperdoc.tools.send_user_message._prompt import SEND_USER_MESSAGE_PROMPT
+        return SEND_USER_MESSAGE_PROMPT
 
     def is_read_only(self) -> bool:
         return True

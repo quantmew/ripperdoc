@@ -44,11 +44,8 @@ class SleepTool(Tool[SleepToolInput, SleepToolOutput]):
         return SleepToolInput
 
     async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
-        return (
-            "Use this tool to sleep for a specified duration. "
-            "This is non-blocking and concurrency-safe — other tools can run concurrently. "
-            "Maximum duration is 3600 seconds (1 hour)."
-        )
+        from ripperdoc.tools.sleep._prompt import SLEEP_PROMPT
+        return SLEEP_PROMPT
 
     def is_read_only(self) -> bool:
         return True

@@ -157,8 +157,10 @@ def _resolve_request_thinking_mode(
     if protocol != "openai":
         return None
     model_name = (model_profile.model or "").lower()
+    base = (model_profile.api_base or "").lower()
     is_reasoning_model = "reasoner" in model_name or "r1" in model_name
-    if max_thinking_tokens > 0 or is_reasoning_model:
+    is_deepseek = "deepseek" in base or model_name.startswith("deepseek")
+    if max_thinking_tokens > 0 or is_reasoning_model or is_deepseek:
         return infer_thinking_mode(model_profile)
     return None
 
@@ -480,7 +482,7 @@ def _build_plan_mode_messages(
     query_context: QueryContext,
     tools_for_model: Sequence[Tool[Any, Any]],
 ) -> List[AttachmentMessage]:
-    """Build Claude Code style plan-mode attachments for the next model turn."""
+    """Build plan-mode attachments for the next model turn."""
 
     if query_context.permission_mode != "plan" or not query_context.plan_file_path:
         return []
@@ -889,7 +891,7 @@ def _reorder_tool_lifecycle_messages(
     *,
     additional_messages: Optional[Sequence[ConversationMessage]] = None,
 ) -> list[ConversationMessage]:
-    """Group tool_use + pre-hooks + tool_result + post-hooks similar to Claude ordering."""
+    """Group tool_use + pre-hooks + tool_result + post-hooks into logical units."""
 
     tool_data: dict[str, dict[str, list[ConversationMessage] | Optional[ConversationMessage]]] = {}
 
@@ -2274,7 +2276,7 @@ async def query(
         # do not interfere with the loop or normalization.
         messages = list(messages)
         # Recompute tool-search mode once per user query while keeping it sticky across
-        # iterations inside this query, matching Claude-style request scoping.
+        # iterations inside this query.
         query_context.mcp_tool_search_enabled = None
         query_context.mcp_tool_search_reason = None
 

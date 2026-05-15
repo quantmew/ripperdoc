@@ -95,14 +95,8 @@ class WebFetchTool(Tool[WebFetchToolInput, WebFetchToolOutput]):
         return WebFetchToolInput
 
     async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
-        return (
-            "Use this tool to fetch and read content from a URL. "
-            "Returns the content converted to a format suitable for the model. "
-            "Supports markdown and text output formats. "
-            "You MUST follow the requirement: After answering the user's question, "
-            "you MUST include a 'Sources:' section at the end of your response listing "
-            "all relevant URLs as markdown hyperlinks."
-        )
+        from ripperdoc.tools.web_fetch._prompt import WEB_FETCH_PROMPT
+        return WEB_FETCH_PROMPT
 
     def needs_permissions(self, input_data: Optional[WebFetchToolInput] = None) -> bool:
         if input_data is None:

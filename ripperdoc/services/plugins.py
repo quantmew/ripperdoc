@@ -1,6 +1,6 @@
 """Plugin discovery and configuration for Ripperdoc.
 
-Ripperdoc plugins follow a Claude-style layout with support for:
+Ripperdoc plugins follow a standard layout with support for:
 - optional manifest: .ripperdoc-plugin/plugin.json (or .claude-plugin/plugin.json)
 - commands/, skills/, agents/, hooks/hooks.json, .mcp.json, .lsp.json
 - optional manifest component path fields that supplement defaults

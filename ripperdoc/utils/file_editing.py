@@ -30,7 +30,6 @@ def safe_record_snapshot(
     content: str,
     cache: dict,
     *,
-    encoding: str = "utf-8",
     log_prefix: str = "",
 ) -> None:
     """Record file snapshot with shared error handling."""
@@ -39,7 +38,6 @@ def safe_record_snapshot(
             file_path,
             content,
             cache,
-            encoding=encoding,
         )
     except (OSError, IOError, RuntimeError) as exc:
         prefix = f"{log_prefix} " if log_prefix else ""

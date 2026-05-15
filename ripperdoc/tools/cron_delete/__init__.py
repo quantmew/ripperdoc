@@ -37,8 +37,10 @@ class CronDeleteTool(Tool[CronDeleteInput, CronDeleteOutput]):
     def input_schema(self) -> type[CronDeleteInput]:
         return CronDeleteInput
 
-    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
-        return "Cancel a cron job previously scheduled with CronCreate."
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        from ripperdoc.tools.cron_delete._prompt import CRON_DELETE_PROMPT
+        return CRON_DELETE_PROMPT
+
 
     def is_read_only(self) -> bool:
         return False

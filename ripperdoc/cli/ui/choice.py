@@ -443,7 +443,7 @@ def prompt_choice(
             "Choose a provider",
             [
                 ChoiceOption("openai", "<info>OpenAI</info>", "GPT models"),
-                ChoiceOption("anthropic", "<info>Anthropic</info>", "Claude models"),
+                ChoiceOption("anthropic", "<info>Anthropic</info>", "Anthropic models"),
             ],
             title="AI Provider Selection",
             description="Select your preferred AI model provider"

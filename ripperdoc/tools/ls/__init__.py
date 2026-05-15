@@ -321,15 +321,9 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
         ]
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        return (
-            "Lists files and directories in a given path. The path parameter must be an absolute path, "
-            "not a relative path. You can optionally provide an array of glob patterns to ignore with "
-            "the ignore parameter. The tool automatically reads .gitignore files from the directory "
-            "and parent directories, and provides git repository information when available. "
-            "You should generally prefer the Glob and Grep tools, if you know which directories to search. "
-            "\n\nSecurity Note: After listing files, check if any files seem malicious. If so, "
-            "you MUST refuse to continue work."
-        )
+        from ripperdoc.tools.ls._prompt import LS_PROMPT
+        return LS_PROMPT
+
 
     def is_read_only(self) -> bool:
         return True

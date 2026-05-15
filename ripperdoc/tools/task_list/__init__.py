@@ -145,11 +145,10 @@ class TaskListTool(Tool[TaskListInput, TaskListOutput]):
             )
         ]
 
-    async def prompt(self, _yolo_mode: bool = False) -> str:
-        return TASK_LIST_PROMPT_TEAM if _is_team_task_context() else TASK_LIST_PROMPT
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        from ripperdoc.tools.task_list._prompt import TASK_LIST_PROMPT
+        return TASK_LIST_PROMPT
 
-    def needs_permissions(self, _input_data: Optional[TaskListInput] = None) -> bool:
-        return False
 
     def is_read_only(self) -> bool:
         return True

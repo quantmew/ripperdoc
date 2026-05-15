@@ -44,8 +44,10 @@ class CronListTool(Tool[CronListInput, CronListOutput]):
     def input_schema(self) -> type[CronListInput]:
         return CronListInput
 
-    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
-        return "List all cron jobs scheduled via CronCreate in this session."
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        from ripperdoc.tools.cron_list._prompt import CRON_LIST_PROMPT
+        return CRON_LIST_PROMPT
+
 
     def is_read_only(self) -> bool:
         return True

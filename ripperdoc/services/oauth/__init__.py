@@ -136,37 +136,37 @@ _COPILOT_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
     ),
     OAuthModelOption(
         model="claude-haiku-4.5",
-        label="Claude Haiku 4.5",
+        label="Haiku 4.5",
         description="Anthropic · GA",
     ),
     OAuthModelOption(
         model="claude-opus-4.5",
-        label="Claude Opus 4.5",
+        label="Opus 4.5",
         description="Anthropic · GA",
     ),
     OAuthModelOption(
         model="claude-opus-4.6",
-        label="Claude Opus 4.6",
+        label="Opus 4.6",
         description="Anthropic · GA",
     ),
     OAuthModelOption(
         model="claude-opus-4.6-fast",
-        label="Claude Opus 4.6 (fast mode)",
+        label="Opus 4.6 (fast mode)",
         description="Anthropic · Public preview",
     ),
     OAuthModelOption(
         model="claude-sonnet-4",
-        label="Claude Sonnet 4",
+        label="Sonnet 4",
         description="Anthropic · GA",
     ),
     OAuthModelOption(
         model="claude-sonnet-4.5",
-        label="Claude Sonnet 4.5",
+        label="Sonnet 4.5",
         description="Anthropic · GA",
     ),
     OAuthModelOption(
         model="claude-sonnet-4.6",
-        label="Claude Sonnet 4.6",
+        label="Sonnet 4.6",
         description="Anthropic · GA",
     ),
     OAuthModelOption(

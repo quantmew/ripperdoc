@@ -41,11 +41,8 @@ class TaskStopTool(Tool[TaskStopInput, TaskStopOutput]):
         return "Stop a running background task by ID."
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        del yolo_mode
-        return (
-            "- Stops a running background task by task_id\n"
-            "- Supports background Bash and Task subagent runs"
-        )
+        from ripperdoc.tools.task_stop._prompt import TASK_STOP_PROMPT
+        return TASK_STOP_PROMPT
 
     @property
     def input_schema(self) -> type[TaskStopInput]:

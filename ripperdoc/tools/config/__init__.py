@@ -88,30 +88,10 @@ class ConfigTool(Tool[ConfigToolInput, ConfigToolOutput]):
     def input_schema(self) -> type[ConfigToolInput]:
         return ConfigToolInput
 
-    async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
-        settings_list = []
-        for key, cfg in _SUPPORTED_SETTINGS.items():
-            options = cfg.get("options")
-            if options:
-                opts = ", ".join(f'"{o}"' for o in options)
-                settings_list.append(f"- {key}: {opts} — {cfg['description']}")
-            elif cfg["type"] == "boolean":
-                settings_list.append(f"- {key}: true/false — {cfg['description']}")
-            else:
-                settings_list.append(f"- {key} — {cfg['description']}")
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        from ripperdoc.tools.config._prompt import CONFIG_PROMPT
+        return CONFIG_PROMPT
 
-        return (
-            "Get or set Ripperdoc configuration settings.\n\n"
-            "## Usage\n"
-            '- **Get current value:** Omit the "value" parameter\n'
-            '- **Set new value:** Include the "value" parameter\n\n'
-            "## Available settings\n"
-            + "\n".join(settings_list)
-            + "\n\n## Examples\n"
-            '- Get theme: { "setting": "theme" }\n'
-            '- Set dark theme: { "setting": "theme", "value": "dark" }\n'
-            '- Enable verbose: { "setting": "verbose", "value": true }'
-        )
 
     def is_read_only(self) -> bool:
         return True  # Overridden dynamically in check_permissions

@@ -116,7 +116,7 @@ def _looks_like_json_schema(value: Any) -> bool:
 
 
 def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
-    """Coerce Claude Agent SDK shorthand schemas into JSON Schema.
+    """Coerce Agent SDK shorthand schemas into JSON Schema.
 
     The SDK accepts compact shapes like ``{"numbers": list}``, while MCP tool
     definitions must expose standard JSON Schema for the model to understand the

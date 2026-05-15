@@ -114,7 +114,7 @@ class MemoryToolOutput(BaseModel):
 
 
 class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
-    """Persistent memory file operations aligned with Claude memory commands."""
+    """Persistent memory file operations."""
 
     def __init__(
         self,

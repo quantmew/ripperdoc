@@ -99,7 +99,7 @@ def _plan_mode_restriction_result(
     parsed_input: Any,
     plan_file_path: str | None,
 ) -> Optional[PermissionPreview]:
-    """Apply Claude Code style plan-mode write restrictions.
+    """Apply plan-mode write restrictions.
 
     In plan mode, only read-only tools, AskUserQuestion, ExitPlanMode, and edits
     to the active plan file are allowed. All other mutating operations are denied.

@@ -107,11 +107,8 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
         ]
 
     async def prompt(self, yolo_mode: bool = False) -> str:  # noqa: ARG002
-        return (
-            "Search for a tool by providing a short description (e.g., 'query database', 'render notebook'). "
-            "Use names to activate tools you've already discovered. "
-            "Keep queries concise to retrieve the 3-5 most relevant tools."
-        )
+        from ripperdoc.tools.tool_search._prompt import TOOL_SEARCH_PROMPT
+        return TOOL_SEARCH_PROMPT
 
     def is_read_only(self) -> bool:
         return True

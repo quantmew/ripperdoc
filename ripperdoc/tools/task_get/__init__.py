@@ -90,11 +90,10 @@ class TaskGetTool(Tool[TaskGetInput, TaskGetOutput]):
     def input_schema(self) -> type[TaskGetInput]:
         return TaskGetInput
 
-    async def prompt(self, _yolo_mode: bool = False) -> str:
+    async def prompt(self, yolo_mode: bool = False) -> str:
+        from ripperdoc.tools.task_get._prompt import TASK_GET_PROMPT
         return TASK_GET_PROMPT
 
-    def needs_permissions(self, _input_data: Optional[TaskGetInput] = None) -> bool:
-        return False
 
     def is_read_only(self) -> bool:
         return True

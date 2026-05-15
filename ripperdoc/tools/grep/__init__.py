@@ -26,18 +26,7 @@ logger = get_logger()
 MAX_GREP_OUTPUT_CHARS = 20000
 
 
-GREP_USAGE = (
-    "A powerful search tool built on ripgrep.\n\n"
-    "Usage:\n"
-    "- ALWAYS use the Grep tool for search tasks. NEVER invoke `grep` or `rg` as a Bash command; this tool is optimized for permissions and access.\n"
-    '- Supports regex patterns (e.g., "log.*Error", "function\\s+\\w+")\n'
-    '- Filter files with the glob parameter (e.g., "*.js", "**/*.tsx")\n'
-    '- Output modes: "content" shows matching lines, "files_with_matches" (default) shows only file paths, "count" shows match counts\n'
-    "- Use head_limit to cap the number of returned entries (similar to piping through head -N) to avoid overwhelming output\n"
-    f"- Outputs are automatically truncated to around {MAX_GREP_OUTPUT_CHARS} characters to stay within context limits; narrow patterns for more detail\n"
-    "- For open-ended searches that need multiple rounds, iterate with Glob and Grep rather than shell commands\n"
-    "- Patterns are line-based; craft patterns accordingly and escape braces if needed (e.g., use `interface\\{\\}` to find `interface{}`)"
-)
+from ripperdoc.tools.grep._prompt import GREP_PROMPT as GREP_USAGE
 
 
 def truncate_with_ellipsis(
