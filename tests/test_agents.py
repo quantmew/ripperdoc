@@ -1,7 +1,7 @@
 """Tests for built-in subagent prompts."""
 
-from ripperdoc.core.agents import (
-    BASH_TOOL_NAME,
+from ripperdoc.core.agents import BASH_TOOL_NAME
+from ripperdoc.tools.agent._built_in import (
     DEFAULT_READ_ONLY_SUBAGENT_TOOLS,
     _build_explore_agent_prompt,
     _build_plan_agent_prompt,

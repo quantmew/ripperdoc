@@ -44,6 +44,7 @@ def test_collect_add_profile_input_sets_thinking_mode(monkeypatch) -> None:
             "openrouter",  # thinking_mode
             "",  # max_thinking_tokens
             "auto",  # supports_vision
+            "",  # custom_headers
             "",  # currency
             "",  # input_price
             "",  # output_price
@@ -87,6 +88,7 @@ def test_collect_edit_profile_input_can_clear_thinking_mode(monkeypatch) -> None
             "-",  # thinking_mode clear
             "",  # max_thinking_tokens
             "",  # supports_vision
+            "",  # custom_headers
             "",  # currency
             "",  # input_price
             "",  # output_price
@@ -430,6 +432,7 @@ def test_collect_add_profile_input_oauth_uses_token_and_curated_model(monkeypatc
             "",  # thinking_mode
             "",  # max_thinking_tokens
             "auto",  # supports_vision
+            "",  # custom_headers
             "",  # currency
             "",  # input_price
             "",  # output_price
@@ -479,6 +482,7 @@ def test_collect_add_profile_input_oauth_supports_non_codex_token(monkeypatch) -
             "",  # thinking_mode
             "",  # max_thinking_tokens
             "auto",  # supports_vision
+            "",  # custom_headers
             "",  # currency
             "",  # input_price
             "",  # output_price

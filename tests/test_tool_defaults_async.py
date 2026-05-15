@@ -26,13 +26,13 @@ async def test_get_default_tools_async_merges_dynamic_tools(monkeypatch, tmp_pat
         return [
             SimpleNamespace(name="Base"),
             SimpleNamespace(name="Dyn"),
-            SimpleNamespace(name="Task"),
+            SimpleNamespace(name="Agent"),
         ]
 
     monkeypatch.setattr(tool_defaults, "merge_tools_with_dynamic", _fake_merge)
 
     result = await tool_defaults.get_default_tools_async(project_path=tmp_path)
-    assert [tool.name for tool in result] == ["Base", "Dyn", "Task"]
+    assert [tool.name for tool in result] == ["Base", "Dyn", "Agent"]
 
 
 @pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def test_get_default_tools_async_ignores_allowed_tools_for_tool_set(monkey
 
     result = await tool_defaults.get_default_tools_async(
         project_path=tmp_path,
-        allowed_tools=["Base", "Task"],
+        allowed_tools=["Base", "Agent"],
     )
     # All tools are returned; allowed_tools does not filter the tool set.
-    assert [tool.name for tool in result] == ["Base", "Extra", "Task"]
+    assert [tool.name for tool in result] == ["Base", "Extra", "Agent"]

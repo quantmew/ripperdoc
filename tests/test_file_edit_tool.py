@@ -2,7 +2,7 @@
 
 Tests cover:
 - FileEditToolInput and FileEditToolOutput models
-- File locking behavior (_file_lock)
+- File locking behavior (file_lock)
 - Input validation
 - Single and multiple replacements
 - Diff generation
@@ -18,11 +18,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from ripperdoc.tools.file_edit import (
-    _file_lock,
     FileEditTool,
     FileEditToolInput,
     FileEditToolOutput,
 )
+from ripperdoc.utils.file_editing import file_lock
 
 
 class TestFileEditToolInput:
@@ -101,7 +101,7 @@ class TestFileEditToolOutput:
 
 
 class TestFileLock:
-    """Tests for _file_lock context manager."""
+    """Tests for file_lock context manager."""
 
     def test_lock_yields_without_error(self, tmp_path):
         """Lock context manager should yield without error."""
@@ -109,7 +109,7 @@ class TestFileLock:
         test_file.write_text("content")
 
         with open(test_file, "r") as f:
-            with _file_lock(f):
+            with file_lock(f):
                 # Should not raise
                 pass
 
@@ -119,16 +119,16 @@ class TestFileLock:
         test_file.write_text("content")
 
         with open(test_file, "r") as f:
-            with _file_lock(f, exclusive=True):
+            with file_lock(f, exclusive=True):
                 pass
 
         with open(test_file, "r") as f:
-            with _file_lock(f, exclusive=False):
+            with file_lock(f, exclusive=False):
                 pass
 
     def test_lock_on_windows_no_fcntl(self, monkeypatch):
         """On Windows (no fcntl), should skip locking gracefully."""
-        monkeypatch.setattr("ripperdoc.tools.file_edit.HAS_FCNTL", False)
+        monkeypatch.setattr("ripperdoc.utils.file_editing.HAS_FCNTL", False)
 
         test_file = tempfile.NamedTemporaryFile(delete=False)
         test_file.write(b"content")
@@ -136,7 +136,7 @@ class TestFileLock:
 
         try:
             with open(test_file.name, "r") as f:
-                with _file_lock(f):
+                with file_lock(f):
                     # Should not raise even without fcntl
                     content = f.read()
                     assert content == "content"
@@ -191,8 +191,7 @@ class TestFileEditToolProperties:
         """Should return usage prompt."""
         tool = FileEditTool()
         prompt = await tool.prompt()
-        assert "Read" in prompt
-        assert "edit" in prompt.lower()
+        assert "string replacement" in prompt.lower()
 
     def test_render_result_for_assistant(self):
         """Should render result message for assistant."""
@@ -236,7 +235,7 @@ class TestValidateInput:
 
         result = await tool.validate_input(input_data, context)
         assert result.result is False
-        assert "not found" in result.message.lower()
+        assert "not exist" in result.message.lower()
 
     async def test_validate_directory_path(self, tmp_path):
         """Should fail validation for directory path."""
@@ -290,7 +289,7 @@ class TestValidateInput:
 
         result = await tool.validate_input(input_data, context)
         assert result.result is False
-        assert "non-empty" in result.message.lower()
+        assert "not been read yet" in result.message.lower()
 
     async def test_validate_file_not_read_yet(self, tmp_path):
         """Should fail validation when file hasn't been read."""
@@ -454,7 +453,7 @@ class TestFileEditExecution:
         assert len(results) == 1
         output = results[0].data
         assert output.success is False
-        assert "appears 3 times" in output.message.lower()
+        assert "occurrences" in output.message.lower()
 
     async def test_diff_generation(self, tmp_path):
         """Should generate proper diff with additions and deletions."""

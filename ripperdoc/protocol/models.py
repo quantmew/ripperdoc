@@ -9,7 +9,8 @@ from __future__ import annotations
 from enum import IntEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
 
 from ripperdoc import __version__
 
@@ -659,6 +660,12 @@ class PermissionUpdateDestination(str):
     LOCAL_SETTINGS = "localSettings"
     SESSION = "session"
     CLI_ARG = "cliArg"
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _source_type: Any, _handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.str_schema()
 
 
 class PermissionDecisionClassification(str):

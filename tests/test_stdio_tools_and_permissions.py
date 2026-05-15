@@ -99,25 +99,25 @@ def _patch_stdio_dependencies(monkeypatch, tools: List[Any]) -> None:
     [
         (
             # tools_list restricts the tool set
-            {"tools": ["Read", "Bash", "Task"]},
-            ["Read", "Bash", "Task"],
+            {"tools": ["Read", "Bash", "Agent"]},
+            ["Read", "Bash", "Agent"],
         ),
         (
             # allowed_tools / disallowed_tools are permission-only; tool set unchanged
             {
-                "allowed_tools": ["Read", "Bash", "Task"],
+                "allowed_tools": ["Read", "Bash", "Agent"],
                 "disallowed_tools": ["Bash"],
             },
-            ["Read", "Edit", "Bash", "Task"],
+            ["Read", "Edit", "Bash", "Agent"],
         ),
         (
             # tools_list restricts; allowed/disallowed don't shrink it further
             {
-                "tools": ["Read", "Bash", "Task"],
-                "allowed_tools": ["Read", "Edit", "Task"],
+                "tools": ["Read", "Bash", "Agent"],
+                "allowed_tools": ["Read", "Edit", "Agent"],
                 "disallowed_tools": ["Bash"],
             },
-            ["Read", "Bash", "Task"],
+            ["Read", "Bash", "Agent"],
         ),
         (
             # empty tools list means no tools

@@ -149,12 +149,12 @@ async def test_summarize_query_stage_emits_sdk_result_fields() -> None:
     assert result["type"] == "result"
     assert result["subtype"] == "success"
     assert result["result"] == "done"
-    assert result["num_turns"] == 2
-    assert result["session_id"] == "session-1"
-    assert result["is_error"] is False
-    assert isinstance(result["duration_ms"], int)
-    assert result["duration_ms"] >= 0
-    assert result["duration_api_ms"] == result["duration_ms"]
+    assert result["numTurns"] == 2
+    assert result["sessionId"] == "session-1"
+    assert result["isError"] is False
+    assert isinstance(result["durationMs"], int)
+    assert result["durationMs"] >= 0
+    assert result["durationApiMs"] == result["durationMs"]
 
 
 @pytest.mark.asyncio
@@ -175,7 +175,7 @@ async def test_summarize_query_stage_marks_error_during_execution() -> None:
     assert result is not None
     assert result["type"] == "result"
     assert result["subtype"] == "error_during_execution"
-    assert result["is_error"] is True
+    assert result["isError"] is True
 
 
 @pytest.mark.asyncio

@@ -202,7 +202,7 @@ async def test_stdio_result_cost_uses_model_profile_pricing(monkeypatch, tmp_pat
 
     result_messages = [msg for msg in stream_messages if msg.get("type") == "result"]
     assert result_messages
-    assert result_messages[-1].get("total_cost_usd") == pytest.approx(0.0215, rel=0, abs=1e-8)
+    assert result_messages[-1].get("totalCostUsd") == pytest.approx(0.0215, rel=0, abs=1e-8)
 
 
 @pytest.mark.asyncio
@@ -235,7 +235,7 @@ async def test_stdio_num_turns_excludes_progress_messages(monkeypatch, tmp_path)
 
     result_messages = [msg for msg in stream_messages if msg.get("type") == "result"]
     assert result_messages
-    assert result_messages[-1].get("num_turns") == 1
+    assert result_messages[-1].get("numTurns") == 1
 
 
 @pytest.mark.asyncio
@@ -267,4 +267,4 @@ async def test_stdio_num_turns_excludes_tool_result_user_messages(monkeypatch, t
 
     result_messages = [msg for msg in stream_messages if msg.get("type") == "result"]
     assert result_messages
-    assert result_messages[-1].get("num_turns") == 1
+    assert result_messages[-1].get("numTurns") == 1

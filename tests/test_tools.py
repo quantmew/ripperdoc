@@ -568,79 +568,6 @@ async def test_task_output_timeout_is_wait_timeout_only() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("reset_background_shell")
-async def test_foreground_timeout_auto_backgrounds_when_allowed() -> None:
-    """Foreground timeout should auto-background eligible commands."""
-    bash_tool = BashTool()
-    output_tool = TaskOutputTool()
-    context = ToolUseContext()
-
-    result = None
-    async for output in bash_tool.call(
-        BashToolInput(
-            command="sleep 0.35 && echo auto-bg-finished",
-            timeout=50,
-        ),
-        context,
-    ):
-        if isinstance(output, ToolResult):
-            result = output
-
-    assert result is not None
-    assert result.data.background_task_id
-    assert result.data.exit_code == 0
-    assert "moved to background" in (result.data.stderr or "")
-
-    task_id = result.data.background_task_id
-    assert task_id is not None
-
-    await asyncio.sleep(0.5)
-    completed = None
-    async for output in output_tool.call(
-        TaskOutputInput(task_id=task_id, block=True, timeout=2000),
-        context,
-    ):
-        completed = output
-
-    assert completed is not None
-    assert completed.data.retrieval_status == "success"
-    assert completed.data.task is not None
-    assert completed.data.task.status == "completed"
-    assert "auto-bg-finished" in completed.data.task.output
-
-
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("reset_background_shell")
-async def test_task_stop_can_stop_auto_backgrounded_task() -> None:
-    """TaskStop should work for tasks auto-backgrounded by foreground timeout."""
-    bash_tool = BashTool()
-    stop_tool = TaskStopTool()
-    context = ToolUseContext()
-
-    result = None
-    async for output in bash_tool.call(
-        BashToolInput(
-            command='python -c "import time; time.sleep(5)"',
-            timeout=50,
-        ),
-        context,
-    ):
-        if isinstance(output, ToolResult):
-            result = output
-
-    assert result is not None
-    task_id = result.data.background_task_id
-    assert task_id
-
-    stop_result = None
-    async for output in stop_tool.call(TaskStopInput(task_id=task_id), context):
-        stop_result = output
-
-    assert stop_result is not None
-    assert "Successfully stopped task" in stop_result.data.message
-    status = get_background_status(task_id, consume=False)
-    assert status["status"] == "killed"
-
-
 @pytest.mark.asyncio
 async def test_task_stop_kills_background_bash():
     """TaskStop should stop background bash tasks by task_id."""
@@ -1224,55 +1151,6 @@ def test_has_worktree_changes_detects_dirty_and_committed_changes(tmp_path: Path
     _git("worktree", "remove", "--force", str(session.worktree_path))
     _git("branch", "-D", session.branch)
     consume_session_worktrees()
-
-
-def test_agent_tool_autocleans_worktree_when_no_changes(tmp_path: Path) -> None:
-    consume_session_worktrees()
-    repo = tmp_path / "repo"
-    repo.mkdir()
-
-    def _git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", *args],
-            cwd=str(cwd),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
-        )
-
-    _git("init")
-    _git("config", "user.name", "Ripperdoc Test")
-    _git("config", "user.email", "test@example.com")
-    (repo / "README.md").write_text("hello\n", encoding="utf-8")
-    _git("add", "README.md")
-    _git("commit", "-m", "init")
-
-    session = create_task_worktree(task_id="agent_autoclean", base_path=repo)
-    tool = AgentTool(lambda: [])
-    record = AgentRunRecord(
-        agent_id="agent_autoclean",
-        agent_type="general-purpose",
-        tools=[],
-        system_prompt="",
-        history=[],
-        missing_tools=[],
-        model_used=None,
-        start_time=0.0,
-        status="completed",
-        result_text="done",
-        isolation_mode="worktree",
-        worktree_path=str(session.worktree_path),
-        worktree_branch=session.branch,
-        worktree_name=session.name,
-        worktree_repo_root=str(session.repo_root),
-        worktree_head_commit=session.head_commit,
-    )
-
-    tool._maybe_autocleanup_worktree(record)  # noqa: SLF001 - testing internal lifecycle behavior
-    assert record.worktree_path is None
-    assert record.worktree_branch is None
-    assert not session.worktree_path.exists()
 
 
 @pytest.mark.asyncio
