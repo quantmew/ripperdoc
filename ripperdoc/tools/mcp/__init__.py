@@ -28,6 +28,7 @@ from ripperdoc.utils.mcp import (
 )
 from ripperdoc.utils.filesystem.temp_paths import ripperdoc_mkstemp
 from ripperdoc.tools.mcp.mcp_output_limits import evaluate_mcp_output_size
+from ripperdoc.tools.mcp_auth import McpAuthOutput, create_mcp_auth_tool
 
 
 logger = get_logger()
@@ -163,7 +164,7 @@ class ListMcpServersTool(BaseMcpTool, Tool[ListMcpServersInput, ListMcpServersOu
 class ListMcpResourcesInput(BaseModel):
     """Input for listing MCP resources."""
 
-    server: Optional[str] = Field(default=None, description="Optional server name to filter")
+    server: Optional[str] = Field(default=None, description="Optional server name to filter resources by")
 
 
 class ListMcpResourcesOutput(BaseModel):
@@ -209,7 +210,7 @@ class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResou
 
     def render_result_for_assistant(self, output: ListMcpResourcesOutput) -> str:
         if not output.resources:
-            return "No MCP resources found."
+            return "No resources found. MCP servers may still provide tools even if they have no resources."
         try:
             return json.dumps(output.resources, indent=2, ensure_ascii=False)
         except (TypeError, ValueError) as exc:
@@ -258,8 +259,7 @@ class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResou
                         )
                         for res in response.resources
                     ]
-                except (OSError, RuntimeError, ConnectionError, ValueError) as exc:
-                    # pragma: no cover - runtime errors
+                except BaseException as exc:  # noqa: BLE001 - isolate per-server failures
                     logger.warning(
                         "Failed to fetch resources from MCP server: %s: %s",
                         type(exc).__name__,
@@ -277,6 +277,7 @@ class ListMcpResourcesTool(BaseMcpTool, Tool[ListMcpResourcesInput, ListMcpResou
                         "uri": getattr(resource, "uri", None),
                         "name": getattr(resource, "name", None),
                         "description": getattr(resource, "description", None),
+                        "mimeType": getattr(resource, "mime_type", None) or getattr(resource, "mimeType", None),
                         "mime_type": getattr(resource, "mime_type", None),
                         "size": getattr(resource, "size", None),
                     }
@@ -522,4 +523,6 @@ __all__ = [
     "ListMcpServersTool",
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",
+    "create_mcp_auth_tool",
+    "McpAuthOutput",
 ]
