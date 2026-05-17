@@ -35,7 +35,7 @@ from ripperdoc.services.providers.error_mapping import (
     map_permission_denied_error,
     run_with_exception_mapper,
 )
-from ripperdoc.message_utils import (
+from ripperdoc.utils.messaging.message_utils import (
     anthropic_prompt_caching_enabled,
     apply_anthropic_prompt_cache_control_to_messages,
     apply_anthropic_prompt_cache_control_to_tool_schemas,

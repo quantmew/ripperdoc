@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
 from ripperdoc.core.query import query
-from ripperdoc.message_utils import estimate_cost_usd, resolve_model_profile
+from ripperdoc.utils.messaging.message_utils import estimate_cost_usd, resolve_model_profile
 from ripperdoc.protocol.models import (
     JsonRpcErrorCodes,
     SDKResultMessage,

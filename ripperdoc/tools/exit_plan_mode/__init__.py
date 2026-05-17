@@ -20,7 +20,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ValidationResult,
 )
-from ripperdoc.plan_mode import (
+from ripperdoc.core.plan_mode import (
     build_plan_mode_exit_system_prompt,
     build_rejected_plan_user_message,
 )

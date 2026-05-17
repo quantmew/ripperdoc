@@ -24,7 +24,7 @@ from ripperdoc.core.hooks.events import (
     SessionStartInput,
 )
 from ripperdoc.core.hooks.state import suspend_hooks
-from ripperdoc.system_prompt import build_environment_prompt
+from ripperdoc.core.system_prompt import build_environment_prompt
 from ripperdoc.tools.bash import BashTool
 from ripperdoc.tools.file_read import FileReadTool
 from ripperdoc.tools.glob import GlobTool

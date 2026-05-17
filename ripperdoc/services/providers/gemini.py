@@ -39,11 +39,11 @@ from ripperdoc.services.providers.error_mapping import (
     map_connection_error,
     run_with_exception_mapper,
 )
-from ripperdoc.message_utils import normalize_tool_args, build_tool_description
+from ripperdoc.utils.messaging.message_utils import normalize_tool_args, build_tool_description
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.sessions.session_usage import record_usage
-from ripperdoc.message_utils import estimate_cost_usd
+from ripperdoc.utils.messaging.message_utils import estimate_cost_usd
 from ripperdoc.utils.user_agent import build_request_headers
 
 logger = get_logger()

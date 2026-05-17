@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from ripperdoc.system_prompt import build_environment_prompt
+from ripperdoc.core.system_prompt import build_environment_prompt
 
 
 def build_agent_listing(agents) -> str:

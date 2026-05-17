@@ -31,7 +31,7 @@ from ripperdoc.services.session_agents import (
 )
 from ripperdoc.services.output_styles import load_all_output_styles, resolve_output_style
 from ripperdoc.services.plugins import discover_plugins, set_runtime_plugin_dirs
-from ripperdoc.system_prompt_overrides import select_base_system_prompt
+from ripperdoc.core.system_prompt_builder import select_base_system_prompt
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes

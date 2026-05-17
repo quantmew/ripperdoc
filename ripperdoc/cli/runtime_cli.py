@@ -20,8 +20,8 @@ from ripperdoc.core.hooks.state import bind_pending_message_queue
 from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.services.skills import build_skill_summary, filter_enabled_skills, load_all_skills
-from ripperdoc.system_prompt import build_system_prompt
-from ripperdoc.system_prompt_overrides import compose_system_prompt
+from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.core.system_prompt_builder import compose_system_prompt
 from ripperdoc.core.tool_defaults import filter_tools_by_names
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.tools.background_shell import shutdown_background_shell

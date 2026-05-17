@@ -8,7 +8,7 @@ from typing import AsyncGenerator
 import pytest
 from pydantic import BaseModel
 
-from ripperdoc.message_utils import build_anthropic_tool_schemas
+from ripperdoc.utils.messaging.message_utils import build_anthropic_tool_schemas
 from ripperdoc.core.tool import Tool, ToolOutput, ToolUseContext
 from ripperdoc.services.providers.anthropic import (
     AnthropicClient,
@@ -16,7 +16,7 @@ from ripperdoc.services.providers.anthropic import (
     _content_blocks_from_response,
     _content_blocks_from_stream_state,
 )
-from ripperdoc.message_utils import (
+from ripperdoc.utils.messaging.message_utils import (
     ANTHROPIC_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     anthropic_cache_control,
     apply_anthropic_prompt_cache_control_to_messages,

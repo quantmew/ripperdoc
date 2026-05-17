@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 import httpx
 
 from ripperdoc.core.config import ModelProfile
-from ripperdoc.message_utils import (
+from ripperdoc.utils.messaging.message_utils import (
     build_openai_tool_schemas,
     content_blocks_from_openai_choice,
     estimate_cost_usd,

@@ -13,7 +13,7 @@ from ripperdoc.services.skills import (
     save_disabled_skill_names,
 )
 from ripperdoc.core.query import QueryContext, _apply_skill_context_updates
-from ripperdoc.message_utils import tool_result_message
+from ripperdoc.utils.messaging.message_utils import tool_result_message
 from ripperdoc.core.tool import ToolUseContext
 from ripperdoc.tools.skill import SkillTool, SkillToolInput
 

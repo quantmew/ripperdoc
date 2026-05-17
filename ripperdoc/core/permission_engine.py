@@ -17,7 +17,7 @@ from ripperdoc.cli.ui.choice import prompt_choice
 from ripperdoc.core.config import config_manager
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.services.managed_settings import get_managed_setting
-from ripperdoc.plan_mode import is_plan_file_path
+from ripperdoc.core.plan_mode import is_plan_file_path
 from ripperdoc.core.tool import Tool
 from ripperdoc.tools.file_read import detect_file_encoding
 from ripperdoc.utils.diff_rendering import build_numbered_diff_layout, format_numbered_diff_text

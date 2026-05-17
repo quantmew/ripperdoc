@@ -232,8 +232,10 @@ KNOWN_PROVIDERS = ProviderRegistry(
             model_suggestions=(
                 "deepseek-chat",
                 "deepseek-reasoner",
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
             ),
-            default_api_base="https://api.deepseek.com/v1",
+            default_api_base="https://api.deepseek.com/anthropic",
         ),
         ProviderOption(
             key="zhipu",

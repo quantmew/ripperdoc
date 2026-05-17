@@ -6,7 +6,7 @@ from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.cli.ui.context_display import format_tokens
 from ripperdoc.core.config import get_global_config, provider_protocol
 from ripperdoc.core.query import QueryContext
-from ripperdoc.system_prompt import build_system_prompt
+from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.services.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.utils.memory import build_memory_instructions
 from ripperdoc.utils.messaging.message_compaction import (

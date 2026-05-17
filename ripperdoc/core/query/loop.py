@@ -29,7 +29,7 @@ from ripperdoc.core.config import ModelProfile, provider_protocol
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
 from ripperdoc.core.hooks.state import bind_hook_scopes, bind_pending_message_queue
 from ripperdoc.services.providers import ProviderClient, get_provider_client
-from ripperdoc.message_utils import (
+from ripperdoc.utils.messaging.message_utils import (
     build_full_system_prompt,
     determine_tool_mode,
     extract_tool_use_blocks,
@@ -39,7 +39,7 @@ from ripperdoc.message_utils import (
     text_mode_history,
     tool_result_message,
 )
-from ripperdoc.plan_mode import (
+from ripperdoc.core.plan_mode import (
     build_plan_mode_full_system_prompt,
     build_plan_mode_reentry_system_prompt,
     build_plan_mode_sparse_system_prompt,

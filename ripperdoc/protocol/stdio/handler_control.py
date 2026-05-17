@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.tool_defaults import get_default_tools_async
-from ripperdoc.message_utils import format_pydantic_errors
+from ripperdoc.utils.messaging.message_utils import format_pydantic_errors
 from ripperdoc.services.output_styles import resolve_output_style
 from ripperdoc.core.permission_engine import PermissionResult
 from ripperdoc.protocol.models import (

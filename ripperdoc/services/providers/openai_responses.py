@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from ripperdoc.message_utils import normalize_tool_args, openai_usage_tokens
+from ripperdoc.utils.messaging.message_utils import normalize_tool_args, openai_usage_tokens
 
 
 def extract_unsupported_parameter_name(message: str) -> Optional[str]:

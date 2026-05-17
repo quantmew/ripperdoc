@@ -8,7 +8,7 @@ from rich.markdown import Markdown
 from rich.markup import escape
 
 from ripperdoc.commands.base import SlashCommand
-from ripperdoc.message_utils import resolve_model_profile
+from ripperdoc.utils.messaging.message_utils import resolve_model_profile
 from ripperdoc.services.providers import get_provider_client
 
 TOOL_MODE_NONE = "none"

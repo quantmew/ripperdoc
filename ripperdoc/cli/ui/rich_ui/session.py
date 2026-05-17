@@ -35,8 +35,8 @@ from ripperdoc.services.theme import get_theme_manager
 from ripperdoc.core.query import query, QueryContext
 from ripperdoc.core.tool import ToolProgress, ToolResult, ToolUseContext
 from ripperdoc.core.hooks.state import bind_pending_message_queue
-from ripperdoc.system_prompt import build_system_prompt
-from ripperdoc.system_prompt_overrides import compose_system_prompt
+from ripperdoc.core.system_prompt import build_system_prompt
+from ripperdoc.core.system_prompt_builder import compose_system_prompt
 from ripperdoc.services.skills import build_skill_summary, filter_enabled_skills, load_all_skills
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
@@ -44,7 +44,7 @@ from ripperdoc.commands import list_custom_commands, list_slash_commands
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permission_engine import make_permission_checker
-from ripperdoc.plan_mode import ensure_plan_file_directory
+from ripperdoc.core.plan_mode import ensure_plan_file_directory
 from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
