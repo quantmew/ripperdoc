@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -163,11 +163,14 @@ class TaskCreateTool(Tool[TaskCreateInput, TaskCreateOutput]):
             "Initial status is pending; assign owners/dependencies later via TaskUpdate."
         )
 
+    def needs_permissions(self, _input_data: Optional[TaskCreateInput] = None) -> bool:
+        return False
+
     @property
     def input_schema(self) -> type[TaskCreateInput]:
         return TaskCreateInput
 
-    def input_examples(self) -> list[ToolUseExample]:
+    def input_examples(self) -> List[ToolUseExample]:
         return [
             ToolUseExample(
                 description="Create a coding task with metadata",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 
 ReasoningKeys = ("reasoning_content", "reasoning_details", "reasoning")
@@ -77,7 +77,7 @@ def _append_reasoning_meta(target: Dict[str, Any], meta: Dict[str, Any]) -> None
             target[key] = meta[key]
 
 
-def _precompute_openai_positions(messages: Sequence[Any]) -> tuple[Dict[str, int], Dict[str, int]]:
+def _precompute_openai_positions(messages: Sequence[Any]) -> Tuple[Dict[str, int], Dict[str, int]]:
     tool_result_positions: Dict[str, int] = {}
     tool_use_positions: Dict[str, int] = {}
 
@@ -108,9 +108,9 @@ def _precompute_openai_positions(messages: Sequence[Any]) -> tuple[Dict[str, int
 def _normalize_openai_user_list(
     *,
     msg_index: int,
-    user_content: list[Any],
+    user_content: List[Any],
     meta: Dict[str, Any],
-    normalized: list[dict[str, Any]],
+    normalized: List[Dict[str, Any]],
     stats: _NormalizationStats,
     tool_use_positions: Dict[str, int],
     to_openai: Callable[[Any], Dict[str, Any]],
@@ -177,9 +177,9 @@ def _normalize_openai_user_list(
 def _normalize_openai_assistant_list(
     *,
     msg_index: int,
-    asst_content: list[Any],
+    asst_content: List[Any],
     meta: Dict[str, Any],
-    normalized: list[dict[str, Any]],
+    normalized: List[Dict[str, Any]],
     stats: _NormalizationStats,
     tool_result_positions: Dict[str, int],
     to_openai: Callable[[Any], Dict[str, Any]],
@@ -255,8 +255,8 @@ def _normalize_openai_messages(
     thinking_mode: Optional[str],
     to_openai: Callable[[Any], Dict[str, Any]],
     logger: Any,
-) -> tuple[list[dict[str, Any]], _NormalizationStats, Dict[str, int], Dict[str, int]]:
-    normalized: list[dict[str, Any]] = []
+) -> Tuple[List[Dict[str, Any]], _NormalizationStats, Dict[str, int], Dict[str, int]]:
+    normalized: List[Dict[str, Any]] = []
     stats = _NormalizationStats()
     tool_result_positions, tool_use_positions = _precompute_openai_positions(messages)
 
@@ -307,8 +307,8 @@ def _normalize_default_messages(
     messages: Sequence[Any],
     to_api: Callable[[Any], Dict[str, Any]],
     protocol: str,
-) -> tuple[list[dict[str, Any]], _NormalizationStats]:
-    normalized: list[dict[str, Any]] = []
+) -> Tuple[List[Dict[str, Any]], _NormalizationStats]:
+    normalized: List[Dict[str, Any]] = []
     stats = _NormalizationStats()
 
     for msg in messages:
@@ -371,9 +371,9 @@ def normalize_messages_for_api_impl(
     thinking_mode: Optional[str],
     to_api: Callable[[Any], Dict[str, Any]],
     to_openai: Callable[[Any], Dict[str, Any]],
-    apply_deepseek_reasoning_content: Callable[[list[dict[str, Any]], bool], list[dict[str, Any]]],
+    apply_deepseek_reasoning_content: Callable[[List[Dict[str, Any]], bool], List[Dict[str, Any]]],
     logger: Any,
-) -> list[dict[str, Any]]:
+) -> List[Dict[str, Any]]:
     """Normalize conversation messages into provider API payloads."""
     effective_tool_mode = (tool_mode or "native").lower()
     if effective_tool_mode not in {"native", "text"}:

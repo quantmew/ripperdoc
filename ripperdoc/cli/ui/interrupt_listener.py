@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
 from ripperdoc.utils.log import get_logger
 
@@ -29,7 +29,7 @@ class EscInterruptListener:
         self._interrupt_sent = False
         self._fd: Optional[int] = None
         self._owns_fd = False
-        self._orig_termios: list[Any] | None = None
+        self._orig_termios: Optional[List[Any]] = None
         self._cbreak_active = False
         self._availability_checked = False
         self._available = True

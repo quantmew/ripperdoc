@@ -7,7 +7,7 @@ The protocol is now expressed as JSON-RPC 2.0 request/response envelopes with
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import Any, Literal
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
@@ -40,16 +40,16 @@ class JsonRpcError(BaseModel):
 
     code: int
     message: str
-    data: Any | None = None
+    data: Optional[Any] = None
 
 
 class JsonRpcResponse(BaseModel):
     """JSON-RPC success/error response for an in-flight request."""
 
     jsonrpc: str = "2.0"
-    id: str | int
-    result: Any | None = None
-    error: JsonRpcError | None = None
+    id: Union[str, int]
+    result: Optional[Any] = None
+    error: Optional[JsonRpcError] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -64,7 +64,7 @@ class JsonRpcResponseError(Exception):
         self,
         code: int,
         message: str,
-        data: Any | None = None,
+        data: Optional[Any] = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -98,7 +98,7 @@ class ThinkingContentBlock(ContentBlock):
 
     type: str = Field(default="thinking")
     thinking: str = Field(alias="text")
-    signature: str | None = None
+    signature: Optional[str] = None
 
 
 class ToolUseContentBlock(ContentBlock):
@@ -116,7 +116,7 @@ class ToolResultContentBlock(ContentBlock):
     type: str = Field(default="tool_result")
     tool_use_id: str = Field(default="")
     content: Any = Field(default="")
-    is_error: bool | None = None
+    is_error: Optional[bool] = None
 
 
 class ImageSource(BaseModel):
@@ -135,13 +135,7 @@ class ImageContentBlock(ContentBlock):
 
 
 # Union type for all content blocks
-ContentBlockType = (
-    TextContentBlock
-    | ThinkingContentBlock
-    | ToolUseContentBlock
-    | ToolResultContentBlock
-    | ImageContentBlock
-)
+ContentBlockType = Union[TextContentBlock, ThinkingContentBlock, ToolUseContentBlock, ToolResultContentBlock, ImageContentBlock]
 
 
 class MessageData(BaseModel):
@@ -157,7 +151,7 @@ class AssistantMessageData(MessageData):
     """Assistant message data."""
 
     role: str = "assistant"
-    content: list[dict[str, Any]] | str
+    content: Union[list[dict[str, Any]], str]
     model: str = "main"
 
 
@@ -165,7 +159,7 @@ class UserMessageData(MessageData):
     """User message data."""
 
     role: str = "user"
-    content: list[dict[str, Any]] | str = ""
+    content: Union[list[dict[str, Any]], str] = ""
 
 
 class AssistantStreamMessage(BaseModel):
@@ -173,9 +167,9 @@ class AssistantStreamMessage(BaseModel):
 
     type: str = Field(default="assistant")
     message: AssistantMessageData
-    session_id: str | None = None
-    parent_tool_use_id: str | None = None
-    uuid: str | None = None
+    session_id: Optional[str] = None
+    parent_tool_use_id: Optional[str] = None
+    uuid: Optional[str] = None
 
 
 class UserStreamMessage(BaseModel):
@@ -183,9 +177,9 @@ class UserStreamMessage(BaseModel):
 
     type: str = Field(default="user")
     message: UserMessageData
-    uuid: str | None = None
-    session_id: str | None = None
-    parent_tool_use_id: str | None = None
+    uuid: Optional[str] = None
+    session_id: Optional[str] = None
+    parent_tool_use_id: Optional[str] = None
     tool_use_result: Any = None
 
 
@@ -198,7 +192,7 @@ class IncomingUserMessageData(BaseModel):
     )
 
     role: Literal["user"]
-    content: list[dict[str, Any]] | str = ""
+    content: Union[list[dict[str, Any]], str] = ""
 
 
 class IncomingUserStreamMessage(BaseModel):
@@ -211,14 +205,14 @@ class IncomingUserStreamMessage(BaseModel):
 
     type: Literal["user"]
     message: IncomingUserMessageData
-    uuid: str | None = None
-    session_id: str | None = None
-    parent_tool_use_id: str | None = None
+    uuid: Optional[str] = None
+    session_id: Optional[str] = None
+    parent_tool_use_id: Optional[str] = None
     tool_use_result: Any = None
 
 
 # Union type for stream messages
-StreamMessage = AssistantStreamMessage | UserStreamMessage
+StreamMessage = Union[AssistantStreamMessage, UserStreamMessage]
 
 
 class MCPServerInfo(BaseModel):
@@ -237,16 +231,16 @@ class MCPServerStatusInfo(BaseModel):
 class ProtocolCapabilities(BaseModel):
     """Server capability set returned in `initialize` result."""
 
-    experimental: dict[str, Any] | None = None
-    sampling: dict[str, Any] | None = None
-    tools: dict[str, Any] | None = Field(
+    experimental: Optional[dict[str, Any]] = None
+    sampling: Optional[dict[str, Any]] = None
+    tools: Optional[dict[str, Any]] = Field(
         default_factory=lambda: {"listChanged": False}
     )
-    tasks: dict[str, Any] | None = None
-    logging: bool | dict[str, Any] | None = None
-    completions: bool | dict[str, Any] | None = None
-    prompts: dict[str, Any] | None = None
-    resources: dict[str, Any] | None = None
+    tasks: Optional[dict[str, Any]] = None
+    logging: bool | Optional[dict[str, Any]] = None
+    completions: bool | Optional[dict[str, Any]] = None
+    prompts: Optional[dict[str, Any]] = None
+    resources: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -258,9 +252,9 @@ class InitializeClientIcon(BaseModel):
     """Client info metadata icon descriptor."""
 
     src: str
-    mimeType: str | None = None
-    sizes: list[str] | None = None
-    theme: Literal["light", "dark"] | None = None
+    mimeType: Optional[str] = None
+    sizes: Optional[list[str]] = None
+    theme: Optional[Literal["light", "dark"]] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -272,11 +266,11 @@ class InitializeClientInfo(BaseModel):
     """Client metadata from `initialize` request."""
 
     name: str
-    title: str | None = None
+    title: Optional[str] = None
     version: str
-    websiteUrl: str | None = None
-    description: str | None = None
-    icons: list[InitializeClientIcon] | None = None
+    websiteUrl: Optional[str] = None
+    description: Optional[str] = None
+    icons: Optional[list[InitializeClientIcon]] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -287,8 +281,8 @@ class InitializeClientInfo(BaseModel):
 class InitializeClientCapabilitiesSampling(BaseModel):
     """Client sampling capability descriptor."""
 
-    context: Any | None = None
-    tools: Any | None = None
+    context: Optional[Any] = None
+    tools: Optional[Any] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -299,8 +293,8 @@ class InitializeClientCapabilitiesSampling(BaseModel):
 class InitializeClientCapabilitiesElicitation(BaseModel):
     """Client elicitation capability descriptor."""
 
-    form: Any | None = None
-    url: Any | None = None
+    form: Optional[Any] = None
+    url: Optional[Any] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -311,7 +305,7 @@ class InitializeClientCapabilitiesElicitation(BaseModel):
 class InitializeClientCapabilitiesTasksSampling(BaseModel):
     """Client task/sampling capability descriptor."""
 
-    createMessage: Any | None = None
+    createMessage: Optional[Any] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -322,8 +316,8 @@ class InitializeClientCapabilitiesTasksSampling(BaseModel):
 class InitializeClientCapabilitiesTasksRequests(BaseModel):
     """Client task request capability descriptors."""
 
-    sampling: InitializeClientCapabilitiesTasksSampling | None = None
-    elicitation: dict[str, Any] | None = None
+    sampling: Optional[InitializeClientCapabilitiesTasksSampling] = None
+    elicitation: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -334,9 +328,9 @@ class InitializeClientCapabilitiesTasksRequests(BaseModel):
 class InitializeClientCapabilitiesTasks(BaseModel):
     """Client task capability descriptor."""
 
-    list: Any | None = None
-    cancel: Any | None = None
-    requests: InitializeClientCapabilitiesTasksRequests | None = None
+    list: Optional[Any] = None
+    cancel: Optional[Any] = None
+    requests: Optional[InitializeClientCapabilitiesTasksRequests] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -347,7 +341,7 @@ class InitializeClientCapabilitiesTasks(BaseModel):
 class InitializeClientCapabilitiesRoots(BaseModel):
     """Client roots capability descriptor."""
 
-    listChanged: bool | None = None
+    listChanged: Optional[bool] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -358,11 +352,11 @@ class InitializeClientCapabilitiesRoots(BaseModel):
 class InitializeClientCapabilities(BaseModel):
     """Client capability shape expected by `initialize`."""
 
-    experimental: dict[str, Any] | None = None
-    sampling: InitializeClientCapabilitiesSampling | None = None
-    elicitation: InitializeClientCapabilitiesElicitation | None = None
-    roots: InitializeClientCapabilitiesRoots | None = None
-    tasks: InitializeClientCapabilitiesTasks | None = None
+    experimental: Optional[dict[str, Any]] = None
+    sampling: Optional[InitializeClientCapabilitiesSampling] = None
+    elicitation: Optional[InitializeClientCapabilitiesElicitation] = None
+    roots: Optional[InitializeClientCapabilitiesRoots] = None
+    tasks: Optional[InitializeClientCapabilitiesTasks] = None
 
     model_config = ConfigDict(
         extra="forbid",
@@ -376,8 +370,8 @@ class InitializeServerInfo(BaseModel):
     name: str = "ripperdoc"
     title: str = "Ripperdoc"
     version: str = __version__
-    websiteUrl: str | None = None
-    description: str | None = None
+    websiteUrl: Optional[str] = None
+    description: Optional[str] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -391,7 +385,7 @@ class InitializeResult(BaseModel):
     protocolVersion: str = DEFAULT_PROTOCOL_VERSION
     capabilities: ProtocolCapabilities
     serverInfo: InitializeServerInfo
-    instructions: str | None = None
+    instructions: Optional[str] = None
 
 
 class InitializeParams(BaseModel):
@@ -400,7 +394,7 @@ class InitializeParams(BaseModel):
     protocolVersion: str
     capabilities: InitializeClientCapabilities
     clientInfo: InitializeClientInfo
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: Optional[dict[str, Any]] = Field(default=None, alias="_meta")
 
     model_config = ConfigDict(
         extra="forbid",
@@ -434,8 +428,8 @@ class SamplingRequestMessage(BaseModel):
     """Single message in a sampling/createMessage request."""
 
     role: Literal["user", "assistant"]
-    content: list[dict[str, Any]] | str
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    content: Union[list[dict[str, Any]], str]
+    meta: Optional[dict[str, Any]] = Field(default=None, alias="_meta")
 
     model_config = ConfigDict(
         extra="allow",
@@ -448,17 +442,17 @@ class SamplingRequest(BaseModel):
     """Request body for `sampling/createMessage`."""
 
     messages: list[SamplingRequestMessage]
-    modelPreferences: dict[str, Any] | None = None
-    systemPrompt: str | None = None
-    appendSystemPrompt: str | None = None
-    includeContext: Literal["none", "thisServer", "allServers"] | None = None
-    temperature: float | None = None
+    modelPreferences: Optional[dict[str, Any]] = None
+    systemPrompt: Optional[str] = None
+    appendSystemPrompt: Optional[str] = None
+    includeContext: Optional[Literal["none", "thisServer", "allServers"]] = None
+    temperature: Optional[float] = None
     maxTokens: int
-    stopSequences: list[str] | None = None
-    metadata: dict[str, Any] | None = None
-    tools: list[dict[str, Any]] | None = None
-    toolChoice: dict[str, Any] | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    stopSequences: Optional[list[str]] = None
+    metadata: Optional[dict[str, Any]] = None
+    tools: Optional[List[Dict[str, Any]]] = None
+    toolChoice: Optional[dict[str, Any]] = None
+    meta: Optional[dict[str, Any]] = Field(default=None, alias="_meta")
 
     model_config = ConfigDict(
         extra="allow",
@@ -482,9 +476,9 @@ class SamplingResult(BaseModel):
         "toolUse",
     ] | str = "endTurn"
     role: Literal["assistant"] = "assistant"
-    content: list[dict[str, Any]] | dict[str, Any] | str
-    usage: UsageInfo | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    content: Union[list[dict[str, Any]], dict[str, Any], str]
+    usage: Optional[UsageInfo] = None
+    meta: Optional[dict[str, Any]] = Field(default=None, alias="_meta")
 
     model_config = ConfigDict(
         extra="allow",
@@ -497,8 +491,8 @@ class ToolCallRequest(BaseModel):
     """Request payload for MCP-style tool invocations."""
 
     name: str
-    arguments: dict[str, Any] | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    arguments: Optional[dict[str, Any]] = None
+    meta: Optional[dict[str, Any]] = Field(default=None, alias="_meta")
 
     model_config = ConfigDict(
         extra="allow",
@@ -516,10 +510,10 @@ class PermissionResponseAllow(BaseModel):
     """A permission allow response."""
 
     behavior: str = Field(default="allow")
-    updatedInput: dict[str, Any] | None = None
-    toolUseID: str | None = None
-    decisionReason: dict[str, Any] | None = None
-    updatedPermissions: list[dict[str, Any]] | None = None
+    updatedInput: Optional[dict[str, Any]] = None
+    toolUseID: Optional[str] = None
+    decisionReason: Optional[dict[str, Any]] = None
+    updatedPermissions: Optional[List[Dict[str, Any]]] = None
 
 
 class PermissionResponseDeny(BaseModel):
@@ -527,8 +521,8 @@ class PermissionResponseDeny(BaseModel):
 
     behavior: str = Field(default="deny")
     message: str = ""
-    toolUseID: str | None = None
-    decisionReason: dict[str, Any] | None = None
+    toolUseID: Optional[str] = None
+    decisionReason: Optional[dict[str, Any]] = None
 
 
 class PermissionRequestPayload(BaseModel):
@@ -540,12 +534,12 @@ class PermissionRequestPayload(BaseModel):
 
     subtype: str = Field(default="can_use_tool")
     tool_name: str
-    input: dict[str, Any] | None = None
-    tool_use_id: str | None = None
-    agent_id: str | None = None
-    permission_suggestions: list[dict[str, Any]] | None = None
-    blocked_path: str | None = None
-    decision_reason: dict[str, Any] | None = None
+    input: Optional[dict[str, Any]] = None
+    tool_use_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    permission_suggestions: Optional[List[Dict[str, Any]]] = None
+    blocked_path: Optional[str] = None
+    decision_reason: Optional[dict[str, Any]] = None
     force_prompt: bool = False
 
 
@@ -566,7 +560,7 @@ class ThinkingConfig(BaseModel):
     """Thinking/reasoning configuration."""
 
     mode: Literal["adaptive", "enabled", "disabled"] = "adaptive"
-    budget_tokens: int | None = Field(default=None, alias="budgetTokens")
+    budget_tokens: Optional[int] = Field(default=None, alias="budgetTokens")
 
     model_config = ConfigDict(
         extra="allow",
@@ -578,10 +572,10 @@ class ModelInfo(BaseModel):
     """Model metadata for SDK initialize response."""
 
     value: str
-    display_name: str | None = Field(default=None, alias="displayName")
-    description: str | None = None
+    display_name: Optional[str] = Field(default=None, alias="displayName")
+    description: Optional[str] = None
     supports_effort: bool = Field(default=False, alias="supportsEffort")
-    supported_effort_levels: list[str] | None = Field(
+    supported_effort_levels: Optional[list[str]] = Field(
         default=None, alias="supportedEffortLevels"
     )
     supports_adaptive_thinking: bool = Field(
@@ -589,8 +583,8 @@ class ModelInfo(BaseModel):
     )
     supports_fast_mode: bool = Field(default=False, alias="supportsFastMode")
     supports_auto_mode: bool = Field(default=False, alias="supportsAutoMode")
-    max_tokens: int | None = Field(default=None, alias="maxTokens")
-    max_thinking_tokens: int | None = Field(
+    max_tokens: Optional[int] = Field(default=None, alias="maxTokens")
+    max_thinking_tokens: Optional[int] = Field(
         default=None, alias="maxThinkingTokens"
     )
 
@@ -603,12 +597,12 @@ class ModelInfo(BaseModel):
 class AccountInfo(BaseModel):
     """Account metadata for SDK initialize response."""
 
-    email: str | None = None
-    organization: str | None = None
-    subscription_type: str | None = Field(default=None, alias="subscriptionType")
-    token_source: str | None = Field(default=None, alias="tokenSource")
-    api_key_source: str | None = Field(default=None, alias="apiKeySource")
-    api_provider: str | None = Field(default=None, alias="apiProvider")
+    email: Optional[str] = None
+    organization: Optional[str] = None
+    subscription_type: Optional[str] = Field(default=None, alias="subscriptionType")
+    token_source: Optional[str] = Field(default=None, alias="tokenSource")
+    api_key_source: Optional[str] = Field(default=None, alias="apiKeySource")
+    api_provider: Optional[str] = Field(default=None, alias="apiProvider")
 
     model_config = ConfigDict(
         extra="allow",
@@ -644,7 +638,7 @@ class PermissionRuleValue(BaseModel):
     """A single permission rule with tool name and content."""
 
     tool_name: str = Field(alias="toolName")
-    rule_content: str | None = Field(default=None, alias="ruleContent")
+    rule_content: Optional[str] = Field(default=None, alias="ruleContent")
 
     model_config = ConfigDict(
         extra="allow",
@@ -682,7 +676,7 @@ class PermissionUpdateAddRules(BaseModel):
     type: Literal["addRules"] = "addRules"
     rules: list[PermissionRuleValue]
     behavior: Literal["allow", "deny", "ask"] = "allow"
-    destination: PermissionUpdateDestination | None = None
+    destination: Optional[PermissionUpdateDestination] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -696,7 +690,7 @@ class PermissionUpdateReplaceRules(BaseModel):
     type: Literal["replaceRules"] = "replaceRules"
     rules: list[PermissionRuleValue]
     behavior: Literal["allow", "deny", "ask"] = "allow"
-    destination: PermissionUpdateDestination | None = None
+    destination: Optional[PermissionUpdateDestination] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -710,7 +704,7 @@ class PermissionUpdateRemoveRules(BaseModel):
     type: Literal["removeRules"] = "removeRules"
     rules: list[PermissionRuleValue]
     behavior: Literal["allow", "deny", "ask"] = "allow"
-    destination: PermissionUpdateDestination | None = None
+    destination: Optional[PermissionUpdateDestination] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -723,7 +717,7 @@ class PermissionUpdateSetMode(BaseModel):
 
     type: Literal["setMode"] = "setMode"
     mode: str
-    destination: PermissionUpdateDestination | None = None
+    destination: Optional[PermissionUpdateDestination] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -736,7 +730,7 @@ class PermissionUpdateAddDirectories(BaseModel):
 
     type: Literal["addDirectories"] = "addDirectories"
     directories: list[str]
-    destination: PermissionUpdateDestination | None = None
+    destination: Optional[PermissionUpdateDestination] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -749,7 +743,7 @@ class PermissionUpdateRemoveDirectories(BaseModel):
 
     type: Literal["removeDirectories"] = "removeDirectories"
     directories: list[str]
-    destination: PermissionUpdateDestination | None = None
+    destination: Optional[PermissionUpdateDestination] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -757,14 +751,7 @@ class PermissionUpdateRemoveDirectories(BaseModel):
     )
 
 
-PermissionUpdate = (
-    PermissionUpdateAddRules
-    | PermissionUpdateReplaceRules
-    | PermissionUpdateRemoveRules
-    | PermissionUpdateSetMode
-    | PermissionUpdateAddDirectories
-    | PermissionUpdateRemoveDirectories
-)
+PermissionUpdate = Union[PermissionUpdateAddRules, PermissionUpdateReplaceRules, PermissionUpdateRemoveRules, PermissionUpdateSetMode, PermissionUpdateAddDirectories, PermissionUpdateRemoveDirectories]
 
 
 # ============================================================================
@@ -775,11 +762,11 @@ PermissionUpdate = (
 class McpToolAnnotation(BaseModel):
     """MCP tool annotation metadata."""
 
-    title: str | None = None
-    read_only_hint: bool | None = Field(default=None, alias="readOnlyHint")
-    destructive_hint: bool | None = Field(default=None, alias="destructiveHint")
-    idempotent_hint: bool | None = Field(default=None, alias="idempotentHint")
-    open_world_hint: bool | None = Field(default=None, alias="openWorldHint")
+    title: Optional[str] = None
+    read_only_hint: Optional[bool] = Field(default=None, alias="readOnlyHint")
+    destructive_hint: Optional[bool] = Field(default=None, alias="destructiveHint")
+    idempotent_hint: Optional[bool] = Field(default=None, alias="idempotentHint")
+    open_world_hint: Optional[bool] = Field(default=None, alias="openWorldHint")
 
     model_config = ConfigDict(
         extra="allow",
@@ -791,8 +778,8 @@ class McpToolInfo(BaseModel):
     """MCP tool with annotations."""
 
     name: str
-    description: str | None = None
-    annotations: McpToolAnnotation | None = None
+    description: Optional[str] = None
+    annotations: Optional[McpToolAnnotation] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -803,10 +790,10 @@ class McpToolInfo(BaseModel):
 class McpServerCapabilities(BaseModel):
     """MCP server capability set."""
 
-    tools: dict[str, Any] | None = None
-    resources: dict[str, Any] | None = None
-    prompts: dict[str, Any] | None = None
-    experimental: dict[str, Any] | None = None
+    tools: Optional[dict[str, Any]] = None
+    resources: Optional[dict[str, Any]] = None
+    prompts: Optional[dict[str, Any]] = None
+    experimental: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -819,14 +806,14 @@ class McpServerStatusDetail(BaseModel):
 
     name: str
     status: str
-    type: str | None = None
-    error: str | None = None
-    server_info: dict[str, Any] | None = Field(default=None, alias="serverInfo")
-    config: dict[str, Any] | None = None
+    type: Optional[str] = None
+    error: Optional[str] = None
+    server_info: Optional[dict[str, Any]] = Field(default=None, alias="serverInfo")
+    config: Optional[dict[str, Any]] = None
     tools: list[McpToolInfo] = Field(default_factory=list)
     resources: int = 0
-    capabilities: McpServerCapabilities | None = None
-    scope: str | None = None
+    capabilities: Optional[McpServerCapabilities] = None
+    scope: Optional[str] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -844,7 +831,7 @@ class ContextCategory(BaseModel):
 
     name: str
     tokens: int
-    color: str | None = None
+    color: Optional[str] = None
     is_deferred: bool = Field(default=False, alias="isDeferred")
 
     model_config = ConfigDict(
@@ -856,9 +843,9 @@ class ContextCategory(BaseModel):
 class ContextGridSquare(BaseModel):
     """A single square in the context usage grid."""
 
-    color: str | None = None
+    color: Optional[str] = None
     is_filled: bool = Field(default=False, alias="isFilled")
-    category_name: str | None = Field(default=None, alias="categoryName")
+    category_name: Optional[str] = Field(default=None, alias="categoryName")
     tokens: int = 0
     percentage: float = 0.0
     square_fullness: float = Field(default=0.0, alias="squareFullness")
@@ -902,16 +889,16 @@ class SDKResultMessage(BaseModel):
     is_error: bool = Field(default=False, alias="isError")
     result: str = ""
     num_turns: int = Field(default=0, alias="numTurns")
-    session_id: str | None = Field(default=None, alias="sessionId")
-    stop_reason: str | None = Field(default="endTurn", alias="stopReason")
+    session_id: Optional[str] = Field(default=None, alias="sessionId")
+    stop_reason: Optional[str] = Field(default="endTurn", alias="stopReason")
     total_cost_usd: float = Field(default=0.0, alias="totalCostUsd")
-    usage: UsageInfo | None = None
-    model_usage: dict[str, Any] | None = Field(default=None, alias="modelUsage")
-    permission_denials: list[dict[str, Any]] | None = Field(
+    usage: Optional[UsageInfo] = None
+    model_usage: Optional[dict[str, Any]] = Field(default=None, alias="modelUsage")
+    permission_denials: Optional[List[Dict[str, Any]]] = Field(
         default=None, alias="permissionDenials"
     )
-    structured_output: Any | None = Field(default=None, alias="structuredOutput")
-    uuid: str | None = None
+    structured_output: Optional[Any] = Field(default=None, alias="structuredOutput")
+    uuid: Optional[str] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -925,9 +912,9 @@ class SDKStatusMessage(BaseModel):
     type: Literal["status"] = "status"
     subtype: str = ""
     message: str = ""
-    tool_use_id: str | None = Field(default=None, alias="toolUseID")
-    progress: float | None = None
-    session_id: str | None = Field(default=None, alias="sessionId")
+    tool_use_id: Optional[str] = Field(default=None, alias="toolUseID")
+    progress: Optional[float] = None
+    session_id: Optional[str] = Field(default=None, alias="sessionId")
 
     model_config = ConfigDict(
         extra="allow",
@@ -940,9 +927,9 @@ class SDKToolProgressMessage(BaseModel):
 
     type: Literal["tool_progress"] = "tool_progress"
     tool_use_id: str = Field(alias="toolUseID")
-    progress: float | None = None
-    message: str | None = None
-    session_id: str | None = Field(default=None, alias="sessionId")
+    progress: Optional[float] = None
+    message: Optional[str] = None
+    session_id: Optional[str] = Field(default=None, alias="sessionId")
 
     model_config = ConfigDict(
         extra="allow",
@@ -955,9 +942,9 @@ class SDKAuthStatusMessage(BaseModel):
 
     type: Literal["auth_status"] = "auth_status"
     authenticated: bool = False
-    provider: str | None = None
-    message: str | None = None
-    session_id: str | None = Field(default=None, alias="sessionId")
+    provider: Optional[str] = None
+    message: Optional[str] = None
+    session_id: Optional[str] = Field(default=None, alias="sessionId")
 
     model_config = ConfigDict(
         extra="allow",
@@ -970,7 +957,7 @@ class SDKPromptSuggestionMessage(BaseModel):
 
     type: Literal["prompt_suggestion"] = "prompt_suggestion"
     suggestions: list[str] = Field(default_factory=list)
-    session_id: str | None = Field(default=None, alias="sessionId")
+    session_id: Optional[str] = Field(default=None, alias="sessionId")
 
     model_config = ConfigDict(
         extra="allow",

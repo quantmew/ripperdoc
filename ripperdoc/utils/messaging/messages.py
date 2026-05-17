@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Sequence, Type, Union, cast
+from typing import Any, Dict, List, Optional, Sequence, Set, Type, Union, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from uuid import uuid4
 from enum import Enum
@@ -310,7 +310,7 @@ class ProgressMessage(BaseModel):
     content: Any
     progress_sender: Optional[str] = None
     normalized_messages: List[Message] = []
-    sibling_tool_use_ids: set[str] = set()
+    sibling_tool_use_ids: Set[str] = set()
     is_subagent_message: bool = False  # Flag to indicate if content is a subagent message
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -836,7 +836,7 @@ class AttachmentMessage(BaseModel):
 ConversationMessage = Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]
 
 
-ATTACHMENT_IGNORED_TYPES: set[str] = {
+ATTACHMENT_IGNORED_TYPES: Set[str] = {
     "dynamic_skill",
     "already_read_file",
     "command_permissions",
@@ -851,7 +851,7 @@ ATTACHMENT_IGNORED_TYPES: set[str] = {
     "background_task_status",
 }
 
-ATTACHMENT_EXPORT_HIDDEN_TYPES: set[str] = {
+ATTACHMENT_EXPORT_HIDDEN_TYPES: Set[str] = {
     "plan_mode",
     "plan_mode_reentry",
     "plan_mode_exit",
@@ -870,7 +870,7 @@ ATTACHMENT_EXPORT_HIDDEN_TYPES: set[str] = {
     "verify_plan_reminder",
 }
 
-ATTACHMENT_SUMMARY_HIDDEN_TYPES: set[str] = {
+ATTACHMENT_SUMMARY_HIDDEN_TYPES: Set[str] = {
     "plan_mode",
     "plan_mode_reentry",
     "plan_mode_exit",
@@ -917,7 +917,7 @@ def create_hook_notice_message(
     tool_name: Optional[str] = None,
     level: str = "info",
     tool_use_id: str = "hook_notice",
-    sibling_tool_use_ids: Optional[set[str]] = None,
+    sibling_tool_use_ids: Optional[Set[str]] = None,
 ) -> ProgressMessage:
     """Create a progress message for hook notices that should be shown to the user."""
     payload = create_hook_notice_payload(
@@ -2253,7 +2253,7 @@ def expand_attachment_messages(
 ) -> List[Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]]:
     """Expand attachment items into model-visible user/meta messages."""
 
-    expanded: List[UserMessage | AssistantMessage | ProgressMessage | AttachmentMessage] = []
+    expanded: List[Union[UserMessage, AssistantMessage, ProgressMessage, AttachmentMessage]] = []
     for message in messages:
         if getattr(message, "type", None) == "attachment" and isinstance(message, AttachmentMessage):
             expanded.extend(parse_attachment_message(message))
@@ -2386,7 +2386,7 @@ def create_assistant_message(
 
 def create_progress_message(
     tool_use_id: str,
-    sibling_tool_use_ids: set[str],
+    sibling_tool_use_ids: Set[str],
     content: Any,
     progress_sender: Optional[str] = None,
     normalized_messages: Optional[List[Message]] = None,

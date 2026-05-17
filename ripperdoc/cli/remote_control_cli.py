@@ -13,7 +13,7 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Optional, Tuple
 
 import click
 
@@ -49,7 +49,7 @@ logger = get_logger()
 _ActiveSession = ActiveSession
 
 
-def _resolve_base_url(explicit_base_url: str | None) -> str:
+def _resolve_base_url(explicit_base_url: Optional[str]) -> str:
     configured = explicit_base_url or os.getenv(BASE_URL_ENV) or os.getenv("RIPPERDOC_BASE_URL")
     if not configured or not configured.strip():
         raise click.ClickException(
@@ -84,7 +84,7 @@ def _resolve_ingress_url(base_url: str) -> str:
     return base_url
 
 
-def _resolve_auth_token(explicit_token: str | None) -> str | None:
+def _resolve_auth_token(explicit_token: Optional[str]) -> Optional[str]:
     token = (
         explicit_token
         or os.getenv(TOKEN_ENV)
@@ -96,7 +96,7 @@ def _resolve_auth_token(explicit_token: str | None) -> str | None:
     return token or None
 
 
-def _resolve_session_refresh_strategy(initial_auth_token: str | None) -> bool:
+def _resolve_session_refresh_strategy(initial_auth_token: Optional[str]) -> bool:
     """Enable proactive session token refresh only when source token looks refreshable."""
     explicit = os.getenv("RIPPERDOC_REMOTE_CONTROL_ENABLE_SESSION_TOKEN_REFRESH")
     if explicit is not None and explicit.strip():
@@ -122,7 +122,7 @@ def _build_connect_url(base_url: str, bridge_id: str) -> str:
     return _build_default_connect_url(base_url, bridge_id)
 
 
-def _get_git_remote_url(cwd: Path) -> str | None:
+def _get_git_remote_url(cwd: Path) -> Optional[str]:
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -143,16 +143,16 @@ def _get_git_remote_url(cwd: Path) -> str | None:
 def run_remote_control(
     *,
     verbose: bool,
-    base_url: str | None,
-    auth_token: str | None,
+    base_url: Optional[str],
+    auth_token: Optional[str],
     session_timeout_sec: int,
-    debug_file: Path | None,
+    debug_file: Optional[Path],
 ) -> None:
     """Entry point for remote control bridge runtime."""
     resolved_base_url = _resolve_base_url(base_url)
     resolved_ingress_url = _resolve_ingress_url(resolved_base_url)
 
-    def _token_supplier() -> str | None:
+    def _token_supplier() -> Optional[str]:
         return _resolve_auth_token(auth_token)
 
     resolved_auth_token = _token_supplier()
@@ -197,7 +197,7 @@ def run_remote_control(
         else None,
     )
 
-    previous_handlers: list[tuple[int, Any]] = []
+    previous_handlers: List[Tuple[int, Any]] = []
 
     def _handle_signal(signum: int, _frame: Any) -> None:
         logger.info("[bridge] Signal %s received; shutting down", signum)
@@ -253,10 +253,10 @@ def run_remote_control(
 )
 def remote_control_cmd(
     verbose: bool,
-    base_url: str | None,
-    auth_token: str | None,
+    base_url: Optional[str],
+    auth_token: Optional[str],
     session_timeout: int,
-    debug_file: Path | None,
+    debug_file: Optional[Path],
 ) -> None:
     """Run a Remote Control bridge process for this working directory."""
     run_remote_control(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict, List, Optional, Union
 
 from ripperdoc.utils.messaging.message_utils import resolve_model_profile
 from ripperdoc.protocol.models import (
@@ -19,14 +19,14 @@ class StdioMessageMixin:
         self,
         text_value: Any,
         content_value: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> List[Dict[str, Any]]:
         source = content_value if content_value is not None else text_value
         if source is None:
             return [{"type": "text", "text": ""}]
         if isinstance(source, str):
             return [{"type": "text", "text": source}]
         if isinstance(source, list):
-            blocks: list[dict[str, Any]] = []
+            blocks: List[Dict[str, Any]] = []
             for item in source:
                 if isinstance(item, dict):
                     block_type = str(item.get("type") or "").strip()
@@ -50,7 +50,7 @@ class StdioMessageMixin:
     def _normalize_tool_use_result_payload(
         self,
         raw_payload: Any,
-        fallback_blocks: list[dict[str, Any]] | None,
+        fallback_blocks: Optional[List[Dict[str, Any]]],
     ) -> Any:
         payload = self._sanitize_for_json(raw_payload)
         if isinstance(payload, dict):
@@ -82,7 +82,7 @@ class StdioMessageMixin:
             return fallback_blocks
         return None
 
-    def _convert_message_to_sdk(self, message: Any) -> dict[str, Any] | None:
+    def _convert_message_to_sdk(self, message: Any) -> Optional[Dict[str, Any]]:
         """Convert internal message to SDK format.
 
         Args:
@@ -149,7 +149,7 @@ class StdioMessageMixin:
         if msg_type == "user":
             msg_content = getattr(message, "message", None)
             content = getattr(msg_content, "content", "") if msg_content else ""
-            first_tool_result_blocks: list[dict[str, Any]] | None = None
+            first_tool_result_blocks: Optional[List[Dict[str, Any]]] = None
 
             # If content is a list of MessageContent objects (e.g., tool results),
             # convert it to SDK content blocks
@@ -164,7 +164,7 @@ class StdioMessageMixin:
                                 block.get("text"),
                                 block.get("content"),
                             )
-                            normalized_block: dict[str, Any] = {
+                            normalized_block: Dict[str, Any] = {
                                 "type": "tool_result",
                                 "tool_use_id": tool_use_id,
                                 "content": content_value,
@@ -189,7 +189,7 @@ class StdioMessageMixin:
                             content_blocks.append(block_dict)
                 content = content_blocks
 
-            stream_message: UserStreamMessage | AssistantStreamMessage = UserStreamMessage(  # type: ignore[assignment,no-redef]
+            stream_message: Union[UserStreamMessage, AssistantStreamMessage] = UserStreamMessage(  # type: ignore[assignment,no-redef]
                 message=UserMessageData(content=content),
                 uuid=getattr(message, "uuid", None),
                 session_id=self._session_id,
@@ -269,7 +269,7 @@ class StdioMessageMixin:
             return ""
         return str(content_value)
 
-    def _format_tool_use_result(self, text_value: str | None, is_error: bool) -> str | None:
+    def _format_tool_use_result(self, text_value: Optional[str], is_error: bool) -> Optional[str]:
         if text_value is None:
             return None
         if is_error and not text_value.startswith("Error: "):
@@ -282,7 +282,7 @@ class StdioMessageMixin:
             return f"{line[:117]}..."
         return line
 
-    def _normalize_task_tool_input(self, input_data: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_task_tool_input(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         normalized = dict(input_data)
         subagent_type = normalized.get("subagent_type")
         if isinstance(subagent_type, str) and subagent_type in ("explore", "plan"):
@@ -293,7 +293,7 @@ class StdioMessageMixin:
                 normalized["description"] = self._summarize_task_prompt(prompt)
         return normalized
 
-    def _normalize_tool_use_block(self, block: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_tool_use_block(self, block: Dict[str, Any]) -> Dict[str, Any]:
         tool_id = block.get("id") or block.get("tool_use_id") or ""
         name = block.get("name") or ""
         input_value = block.get("input") or {}
@@ -316,7 +316,7 @@ class StdioMessageMixin:
         )
         return normalized
 
-    def _convert_content_block(self, block: Any) -> dict[str, Any] | None:
+    def _convert_content_block(self, block: Any) -> Optional[Dict[str, Any]]:
         """Convert a MessageContent block to dictionary.
 
         Uses the same logic as _content_block_to_api in messages.py
@@ -365,7 +365,7 @@ class StdioMessageMixin:
             }
 
         if block_type == "tool_result":
-            result_block: dict[str, Any] = {
+            result_block: Dict[str, Any] = {
                 "type": "tool_result",
                 "tool_use_id": getattr(block, "tool_use_id", None)
                 or getattr(block, "id", None)
@@ -392,17 +392,17 @@ class StdioMessageMixin:
         # Unknown block type - try to convert with generic approach
         block_dict = {}
         if hasattr(block, "type"):
-            block_dict["type"] = block.type
+            block_Dict["type"] = block.type
         if hasattr(block, "text"):
-            block_dict["text"] = block.text
+            block_Dict["text"] = block.text
         if hasattr(block, "id"):
-            block_dict["id"] = block.id
+            block_Dict["id"] = block.id
         if hasattr(block, "name"):
-            block_dict["name"] = block.name
+            block_Dict["name"] = block.name
         if hasattr(block, "input"):
-            block_dict["input"] = block.input
+            block_Dict["input"] = block.input
         if hasattr(block, "content"):
-            block_dict["content"] = block.content
+            block_Dict["content"] = block.content
         if hasattr(block, "is_error"):
-            block_dict["is_error"] = block.is_error
+            block_Dict["is_error"] = block.is_error
         return block_dict if block_dict else None

@@ -37,7 +37,7 @@ from ripperdoc.utils.collaboration.worktree import (
 from ripperdoc.core.tool import Tool, ToolUseContext, ToolProgress, ToolResult
 from ripperdoc.core.query import ToolRegistry
 from ripperdoc.tools.tool_search import ToolSearchTool, ToolSearchInput
-from ripperdoc.tools.background_shell import get_background_status
+from ripperdoc.services.background_shell import get_background_status
 
 
 @pytest.mark.asyncio
@@ -653,8 +653,8 @@ async def test_bash_tool_supports_dangerously_disable_sandbox_alias() -> None:
     # Sandbox override should bypass the unconditional sandbox dict path.
     sandbox_decision = await tool.check_permissions(BashToolInput(command="touch /tmp/x", sandbox=True), {})
     override_decision = await tool.check_permissions(parsed, {})
-    assert isinstance(sandbox_decision, dict)
-    assert not isinstance(override_decision, dict)
+    assert sandbox_decision.behavior == "allow"
+    assert override_decision.behavior == "ask"
 
 
 def test_create_task_worktree_creates_isolated_branch(tmp_path: Path) -> None:

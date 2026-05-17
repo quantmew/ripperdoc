@@ -12,7 +12,7 @@ import html
 import os
 import sys
 from textwrap import dedent
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -200,7 +200,7 @@ def format_question_prompt(
 def build_question_tabs(questions: List[QuestionInput], current_index: int) -> str:
     """Build a plain tab-like step header for multi-question flows."""
     use_ansi = _supports_ansi_tabs()
-    tabs: list[str] = []
+    tabs: List[str] = []
     for idx, item in enumerate(questions):
         header = truncate_header(item.header)
         if idx == current_index:
@@ -267,7 +267,7 @@ async def prompt_single_choice_with_ui(
     """Prompt single-select questions using the shared choice component."""
     header = truncate_header(question.header)
     title = f"[{header}] {question_num}/{total}"
-    message_parts: list[str] = [f"<question>{html.escape(question.question)}</question>"]
+    message_parts: List[str] = [f"<question>{html.escape(question.question)}</question>"]
     nav_hints = ["Enter submit", "ESC cancel"]
     if allow_back:
         nav_hints.insert(0, "← previous step")
@@ -278,7 +278,7 @@ async def prompt_single_choice_with_ui(
     external_header = None
     if all_questions and len(all_questions) > 1:
         external_header = build_question_tabs(all_questions, question_num - 1)
-    options: list[ChoiceOption] = []
+    options: List[ChoiceOption] = []
     for option in question.options:
         label = html.escape(option.label)
         if option.description.strip():
@@ -328,7 +328,7 @@ async def prompt_multi_choice_with_ui(
     """Prompt multi-select questions using the shared checkbox component."""
     header = truncate_header(question.header)
     title = f"[{header}] {question_num}/{total}"
-    message_parts: list[str] = [f"<question>{html.escape(question.question)}</question>"]
+    message_parts: List[str] = [f"<question>{html.escape(question.question)}</question>"]
     message_parts.append("<dim>Use arrow keys to move, Space to toggle.</dim>")
     nav_hints = ["Enter submit", "ESC cancel", "Tab Other input"]
     if allow_back:
@@ -341,7 +341,7 @@ async def prompt_multi_choice_with_ui(
     external_header = None
     if all_questions and len(all_questions) > 1:
         external_header = build_question_tabs(all_questions, question_num - 1)
-    options: list[ChoiceOption] = []
+    options: List[ChoiceOption] = []
     for option in question.options:
         label = html.escape(option.label)
         if option.description.strip():
@@ -557,7 +557,7 @@ async def _confirm_answers(questions: List[QuestionInput], answers: Dict[str, st
 
 async def collect_answers(
     questions: List[QuestionInput], initial_answers: Dict[str, str]
-) -> tuple[Dict[str, str], bool]:
+) -> Tuple[Dict[str, str], bool]:
     """Collect answers for all questions.
 
     Returns (answers_dict, cancelled_flag).
@@ -634,14 +634,14 @@ class AskUserQuestionTool(Tool[AskUserQuestionToolInput, AskUserQuestionToolOutp
         context: Optional[ToolUseContext] = None,  # noqa: ARG002
     ) -> ValidationResult:
         """Validate that question texts and option labels are unique."""
-        seen_questions: set[str] = set()
+        seen_questions: Set[str] = set()
 
         for question in input_data.questions:
             if question.question in seen_questions:
                 return ValidationResult(result=False, message="Question texts must be unique")
             seen_questions.add(question.question)
 
-            option_labels: set[str] = set()
+            option_labels: Set[str] = set()
             for option in question.options:
                 if option.label in option_labels:
                     return ValidationResult(

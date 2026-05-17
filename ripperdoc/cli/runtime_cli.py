@@ -7,7 +7,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -24,7 +24,7 @@ from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.system_prompt_builder import compose_system_prompt
 from ripperdoc.core.tool_defaults import filter_tools_by_names
 from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
-from ripperdoc.tools.background_shell import shutdown_background_shell
+from ripperdoc.services.background_shell import shutdown_background_shell
 from ripperdoc.tools.agent import list_running_agent_worktree_paths
 from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
@@ -104,7 +104,7 @@ async def _prepare_prompt_runtime_assets(
     allowed_tools: Optional[List[str]],
     query_context: QueryContext,
     disable_skills: bool,
-) -> tuple[list, str, List[str]]:
+) -> Tuple[list, str, List[str]]:
     servers, dynamic_tools = await asyncio.gather(
         load_mcp_servers_async(project_path),
         load_dynamic_mcp_tools_async(project_path),
@@ -139,8 +139,8 @@ async def _run_prompt_submission_hooks(
     prompt: str,
     query_context: QueryContext,
     additional_instructions: List[str],
-) -> tuple[bool, List[UserMessage | AttachmentMessage]]:
-    hook_context_messages: List[UserMessage | AttachmentMessage] = []
+) -> Tuple[bool, List[Union[UserMessage, AttachmentMessage]]]:
+    hook_context_messages: List[Union[UserMessage, AttachmentMessage]] = []
     with bind_pending_message_queue(query_context.pending_message_queue):
         session_start_result = await hook_manager.run_session_start_async("startup")
         _print_hook_system_message(session_start_result, "SessionStart")

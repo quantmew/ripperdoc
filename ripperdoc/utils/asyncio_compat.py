@@ -40,9 +40,9 @@ class _TimeoutCompat:
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
+        exc_type: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[TracebackType],
     ) -> bool:
         if self._handle is not None:
             self._handle.cancel()

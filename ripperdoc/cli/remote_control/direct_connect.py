@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from ripperdoc.utils.log import get_logger
 
@@ -32,7 +32,7 @@ class DirectConnectConfig:
     server_url: str
     session_id: str
     ws_url: str
-    auth_token: str | None = None
+    auth_token: Optional[str] = None
 
 
 @dataclass
@@ -40,19 +40,19 @@ class RemotePermissionResponse:
     """Permission response for direct-connect sessions."""
 
     behavior: str  # "allow" or "deny"
-    updated_input: dict[str, Any] | None = None
-    message: str | None = None
+    updated_input: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
 
 
 @dataclass
 class DirectConnectCallbacks:
     """Callbacks for direct-connect session lifecycle."""
 
-    on_message: Callable[[dict[str, Any]], None]
-    on_permission_request: Callable[[dict[str, Any], str], None]
-    on_connected: Callable[[], None] | None = None
-    on_disconnected: Callable[[], None] | None = None
-    on_error: Callable[[Exception], None] | None = None
+    on_message: Callable[[Dict[str, Any]], None]
+    on_permission_request: Callable[[Dict[str, Any], str], None]
+    on_connected: Optional[Callable[[], None]] = None
+    on_disconnected: Optional[Callable[[], None]] = None
+    on_error: Optional[Callable[[Exception], None]] = None
 
 
 def _is_stdout_message(value: Any) -> bool:
@@ -235,10 +235,10 @@ class DirectConnectError(Exception):
 def create_direct_connect_session(
     server_url: str,
     *,
-    auth_token: str | None = None,
-    cwd: str | None = None,
+    auth_token: Optional[str] = None,
+    cwd: Optional[str] = None,
     dangerously_skip_permissions: bool = False,
-) -> tuple[DirectConnectConfig, str | None]:
+) -> Tuple[DirectConnectConfig, Optional[str]]:
     """Create a session on a direct-connect server.
 
     Posts to {server_url}/sessions, validates the response, and returns

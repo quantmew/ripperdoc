@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+from typing import Optional, Set
+
 from ripperdoc.utils.shell.output_utils import trim_blank_lines, truncate_output
 from ripperdoc.utils.filesystem.safe_get_cwd import get_original_cwd, safe_get_cwd
 
@@ -17,7 +19,7 @@ def append_cwd_reset_message(message: str) -> str:
     return suffix
 
 
-def reset_cwd_if_needed(allowed_directories: set[str] | None = None) -> bool:
+def reset_cwd_if_needed(allowed_directories: Optional[Set[str]] = None) -> bool:
     """In this environment we simply report whether the current cwd is outside the
     provided allowed set and reset to the original cwd if so.
     """

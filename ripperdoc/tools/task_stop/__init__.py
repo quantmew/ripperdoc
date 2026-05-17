@@ -7,7 +7,7 @@ from typing import AsyncGenerator, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext, ValidationResult
-from ripperdoc.tools.background_shell import get_background_status, kill_background_task
+from ripperdoc.services.background_shell import get_background_status, kill_background_task
 from ripperdoc.tools.agent import cancel_agent_run, get_agent_run_snapshot
 
 

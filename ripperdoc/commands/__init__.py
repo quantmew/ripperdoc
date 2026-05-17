@@ -133,14 +133,14 @@ def list_custom_commands(project_path: Optional[Path] = None) -> List[CustomComm
     return _get_custom_commands(project_path)
 
 
-def get_slash_command(name: str) -> SlashCommand | None:
+def get_slash_command(name: str) -> Optional[SlashCommand]:
     """Return a built-in command by name or alias."""
     return COMMAND_REGISTRY.get(name)
 
 
 def get_custom_command(
     name: str, project_path: Optional[Path] = None
-) -> CustomCommandDefinition | None:
+) -> Optional[CustomCommandDefinition]:
     """Return a custom command by name."""
     commands = _get_custom_commands(project_path)
     return next((cmd for cmd in commands if cmd.name == name), None)

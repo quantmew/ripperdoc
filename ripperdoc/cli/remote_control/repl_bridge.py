@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Dict, Optional
 
 from ripperdoc.utils.log import get_logger
 
@@ -30,17 +30,17 @@ class RemoteSessionConfig:
 class RemoteSessionCallbacks:
     """Lifecycle and message callbacks for remote REPL bridge usage."""
 
-    on_message: Callable[[dict[str, Any]], None] | None = None
-    on_connected: Callable[[], None] | None = None
-    on_disconnected: Callable[[], None] | None = None
-    on_error: Callable[[Exception], None] | None = None
-    on_permission_request: Callable[[dict[str, Any], str], None] | None = None
+    on_message: Optional[Callable[[Dict[str, Any]], None]] = None
+    on_connected: Optional[Callable[[], None]] = None
+    on_disconnected: Optional[Callable[[], None]] = None
+    on_error: Optional[Callable[[Exception], None]] = None
+    on_permission_request: Optional[Callable[[Dict[str, Any], str], None]] = None
 
 
 @dataclass
 class _PendingRequest:
     event: threading.Event
-    response: dict[str, Any] | None = None
+    response: Optional[Dict[str, Any]] = None
 
 
 class RemoteSessionBridgeManager:
@@ -51,13 +51,13 @@ class RemoteSessionBridgeManager:
         config: RemoteSessionConfig,
         callbacks: RemoteSessionCallbacks,
         *,
-        on_control_response_fallback: Callable[[dict[str, Any]], None] | None = None,
+        on_control_response_fallback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         self.config = config
         self.callbacks = callbacks
         self._on_control_response_fallback = on_control_response_fallback
-        self.websocket: SessionsWebSocketManager | None = None
-        self.pending_permission_requests: dict[str, dict[str, Any]] = {}
+        self.websocket: Optional[SessionsWebSocketManager] = None
+        self.pending_permission_requests: Dict[str, Dict[str, Any]] = {}
         self._pending_outbound: dict[str, _PendingRequest] = {}
         self._pending_lock = threading.Lock()
 
@@ -186,7 +186,7 @@ class RemoteSessionBridgeManager:
         request: dict[str, Any],
         *,
         timeout_sec: float = 60.0,
-    ) -> dict[str, Any] | None:
+    ) -> Optional[Dict[str, Any]]:
         if self.websocket is None:
             return None
 

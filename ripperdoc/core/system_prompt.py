@@ -13,7 +13,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Dict, Iterable, List, Literal, Optional
+from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Union
 
 from ripperdoc.core.agents import (
     ASK_USER_QUESTION_TOOL_NAME,
@@ -86,7 +86,7 @@ def _detect_git_repo(cwd: Path) -> bool:
 def get_intro_section(
     include_efficiency_instructions: bool,
     keep_coding_instructions: bool,
-    shell_tool_name: str | None,
+    shell_tool_name: Optional[str],
 ) -> str:
     """Identity, security constraints, and URL policy."""
     communication_line = (
@@ -200,7 +200,7 @@ def get_doing_tasks_section(
     task_tracking_hint: Optional[str],
     ask_available: bool,
     ask_tool_name: str,
-    shell_tool_name: str | None,
+    shell_tool_name: Optional[str],
     *,
     keep_coding_instructions: bool,
 ) -> str:
@@ -276,11 +276,11 @@ def get_actions_section() -> str:
 
 def get_using_tools_section(
     task_available: bool,
-    tool_names: set[str],
+    tool_names: Set[str],
     read_tool_name: str,
     file_edit_tool_name: str,
     file_write_tool_name: str,
-    shell_tool_name: str | None,
+    shell_tool_name: Optional[str],
     *,
     include_efficiency_instructions: bool,
 ) -> str:
@@ -302,7 +302,7 @@ def get_using_tools_section(
             "- Use the Memory tool for persistent cross-session memory files. Prefer it over generic file tools when saving, editing, or deleting memory notes."
         )
 
-    file_tool_hints: list[str] = []
+    file_tool_hints: List[str] = []
     if read_tool_name in tool_names:
         file_tool_hints.append(f"{read_tool_name} for reading files")
     if file_edit_tool_name in tool_names:
@@ -393,7 +393,7 @@ def _build_task_management_section(
     task_update_tool_name: str,
     task_get_tool_name: str,
     task_list_tool_name: str,
-    shell_tool_name: str | None,
+    shell_tool_name: Optional[str],
 ) -> str:
     """Build task tracking instructions."""
     run_build_line = (
@@ -604,7 +604,7 @@ def _get_git_signature() -> Dict[str, str]:
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def _resolve_shell_tool_name(tools: List[Tool[Any, Any]]) -> str | None:
+def _resolve_shell_tool_name(tools: List[Tool[Any, Any]]) -> Optional[str]:
     """Return the shell tool name if present."""
     for tool in tools:
         tool_name = getattr(tool, "name", None)
@@ -635,7 +635,7 @@ def _build_output_language_section(output_language: str) -> str:
 
 
 def _build_git_workflow_section(
-    shell_tool_name: str | None, task_tracking_tool_label: str, task_tool_name: str
+    shell_tool_name: Optional[str], task_tracking_tool_label: str, task_tool_name: str
 ) -> str:
     if shell_tool_name:
         return build_commit_workflow_prompt(

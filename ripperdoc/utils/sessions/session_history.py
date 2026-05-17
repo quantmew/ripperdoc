@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
@@ -52,8 +52,8 @@ def _sessions_root() -> Path:
 def _session_file(
     project_path: Path,
     session_id: str,
-    ensure: bool | None = None,
-    ensure_root: bool | None = None,
+    ensure: Optional[bool] = None,
+    ensure_root: Optional[bool] = None,
 ) -> Path:
     ensure_root = bool(ensure_root) if ensure_root is not None else bool(ensure)
     directory = project_storage_dir(_sessions_root(), project_path, ensure=ensure_root)
@@ -64,7 +64,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _deserialize_message(payload: dict) -> Optional[ConversationMessage]:
+def _deserialize_message(payload: Dict[str, Any]) -> Optional[ConversationMessage]:
     """Rebuild a message model from a stored payload."""
     msg_type = payload.get("type")
     if msg_type == "user":
@@ -90,7 +90,7 @@ class SessionHistory:
             session_id,
             ensure=self.session_persistence,
         )
-        self._seen_ids: set[str] = set()
+        self._seen_ids: Set[str] = set()
         if self.session_persistence:
             self._load_seen_ids()
 

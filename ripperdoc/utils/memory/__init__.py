@@ -7,7 +7,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Tuple, Union
 
 from ripperdoc.core.config import get_effective_config, get_global_config_path
 from ripperdoc.utils.filesystem.config_paths import user_config_dir
@@ -69,7 +69,7 @@ def _is_false_string(value: object) -> bool:
     return normalized in {"0", "false", "no", "off"}
 
 
-def _first_env_value(keys: tuple[str, ...]) -> Optional[str]:
+def _first_env_value(keys: Tuple[str, ...]) -> Optional[str]:
     """Return the first non-empty environment value from candidate keys."""
     for key in keys:
         value = os.getenv(key)
@@ -139,7 +139,7 @@ def auto_memory_file_path(project_path: Optional[Path] = None) -> Path:
     return auto_memory_directory_path(project_path) / AUTO_MEMORY_FILE_NAME
 
 
-def is_auto_memory_path(file_path: str | Path, project_path: Optional[Path] = None) -> bool:
+def is_auto_memory_path(file_path: Union[str, Path], project_path: Optional[Path] = None) -> bool:
     """Return True when file_path is under the auto-memory directory."""
     base = os.path.normpath(str(auto_memory_directory_path(project_path)))
     candidate_path = Path(file_path).expanduser()
@@ -152,7 +152,7 @@ def is_auto_memory_path(file_path: str | Path, project_path: Optional[Path] = No
     return candidate == base or candidate.startswith(base + os.sep)
 
 
-def _generate_search_guidelines(markdown_search_directory: Path) -> list[str]:
+def _generate_search_guidelines(markdown_search_directory: Path) -> List[str]:
     """Generate optional memory/session-search guidance."""
     if not _is_truthy(os.getenv(_ENABLE_SESSION_SEARCH_GUIDANCE_ENV)):
         return []
@@ -178,7 +178,7 @@ def _generate_search_guidelines(markdown_search_directory: Path) -> list[str]:
 def generate_auto_memory_guidelines(project_path: Optional[Path] = None) -> str:
     """Generate the auto-memory instruction block."""
     auto_memory_dir = auto_memory_directory_path(project_path)
-    lines: list[str] = [
+    lines: List[str] = [
         f"# {AUTO_MEMORY_NAME}",
         "",
         f"You have a persistent auto memory directory at `{auto_memory_dir}`. Its contents persist across conversations.",
@@ -483,7 +483,7 @@ def get_oversized_memory_files() -> List[MemoryFile]:
 
 def build_memory_instructions() -> str:
     """Build the instruction block to append to the system prompt."""
-    sections: list[str] = []
+    sections: List[str] = []
 
     auto_memory_config = get_auto_memory_config()
     if auto_memory_config:

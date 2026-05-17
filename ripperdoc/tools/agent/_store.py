@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 from ripperdoc.core.hooks.config import HooksConfig
@@ -367,11 +367,11 @@ def list_agent_runs() -> List[str]:
         return list(_AGENT_RUNS.keys())
 
 
-def list_running_team_members(team_name: Optional[str] = None) -> list[str]:
+def list_running_team_members(team_name: Optional[str] = None) -> List[str]:
     """Return teammate names that currently have a running execution state."""
     target = (team_name or "").strip()
     with _AGENT_RUNS_LOCK:
-        names: set[str] = set()
+        names: Set[str] = set()
         for record in _AGENT_RUNS.values():
             if record.status != "running":
                 continue
@@ -385,10 +385,10 @@ def list_running_team_members(team_name: Optional[str] = None) -> list[str]:
         return sorted(names)
 
 
-def list_running_agent_worktree_paths() -> set[str]:
+def list_running_agent_worktree_paths() -> Set[str]:
     """Return worktree paths currently used by running subagents."""
     with _AGENT_RUNS_LOCK:
-        paths: set[str] = set()
+        paths: Set[str] = set()
         for record in _AGENT_RUNS.values():
             if record.status != "running":
                 continue

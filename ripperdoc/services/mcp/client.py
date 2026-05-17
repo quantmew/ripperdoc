@@ -16,7 +16,7 @@ import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TextIO, cast
+from typing import Any, Callable, Dict, List, Optional, TextIO, Union, cast
 
 from ripperdoc import __version__
 from ripperdoc.services.mcp import config as _mcp_config_loader
@@ -43,10 +43,10 @@ _MCP_CIRCUIT_BREAKER_COOLDOWN_SEC_DEFAULT = 30.0
 
 # SDK MCP request sender (for in-process SDK-backed servers)
 _sdk_mcp_request_sender_var: contextvars.ContextVar[
-    Callable[[str, dict[str, Any]], Any] | None
+    Optional[Callable[[str, Dict[str, Any]], Any]]
 ] = contextvars.ContextVar("ripperdoc_sdk_mcp_request_sender", default=None)
 _global_sdk_mcp_request_sender: (
-    Callable[[str, dict[str, Any]], Any] | None
+    Optional[Callable[[str, Dict[str, Any]], Any]]
 ) = None
 
 # Conditional MCP SDK import
@@ -67,8 +67,8 @@ MCP_AVAILABLE = _mcp_types.MCP_AVAILABLE
 class _SdkMcpCallToolResult:
     """Result from an SDK-backed MCP tool call."""
 
-    content: list[dict[str, Any]]
-    structuredContent: dict[str, Any] | None = None
+    content: List[Dict[str, Any]]
+    structuredContent: Optional[Dict[str, Any]] = None
     isError: bool = False
 
 
@@ -78,8 +78,8 @@ class _SdkMcpToolDefinition:
 
     name: str
     description: str = ""
-    inputSchema: dict[str, Any] | None = None
-    annotations: dict[str, Any] | None = None
+    inputSchema: Optional[Dict[str, Any]] = None
+    annotations: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -157,7 +157,7 @@ class _SdkMcpSession:
         return _SdkMcpListToolsResult(tools=tools)
 
     async def call_tool(
-        self, name: str, arguments: dict[str, Any] | None = None
+        self, name: str, arguments: Optional[Dict[str, Any]] = None
     ) -> _SdkMcpCallToolResult:
         resp = await self._send_message(
             {
@@ -191,7 +191,7 @@ def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
 
 
 def get_sdk_mcp_request_sender() -> (
-    Callable[[str, dict[str, Any]], Any] | None
+    Optional[Callable[[str, Dict[str, Any]], Any]]
 ):
     sender = _sdk_mcp_request_sender_var.get()
     if sender is not None:
@@ -200,7 +200,7 @@ def get_sdk_mcp_request_sender() -> (
 
 
 def set_sdk_mcp_request_sender(
-    sender: Callable[[str, dict[str, Any]], Any] | None,
+    sender: Optional[Callable[[str, Dict[str, Any]], Any]],
 ) -> None:
     global _global_sdk_mcp_request_sender
     _global_sdk_mcp_request_sender = sender
@@ -519,7 +519,7 @@ class McpRuntime:
                 session = _SdkMcpSession(config.name, sender)
                 init_result = await session.initialize()
                 info.status = "connected"
-                info.instructions = cast(str | None, init_result.get("instructions")) or info.instructions
+                info.instructions = cast(Optional[str], init_result.get("instructions")) or info.instructions
                 server_info = init_result.get("serverInfo")
                 if isinstance(server_info, dict):
                     info.server_version = str(server_info.get("version", "")) or None

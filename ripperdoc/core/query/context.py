@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 from ripperdoc.core.tool import Tool
 from ripperdoc.core.plan_mode import resolve_plan_file_path
@@ -25,9 +25,9 @@ class ToolRegistry:
         self._tool_map_lower: Dict[str, str] = {}
         self._alias_map: Dict[str, str] = {}
         self._order: List[str] = []
-        self._deferred: set[str] = set()
+        self._deferred: Set[str] = set()
         self._active: List[str] = []
-        self._active_set: set[str] = set()
+        self._active_set: Set[str] = set()
         self.replace_tools(tools)
 
     def replace_tools(self, tools: List[Tool[Any, Any]]) -> None:
@@ -82,7 +82,7 @@ class ToolRegistry:
         return [self._tool_map[name] for name in self._order]
 
     @property
-    def deferred_names(self) -> set[str]:
+    def deferred_names(self) -> Set[str]:
         """Return the set of deferred tool names."""
         return set(self._deferred)
 
@@ -136,7 +136,7 @@ class ToolRegistry:
 
         return activated, missing
 
-    def iter_named_tools(self) -> Iterable[tuple[str, Tool[Any, Any]]]:
+    def iter_named_tools(self) -> Iterable[Tuple[str, Tool[Any, Any]]]:
         """Yield (name, tool) for all known tools in registration order."""
         for name in self._order:
             tool = self._tool_map.get(name)
@@ -344,7 +344,7 @@ class QueryContext:
             )
         )
         self.hook_scopes: List[HooksConfig] = list(hook_scopes) if hook_scopes else []
-        self._hook_scope_ids: set[str] = set()
+        self._hook_scope_ids: Set[str] = set()
 
     @property
     def tools(self) -> List[Tool[Any, Any]]:

@@ -9,7 +9,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Dict, List, Optional, Set, Union, cast
 
 from pydantic import ValidationError
 
@@ -75,26 +75,26 @@ _DEFAULT_SYNC_TOOL_LOADER = tool_defaults_module.get_default_tools
 
 
 class StdioSessionMixin:
-    _pre_plan_mode: str | None
-    _query_context: QueryContext | None
-    _session_id: str | None
-    _custom_system_prompt: str | None
-    _append_system_prompt: str | None
-    _skill_instructions: str | None
+    _pre_plan_mode: Optional[str]
+    _query_context: Optional[QueryContext]
+    _session_id: Optional[str]
+    _custom_system_prompt: Optional[str]
+    _append_system_prompt: Optional[str]
+    _skill_instructions: Optional[str]
     _output_style: str
     _output_language: str
-    _session_start_time: float | None
-    _session_history: SessionHistory | None
-    _session_additional_working_dirs: set[str]
-    _fallback_model: str | None
-    _max_budget_usd: float | None
-    _json_schema: dict[str, Any] | None
-    _session_agent_name: str | None
-    _session_agents: dict[str, dict[str, str]]
-    _session_agent_prompt: str | None
-    _active_agent_names: list[str]
-    _enabled_skill_names: list[str]
-    _plugin_payloads: list[dict[str, str]]
+    _session_start_time: Optional[float]
+    _session_history: Optional[SessionHistory]
+    _session_additional_working_dirs: Set[str]
+    _fallback_model: Optional[str]
+    _max_budget_usd: Optional[float]
+    _json_schema: Optional[Dict[str, Any]]
+    _session_agent_name: Optional[str]
+    _session_agents: Dict[str, Dict[str, str]]
+    _session_agent_prompt: Optional[str]
+    _active_agent_names: List[str]
+    _enabled_skill_names: List[str]
+    _plugin_payloads: List[Dict[str, str]]
     _disable_slash_commands: bool
     _replay_user_messages: bool
     _permission_mode: str
@@ -346,7 +346,7 @@ class StdioSessionMixin:
                 return
             raw_max_turns = options.get("max_turns")
             raw_max_thinking_tokens = options.get("max_thinking_tokens")
-            max_turns: int | None = None
+            max_turns: Optional[int] = None
             max_thinking_tokens = 0
             if raw_max_turns is not None:
                 try:

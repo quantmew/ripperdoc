@@ -8,7 +8,7 @@ is called.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 from ripperdoc.utils.log import get_logger
 
@@ -21,7 +21,7 @@ logger = get_logger()
 SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
 
 # Type for a section compute function (sync or async)
-ComputeFn = Callable[[], Optional[str] | Awaitable[Optional[str]]]
+ComputeFn = Callable[[], Union[Optional[str], Awaitable[Optional[str]]]]
 
 
 class SystemPromptSection:
@@ -69,7 +69,7 @@ def DANGEROUS_uncached_system_prompt_section(
 
 
 # In-memory cache for system prompt section results
-_cache: dict[str, str | None] = {}
+_cache: Dict[str, Optional[str]] = {}
 
 
 def resolve_system_prompt_sections(
@@ -162,6 +162,6 @@ def clear_system_prompt_sections() -> None:
     _cache.clear()
 
 
-def get_system_prompt_section_cache() -> dict[str, str | None]:
+def get_system_prompt_section_cache() -> Dict[str, Optional[str]]:
     """Return the current cache contents (for inspection/debug)."""
     return dict(_cache)

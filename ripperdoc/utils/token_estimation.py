@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import math
 
+from typing import Optional
+
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
 # Optional: use tiktoken for accurate counts when available.
-_TIKTOKEN_ENCODING: tiktoken.Encoding | None = None
+_TIKTOKEN_ENCODING: Optional["tiktoken.Encoding"] = None
 try:  # pragma: no cover - optional dependency
     import tiktoken  # type: ignore
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import random
 import string
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -17,7 +17,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ValidationResult,
 )
-from ripperdoc.tools.TeamCreateTool._prompt import TEAM_CREATE_PROMPT
+from ripperdoc.tools.team_create._prompt import TEAM_CREATE_PROMPT
 from ripperdoc.utils.collaboration.team_context import (
     remember_active_team,
     resolve_active_team_name,
@@ -102,7 +102,7 @@ class TeamCreateTool(Tool[TeamCreateInput, TeamCreateOutput]):
     def input_schema(self) -> type[TeamCreateInput]:
         return TeamCreateInput
 
-    def input_examples(self) -> list[ToolUseExample]:
+    def input_examples(self) -> List[ToolUseExample]:
         return [
             ToolUseExample(
                 description="Create a team for auth refactor",
@@ -165,7 +165,7 @@ class TeamCreateTool(Tool[TeamCreateInput, TeamCreateOutput]):
         lead_agent_type = (input_data.agent_type or "").strip() or "general-purpose"
         lead_agent_id = format_agent_id(lead_name, final_team_name)
 
-        metadata: dict[str, Any] = {
+        metadata: Dict[str, Any] = {
             "team_lead": lead_name,
             "cwd": input_data.cwd or os.getcwd(),
         }

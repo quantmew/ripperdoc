@@ -12,8 +12,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.shell.shell_utils import build_shell_command, find_suitable_shell
-from ripperdoc.tools.background_shell._models import BackgroundTask
-from ripperdoc.tools.background_shell._manager import BackgroundShellManager
+from ripperdoc.services.background_shell._models import BackgroundTask
+from ripperdoc.services.background_shell._manager import BackgroundShellManager
 
 logger = get_logger()
 

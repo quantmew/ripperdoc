@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 import atexit
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.tools.background_shell._models import BackgroundTask
+from ripperdoc.services.background_shell._models import BackgroundTask
 
 logger = get_logger()
 
@@ -188,7 +188,7 @@ class BackgroundShellManager:
         self, loop: asyncio.AbstractEventLoop, force: bool = False
     ) -> None:
         """Drain running background processes before stopping the loop."""
-        from ripperdoc.tools.background_shell._utils import (
+        from ripperdoc.services.background_shell._utils import (
             _finalize_reader_tasks,
             _loop_time,
             _run_completion_callbacks,

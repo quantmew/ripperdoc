@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, cast
 
 from ripperdoc.core.agents import AgentDefinition, resolve_agent_tools
 from ripperdoc.core.tool import Tool
@@ -79,7 +79,7 @@ def extract_tool_result_ids(
 def lookup_tool_use_input_by_id(
     history: Sequence[MessageType],
     tool_use_id: str,
-) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     if not tool_use_id:
         return None, None
 
@@ -226,7 +226,7 @@ def filter_tools_for_agent(
     resolved, missing = resolve_agent_tools(agent_def, available_tools, task_tool_name)
 
     # Build the full set of disallowed tool names
-    disallowed: set[str] = set(agent_def.disallowed_tools or [])
+    disallowed: Set[str] = set(agent_def.disallowed_tools or [])
     disallowed.update(ALL_AGENT_DISALLOWED_TOOLS)
     disallowed.update(CUSTOM_AGENT_DISALLOWED_TOOLS)
 

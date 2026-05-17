@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from ripperdoc.utils.log import get_logger
 
@@ -49,18 +49,18 @@ class EnvLessBridgeParams:
     base_url: str
     org_uuid: str
     title: str
-    get_access_token: Callable[[], str | None]
-    on_auth_401: Callable[[str], bool] | None = None
-    initial_messages: list[dict[str, Any]] | None = None
+    get_access_token: Callable[[], Optional[str]]
+    on_auth_401: Optional[Callable[[str], bool]] = None
+    initial_messages: Optional[List[Dict[str, Any]]] = None
     initial_history_cap: int = 0
-    on_inbound_message: Callable[[dict[str, Any]], None] | None = None
-    on_user_message: Callable[[str, str], bool] | None = None
-    on_permission_response: Callable[[dict[str, Any]], None] | None = None
-    on_interrupt: Callable[[], None] | None = None
-    on_set_model: Callable[[str | None], None] | None = None
-    on_state_change: Callable[[str, str | None], None] | None = None
+    on_inbound_message: Optional[Callable[[Dict[str, Any]], None]] = None
+    on_user_message: Optional[Callable[[str, str], bool]] = None
+    on_permission_response: Optional[Callable[[Dict[str, Any]], None]] = None
+    on_interrupt: Optional[Callable[[], None]] = None
+    on_set_model: Optional[Callable[[Optional[str]], None]] = None
+    on_state_change: Optional[Callable[[str, Optional[str]], None]] = None
     outbound_only: bool = False
-    tags: list[str] | None = None
+    tags: Optional[List[str]] = None
 
 
 @dataclass
@@ -70,7 +70,7 @@ class ReplBridgeHandle:
     bridge_session_id: str
     environment_id: str
     session_ingress_url: str
-    write_messages: Callable[[list[dict[str, Any]]], None]
+    write_messages: Callable[[List[Dict[str, Any]]], None]
     teardown: Callable[[], None]
 
 
@@ -78,7 +78,7 @@ def init_envless_bridge(
     params: EnvLessBridgeParams,
     *,
     api_client: Any,
-) -> ReplBridgeHandle | None:
+) -> Optional[ReplBridgeHandle]:
     """Create a session, fetch a worker JWT, connect the v2 transport.
 
     Returns None on any pre-flight failure.
@@ -138,7 +138,7 @@ def init_envless_bridge(
     session_url = _build_ccr_v2_sdk_url(credentials.api_base_url, session_id)
     logger.debug("[remote-bridge] v2 session URL: %s", session_url)
 
-    transport: ReplBridgeTransport | None = None
+    transport: Optional[ReplBridgeTransport] = None
     try:
         transport = create_v2_repl_transport(
             session_url,
@@ -194,7 +194,7 @@ def init_envless_bridge(
             on_control_request=None,
         )
 
-    def _on_close(code: int | None) -> None:
+    def _on_close(code: Optional[int]) -> None:
         nonlocal torn_down
         if torn_down:
             return
@@ -305,7 +305,7 @@ def _is_eligible_bridge_message(m: dict[str, Any]) -> bool:
     return False
 
 
-def _extract_title_text(m: dict[str, Any]) -> str | None:
+def _extract_title_text(m: Dict[str, Any]) -> Optional[str]:
     """Extract title-worthy text from a message."""
     if m.get("type") != "user":
         return None

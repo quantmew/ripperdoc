@@ -9,9 +9,9 @@ import pytest
 
 from ripperdoc.core.tool import ToolUseContext
 from ripperdoc.tools.agent.task_graph import TaskCreateInput, TaskCreateTool, TaskUpdateInput, TaskUpdateTool
-from ripperdoc.tools.SendMessageTool import SendMessageInput, SendMessageTool
-from ripperdoc.tools.TeamCreateTool import TeamCreateInput, TeamCreateTool
-from ripperdoc.tools.TeamDeleteTool import TeamDeleteInput, TeamDeleteTool
+from ripperdoc.tools.send_message import SendMessageInput, SendMessageTool
+from ripperdoc.tools.team_create import TeamCreateInput, TeamCreateTool
+from ripperdoc.tools.team_delete import TeamDeleteInput, TeamDeleteTool
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 from ripperdoc.utils.collaboration.teams import (
     TeamMember,

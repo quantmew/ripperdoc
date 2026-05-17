@@ -6,6 +6,8 @@ Configuration schemas and types for MCP server management.
 
 from __future__ import annotations
 
+from typing import Union
+
 # MCP SDK availability
 MCP_AVAILABLE = False
 
@@ -103,7 +105,7 @@ class HTTPMcpServerConfig(McpServerConfig):
 
 
 # Union type for any MCP server configuration
-AnyMcpServerConfig = StdioMcpServerConfig | SSEMcpServerConfig | HTTPMcpServerConfig
+AnyMcpServerConfig = Union[StdioMcpServerConfig, SSEMcpServerConfig, HTTPMcpServerConfig]
 
 
 @dataclass
@@ -130,6 +132,4 @@ class McpServerInfo:
     tools_discovered: bool = False
 
 
-ScopedMcpServerConfig = (
-    StdioMcpServerConfig | SSEMcpServerConfig | HTTPMcpServerConfig
-)
+ScopedMcpServerConfig = Union[StdioMcpServerConfig, SSEMcpServerConfig, HTTPMcpServerConfig]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import sys
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from rich import box
 from rich.markup import escape
@@ -187,7 +187,7 @@ def _render_marketplaces(ui: Any) -> bool:
     return True
 
 
-def _handle_marketplace(ui: Any, tokens: list[str]) -> bool:
+def _handle_marketplace(ui: Any, tokens: List[str]) -> bool:
     console = ui.console
     if not tokens:
         return _render_marketplaces(ui)
@@ -255,7 +255,7 @@ def _handle_marketplace(ui: Any, tokens: list[str]) -> bool:
     return True
 
 
-def _handle_add(ui: Any, tokens: list[str]) -> bool:
+def _handle_add(ui: Any, tokens: List[str]) -> bool:
     console = ui.console
     if not tokens:
         console.print("[red]Usage: /plugins add <path> [scope][/red]")
@@ -296,7 +296,7 @@ def _resolve_selector_to_path(ui: Any, selector: str) -> Optional[Path]:
     return None
 
 
-def _handle_remove(ui: Any, tokens: list[str]) -> bool:
+def _handle_remove(ui: Any, tokens: List[str]) -> bool:
     console = ui.console
     if not tokens:
         console.print("[red]Usage: /plugins remove <name-or-path> [scope][/red]")

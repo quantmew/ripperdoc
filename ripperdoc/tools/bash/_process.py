@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import os
 import signal
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, List, Optional
 
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.shell.output_utils import (
@@ -66,7 +66,7 @@ async def force_kill_process(
         await asyncio.wait_for(process.wait(), timeout=grace_seconds)
 
 
-async def drain_stream(stream: Optional[asyncio.StreamReader], sink: list[str]) -> None:
+async def drain_stream(stream: Optional[asyncio.StreamReader], sink: List[str]) -> None:
     """Drain any remaining data from a stream."""
     if not stream:
         return
@@ -84,8 +84,8 @@ async def execute_foreground_process(
     timeout_seconds: float,
 ) -> AsyncGenerator[tuple[bool, list[str], list[str], bool], Any]:
     """Execute process and yield progress updates."""
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
+    stdout_lines: List[str] = []
+    stderr_lines: List[str] = []
     queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
     deadline = (
@@ -95,7 +95,7 @@ async def execute_foreground_process(
     last_progress_time = loop.time()
 
     async def _pump_stream(
-        stream: Optional[asyncio.StreamReader], sink: list[str], label: str
+        stream: Optional[asyncio.StreamReader], sink: List[str], label: str
     ) -> None:
         if not stream:
             return

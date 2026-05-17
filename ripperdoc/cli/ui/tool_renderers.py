@@ -4,7 +4,9 @@ This module provides a strategy pattern implementation for rendering different
 tool results in the Rich CLI interface.
 """
 
-from typing import Any, Callable, List, Literal, Optional, TypedDict
+from __future__ import annotations
+
+from typing import Any, Callable, List, Literal, Optional, Tuple, TypedDict, Union
 
 from rich.console import Console
 from rich.markup import escape
@@ -100,7 +102,7 @@ class TaskGraphResultRenderer(ToolResultRenderer):
                 return team.task_list_id
         return resolve_task_list_id()
 
-    def _task_sort_key(self, task_id: str) -> tuple[int, int | str]:
+    def _task_sort_key(self, task_id: str) -> Tuple[int, Union[int, str]]:
         if str(task_id).isdigit():
             return (0, int(task_id))
         return (1, str(task_id))

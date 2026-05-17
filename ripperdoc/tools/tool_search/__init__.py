@@ -6,7 +6,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -180,7 +180,7 @@ class ToolSearchTool(Tool[ToolSearchInput, ToolSearchOutput]):
         def _tokenize(text: str) -> List[str]:
             return re.findall(r"[a-z0-9]+", text.lower())
 
-        corpus: List[tuple[str, Any, List[str], int, str]] = []
+        corpus: List[Tuple[str, Any, List[str], int, str]] = []
         for name, tool in registry.iter_named_tools():
             try:
                 description = await build_tool_description(

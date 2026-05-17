@@ -9,7 +9,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from ripperdoc.core.hooks.config import (
     HooksConfig,
@@ -193,7 +193,7 @@ class HookManager:
         self._config: Optional[HooksConfig] = None
         self._executor: Optional[HookExecutor] = None
         self._setup_ran_for_project: Optional[Path] = None
-        self._once_executed: set[str] = set()
+        self._once_executed: Set[str] = set()
 
     @property
     def config(self) -> HooksConfig:
@@ -331,7 +331,7 @@ class HookManager:
         self, event: HookEvent, hooks: List[HookDefinition]
     ) -> List[HookDefinition]:
         selected: List[HookDefinition] = []
-        seen: set[str] = set()
+        seen: Set[str] = set()
         for hook in hooks:
             key = self._hook_identity(event, hook)
             if key in seen:

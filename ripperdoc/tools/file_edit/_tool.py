@@ -32,6 +32,7 @@ from ripperdoc.utils.file_editing import (
 )
 from ripperdoc.tools.file_read import detect_file_encoding
 from ripperdoc.utils.secret_detection import detect_secrets
+from ripperdoc.tools.file_edit._prompt import get_edit_prompt
 from ripperdoc.tools.file_edit._utils import (
     _normalize_quotes,
     determine_edit_encoding,
@@ -121,7 +122,7 @@ Input examples:
         ]
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        return "Edit files using string replacement."
+        return get_edit_prompt()
 
     def is_read_only(self) -> bool:
         return False

@@ -1,6 +1,6 @@
 """Status calculations for background shell tasks."""
 
-from ripperdoc.tools import background_shell
+from ripperdoc.services import background_shell
 
 
 def test_get_background_status_returns_runtime_and_age(monkeypatch):

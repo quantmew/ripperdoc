@@ -10,7 +10,7 @@ import sys
 import uuid
 import subprocess
 from pathlib import Path
-from typing import Optional, cast
+from typing import Dict, List, Optional, Tuple, cast
 
 from rich.console import Console
 from rich.markup import escape
@@ -61,7 +61,7 @@ _DEFAULT_SYNC_TOOL_LOADER = tool_defaults_module.get_default_tools
 async def _load_prompt_tools(
     *,
     project_path: Path,
-    allowed_tools: Optional[list[str]],
+    allowed_tools: Optional[List[str]],
 ) -> list:
     """Use async discovery by default, but honor patched sync loaders in tests."""
     sync_loader = tool_defaults_module.get_default_tools
@@ -156,16 +156,16 @@ _build_tmux_session_name = worktree_tmux._build_tmux_session_name
 
 
 def _run_tmux_command(
-    args: list[str],
+    args: List[str],
     *,
     cwd: Optional[Path] = None,
-    env: Optional[dict[str, str]] = None,
+    env: Optional[Dict[str, str]] = None,
     capture: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return worktree_tmux._run_tmux_command(args, cwd=cwd, env=env, capture=capture)
 
 
-def _exec_into_tmux_worktree(argv: list[str]) -> tuple[bool, Optional[str]]:
+def _exec_into_tmux_worktree(argv: List[str]) -> Tuple[bool, Optional[str]]:
     return worktree_tmux._exec_into_tmux_worktree(
         argv,
         get_git_root_fn=get_git_root,
@@ -547,7 +547,7 @@ def cli(
     disallowed_tools_csv: Optional[str],
     permission_prompt_tool: Optional[str],
     settings: Optional[str],
-    add_dirs: tuple[str, ...],
+    add_dirs: Tuple[str, ...],
     mcp_config: Optional[str],
     include_partial_messages: bool,
     replay_user_messages: bool,
@@ -556,7 +556,7 @@ def cli(
     agents: Optional[str],
     setting_sources: Optional[str],
     disable_slash_commands: bool,
-    plugin_dirs: tuple[str, ...],
+    plugin_dirs: Tuple[str, ...],
     betas: Optional[str],
     fallback_model: Optional[str],
     max_budget_usd: Optional[float],
@@ -924,7 +924,7 @@ def main() -> None:
             sep_index = argv.index("--")
             prompt = " ".join(argv[sep_index + 1 :]).strip()
             argv = argv[:sep_index] + ["--prompt", prompt]
-        rewritten_argv: list[str] = []
+        rewritten_argv: List[str] = []
         index = 0
         while index < len(argv):
             token = argv[index]

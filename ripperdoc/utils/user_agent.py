@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Set, Union
 
 from ripperdoc import __version__
 
@@ -37,13 +37,13 @@ def get_client_source() -> UserAgentSource:
         The client source type (cli, sdk-py, sdk-ts, sdk-cli, vscode)
     """
     source = os.environ.get(RIPPERDOC_CLIENT_SOURCE_ENV, "").lower()
-    valid_sources: set[UserAgentSource] = {"cli", "sdk-py", "sdk-ts", "sdk-cli", "vscode"}
+    valid_sources: Set[UserAgentSource] = {"cli", "sdk-py", "sdk-ts", "sdk-cli", "vscode"}
     if source in valid_sources:
         return source  # type: ignore
     return DEFAULT_SOURCE
 
 
-def build_user_agent(source: UserAgentSource | None = None) -> str:
+def build_user_agent(source: Optional[UserAgentSource] = None) -> str:
     """Build the User-Agent header value.
 
     If RIPPERDOC_CUSTOM_USER_AGENT is set, returns that value directly.

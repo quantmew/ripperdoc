@@ -7,7 +7,7 @@ import json
 import signal
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import click
 from ripperdoc import __version__
@@ -23,9 +23,9 @@ from .handler import StdioProtocolHandler
 logger = get_logger()
 
 
-def _coerce_print_messages_for_query(messages: list[Any]) -> list[dict[str, Any]]:
+def _coerce_print_messages_for_query(messages: List[Any]) -> List[Dict[str, Any]]:
     """Convert stored session messages to sampling request payloads."""
-    converted: list[dict[str, Any]] = []
+    converted: List[Dict[str, Any]] = []
     for message in messages:
         raw_message = (
             message.model_dump(by_alias=True, mode="json")
@@ -42,7 +42,7 @@ def _coerce_print_messages_for_query(messages: list[Any]) -> list[dict[str, Any]
         if not isinstance(message_payload, dict):
             continue
 
-        entry: dict[str, Any] = {
+        entry: Dict[str, Any] = {
             "role": role,
             "content": message_payload.get("content", ""),
         }
@@ -57,9 +57,9 @@ def _coerce_print_messages_for_query(messages: list[Any]) -> list[dict[str, Any]
     return converted
 
 
-def _coerce_stream_payload_message_to_query(message: dict[str, Any]) -> list[dict[str, Any]]:
+def _coerce_stream_payload_message_to_query(message: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Coerce stream-json stdin payload entries into sampling messages."""
-    normalized: list[dict[str, Any]] = []
+    normalized: List[Dict[str, Any]] = []
 
     item_type = str(message.get("type") or message.get("role") or "").strip()
     role = item_type if item_type in {"user", "assistant"} else ""
@@ -93,7 +93,7 @@ def _coerce_stream_payload_message_to_query(message: dict[str, Any]) -> list[dic
                 return normalized
             content = [{"type": "text", "text": content}]
         elif isinstance(content, list):
-            normalized_content: list[dict[str, Any]] = []
+            normalized_content: List[Dict[str, Any]] = []
             for block in content:
                 if not isinstance(block, dict):
                     continue
@@ -114,7 +114,7 @@ def _coerce_stream_payload_message_to_query(message: dict[str, Any]) -> list[dic
         else:
             return normalized
 
-        entry: dict[str, Any] = {
+        entry: Dict[str, Any] = {
             "role": role,
             "content": content,
         }
@@ -134,9 +134,9 @@ def _coerce_stream_payload_message_to_query(message: dict[str, Any]) -> list[dic
 
 def _coerce_stream_messages_for_query(
     payload: Any,
-) -> list[dict[str, Any]]:
+) -> List[Dict[str, Any]]:
     """Convert a JSON stream-json payload into sampling messages."""
-    normalized: list[dict[str, Any]] = []
+    normalized: List[Dict[str, Any]] = []
     if payload is None:
         return normalized
     if isinstance(payload, list):
@@ -154,7 +154,7 @@ def _coerce_stream_messages_for_query(
     return normalized
 
 
-async def _read_stream_json_messages_from_stdin() -> list[dict[str, Any]]:
+async def _read_stream_json_messages_from_stdin() -> List[Dict[str, Any]]:
     """Read non-tty stdin and parse newline-separated or JSON payload stream."""
     stdin_stream = sys.stdin
     try:
@@ -175,7 +175,7 @@ async def _read_stream_json_messages_from_stdin() -> list[dict[str, Any]]:
     if not text:
         return []
 
-    parsed_payload: list[Any] = []
+    parsed_payload: List[Any] = []
     try:
         loaded = json.loads(text)
         if isinstance(loaded, list):
@@ -205,7 +205,7 @@ def _install_stdio_shutdown_signal_handlers(
     cancel_main_task: Callable[[], None],
 ) -> Callable[[], None]:
     """Translate process termination signals into cooperative task cancellation."""
-    installed: list[tuple[signal.Signals, Any]] = []
+    installed: List[Tuple[signal.Signals, Any]] = []
 
     def _handle_signal(signum: int, _frame: Any) -> None:
         try:
@@ -342,17 +342,17 @@ async def _run_stdio_with_signal_handling(**kwargs: Any) -> None:
 def stdio_cmd(
     input_format: str,
     output_format: str,
-    model: str | None,
+    model: Optional[str],
     permission_mode: str,
-    max_turns: int | None,
-    system_prompt: str | None,
-    append_system_prompt: str | None,
+    max_turns: Optional[int],
+    system_prompt: Optional[str],
+    append_system_prompt: Optional[str],
     print: bool,
-    resume_session_at: str | None,
-    rewind_files: str | None,
-    sdk_url: str | None,
+    resume_session_at: Optional[str],
+    rewind_files: Optional[str],
+    sdk_url: Optional[str],
     replay_user_messages: bool,
-    prompt: str | None,
+    prompt: Optional[str],
 ) -> None:
     """Stdio mode for SDK subprocess communication.
 
@@ -391,23 +391,23 @@ def stdio_cmd(
 async def run_stdio(
     input_format: str,
     output_format: str,
-    model: str | None,
+    model: Optional[str],
     permission_mode: str,
-    max_turns: int | None,
-    system_prompt: str | None,
+    max_turns: Optional[int],
+    system_prompt: Optional[str],
     print_mode: bool,
-    session_id: str | None = None,
-    resume_session: str | None = None,
+    session_id: Optional[str] = None,
+    resume_session: Optional[str] = None,
     continue_session: bool = False,
-    resume_session_at: str | None = None,
-    rewind_files: str | None = None,
+    resume_session_at: Optional[str] = None,
+    rewind_files: Optional[str] = None,
     fork_session: bool = False,
-    project_path: str | Path | None = None,
-    sdk_url: str | None = None,
+    project_path: Optional[Union[str, Path]] = None,
+    sdk_url: Optional[str] = None,
     replay_user_messages: bool = False,
-    prompt: str | None = None,
-    append_system_prompt: str | None = None,
-    default_options: dict[str, Any] | None = None,
+    prompt: Optional[str] = None,
+    append_system_prompt: Optional[str] = None,
+    default_options: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Async entry point for stdio command."""
     if sdk_url and input_format != "stream-json":
@@ -461,10 +461,10 @@ async def run_stdio(
 
         project_root = Path(project_path) if project_path is not None else Path.cwd()
         effective_session_id = str(request_default_options.get("session_id") or "")
-        resumed_messages: list[Any] = []
+        resumed_messages: List[Any] = []
         if resume_session or continue_session:
             summaries = list_session_summaries(project_root)
-            target_session_id: str | None = None
+            target_session_id: Optional[str] = None
             if resume_session:
                 match = next(
                     (
@@ -548,7 +548,7 @@ async def run_stdio(
                 }
             )
 
-        request_options: dict[str, Any] = dict(request_default_options)
+        request_options: Dict[str, Any] = dict(request_default_options)
         if model is not None:
             request_options["model"] = model
         if permission_mode is not None:

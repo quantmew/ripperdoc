@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -35,10 +35,10 @@ class RemoteControlApiClient:
         self,
         *,
         base_url: str,
-        access_token: str | None,
+        access_token: Optional[str],
         runner_version: str,
-        refresh_access_token: Callable[[str], str | None] | None = None,
-        poll_ack_in_query: bool | None = None,
+        refresh_access_token: Optional[Callable[[str], Optional[str]]] = None,
+        poll_ack_in_query: Optional[bool] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.access_token = access_token.strip() if isinstance(access_token, str) else None
@@ -52,8 +52,8 @@ class RemoteControlApiClient:
         else:
             self.poll_ack_in_query = bool(poll_ack_in_query)
 
-    def _headers(self, bearer_token: str | None = None) -> dict[str, str]:
-        headers: dict[str, str] = {
+    def _headers(self, bearer_token: Optional[str] = None) -> Dict[str, str]:
+        headers: Dict[str, str] = {
             "Content-Type": "application/json",
             "Accept": "application/json",
             REMOTE_CONTROL_VERSION_HEADER: REMOTE_CONTROL_API_VERSION,
@@ -76,11 +76,11 @@ class RemoteControlApiClient:
         method: str,
         path: str,
         *,
-        payload: dict[str, Any] | None = None,
-        query: dict[str, Any] | None = None,
+        payload: Optional[Dict[str, Any]] = None,
+        query: Optional[Dict[str, Any]] = None,
         timeout_sec: float = 15.0,
-        bearer_token: str | None = None,
-    ) -> tuple[int, Any]:
+        bearer_token: Optional[str] = None,
+    ) -> Tuple[int, Any]:
         url = f"{self.base_url}{path}"
         if query:
             encoded = urlencode(query, doseq=True)
@@ -117,12 +117,12 @@ class RemoteControlApiClient:
         method: str,
         path: str,
         *,
-        payload: dict[str, Any] | None = None,
-        query: dict[str, Any] | None = None,
+        payload: Optional[Dict[str, Any]] = None,
+        query: Optional[Dict[str, Any]] = None,
         timeout_sec: float = 15.0,
-        bearer_token: str | None = None,
+        bearer_token: Optional[str] = None,
         operation_name: str,
-    ) -> tuple[int, Any]:
+    ) -> Tuple[int, Any]:
         status, data = self._request_json(
             method,
             path,
@@ -153,7 +153,7 @@ class RemoteControlApiClient:
         return retry_status, retry_data
 
     @staticmethod
-    def _extract_error_message(data: Any) -> str | None:
+    def _extract_error_message(data: Any) -> Optional[str]:
         if isinstance(data, dict):
             message = data.get("message")
             if isinstance(message, str) and message.strip():
@@ -166,7 +166,7 @@ class RemoteControlApiClient:
         return None
 
     @staticmethod
-    def _extract_error_type(data: Any) -> str | None:
+    def _extract_error_type(data: Any) -> Optional[str]:
         if isinstance(data, dict):
             error = data.get("error")
             if isinstance(error, dict):
@@ -176,7 +176,7 @@ class RemoteControlApiClient:
         return None
 
     @staticmethod
-    def _is_expired(error_type: str | None) -> bool:
+    def _is_expired(error_type: Optional[str]) -> bool:
         if not error_type:
             return False
         lowered = error_type.lower()
@@ -255,7 +255,7 @@ class RemoteControlApiClient:
             connect_url=connect_url,
         )
 
-    def poll_for_work(self, environment_id: str, environment_secret: str) -> dict[str, Any] | None:
+    def poll_for_work(self, environment_id: str, environment_secret: str) -> Optional[Dict[str, Any]]:
         safe_env = quote(validate_identifier(environment_id, "environmentId"), safe="")
         status, data = self._request_json(
             "GET",
@@ -284,7 +284,7 @@ class RemoteControlApiClient:
         self,
         environment_id: str,
         work_id: str,
-        environment_secret: str | None = None,
+        environment_secret: Optional[str] = None,
     ) -> None:
         safe_env = quote(validate_identifier(environment_id, "environmentId"), safe="")
         safe_work = quote(validate_identifier(work_id, "workId"), safe="")
@@ -354,9 +354,9 @@ class RemoteControlApiClient:
         *,
         environment_id: str,
         title: str,
-        git_repo_url: str | None,
-        branch: str | None,
-    ) -> str | None:
+        git_repo_url: Optional[str],
+        branch: Optional[str],
+    ) -> Optional[str]:
         status, data = self._request_json_with_refresh(
             "POST",
             "/v1/sessions",
@@ -380,7 +380,7 @@ class RemoteControlApiClient:
             return None
         return session_id.strip()
 
-    def get_session(self, session_id: str) -> dict[str, Any]:
+    def get_session(self, session_id: str) -> Dict[str, Any]:
         safe_session = quote(validate_identifier(session_id, "sessionId"), safe="")
         status, data = self._request_json_with_refresh(
             "GET",
@@ -394,7 +394,7 @@ class RemoteControlApiClient:
     def send_permission_response_event(
         self,
         session_id: str,
-        event: dict[str, Any],
+        event: Dict[str, Any],
         access_token: str,
     ) -> None:
         safe_session = quote(validate_identifier(session_id, "sessionId"), safe="")
@@ -412,7 +412,7 @@ class RemoteControlApiClient:
         environment_id: str,
         work_id: str,
         session_token: str,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Send a lightweight heartbeat for an active work item, extending its lease."""
         safe_env = quote(validate_identifier(environment_id, "environmentId"), safe="")
         safe_work = quote(validate_identifier(work_id, "workId"), safe="")
@@ -449,10 +449,10 @@ class RemoteControlApiClient:
         access_token: str,
         title: str,
         timeout_sec: float = 10.0,
-        tags: list[str] | None = None,
-    ) -> str | None:
+        tags: Optional[List[str]] = None,
+    ) -> Optional[str]:
         """Create a session via the v2 /v1/code/sessions endpoint (no env_id)."""
-        payload: dict[str, Any] = {"title": title, "events": [], "source": "remote-control"}
+        payload: Dict[str, Any] = {"title": title, "events": [], "source": "remote-control"}
         if tags:
             payload["tags"] = tags
         status, data = self._request_json(
@@ -477,7 +477,7 @@ class RemoteControlApiClient:
         base_url: str,
         access_token: str,
         timeout_sec: float = 10.0,
-    ) -> dict[str, Any] | None:
+    ) -> Optional[Dict[str, Any]]:
         """Fetch bridge credentials via POST /v1/code/sessions/{id}/bridge."""
         safe_session = quote(validate_identifier(session_id, "sessionId"), safe="")
         status, data = self._request_json(

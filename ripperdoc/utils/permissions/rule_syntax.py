@@ -6,7 +6,7 @@ import fnmatch
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 from ripperdoc.utils.permissions.tool_permission_utils import match_rule
@@ -31,7 +31,7 @@ def _is_wildcard_pattern(value: str) -> bool:
     return any(ch in value for ch in _WILDCARD_CHARS)
 
 
-def normalize_legacy_bash_wildcard(specifier: str) -> tuple[str, bool]:
+def normalize_legacy_bash_wildcard(specifier: str) -> Tuple[str, bool]:
     """Convert deprecated `:*` wildcard suffix syntax to glob ` *`.
 
     Examples:
@@ -158,7 +158,7 @@ def _normalize_path_text(value: str) -> str:
     return value.replace("\\", "/")
 
 
-def _path_candidates(path_value: str, cwd: Optional[Path]) -> set[str]:
+def _path_candidates(path_value: str, cwd: Optional[Path]) -> Set[str]:
     candidates = {_normalize_path_text(path_value.strip())}
     try:
         resolved = Path(path_value).expanduser().resolve()

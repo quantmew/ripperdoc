@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
 
 from ripperdoc.utils.filesystem.config_paths import project_config_dir
 
@@ -21,11 +21,11 @@ class PlanModeAttachmentDecision:
     reminder_type: str = "full"
 
 
-def _message_type(message: Any) -> str | None:
+def _message_type(message: Any) -> Optional[str]:
     return getattr(message, "type", None)
 
 
-def _message_metadata(message: Any) -> dict[str, Any]:
+def _message_metadata(message: Any) -> Dict[str, Any]:
     if getattr(message, "type", None) == "attachment":
         metadata = getattr(message, "metadata", None)
         return dict(metadata) if isinstance(metadata, dict) else {}
@@ -49,7 +49,7 @@ def _is_plan_mode_exit_attachment(message: Any) -> bool:
     return metadata.get("plan_mode_attachment_type") == "plan_mode_exit"
 
 
-def _assistant_turns_since_last_plan_attachment(messages: Sequence[Any]) -> tuple[int, bool]:
+def _assistant_turns_since_last_plan_attachment(messages: Sequence[Any]) -> Tuple[int, bool]:
     assistant_count = 0
     found_plan_attachment = False
     for message in reversed(messages):
@@ -104,7 +104,7 @@ def resolve_plan_mode_attachment_decision(messages: Sequence[Any]) -> PlanModeAt
 
 def resolve_plan_file_path(
     *,
-    working_directory: str | Path | None = None,
+    working_directory: Union[str, Path, None] = None,
     agent_id: Optional[str] = None,
 ) -> Path:
     """Return the canonical plan file path for the current session scope.
@@ -128,7 +128,7 @@ def resolve_plan_file_path(
     return plan_dir / f"{safe_name}.md"
 
 
-def ensure_plan_file_directory(plan_file_path: str | Path) -> Path:
+def ensure_plan_file_directory(plan_file_path: Union[str, Path]) -> Path:
     """Ensure the parent directory for the plan file exists and return the path."""
 
     path = Path(plan_file_path).expanduser()
@@ -136,7 +136,7 @@ def ensure_plan_file_directory(plan_file_path: str | Path) -> Path:
     return path
 
 
-def is_plan_file_path(path: str | Path | None, plan_file_path: str | Path | None) -> bool:
+def is_plan_file_path(path: Union[str, Path, None], plan_file_path: Union[str, Path, None]) -> bool:
     """Return whether ``path`` resolves to the active plan file path."""
 
     if not path or not plan_file_path:
@@ -149,7 +149,7 @@ def is_plan_file_path(path: str | Path | None, plan_file_path: str | Path | None
 
 def build_plan_mode_full_system_prompt(
     *,
-    plan_file_path: str | Path,
+    plan_file_path: Union[str, Path],
     available_tool_names: Iterable[str],
 ) -> str:
     """Build system instruction block for plan mode."""
@@ -188,7 +188,7 @@ def build_plan_mode_full_system_prompt(
 
 def build_plan_mode_sparse_system_prompt(
     *,
-    plan_file_path: str | Path,
+    plan_file_path: Union[str, Path],
     available_tool_names: Iterable[str],
 ) -> str:
     """Build the sparse follow-up reminder used between full plan-mode attachments."""
@@ -208,7 +208,7 @@ def build_plan_mode_sparse_system_prompt(
 
 def build_plan_mode_reentry_system_prompt(
     *,
-    plan_file_path: str | Path,
+    plan_file_path: Union[str, Path],
     available_tool_names: Iterable[str],
 ) -> str:
     """Build the plan-mode re-entry reminder."""
@@ -230,7 +230,7 @@ def build_plan_mode_reentry_system_prompt(
     )
 
 
-def build_plan_mode_exit_system_prompt(*, plan_file_path: str | Path, plan_exists: bool) -> str:
+def build_plan_mode_exit_system_prompt(*, plan_file_path: Union[str, Path], plan_exists: bool) -> str:
     """Build the plan-mode exit reminder."""
 
     suffix = f" The plan file is located at {Path(plan_file_path)} if you need to reference it." if plan_exists else ""
@@ -253,7 +253,7 @@ def build_rejected_plan_user_message(plan: str) -> str:
 
 def build_plan_mode_system_prompt(
     *,
-    plan_file_path: str | Path,
+    plan_file_path: Union[str, Path],
     available_tool_names: Iterable[str],
 ) -> str:
     """Backwards-compatible alias for the full plan-mode reminder."""

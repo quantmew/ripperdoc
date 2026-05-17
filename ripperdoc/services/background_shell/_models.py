@@ -24,5 +24,5 @@ class BackgroundTask:
     timed_out: bool = False
     reader_tasks: List[asyncio.Task] = field(default_factory=list)
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
-    completion_callbacks: list[Callable[["BackgroundTask"], None]] = field(default_factory=list)
+    completion_callbacks: List[Callable[["BackgroundTask"], None]] = field(default_factory=list)
     notification_sent: bool = False

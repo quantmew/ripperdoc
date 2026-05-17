@@ -13,7 +13,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from ripperdoc.services.plugins import (
     INSTALLED_PLUGINS_FILE,
@@ -171,7 +171,7 @@ def _canonical_marketplace_id(source: str) -> str:
     return base or "marketplace"
 
 
-def _strict_known_marketplace_sources() -> Optional[set[str]]:
+def _strict_known_marketplace_sources() -> Optional[Set[str]]:
     raw = get_managed_setting("strictKnownMarketplaces")
     if raw is None:
         raw = get_managed_setting("strict_known_marketplaces")
@@ -182,7 +182,7 @@ def _strict_known_marketplace_sources() -> Optional[set[str]]:
             "[marketplace] managed strictKnownMarketplaces is not a list; ignoring policy"
         )
         return None
-    normalized: set[str] = set()
+    normalized: Set[str] = set()
     for item in raw:
         value = str(item or "").strip()
         if not value:
@@ -244,7 +244,7 @@ def _save_known_marketplaces(payload: Dict[str, Dict[str, Any]], home: Optional[
 
 
 def _marketplace_from_known_record(
-    marketplace_id: str, record: dict[str, Any]
+    marketplace_id: str, record: Dict[str, Any]
 ) -> Optional[MarketplaceSource]:
     source = _normalize_source_record(record.get("source")) or ""
     if not source:
@@ -272,7 +272,7 @@ def _load_marketplaces_from_known(home: Optional[Path] = None) -> List[Marketpla
     return marketplaces
 
 
-def _marketplace_from_legacy_record(record: dict[str, Any]) -> Optional[MarketplaceSource]:
+def _marketplace_from_legacy_record(record: Dict[str, Any]) -> Optional[MarketplaceSource]:
     source = str(record.get("source") or "").strip()
     if not source:
         return None
@@ -314,7 +314,7 @@ def _load_marketplaces_from_legacy(home: Optional[Path] = None) -> List[Marketpl
 
 def _dedupe_marketplaces(marketplaces: Iterable[MarketplaceSource]) -> List[MarketplaceSource]:
     deduped: List[MarketplaceSource] = []
-    seen: set[str] = set()
+    seen: Set[str] = set()
     for marketplace in marketplaces:
         key = marketplace.marketplace_id.strip().lower()
         if not key or key in seen:
@@ -659,7 +659,7 @@ def _github_entries(marketplace: MarketplaceSource) -> List[PluginCatalogEntry]:
             if file_name.endswith("/.claude-plugin/plugin.json")
             or file_name.endswith("/.ripperdoc-plugin/plugin.json")
         ]
-        manifests: List[Tuple[str, dict[str, Any]]] = []
+        manifests: List[Tuple[str, Dict[str, Any]]] = []
         for file_name in manifest_paths:
             relative_path = file_name.split("/", 1)[1] if "/" in file_name else file_name
             try:
@@ -784,7 +784,7 @@ def _url_entries(marketplace: MarketplaceSource) -> List[PluginCatalogEntry]:
     return _parse_plugin_entries_from_json(payload, marketplace)
 
 
-def _read_manifest(path: Path) -> Optional[dict[str, Any]]:
+def _read_manifest(path: Path) -> Optional[Dict[str, Any]]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError):

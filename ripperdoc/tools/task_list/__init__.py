@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import AsyncGenerator, List, Literal, Optional
+from typing import AsyncGenerator, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -92,7 +92,7 @@ def _resolve_active_task_list_id() -> str:
     return resolve_task_list_id()
 
 
-def _task_id_sort_key(task_id: str) -> tuple[int, int | str]:
+def _task_id_sort_key(task_id: str) -> Tuple[int, Union[int, str]]:
     if str(task_id).isdigit():
         return (0, int(task_id))
     return (1, str(task_id))
@@ -137,7 +137,7 @@ class TaskListTool(Tool[TaskListInput, TaskListOutput]):
     def input_schema(self) -> type[TaskListInput]:
         return TaskListInput
 
-    def input_examples(self) -> list[ToolUseExample]:
+    def input_examples(self) -> List[ToolUseExample]:
         return [
             ToolUseExample(
                 description="List current task board summary",
@@ -180,7 +180,7 @@ class TaskListTool(Tool[TaskListInput, TaskListOutput]):
         tasks = list_tasks(task_list_id=task_list_id)
 
         by_id = {task.id: task for task in tasks}
-        visible: list[TaskItem] = []
+        visible: List[TaskItem] = []
         for task in tasks:
             metadata = task.metadata if isinstance(task.metadata, dict) else {}
             if metadata.get("_internal"):
@@ -189,7 +189,7 @@ class TaskListTool(Tool[TaskListInput, TaskListOutput]):
 
         visible.sort(key=lambda item: _task_id_sort_key(item.id))
 
-        entries: list[TaskListEntry] = []
+        entries: List[TaskListEntry] = []
         for task in visible:
             blockers = [
                 dep

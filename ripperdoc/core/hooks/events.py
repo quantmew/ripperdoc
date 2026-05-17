@@ -6,7 +6,7 @@ as well as the input/output data structures for each event type.
 
 import json
 from enum import Enum
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
@@ -102,7 +102,7 @@ class PermissionRequestInput(HookInput):
     tool_input: Dict[str, Any] = Field(default_factory=dict)
     tool_use_id: Optional[str] = None
     # Suggested permission rules (e.g., from tool checks).
-    permission_suggestions: Optional[list[Any]] = Field(
+    permission_suggestions: Optional[List[Any]] = Field(
         default=None, alias="permissionSuggestions"
     )
 

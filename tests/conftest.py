@@ -2,7 +2,7 @@
 
 import pytest
 
-from ripperdoc.tools import background_shell
+from ripperdoc.services import background_shell
 
 
 @pytest.fixture(scope="session", autouse=True)

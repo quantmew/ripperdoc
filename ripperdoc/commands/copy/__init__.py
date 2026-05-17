@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, List, Optional
 
 from rich.markup import escape
 
@@ -16,7 +16,7 @@ def _join_text_blocks(content: Any) -> str:
     if not isinstance(content, list):
         return ""
 
-    texts: list[str] = []
+    texts: List[str] = []
     for block in content:
         if isinstance(block, dict):
             if block.get("type") == "text" and block.get("text"):
@@ -29,7 +29,7 @@ def _join_text_blocks(content: Any) -> str:
     return "\n\n".join(texts)
 
 
-def _find_last_assistant_message(messages: list[Any]) -> Any | None:
+def _find_last_assistant_message(messages: List[Any]) -> Optional[Any]:
     for message in reversed(messages):
         if getattr(message, "type", None) == "assistant":
             return message

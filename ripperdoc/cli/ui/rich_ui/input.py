@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import sys
 from pathlib import Path
-from typing import Any, Iterable, cast
+from typing import Any, Iterable, List, Optional, Tuple, Union, cast
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, merge_completers
@@ -182,7 +182,7 @@ def build_prompt_session(
             pos += 1
         return min(best, row_end)
 
-    def _visual_row_boundaries(info: Any, buf: Any) -> list[tuple[int, int]] | None:
+    def _visual_row_boundaries(info: Any, buf: Any) -> Optional[List[Tuple[int, int]]]:
         """Return [(start, end), ...] for each visual row of the current
         logical line, using prompt_toolkit's render_info.  Returns None if
         the information is not available."""
@@ -212,8 +212,8 @@ def build_prompt_session(
         # visible lines — but there might be invisible rows above/below.
         return boundaries
 
-    def _find_current_row(boundaries: list[tuple[int, int]],
-                          cursor_pos: int) -> int | None:
+    def _find_current_row(boundaries: List[Tuple[int, int]],
+                          cursor_pos: int) -> Optional[int]:
         """Return the index into *boundaries* that contains *cursor_pos*."""
         for i, (s, e) in enumerate(boundaries):
             if s <= cursor_pos <= e:

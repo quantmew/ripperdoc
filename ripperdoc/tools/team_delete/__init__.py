@@ -1,6 +1,6 @@
 """TeamDeleteTool — clean up team and task directories when the swarm is complete."""
 
-from ripperdoc.tools.TeamDeleteTool._tool import (
+from ripperdoc.tools.team_delete._tool import (
     TeamDeleteInput,
     TeamDeleteOutput,
     TeamDeleteTool,

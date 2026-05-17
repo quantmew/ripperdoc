@@ -109,7 +109,7 @@ class InProcessTeammateState:
     messages: List[Any] = field(default_factory=list)
     last_reported_tool_count: int = 0
     last_reported_token_count: int = 0
-    in_progress_tool_use_ids: set = field(default_factory=set)
+    in_progress_tool_use_ids: set = field(default_factory=set)  # type: ignore[type-arg]
 
     # Timing
     start_time: float = field(default_factory=time.time)

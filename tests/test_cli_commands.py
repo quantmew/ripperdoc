@@ -15,7 +15,7 @@ from ripperdoc.commands.rename import command as rename_command
 from ripperdoc.commands.tasks import command as tasks_command
 from ripperdoc.commands.todos import command as todos_command
 from ripperdoc.services.plugins import clear_runtime_plugin_dirs
-from ripperdoc.tools import background_shell
+from ripperdoc.services import background_shell
 from ripperdoc.utils.mcp import McpServerInfo
 from ripperdoc.utils.messaging.messages import create_user_message
 from ripperdoc.utils.filesystem.working_directories import normalize_directory_inputs

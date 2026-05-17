@@ -1,7 +1,7 @@
 """Utilities for processing and truncating command output."""
 
 import re
-from typing import Any
+from typing import Any, Dict
 
 
 # Maximum output length to prevent token overflow
@@ -88,7 +88,7 @@ def is_image_data(text: str) -> bool:
     return len(stripped) > 10000
 
 
-def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> dict[str, Any]:
+def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> Dict[str, Any]:
     """Truncate output if it exceeds max length.
 
     Keeps both the beginning and end of output to preserve context.

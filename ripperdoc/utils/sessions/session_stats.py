@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.sessions.session_index import list_session_index_entries
@@ -38,8 +38,8 @@ class SessionStats:
 
     # Time statistics
     longest_session_duration: timedelta = field(default_factory=lambda: timedelta(0))
-    earliest_session: datetime | None = None
-    latest_session: datetime | None = None
+    earliest_session: Optional[datetime] = None
+    latest_session: Optional[datetime] = None
 
     # Streak statistics
     current_streak: int = 0

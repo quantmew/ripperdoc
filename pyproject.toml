@@ -39,6 +39,8 @@ dependencies = [
     "tiktoken>=0.7.0",
     "google-genai>=1.62.0",
     "charset-normalizer>=3.0.0",
+    "tree-sitter>=0.21.0",
+    "tree-sitter-bash>=0.21.0",
 ]
 
 [project.optional-dependencies]

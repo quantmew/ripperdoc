@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ class OperationWatchdog:
         self.check_interval = check_interval
         self._last_activity: float = time.time()
         self._stopped = False
-        self._task: asyncio.Task[None] | None = None
-        self._monitoring_task: asyncio.Task[None] | None = None
+        self._task: Optional[asyncio.Task[None]] = None
+        self._monitoring_task: Optional[asyncio.Task[None]] = None
 
     def _update_activity(self) -> None:
         """Update the last activity timestamp."""

@@ -9,7 +9,7 @@ from typing import AsyncGenerator, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from ripperdoc.core.tool import Tool, ToolResult, ToolUseContext, ValidationResult
-from ripperdoc.tools.background_shell import get_background_status
+from ripperdoc.services.background_shell import get_background_status
 from ripperdoc.tools.agent import get_agent_run_snapshot, wait_for_agent_run_snapshot
 
 

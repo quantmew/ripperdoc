@@ -21,7 +21,7 @@ def memory_root(memory_dir_override: Optional[Path] = None, project_path: Option
     return root.resolve()
 
 
-def resolve_path(raw_path: str | None, *, root: Path, allow_root: bool) -> Path:
+def resolve_path(raw_path: Optional[str], *, root: Path, allow_root: bool) -> Path:
     """Resolve a path relative to the memory root, with safety checks."""
     token = "." if raw_path is None else str(raw_path).strip()
     if not token:

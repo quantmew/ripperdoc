@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Tests for permissions TUI keyboard behavior."""
 
 from pathlib import Path

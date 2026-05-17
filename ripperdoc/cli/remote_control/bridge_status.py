@@ -8,7 +8,7 @@ Supports QR code rendering of the connect URL.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, List, Literal, Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -41,7 +41,7 @@ class BridgeStatusDisplay:
         self._session_title: str = ""
         self._session_elapsed: str = ""
         self._session_activity: str = ""
-        self._session_trail: list[str] = []
+        self._session_trail: List[str] = []
         self._active_sessions: int = 0
         self._max_sessions: int = 1
         self._spawn_mode: str = "single-session"
@@ -116,8 +116,8 @@ class BridgeStatusDisplay:
         self,
         session_id: str,
         elapsed: str,
-        activity: BridgeActivity | None,
-        trail: list[str] | None = None,
+        activity: Optional[BridgeActivity],
+        trail: Optional[List[str]] = None,
     ) -> None:
         """Show active session status."""
         self._status_state = "attached"
@@ -152,7 +152,7 @@ class BridgeStatusDisplay:
         if max_sessions > 1:
             console.print(f"[dim]{active} of {max_sessions} sessions ({mode})[/dim]")
 
-    def set_spawn_mode_display(self, mode: str | None) -> None:
+    def set_spawn_mode_display(self, mode: Optional[str]) -> None:
         self._spawn_mode = mode or "single-session"
 
     def add_session(self, session_id: str, url: str) -> None:

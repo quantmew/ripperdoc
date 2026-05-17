@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -254,7 +254,7 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         return result
 
     @staticmethod
-    def _coerce_exit_decision(decision_payload: Any) -> tuple[bool, Optional[str], bool]:
+    def _coerce_exit_decision(decision_payload: Any) -> Tuple[bool, Optional[str], bool]:
         """Normalize callback return value into (approved, mode, clear_context)."""
         if isinstance(decision_payload, bool):
             return decision_payload, None, False

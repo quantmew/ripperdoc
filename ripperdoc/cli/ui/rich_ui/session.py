@@ -3,6 +3,8 @@
 This module provides a clean, minimal terminal UI using Rich for the Ripperdoc agent.
 """
 
+from __future__ import annotations
+
 import asyncio
 import concurrent.futures
 import html
@@ -72,7 +74,7 @@ from ripperdoc.utils.mcp import (
     shutdown_mcp_runtime,
 )
 from ripperdoc.utils.lsp import shutdown_lsp_manager
-from ripperdoc.tools.background_shell import shutdown_background_shell
+from ripperdoc.services.background_shell import shutdown_background_shell
 from ripperdoc.tools.agent import list_running_agent_worktree_paths
 from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,
@@ -2101,7 +2103,7 @@ class RichUI:
         """Public wrapper for running coroutines on the UI event loop."""
         return self._run_async(coro)
 
-    def handle_slash_command(self, user_input: str) -> bool | str | ForkedCustomCommandRequest:
+    def handle_slash_command(self, user_input: str) -> Union[bool, str, ForkedCustomCommandRequest]:
         """Handle slash commands.
 
         Returns True if handled as built-in, False if not a command,

@@ -7,7 +7,7 @@ including API keys, model settings, and user preferences.
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Literal, TYPE_CHECKING, cast
+from typing import Any, Dict, List, Optional, Literal, TYPE_CHECKING, cast
 from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
@@ -234,9 +234,9 @@ class UserConfig(BaseModel):
     default_thinking_tokens: int = Field(default=10240)
 
     # User-level permission rules (applied globally)
-    user_allow_rules: list[str] = Field(default_factory=list)
-    user_deny_rules: list[str] = Field(default_factory=list)
-    user_ask_rules: list[str] = Field(default_factory=list)
+    user_allow_rules: List[str] = Field(default_factory=list)
+    user_deny_rules: List[str] = Field(default_factory=list)
+    user_ask_rules: List[str] = Field(default_factory=list)
 
     # Onboarding
     has_completed_onboarding: bool = False
@@ -245,30 +245,30 @@ class UserConfig(BaseModel):
     # Statistics
     num_startups: int = 0
     # Worktree options
-    worktree: Optional[dict[str, Any]] = None
+    worktree: Optional[Dict[str, Any]] = None
 
 class ProjectConfig(BaseModel):
     """Project-specific configuration stored in .ripperdoc/config.json"""
 
     # Tool permissions (project level - checked into git)
-    allowed_tools: list[str] = Field(default_factory=list)
-    bash_allow_rules: list[str] = Field(default_factory=list)
-    bash_deny_rules: list[str] = Field(default_factory=list)
-    bash_ask_rules: list[str] = Field(default_factory=list)
-    working_directories: list[str] = Field(default_factory=list)
+    allowed_tools: List[str] = Field(default_factory=list)
+    bash_allow_rules: List[str] = Field(default_factory=list)
+    bash_deny_rules: List[str] = Field(default_factory=list)
+    bash_ask_rules: List[str] = Field(default_factory=list)
+    working_directories: List[str] = Field(default_factory=list)
 
     # Path ignore patterns (gitignore-style)
-    ignore_patterns: list[str] = Field(
+    ignore_patterns: List[str] = Field(
         default_factory=list,
         description="Gitignore-style patterns for paths to ignore in file operations",
     )
 
     # Context
     context: Dict[str, str] = Field(default_factory=dict)
-    context_files: list[str] = Field(default_factory=list)
+    context_files: List[str] = Field(default_factory=list)
 
     # History
-    history: list[str] = Field(default_factory=list)
+    history: List[str] = Field(default_factory=list)
 
     # Project settings
     dont_crawl_directory: bool = False
@@ -281,22 +281,22 @@ class ProjectConfig(BaseModel):
     last_duration: Optional[float] = None
     last_session_id: Optional[str] = None
     # Worktree options
-    worktree: Optional[dict[str, Any]] = None
+    worktree: Optional[Dict[str, Any]] = None
 
 class ProjectLocalConfig(BaseModel):
     """Project-local configuration stored in .ripperdoc/config.local.json (not checked into git)"""
 
     # Local permission rules (project-specific but not shared)
-    local_allow_rules: list[str] = Field(default_factory=list)
-    local_deny_rules: list[str] = Field(default_factory=list)
-    local_ask_rules: list[str] = Field(default_factory=list)
+    local_allow_rules: List[str] = Field(default_factory=list)
+    local_deny_rules: List[str] = Field(default_factory=list)
+    local_ask_rules: List[str] = Field(default_factory=list)
 
     # Output style for this project/session context
     output_style: str = Field(default="default")
     # Preferred assistant output language for this project/session context ("auto" = follow user)
     output_language: str = Field(default="auto")
     # Worktree options
-    worktree: Optional[dict[str, Any]] = None
+    worktree: Optional[Dict[str, Any]] = None
 
 
 class ConfigManager:

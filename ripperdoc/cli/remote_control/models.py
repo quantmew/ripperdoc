@@ -6,7 +6,7 @@ import enum
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import List, Optional, Protocol
 
 
 class SpawnMode(enum.Enum):
@@ -23,7 +23,7 @@ class WorkSecret:
 
     version: int
     session_ingress_token: str
-    api_base_url: str | None
+    api_base_url: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,7 @@ class RegisteredEnvironment:
 
     environment_id: str
     environment_secret: str
-    connect_url: str | None
+    connect_url: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -41,15 +41,15 @@ class RemoteControlConfig:
 
     directory: Path
     machine_name: str
-    branch: str | None
-    git_repo_url: str | None
+    branch: Optional[str]
+    git_repo_url: Optional[str]
     bridge_id: str
     environment_id: str
     base_api_url: str
     session_ingress_url: str
     session_timeout_sec: int
     verbose: bool
-    debug_file: Path | None
+    debug_file: Optional[Path]
     max_sessions: int = 1
     spawn_mode: SpawnMode = SpawnMode.SINGLE_SESSION
 
@@ -59,7 +59,7 @@ class BridgeChildProcess(Protocol):
 
     session_id: str
 
-    def poll(self) -> int | None: ...
+    def poll(self) -> Optional[int]: ...
 
     def is_running(self) -> bool: ...
 
@@ -70,7 +70,7 @@ class BridgeChildProcess(Protocol):
     def terminate(self, *, force: bool = False) -> None: ...
 
     @property
-    def stderr_tail(self) -> list[str]: ...
+    def stderr_tail(self) -> List[str]: ...
 
 
 @dataclass
@@ -81,4 +81,4 @@ class ActiveSession:
     work_id: str
     process: BridgeChildProcess
     started_at_monotonic: float = time.monotonic()
-    work_dir: Path | None = None
+    work_dir: Optional[Path] = None

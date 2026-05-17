@@ -5,7 +5,7 @@ import os
 import sys
 from asyncio import CancelledError
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Dict, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Dict, List, Optional, Set, Tuple, Union, cast
 
 from ripperdoc.core.hooks.manager import HookResult, hook_manager
 from ripperdoc.core.hooks.state import bind_hook_status_emitter
@@ -156,7 +156,7 @@ async def _tool_execution_cwd(
 
 def _resolve_tool(
     tool_registry: "ToolRegistry", tool_name: str, tool_use_id: str
-) -> tuple[Optional[Tool[Any, Any]], Optional[UserMessage]]:
+) -> Tuple[Optional[Tool[Any, Any]], Optional[UserMessage]]:
     """Find a tool by name and return an error message if missing."""
     tool = tool_registry.get(tool_name)
     if tool:
@@ -170,7 +170,7 @@ def _resolve_tool(
 async def _run_hook_call_with_status(
     awaitable: Awaitable[HookResult],
     tool_use_id: str,
-    sibling_ids: set[str],
+    sibling_ids: Set[str],
 ) -> AsyncGenerator[Union[ProgressMessage, HookResult], None]:
     """Run a hook call while streaming statusMessage updates as progress."""
     status_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -196,7 +196,7 @@ async def _run_hook_call_with_status(
             if task.done():
                 break
             get_task: asyncio.Task[str] = asyncio.create_task(status_queue.get())
-            wait_tasks = cast(set[asyncio.Future[Any]], {task, get_task})
+            wait_tasks = cast(Set[asyncio.Future[Any]], {task, get_task})
             done, pending_tasks = await asyncio.wait(
                 wait_tasks, timeout=0.2, return_when=asyncio.FIRST_COMPLETED
             )
@@ -230,7 +230,7 @@ async def _run_tool_use_generator(
     tool_use_id: str,
     tool_name: str,
     parsed_input: Any,
-    sibling_ids: set[str],
+    sibling_ids: Set[str],
     tool_context: ToolUseContext,
 ) -> AsyncGenerator[Union[UserMessage, AttachmentMessage, ProgressMessage], None]:
     """Execute a single tool_use and yield progress/results."""
@@ -250,7 +250,7 @@ async def _run_tool_use_generator(
 
     tool_output = None
     tool_error: Optional[str] = None
-    pending_results: List[tuple[Any, str]] = []
+    pending_results: List[Tuple[Any, str]] = []
 
     try:
         logger.debug("[query] _run_tool_use_generator: BEFORE tool.call() for '%s'", tool_name)
@@ -305,7 +305,7 @@ async def _run_tool_use_generator(
     except CancelledError:
         logger.debug("[query] _run_tool_use_generator: tool='%s' CANCELLED", tool_name)
         raise  # Don't suppress task cancellation
-    except (RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as exc:
+    except (RecursionError, RuntimeError, ValueError, TypeError, OSError, IOError, AttributeError, KeyError) as exc:
         logger.warning(
             "Error executing tool '%s': %s: %s",
             tool_name,
@@ -527,9 +527,7 @@ async def _execute_tools_sequentially(
                 yield message
         finally:
             result = (await asyncio.gather(consumer, return_exceptions=True))[0]
-            if isinstance(result, asyncio.CancelledError):
-                continue
-            if isinstance(result, Exception):
+            if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
                 raise result
 
 
@@ -776,7 +774,7 @@ async def _run_concurrent_tool_uses(
     finally:
         # Wait for all tasks and collect any exceptions
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        exceptions_found: List[tuple[int, str, BaseException]] = []
+        exceptions_found: List[Tuple[int, str, BaseException]] = []
         for i, result in enumerate(results):
             if isinstance(result, asyncio.CancelledError):
                 continue

@@ -8,7 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.markup import escape
 
-from ripperdoc.tools.background_shell import (
+from ripperdoc.services.background_shell import (
     get_background_status,
     kill_background_task,
     list_background_tasks,

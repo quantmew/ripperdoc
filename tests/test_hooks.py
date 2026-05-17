@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Comprehensive tests for the hooks system.
 
 Tests cover:

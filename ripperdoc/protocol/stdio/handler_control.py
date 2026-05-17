@@ -6,7 +6,7 @@ import inspect
 import logging
 import asyncio
 from dataclasses import replace
-from typing import Any, cast
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 from pydantic import ValidationError
 
@@ -45,7 +45,7 @@ class _UnknownControlMethodError(RuntimeError):
     """Raised when a control request method is unsupported."""
 
 
-_CONTROL_HANDLER_MAP: dict[str, str] = {
+_CONTROL_HANDLER_MAP: Dict[str, str] = {
     "initialize": "_handle_initialize",
     "sampling/createMessage": "_handle_query",
     "query": "_handle_query",
@@ -72,9 +72,9 @@ _CONTROL_HANDLER_MAP: dict[str, str] = {
 
 
 class StdioControlMixin:
-    _mcp_server_overrides: dict[str, McpServerInfo] | None
+    _mcp_server_overrides: Optional[Dict[str, McpServerInfo]]
 
-    async def _load_mcp_servers_with_wait(self) -> list[McpServerInfo]:
+    async def _load_mcp_servers_with_wait(self) -> List[McpServerInfo]:
         try:
             return await load_mcp_servers_async(self._project_path, wait_for_connections=True)
         except TypeError as exc:
@@ -82,7 +82,7 @@ class StdioControlMixin:
                 raise
             return await load_mcp_servers_async(self._project_path)
 
-    async def _load_dynamic_mcp_tools_with_wait(self) -> list[Any]:
+    async def _load_dynamic_mcp_tools_with_wait(self) -> List[Any]:
         try:
             return await load_dynamic_mcp_tools_async(
                 self._project_path,
@@ -93,15 +93,15 @@ class StdioControlMixin:
                 raise
             return await load_dynamic_mcp_tools_async(self._project_path)
 
-    def _coerce_tool_request(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _coerce_tool_request(self, request: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         """Normalize JSON-RPC payload into (name, arguments)."""
         name = str(request.get("name") or "").strip()
-        arguments: dict[str, Any] = request.get("arguments") or {}
+        arguments: Dict[str, Any] = request.get("arguments") or {}
         if not isinstance(arguments, dict):
             arguments = {"value": arguments}
         return name, arguments
 
-    async def _handle_control_request(self, message: dict[str, Any]) -> None:
+    async def _handle_control_request(self, message: Dict[str, Any]) -> None:
         """Handle inbound control requests from SDK."""
         request_id = message.get("id")
         if request_id is None:
@@ -160,7 +160,7 @@ class StdioControlMixin:
                     },
                 )
 
-    async def _handle_tools_call(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_tools_call(self, request: Dict[str, Any], request_id: str) -> None:
         """Handle SDK-driven `tools/call` callbacks used by control integrations."""
         try:
             validated = ToolCallRequest.model_validate(request)
@@ -217,7 +217,7 @@ class StdioControlMixin:
             ),
         )
 
-    async def _handle_set_permission_mode(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_set_permission_mode(self, request: Dict[str, Any], request_id: str) -> None:
         mode = self._normalize_permission_mode(
             request.get("mode")
             if request.get("mode") is not None
@@ -235,7 +235,7 @@ class StdioControlMixin:
             response={"status": "permission_mode_set", "mode": applied_mode},
         )
 
-    async def _handle_set_model(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_set_model(self, request: Dict[str, Any], request_id: str) -> None:
         model = request.get("model")
         if self._query_context:
             self._query_context.model = model or "main"
@@ -244,7 +244,7 @@ class StdioControlMixin:
             response={"status": "model_set", "model": model},
         )
 
-    def _resolve_mcp_server_name(self, requested_name: Any, available_names: list[str]) -> str | None:
+    def _resolve_mcp_server_name(self, requested_name: Any, available_names: List[str]) -> Optional[str]:
         target = str(requested_name or "").strip()
         if not target:
             return None
@@ -263,15 +263,15 @@ class StdioControlMixin:
             disabled=disabled,
         )
 
-    async def _reload_mcp_runtime(self) -> list[McpServerInfo]:
+    async def _reload_mcp_runtime(self) -> List[McpServerInfo]:
         self._sync_mcp_runtime_overrides()
         await shutdown_mcp_runtime()
         return await self._load_mcp_servers_with_wait()
 
-    def _clone_mcp_config_map(self, configs: dict[str, McpServerInfo]) -> dict[str, McpServerInfo]:
+    def _clone_mcp_config_map(self, configs: Dict[str, McpServerInfo]) -> Dict[str, McpServerInfo]:
         return {name: replace(info) for name, info in configs.items()}
 
-    def _ensure_mutable_mcp_configs(self) -> dict[str, McpServerInfo]:
+    def _ensure_mutable_mcp_configs(self) -> Dict[str, McpServerInfo]:
         if self._mcp_server_overrides is None:
             self._mcp_server_overrides = self._clone_mcp_config_map(
                 load_mcp_server_configs(self._project_path)
@@ -305,8 +305,8 @@ class StdioControlMixin:
             )
         self._query_context.tools = tools
 
-    def _format_mcp_server_status(self, server: McpServerInfo) -> dict[str, Any]:
-        config: dict[str, Any]
+    def _format_mcp_server_status(self, server: McpServerInfo) -> Dict[str, Any]:
+        config: Dict[str, Any]
         if server.type in {"sse", "http", "streamable-http"}:
             config = {
                 "type": server.type,
@@ -350,10 +350,10 @@ class StdioControlMixin:
 
     def _build_mcp_status_response(
         self,
-        servers: list[McpServerInfo],
+        servers: List[McpServerInfo],
         *,
         status: str = "mcp_status",
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         connected = [server.name for server in servers if server.status == "connected"]
         failed = [server.name for server in servers if server.status == "failed"]
         unavailable = [server.name for server in servers if server.status == "unavailable"]
@@ -369,7 +369,7 @@ class StdioControlMixin:
             "mcpServers": configured,
         }
 
-    async def _handle_mcp_status(self, _request: dict[str, Any], request_id: str) -> None:
+    async def _handle_mcp_status(self, _request: Dict[str, Any], request_id: str) -> None:
         """Return MCP runtime status and server summaries."""
         try:
             servers = await self._load_mcp_servers_with_wait()
@@ -387,7 +387,7 @@ class StdioControlMixin:
                 },
             )
 
-    async def _handle_mcp_set_servers(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_mcp_set_servers(self, request: Dict[str, Any], request_id: str) -> None:
         raw_servers = request.get("servers")
         if raw_servers is None and "mcpServers" in request:
             raw_servers = request.get("mcpServers")
@@ -421,7 +421,7 @@ class StdioControlMixin:
         response["applied"] = sorted(parsed_configs.keys())
         await self._write_control_response(request_id, response=response)
 
-    async def _handle_mcp_reconnect(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_mcp_reconnect(self, request: Dict[str, Any], request_id: str) -> None:
         requested_name = request.get("serverName")
         if requested_name is None:
             requested_name = request.get("server_name")
@@ -447,7 +447,7 @@ class StdioControlMixin:
             response["serverName"] = resolved_name
         await self._write_control_response(request_id, response=response)
 
-    async def _handle_mcp_toggle(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_mcp_toggle(self, request: Dict[str, Any], request_id: str) -> None:
         requested_name = request.get("serverName")
         if requested_name is None:
             requested_name = request.get("server_name")
@@ -478,13 +478,13 @@ class StdioControlMixin:
         response["enabled"] = enabled
         await self._write_control_response(request_id, response=response)
 
-    async def _handle_mcp_authenticate(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_mcp_authenticate(self, request: Dict[str, Any], request_id: str) -> None:
         requested_name = request.get("serverName")
         if requested_name is None:
             requested_name = request.get("server_name")
 
         headers_payload = request.get("headers")
-        header_updates: dict[str, str] = {}
+        header_updates: Dict[str, str] = {}
         if isinstance(headers_payload, dict):
             header_updates = {
                 str(key).strip(): str(value)
@@ -551,7 +551,7 @@ class StdioControlMixin:
             },
         )
 
-    async def _handle_mcp_clear_auth(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_mcp_clear_auth(self, request: Dict[str, Any], request_id: str) -> None:
         requested_name = request.get("serverName")
         if requested_name is None:
             requested_name = request.get("server_name")
@@ -604,7 +604,7 @@ class StdioControlMixin:
             },
         )
 
-    async def _handle_interrupt(self, _request: dict[str, Any], request_id: str) -> None:
+    async def _handle_interrupt(self, _request: Dict[str, Any], request_id: str) -> None:
         """Interrupt the active turn."""
         current_task = asyncio.current_task()
         cancelled = 0
@@ -645,7 +645,7 @@ class StdioControlMixin:
             },
         )
 
-    async def _handle_set_output_style(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_set_output_style(self, request: Dict[str, Any], request_id: str) -> None:
         requested_style = (
             request.get("style")
             if request.get("style") is not None
@@ -662,7 +662,7 @@ class StdioControlMixin:
             response={"status": "output_style_set", "output_style": self._output_style},
         )
 
-    def _resolve_rewind_target_index(self, user_message_id: str) -> int | None:
+    def _resolve_rewind_target_index(self, user_message_id: str) -> Optional[int]:
         if not user_message_id:
             return None
         matches = [
@@ -675,7 +675,7 @@ class StdioControlMixin:
             return None
         return matches[-1]
 
-    async def _handle_rewind_files(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_rewind_files(self, request: Dict[str, Any], request_id: str) -> None:
         user_message_id = str(request.get("user_message_id") or "").strip()
         dry_run = bool(request.get("dry_run"))
         if not user_message_id:
@@ -722,7 +722,7 @@ class StdioControlMixin:
             },
         )
 
-    async def _handle_hook_callback(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_hook_callback(self, request: Dict[str, Any], request_id: str) -> None:
         callback_id = request.get("callback_id")
         if not callback_id:
             await self._write_control_response(
@@ -757,7 +757,7 @@ class StdioControlMixin:
 
     def _serialize_permission_suggestions(
         self, rule_suggestions: Any
-    ) -> list[dict[str, Any]] | None:
+    ) -> Optional[List[Dict[str, Any]]]:
         """Serialize rule suggestions into SDK-compatible format.
 
         Converts ToolRule objects and other suggestion formats into
@@ -772,7 +772,7 @@ class StdioControlMixin:
         """
         if not rule_suggestions:
             return None
-        suggestions: list[dict[str, Any]] = []
+        suggestions: List[Dict[str, Any]] = []
         for suggestion in rule_suggestions:
             if isinstance(suggestion, ToolRule):
                 suggestions.append(
@@ -788,7 +788,7 @@ class StdioControlMixin:
                 suggestions.append({"rule": str(suggestion)})
         return suggestions or None
 
-    def _extract_blocked_path(self, decision: Any) -> str | None:
+    def _extract_blocked_path(self, decision: Any) -> Optional[str]:
         """Extract blocked path from permission decision.
 
         Args:
@@ -812,7 +812,7 @@ class StdioControlMixin:
                 return blocked_path.strip() or None
         return None
 
-    def _serialize_decision_reason(self, decision: Any) -> dict[str, Any] | None:
+    def _serialize_decision_reason(self, decision: Any) -> Optional[Dict[str, Any]]:
         """Serialize decision reason for SDK transmission.
 
         Args:
@@ -837,19 +837,19 @@ class StdioControlMixin:
         if isinstance(decision_reason, dict):
             return decision_reason
         if hasattr(decision_reason, "model_dump"):
-            return cast(dict[str, Any], decision_reason.model_dump())
+            return cast(Dict[str, Any], decision_reason.model_dump())
         return {"type": str(decision_reason)}
 
     async def _run_permission_hook_race(
         self,
         tool_name: str,
-        tool_input: dict[str, Any],
-        tool_use_id: str | None,
-        permission_suggestions: list[dict[str, Any]] | None,
-        blocked_path: str | None,
-        decision_reason: dict[str, Any] | None,
-        agent_id: str | None,
-    ) -> dict[str, Any] | None:
+        tool_input: Dict[str, Any],
+        tool_use_id: Optional[str],
+        permission_suggestions: Optional[List[Dict[str, Any]]],
+        blocked_path: Optional[str],
+        decision_reason: Optional[Dict[str, Any]],
+        agent_id: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
         """Run PermissionRequest hooks concurrently with SDK request.
 
         Implements a Promise.race-style pattern where hooks and
@@ -873,7 +873,7 @@ class StdioControlMixin:
         # Create an abort-controller-style coordination event
         abort_event = asyncio.Event()
 
-        async def run_hook_decision() -> dict[str, Any] | None:
+        async def run_hook_decision() -> Optional[Dict[str, Any]]:
             """Run PermissionRequest hooks and return first decisive result."""
             try:
                 hook_input = {
@@ -910,7 +910,7 @@ class StdioControlMixin:
                 logger.debug("[stdio] PermissionRequest hook error: %s", e)
                 return None
 
-        async def run_sdk_request() -> dict[str, Any]:
+        async def run_sdk_request() -> Dict[str, Any]:
             """Send can_use_tool request to SDK and await response."""
             try:
                 sdk_request = {
@@ -995,7 +995,7 @@ class StdioControlMixin:
             sdk_task.cancel()
             raise
 
-    async def _handle_can_use_tool(self, request: dict[str, Any], request_id: str) -> None:
+    async def _handle_can_use_tool(self, request: Dict[str, Any], request_id: str) -> None:
         tool_name = request.get("tool_name") or ""
         tool_input = request.get("input")
         if tool_input is None:
@@ -1150,7 +1150,7 @@ class StdioControlMixin:
             )
 
     async def _handle_set_max_thinking_tokens(
-        self, request: dict[str, Any], request_id: str
+        self, request: Dict[str, Any], request_id: str
     ) -> None:
         """Adjust max thinking tokens during an active session."""
         raw_value = request.get("max_thinking_tokens")
@@ -1187,7 +1187,7 @@ class StdioControlMixin:
         )
 
     async def _handle_get_context_usage(
-        self, _request: dict[str, Any], request_id: str
+        self, _request: Dict[str, Any], request_id: str
     ) -> None:
         """Return context window usage breakdown."""
         if not self._query_context:
@@ -1245,7 +1245,7 @@ class StdioControlMixin:
         )
 
     async def _handle_reload_plugins(
-        self, _request: dict[str, Any], request_id: str
+        self, _request: Dict[str, Any], request_id: str
     ) -> None:
         """Reload plugins and return updated commands, agents, plugins, mcpServers."""
         from ripperdoc.core.agents import load_agent_definitions
@@ -1267,7 +1267,7 @@ class StdioControlMixin:
             error_count += 1
 
         try:
-            commands_payload: list[dict[str, str]] = []
+            commands_payload: List[Dict[str, str]] = []
             for cmd in list_slash_commands():
                 commands_payload.append({
                     "name": getattr(cmd, "name", ""),
@@ -1330,7 +1330,7 @@ class StdioControlMixin:
         )
 
     async def _handle_stop_task(
-        self, request: dict[str, Any], request_id: str
+        self, request: Dict[str, Any], request_id: str
     ) -> None:
         """Stop a running task by task_id."""
         task_id = request.get("task_id")
@@ -1374,7 +1374,7 @@ class StdioControlMixin:
         )
 
     async def _handle_cancel_async_message(
-        self, request: dict[str, Any], request_id: str
+        self, request: Dict[str, Any], request_id: str
     ) -> None:
         """Cancel a pending async message by uuid."""
         message_uuid = request.get("message_uuid") or request.get("uuid")
@@ -1405,7 +1405,7 @@ class StdioControlMixin:
         )
 
     async def _handle_seed_read_state(
-        self, request: dict[str, Any], request_id: str
+        self, request: Dict[str, Any], request_id: str
     ) -> None:
         """Seed file read state cache with provided entries."""
         files = request.get("files")

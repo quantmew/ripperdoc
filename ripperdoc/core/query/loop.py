@@ -1,6 +1,9 @@
 """Main query loop and LLM interaction helpers."""
 
+from __future__ import annotations
+
 import asyncio
+import inspect
 import json
 import os
 import sys
@@ -1451,36 +1454,75 @@ async def _wait_for_assistant_with_progress(
     model_name: Optional[str],
     out: _AssistantWaitState,
 ) -> AsyncGenerator[Union[ProgressMessage, AssistantMessage], None]:
-    """Yield progress while waiting for query_llm, then emit final assistant (or interrupt)."""
-    while True:
-        if query_context.abort_controller.is_set():
-            await _cancel_assistant_task(assistant_task)
-            out.aborted = True
-            yield create_assistant_message(INTERRUPT_MESSAGE, model=model_name)
-            return
+    """Yield progress while waiting for query_llm, then emit final assistant (or interrupt).
 
-        if assistant_task.done():
-            out.assistant_message = await assistant_task
-            break
+    A background drainer task continuously pulls items from the bounded
+    progress_queue into an unbounded local buffer.  This decouples queue
+    draining from the generator's yield cycle so that the producer
+    (_enqueue_stream_progress) never blocks waiting for the consumer to
+    finish rendering a previous chunk.
+    """
+    drained: list[Optional[ProgressMessage]] = []
+    drainer_stop = asyncio.Event()
 
-        progress, completed_message, should_continue = await _poll_progress_or_completion(
-            assistant_task=assistant_task,
-            progress_queue=progress_queue,
-            abort_controller=query_context.abort_controller,
-        )
-        if should_continue:
-            continue
-        if completed_message is not None:
-            out.assistant_message = completed_message
-            break
-        if progress:
-            yield progress
+    async def _drain_loop() -> None:
+        while not drainer_stop.is_set():
+            try:
+                item = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                if assistant_task.done() and progress_queue.empty():
+                    break
+                continue
+            drained.append(item)
+        # Pull any items that arrived between the last check and stop.
+        while True:
+            try:
+                drained.append(progress_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
 
-    for residual in _drain_progress_queue(progress_queue):
-        yield residual
+    drainer = asyncio.create_task(_drain_loop())
 
-    if out.assistant_message is not None:
-        yield out.assistant_message
+    try:
+        pos = 0
+        while True:
+            if query_context.abort_controller.is_set():
+                await _cancel_assistant_task(assistant_task)
+                out.aborted = True
+                yield create_assistant_message(INTERRUPT_MESSAGE, model=model_name)
+                return
+
+            if assistant_task.done():
+                drainer_stop.set()
+                await drainer
+                out.assistant_message = await assistant_task
+                break
+
+            while pos < len(drained):
+                item = drained[pos]
+                pos += 1
+                if item is not None:
+                    yield item
+
+            await asyncio.sleep(0)
+
+        # Yield any items that arrived after the assistant completed.
+        while pos < len(drained):
+            item = drained[pos]
+            pos += 1
+            if item is not None:
+                yield item
+
+        if out.assistant_message is not None:
+            yield out.assistant_message
+    finally:
+        drainer_stop.set()
+        if not drainer.done():
+            drainer.cancel()
+            try:
+                await drainer
+            except asyncio.CancelledError:
+                pass
 
 
 async def _process_iteration_assistant_message(
@@ -1803,6 +1845,7 @@ async def _prepare_single_iteration_tool_call(
     except CancelledError:
         raise
     except (
+        RecursionError,
         RuntimeError,
         ValueError,
         TypeError,
@@ -2052,6 +2095,29 @@ async def _apply_pre_hook_input_update(
     return parsed_input, tool_input_dict, None
 
 
+async def _preview_pretool_allow(
+    tool: Tool[Any, Any],
+    parsed_input: Any,
+    can_use_tool_fn: Optional[ToolPermissionCallable],
+) -> tuple[Optional[bool], Optional[str]]:
+    if can_use_tool_fn is None or not hasattr(can_use_tool_fn, "preview"):
+        return None, None
+
+    preview_fn = getattr(can_use_tool_fn, "preview")
+    preview = preview_fn(tool, parsed_input)
+    if inspect.isawaitable(preview):
+        preview = await preview
+
+    if getattr(preview, "requires_user_input", True):
+        return False, None
+
+    result = getattr(preview, "result", None)
+    if result is None:
+        return False, None
+
+    return bool(getattr(result, "result", False)), getattr(result, "message", None)
+
+
 async def _apply_permission_updates(
     *,
     tool: Tool[Any, Any],
@@ -2065,7 +2131,18 @@ async def _apply_permission_updates(
 ) -> tuple[Any, bool, Optional[UserMessage]]:
     """Run permission gate and apply permission-updated input when provided."""
     force_permission_prompt = pre_result.should_ask
-    bypass_permissions = pre_result.should_allow and not force_permission_prompt
+    bypass_permissions = False
+    if pre_result.should_allow and not force_permission_prompt:
+        preview_allowed, preview_message = await _preview_pretool_allow(
+            tool, parsed_input, can_use_tool_fn
+        )
+        if preview_allowed is True:
+            bypass_permissions = True
+        elif preview_allowed is False and preview_message:
+            return parsed_input, True, tool_result_message(
+                tool_use_id, preview_message, is_error=True
+            )
+
     should_check_permissions = not bypass_permissions and (
         not query_context.yolo_mode or can_use_tool_fn is not None or force_permission_prompt
     )
@@ -2159,7 +2236,7 @@ async def _run_query_iteration(
         for meta_message in plan.plan_mode_messages:
             yield meta_message
 
-    progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue(maxsize=1000)
+    progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue(maxsize=10000)
     query_llm_fn = _resolve_query_llm_callable()
 
     assistant_task: asyncio.Task[AssistantMessage] = asyncio.create_task(

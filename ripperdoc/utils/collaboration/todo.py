@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import List, Literal, Optional, Sequence, Tuple
+from typing import Dict, List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ripperdoc.utils.filesystem.config_paths import user_config_dir
@@ -24,7 +24,7 @@ logger = get_logger()
 
 TodoStatus = Literal["pending", "in_progress", "completed"]
 TodoPriority = Literal["high", "medium", "low"]
-_TODO_PRIORITIES: dict[str, TodoPriority] = {"high": "high", "medium": "medium", "low": "low"}
+_TODO_PRIORITIES: Dict[str, TodoPriority] = {"high": "high", "medium": "medium", "low": "low"}
 
 
 class TodoItem(BaseModel):
@@ -62,7 +62,7 @@ def _storage_path(project_root: Optional[Path], ensure_dir: bool) -> Path:
 
 def validate_todos(
     todos: Sequence[TodoItem], max_items: int = MAX_TODOS
-) -> Tuple[bool, str | None]:
+) -> Tuple[bool, Optional[str]]:
     """Basic validation for a todo list."""
     if len(todos) > max_items:
         return False, f"Too many todos; limit is {max_items}."

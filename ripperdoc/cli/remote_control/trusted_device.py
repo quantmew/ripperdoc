@@ -15,7 +15,7 @@ import json
 import os
 import platform
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 
 from ripperdoc.utils.log import get_logger
 
@@ -24,7 +24,7 @@ logger = get_logger()
 TRUSTED_DEVICE_ENV = "RIPPERDOC_TRUSTED_DEVICE_TOKEN"
 TRUSTED_DEVICE_GATE_ENV = "RIPPERDOC_TRUSTED_DEVICE_ENABLED"
 
-_cached_token: str | None = None
+_cached_token: Optional[str] = None
 
 
 def _get_auth_storage_path() -> Path:
@@ -37,7 +37,7 @@ def _get_auth_storage_path() -> Path:
     return base / "auth.json"
 
 
-def _read_auth_storage() -> dict[str, Any] | None:
+def _read_auth_storage() -> Optional[Dict[str, Any]]:
     """Read the auth storage file. Returns None on any failure."""
     path = _get_auth_storage_path()
     try:
@@ -50,7 +50,7 @@ def _read_auth_storage() -> dict[str, Any] | None:
         return None
 
 
-def _write_auth_storage(data: dict[str, Any]) -> bool:
+def _write_auth_storage(data: Dict[str, Any]) -> bool:
     """Write the auth storage file. Returns True on success."""
     path = _get_auth_storage_path()
     try:
@@ -68,7 +68,7 @@ def _is_gate_enabled() -> bool:
     return val in ("1", "true", "yes")
 
 
-def get_trusted_device_token() -> str | None:
+def get_trusted_device_token() -> Optional[str]:
     """Return the trusted device token if the gate is enabled and a token exists."""
     global _cached_token
 

@@ -5,7 +5,7 @@ Allows performing multiple exact string replacements in a single file atomically
 
 import difflib
 import os
-from typing import AsyncGenerator, Optional, List
+from typing import AsyncGenerator, List, Optional, Tuple
 from textwrap import dedent
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,7 @@ from ripperdoc.utils.file_editing import (
     select_write_encoding,
 )
 from ripperdoc.tools.file_read import detect_file_encoding
+from ripperdoc.tools.file_read._utils import line_prefix_format_description
 
 logger = get_logger()
 
@@ -34,51 +35,57 @@ DEFAULT_ACTION = "Edit"
 TOOL_NAME_READ = "Read"
 NOTEBOOK_EDIT_TOOL_NAME = "NotebookEdit"
 
-MULTI_EDIT_DESCRIPTION = dedent(
-    f"""\
-    This is a tool for making multiple edits to a single file in one operation. It is built on top of the {DEFAULT_ACTION} tool and allows you to perform multiple find-and-replace operations efficiently. Prefer this tool over the {DEFAULT_ACTION} tool when you need to make multiple edits to the same file.
+def get_multi_edit_description() -> str:
+    prefix_format = line_prefix_format_description()
+    return dedent(
+        f"""\
+        This is a tool for making multiple edits to a single file in one operation. It is built on top of the {DEFAULT_ACTION} tool and allows you to perform multiple find-and-replace operations efficiently. Prefer this tool over the {DEFAULT_ACTION} tool when you need to make multiple edits to the same file.
 
-    Before using this tool:
+        Before using this tool:
 
-    1. Use the {TOOL_NAME_READ} tool to understand the file's contents and context
-    2. Verify the directory path is correct
+        1. Use the {TOOL_NAME_READ} tool to understand the file's contents and context
+        2. Verify the directory path is correct
 
-    To make multiple file edits, provide the following:
-    1. file_path: The absolute path to the file to modify (must be absolute, not relative)
-    2. edits: An array of edit operations to perform, where each edit contains:
-       - old_string: The text to replace (must match the file contents exactly, including all whitespace and indentation)
-       - new_string: The edited text to replace the old_string
-       - replace_all: Replace all occurences of old_string. This parameter is optional and defaults to false.
+        To make multiple file edits, provide the following:
+        1. file_path: The absolute path to the file to modify (must be absolute, not relative)
+        2. edits: An array of edit operations to perform, where each edit contains:
+           - old_string: The text to replace (must match the file contents exactly, including all whitespace and indentation)
+           - new_string: The edited text to replace the old_string
+           - replace_all: Replace all occurences of old_string. This parameter is optional and defaults to false.
 
-    IMPORTANT:
-    - All edits are applied in sequence, in the order they are provided
-    - Each edit operates on the result of the previous edit
-    - All edits must be valid for the operation to succeed - if any edit fails, none will be applied
-    - This tool is ideal when you need to make several changes to different parts of the same file
-    - For Jupyter notebooks (.ipynb files), use the {NOTEBOOK_EDIT_TOOL_NAME} instead
+        IMPORTANT:
+        - All edits are applied in sequence, in the order they are provided
+        - Each edit operates on the result of the previous edit
+        - All edits must be valid for the operation to succeed - if any edit fails, none will be applied
+        - This tool is ideal when you need to make several changes to different parts of the same file
+        - For Jupyter notebooks (.ipynb files), use the {NOTEBOOK_EDIT_TOOL_NAME} instead
 
-    CRITICAL REQUIREMENTS:
-    1. All edits follow the same requirements as the single Edit tool
-    2. The edits are atomic - either all succeed or none are applied
-    3. Plan your edits carefully to avoid conflicts between sequential operations
+        CRITICAL REQUIREMENTS:
+        1. All edits follow the same requirements as the single Edit tool
+        2. The edits are atomic - either all succeed or none are applied
+        3. Plan your edits carefully to avoid conflicts between sequential operations
+        4. When editing text from Read tool output, preserve the exact indentation after the line number prefix. The line number prefix format is: {prefix_format}. Never include any part of the line number prefix in old_string or new_string.
 
-    WARNING:
-    - The tool will fail if edits.old_string doesn't match the file contents exactly (including whitespace)
-    - The tool will fail if edits.old_string and edits.new_string are the same
-    - Since edits are applied in sequence, ensure that earlier edits don't affect the text that later edits are trying to find
+        WARNING:
+        - The tool will fail if edits.old_string doesn't match the file contents exactly (including whitespace)
+        - The tool will fail if edits.old_string and edits.new_string are the same
+        - Since edits are applied in sequence, ensure that earlier edits don't affect the text that later edits are trying to find
 
-    When making edits:
-    - Ensure all edits result in idiomatic, correct code
-    - Do not leave the code in a broken state
-    - Always use absolute file paths (starting with /)
-    - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
-    - Use replace_all for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
+        When making edits:
+        - Ensure all edits result in idiomatic, correct code
+        - Do not leave the code in a broken state
+        - Always use absolute file paths (starting with /)
+        - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
+        - Use replace_all for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
 
-    If you want to create a new file, use:
-    - A new file path, including dir name if needed
-    - First edit: empty old_string and the new file's contents as new_string
-    - Subsequent edits: normal edit operations on the created content"""
-)
+        If you want to create a new file, use:
+        - A new file path, including dir name if needed
+        - First edit: empty old_string and the new file's contents as new_string
+        - Subsequent edits: normal edit operations on the created content"""
+    )
+
+
+MULTI_EDIT_DESCRIPTION = get_multi_edit_description()
 
 
 class EditOperation(BaseModel):
@@ -125,7 +132,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         return "MultiEdit"
 
     async def description(self) -> str:
-        return MULTI_EDIT_DESCRIPTION
+        return get_multi_edit_description()
 
     @property
     def input_schema(self) -> type[MultiEditToolInput]:
@@ -156,7 +163,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         ]
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        return MULTI_EDIT_DESCRIPTION
+        return get_multi_edit_description()
 
     def is_read_only(self) -> bool:
         return False
@@ -233,7 +240,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
     ) -> str:
         return f"Multi-editing: {input_data.file_path} ({len(input_data.edits)} edits)"
 
-    def _apply_edits(self, content: str, edits: List[EditOperation]) -> tuple[str, int]:
+    def _apply_edits(self, content: str, edits: List[EditOperation]) -> Tuple[str, int]:
         """Apply edits in-memory. Raises ValueError on failure."""
         current = content
         total_replacements = 0
@@ -271,7 +278,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
 
     def _build_diff(
         self, original: str, updated: str, file_path: str
-    ) -> tuple[list[str], int, int]:
+    ) -> Tuple[List[str], int, int]:
         old_lines = original.splitlines(keepends=True)
         new_lines = updated.splitlines(keepends=True)
 

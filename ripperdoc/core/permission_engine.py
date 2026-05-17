@@ -11,7 +11,7 @@ import shutil
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Optional, Set
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from ripperdoc.cli.ui.choice import prompt_choice
 from ripperdoc.core.config import config_manager
@@ -93,11 +93,17 @@ def _extract_tool_target_path(tool_name: str, parsed_input: Any) -> Optional[str
     return None
 
 
+def _permission_request_allow_can_override(decision: PermissionDecision) -> bool:
+    if decision.behavior == "deny":
+        return False
+    return not _is_rule_ask_decision(decision)
+
+
 def _plan_mode_restriction_result(
     *,
     tool: Tool[Any, Any],
     parsed_input: Any,
-    plan_file_path: str | None,
+    plan_file_path: Optional[str],
 ) -> Optional[PermissionPreview]:
     """Apply plan-mode write restrictions.
 
@@ -251,7 +257,7 @@ def _build_edit_permission_preview(parsed_input: Any, *, tool_name: str) -> str:
         )
         return "\n  ".join(lines)
 
-    diff_lines: list[str] = preview_result["diff_lines"]
+    diff_lines: List[str] = preview_result["diff_lines"]
     replacements = preview_result["replacements"]
     if not diff_lines:
         lines.append("<warning>No textual diff generated.</warning>")
@@ -465,7 +471,7 @@ def _compute_edit_preview(
     original_content: str,
     parsed_input: Any,
     tool_name: str,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Apply edit inputs in-memory and return diff preview payload."""
     operations = _normalize_edit_operations(parsed_input, tool_name=tool_name)
     if operations is None:
@@ -531,7 +537,7 @@ def _compute_edit_preview(
     }
 
 
-def _normalize_edit_operations(parsed_input: Any, *, tool_name: str) -> Optional[list[dict[str, Any]]]:
+def _normalize_edit_operations(parsed_input: Any, *, tool_name: str) -> Optional[List[Dict[str, Any]]]:
     """Normalize Edit/MultiEdit payloads into a common in-memory operation list."""
     if tool_name == "Edit":
         return [
@@ -546,7 +552,7 @@ def _normalize_edit_operations(parsed_input: Any, *, tool_name: str) -> Optional
         edits = getattr(parsed_input, "edits", None)
         if edits is None:
             return None
-        normalized: list[dict[str, Any]] = []
+        normalized: List[Dict[str, Any]] = []
         for edit in edits:
             normalized.append(
                 {
@@ -585,11 +591,11 @@ def permission_key(tool: Tool[Any, Any], parsed_input: Any) -> str:
     return tool.name
 
 
-def _rule_strings(rule_suggestions: Optional[Any]) -> list[str]:
+def _rule_strings(rule_suggestions: Optional[Any]) -> List[str]:
     """Normalize rule suggestions to simple strings."""
     if not rule_suggestions:
         return []
-    rules: list[str] = []
+    rules: List[str] = []
     for suggestion in rule_suggestions:
         if isinstance(suggestion, ToolRule):
             rules.append(suggestion.rule_content)
@@ -598,11 +604,11 @@ def _rule_strings(rule_suggestions: Optional[Any]) -> list[str]:
     return [rule for rule in rules if rule]
 
 
-def _serialize_permission_suggestions(rule_suggestions: Optional[Any]) -> Optional[list[Any]]:
+def _serialize_permission_suggestions(rule_suggestions: Optional[Any]) -> Optional[List[Any]]:
     """Convert rule suggestions into hook-friendly structures."""
     if not rule_suggestions:
         return None
-    suggestions: list[Any] = []
+    suggestions: List[Any] = []
     for suggestion in rule_suggestions:
         if isinstance(suggestion, ToolRule):
             suggestions.append(
@@ -622,7 +628,7 @@ def _apply_updated_permissions(
     *,
     default_tool_name: str,
     session_allowed_tools: Set[str],
-    session_tool_rules: dict[str, Set[str]],
+    session_tool_rules: Dict[str, Set[str]],
 ) -> None:
     """Apply updatedPermissions output to in-session permission state."""
     if not updated_permissions:
@@ -745,8 +751,8 @@ def _is_rule_ask_decision(decision: PermissionDecision) -> bool:
     return isinstance(reason, dict) and reason.get("type") == "rule"
 
 
-def _parse_rule_collection(rules: Iterable[str]) -> list[ParsedPermissionRule]:
-    parsed_rules: list[ParsedPermissionRule] = []
+def _parse_rule_collection(rules: Iterable[str]) -> List[ParsedPermissionRule]:
+    parsed_rules: List[ParsedPermissionRule] = []
     for rule in rules:
         parsed = parse_permission_rule(rule)
         if parsed is not None:
@@ -756,8 +762,8 @@ def _parse_rule_collection(rules: Iterable[str]) -> list[ParsedPermissionRule]:
 
 def _extract_tool_specifier_rules(
     parsed_rules: Iterable[ParsedPermissionRule], tool_name: str
-) -> set[str]:
-    specifiers: set[str] = set()
+) -> Set[str]:
+    specifiers: Set[str] = set()
     for rule in parsed_rules:
         if rule.tool_name != tool_name or rule.specifier is None:
             continue
@@ -816,7 +822,7 @@ def _resolve_explicit_rule_decision(
     *,
     tool_name: str,
     parsed_input: Any,
-    policy: dict[str, Any],
+    policy: Dict[str, Any],
 ) -> Optional[PermissionDecision]:
     project_path = policy["project_path"]
     deny_decision = _explicit_rule_decision(
@@ -854,9 +860,9 @@ def _build_permission_policy(
     config: Any,
     global_config: Any,
     local_config: Any,
-    session_tool_rules: dict[str, Set[str]],
-    session_working_dirs: Iterable[str] | None = None,
-) -> dict[str, Any]:
+    session_tool_rules: Dict[str, Set[str]],
+    session_working_dirs: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
     """Build merged permission policy inputs for tool-level evaluation."""
     managed_permissions_only = _managed_permissions_only_enabled()
     managed_allow_rules = (
@@ -939,6 +945,7 @@ def _build_permission_policy(
         "parsed_ask_rules": parsed_ask_rules,
         "allowed_working_dirs": allowed_working_dirs,
         "project_path": project_path,
+        "permission_mode": getattr(config, "permission_mode", "default"),
         "managed_permissions_only": managed_permissions_only,
     }
 
@@ -947,6 +954,18 @@ def _coerce_permission_decision(raw_decision: Any) -> Optional[PermissionDecisio
     """Normalize tool-provided permission decision payloads."""
     if isinstance(raw_decision, PermissionDecision):
         return raw_decision
+
+    # Handle security.PermissionResult from bash tool's check_permissions
+    from ripperdoc.security import PermissionResult as SecurityPermissionResult
+    if isinstance(raw_decision, SecurityPermissionResult):
+        return PermissionDecision(
+            behavior=raw_decision.behavior,
+            message=raw_decision.message or None,
+            updated_input=raw_decision.updated_input,
+            decision_reason=raw_decision.decision_reason,
+            rule_suggestions=raw_decision.suggestions,
+        )
+
     if isinstance(raw_decision, dict) and "behavior" in raw_decision:
         try:
             return PermissionDecision(**raw_decision)
@@ -963,7 +982,7 @@ async def _resolve_permission_decision(
     tool: Tool[Any, Any],
     parsed_input: Any,
     *,
-    policy: dict[str, Any],
+    policy: Dict[str, Any],
     log_errors: bool,
 ) -> PermissionDecision:
     """Resolve the tool decision from tool policy hooks/checkers."""
@@ -987,6 +1006,7 @@ async def _resolve_permission_decision(
         return _default_permission_decision(tool.name)
 
     permission_context = {
+        "mode": policy["permission_mode"],
         "allowed_rules": policy["allow_rules"].get(tool.name, set()),
         "denied_rules": policy["deny_rules"].get(tool.name, set()),
         "ask_rules": policy["ask_rules"].get(tool.name, set()),
@@ -1001,12 +1021,10 @@ async def _resolve_permission_decision(
     except (TypeError, AttributeError, ValueError, KeyError) as exc:
         if log_errors:
             logger.warning(
-                "[permissions] Tool check_permissions failed",
-                extra={
-                    "tool": getattr(tool, "name", None),
-                    "error": str(exc),
-                    "error_type": type(exc).__name__,
-                },
+                "[permissions] Tool %s check_permissions failed: %s: %s",
+                getattr(tool, "name", None),
+                type(exc).__name__,
+                exc,
             )
         return PermissionDecision(
             behavior="ask",
@@ -1166,7 +1184,7 @@ def make_permission_checker(
         for name in (session_disallowed_tools or [])
         if str(name).strip()
     }
-    session_tool_rules: dict[str, Set[str]] = defaultdict(set)
+    session_tool_rules: Dict[str, Set[str]] = defaultdict(set)
     session_working_dirs: Set[str] = set()
     for raw_path in session_additional_working_dirs or []:
         try:
@@ -1177,7 +1195,7 @@ def make_permission_checker(
         except (OSError, RuntimeError, ValueError):
             continue
 
-    async def _prompt_user(prompt: str, options: list[tuple[str, str]]) -> str:
+    async def _prompt_user(prompt: str, options: List[Tuple[str, str]]) -> str:
         """Prompt the user with proper interrupt handling using unified choice component.
 
         Args:
@@ -1275,6 +1293,7 @@ def make_permission_checker(
             session_tool_rules=session_tool_rules,
             session_working_dirs=session_working_dirs,
         )
+        policy["permission_mode"] = permission_mode
         if policy.get("managed_permissions_only"):
             is_preapproved = False
         else:
@@ -1347,7 +1366,7 @@ def make_permission_checker(
                         updated_input=updated_input,
                         decision=decision,
                     )
-                if hook_result.should_allow:
+                if hook_result.should_allow and _permission_request_allow_can_override(decision):
                     return PermissionResult(
                         result=True,
                         message=decision.message,
@@ -1371,6 +1390,13 @@ def make_permission_checker(
         if decision.message:
             # Use warning style for warning messages
             prompt_html += f"\n  <warning>{html.escape(decision.message)}</warning>"
+        # Append destructive-command warning for Bash if present
+        if tool.name == "Bash":
+            from ripperdoc.tools.bash.destructive_warning import get_destructive_command_warning
+            command = getattr(parsed_input, "command", "") or ""
+            destructive_warn = get_destructive_command_warning(command)
+            if destructive_warn:
+                prompt_html += f"\n  <warning>{html.escape(destructive_warn)}</warning>"
         prompt_html += "\n  <question>Do you want to proceed?</question>"
         prompt = prompt_html
 
@@ -1437,7 +1463,7 @@ def make_permission_checker(
     setattr(can_use_tool, "preview", _preview)
     setattr(can_use_tool, "preview_force_prompt", _preview_force_prompt)
 
-    def _add_working_directory(path: str) -> str | None:
+    def _add_working_directory(path: str) -> Optional[str]:
         """Add a session-scoped allowed working directory."""
         text = str(path).strip()
         if not text:
@@ -1452,7 +1478,7 @@ def make_permission_checker(
         session_working_dirs.add(resolved_str)
         return resolved_str
 
-    def _list_working_directories() -> set[str]:
+    def _list_working_directories() -> Set[str]:
         """Return session-scoped additional working directories."""
         return set(session_working_dirs)
 

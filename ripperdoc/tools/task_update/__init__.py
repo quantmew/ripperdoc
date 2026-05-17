@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Set, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -94,15 +94,15 @@ def _resolve_active_task_list_id() -> str:
     return resolve_task_list_id()
 
 
-def _task_id_sort_key(task_id: str) -> tuple[int, int | str]:
+def _task_id_sort_key(task_id: str) -> Tuple[int, Union[int, str]]:
     if str(task_id).isdigit():
         return (0, int(task_id))
     return (1, str(task_id))
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
+def _dedupe(values: List[str]) -> List[str]:
+    seen: Set[str] = set()
+    result: List[str] = []
     for value in values:
         token = str(value or "").strip()
         if not token or token in seen:
@@ -166,11 +166,14 @@ class TaskUpdateTool(Tool[TaskUpdateInput, TaskUpdateOutput]):
             "Supports addBlocks/addBlockedBy incremental dependency updates."
         )
 
+    def needs_permissions(self, _input_data: Optional[TaskUpdateInput] = None) -> bool:
+        return False
+
     @property
     def input_schema(self) -> type[TaskUpdateInput]:
         return TaskUpdateInput
 
-    def input_examples(self) -> list[ToolUseExample]:
+    def input_examples(self) -> List[ToolUseExample]:
         return [
             ToolUseExample(
                 description="Start work on a task",
@@ -307,7 +310,7 @@ class TaskUpdateTool(Tool[TaskUpdateInput, TaskUpdateOutput]):
         try:
             updated = update_task(input_data.task_id, patch, task_list_id=task_list_id)
 
-            updated_fields: list[str] = []
+            updated_fields: List[str] = []
             if updated.subject != previous_task.subject:
                 updated_fields.append("subject")
             if updated.description != previous_task.description:

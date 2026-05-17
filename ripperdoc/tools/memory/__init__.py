@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import AsyncGenerator, Callable, List, Literal, Optional
+from typing import AsyncGenerator, Callable, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -119,8 +119,8 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
     def __init__(
         self,
         *,
-        project_path: Optional[Path | str] = None,
-        memory_dir: Optional[Path | str] = None,
+        project_path: Optional[Union[Path, str]] = None,
+        memory_dir: Optional[Union[Path, str]] = None,
     ) -> None:
         super().__init__()
         self._project_path = Path(project_path).resolve() if project_path else None
@@ -165,7 +165,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
             ),
         ]
 
-    def input_param_aliases(self) -> dict[str, str]:
+    def input_param_aliases(self) -> Dict[str, str]:
         return {
             "old_string": "old_str",
             "new_string": "new_str",
@@ -325,7 +325,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
         root.mkdir(parents=True, exist_ok=True)
         return root.resolve()
 
-    def _resolve_path(self, raw_path: str | None, *, allow_root: bool) -> Path:
+    def _resolve_path(self, raw_path: Optional[str], *, allow_root: bool) -> Path:
         root = self._memory_root()
         token = "." if raw_path is None else str(raw_path).strip()
         if not token:
@@ -420,7 +420,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
             )
 
         root = self._memory_root()
-        entries: list[str] = []
+        entries: List[str] = []
         for entry in sorted(target.rglob("*")):
             if len(entries) >= input_data.max_entries:
                 break
@@ -636,7 +636,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
         )
 
     def _execute(self, input_data: MemoryToolInput) -> MemoryToolOutput:
-        dispatch: dict[MemoryCommand, Callable[[MemoryToolInput], MemoryToolOutput]] = {
+        dispatch: Dict[MemoryCommand, Callable[[MemoryToolInput], MemoryToolOutput]] = {
             "view": self._view,
             "create": self._create,
             "str_replace": self._str_replace,

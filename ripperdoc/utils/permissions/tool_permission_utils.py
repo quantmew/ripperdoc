@@ -1,16 +1,21 @@
-"""Permission evaluation helpers."""
+"""Permission types and rule matching utilities.
+
+This module provides the core PermissionDecision and ToolRule types
+used by the permission engine, along with legacy rule matching logic.
+
+Kept for backward compatibility with the general permission system
+(permission_engine.py, handler_control.py, rule_syntax.py).
+New bash-specific logic lives in ripperdoc/tools/bash/.
+"""
 
 from __future__ import annotations
 
 import fnmatch
 import re
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional, Set
+from typing import List, Optional, Union
 
-from ripperdoc.utils.permissions.path_validation_utils import validate_shell_command_paths
-from ripperdoc.utils.permissions.shell_command_validation import validate_shell_command
-from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
-from ripperdoc.utils.shell.shell_token_utils import parse_and_clean_shell_tokens, parse_shell_tokens
+from ripperdoc.utils.shell.shell_token_utils import parse_shell_tokens
 
 
 @dataclass
@@ -26,7 +31,7 @@ class PermissionDecision:
     message: Optional[str] = None
     updated_input: Optional[object] = None
     decision_reason: Optional[dict] = None
-    rule_suggestions: Optional[List[ToolRule] | List[str]] = None
+    rule_suggestions: Optional[Union[List[ToolRule], List[str]]] = None
 
 
 def create_wildcard_rule(rule_name: str) -> str:
@@ -37,10 +42,6 @@ def create_wildcard_rule(rule_name: str) -> str:
 
     Returns:
         Wildcard rule string in glob format.
-
-    Examples:
-        >>> create_wildcard_rule("git")
-        "git *"
     """
     return f"{rule_name} *"
 
@@ -72,28 +73,12 @@ def _has_unquoted_shell_operators(command: str) -> bool:
 
     Returns:
         True if command contains unquoted shell operators, False otherwise
-
-    Examples:
-        >>> _has_unquoted_shell_operators("git status && rm -rf /")
-        True
-        >>> _has_unquoted_shell_operators("echo 'foo && bar'")
-        False
-        >>> _has_unquoted_shell_operators("ls | grep foo")
-        True
-        >>> _has_unquoted_shell_operators("echo hi; rm -rf /")
-        True
     """
-    # Parse the command into tokens, which handles quotes correctly
     tokens = parse_shell_tokens(command)
 
-    # Check for shell operators in the tokens
-    # Note: parse_shell_tokens may attach semicolon to adjacent tokens
-    # (e.g., "echo hi; rm" -> ["echo", "hi;", "rm"] or ";echo" -> [";echo"])
     for token in tokens:
-        # Check for separate operator tokens
         if token in {"&&", "||", "|"}:
             return True
-        # Check for semicolon (may be attached to previous or next token)
         if token.endswith(";") or token.startswith(";"):
             return True
 
@@ -107,16 +92,8 @@ def match_rule(command: str, rule: str) -> bool:
     - Exact match: "git status" matches "git status" only
     - Glob patterns: "git * main" matches "git push main", "git pull main", etc.
 
-    Glob patterns support:
-    - * (matches any characters)
-    - ? (matches single character)
-    - [seq] (matches any character in seq)
-    - [!seq] (matches any character NOT in seq)
-
     Security: Wildcard rules will NOT match commands
-    containing shell operators (&&, ||, ;, |) outside of quotes. This prevents
-    a rule like "git *" from matching "git status && rm -rf /". Exact match
-    rules still work with operators (user explicitly approved the full command).
+    containing shell operators (&&, ||, ;, |) outside of quotes.
 
     Args:
         command: The command to check
@@ -124,16 +101,6 @@ def match_rule(command: str, rule: str) -> bool:
 
     Returns:
         True if command matches rule, False otherwise
-
-    Examples:
-        >>> match_rule("npm install", "npm *")
-        True
-        >>> match_rule("pip install", "* install")
-        True
-        >>> match_rule("git push main", "git * main")
-        True
-        >>> match_rule("git status && git commit", "git status && git commit")
-        True
     """
     command = command.strip()
     if not command:
@@ -147,415 +114,20 @@ def match_rule(command: str, rule: str) -> bool:
 
     # Glob-style patterns with wildcards
     if "*" in rule or "?" in rule or "[" in rule:
-        # For wildcard rules, reject commands with shell operators for security
         if _has_unquoted_shell_operators(command):
             return False
         return fnmatch.fnmatch(command, rule)
 
-    # Exact match - allow even with operators (user explicitly approved full command)
+    # Exact match
     return command == rule
-
-
-def _merge_rules(*rules: Iterable[str]) -> Set[str]:
-    merged: Set[str] = set()
-    for collection in rules:
-        merged.update(collection)
-    return merged
-
-
-def _is_command_read_only(
-    command: str,
-    injection_check: Callable[[str], bool],
-) -> bool:
-    """Heuristic read-only detector."""
-    validation = validate_shell_command(command)
-    if validation.behavior != "passthrough":
-        return False
-
-    cleaned_tokens = parse_and_clean_shell_tokens(command)
-    if not cleaned_tokens:
-        return True
-
-    # Treat pipelines/compound commands as read-only only if every segment is safe.
-    tokens = parse_shell_tokens(command)
-    
-    # Split compound commands by control operators (&&, ||, ;)
-    def split_compound_commands(token_list: list[str]) -> list[list[str]]:
-        """Split tokens into command segments by control operators."""
-        parts: list[list[str]] = []
-        current: list[str] = []
-        i = 0
-        while i < len(token_list):
-            token = token_list[i]
-            # Check for && and || (two-character operators)
-            if token in ("&&", "||"):
-                if current:
-                    parts.append(current)
-                current = []
-                i += 1
-                continue
-            # Check for standalone semicolon
-            if token == ";":
-                if current:
-                    parts.append(current)
-                current = []
-                i += 1
-                continue
-            # Check for tokens that end with semicolon (e.g., "echo hi;" from "echo hi; ls")
-            if token.endswith(";") and len(token) > 1:
-                current.append(token[:-1])
-                if current:
-                    parts.append(current)
-                current = []
-                i += 1
-                continue
-            # Check for tokens that start with semicolon
-            if token.startswith(";") and len(token) > 1:
-                if current:
-                    parts.append(current)
-                current = [token[1:]]
-                i += 1
-                continue
-            current.append(token)
-            i += 1
-        if current:
-            parts.append(current)
-        return parts
-    
-    command_segments = split_compound_commands(tokens)
-    if len(command_segments) > 1:
-        # Multiple command segments - check each one
-        return all(
-            _is_command_read_only(" ".join(segment), injection_check)
-            for segment in command_segments
-        )
-    
-    # Check for pipeline operator
-    if "|" in tokens:
-        parts: list[str] = []
-        current: list[str] = []
-        for token in tokens:
-            if token == "|":
-                if current:
-                    parts.append(" ".join(current))
-                current = []
-            else:
-                current.append(token)
-        if current:
-            parts.append(" ".join(current))
-        return all(_is_command_read_only(part, injection_check) for part in parts)
-
-    dangerous_prefixes = {
-        "rm",
-        "mv",
-        "chmod",
-        "chown",
-        "sudo",
-        "dd",
-        "tee",
-        "truncate",
-        "kill",
-        "pkill",
-        "systemctl",
-        "service",
-    }
-    first = cleaned_tokens[0]
-    if first in dangerous_prefixes:
-        return False
-    if first == "git":
-        if len(cleaned_tokens) < 2:
-            return False
-        allowed_git = {
-            "status",
-            "diff",
-            "show",
-            "log",
-            "rev-parse",
-            "ls-files",
-            "remote",
-            "branch",
-            "tag",
-            "blame",
-            "reflog",
-        }
-        return cleaned_tokens[1] in allowed_git
-
-    # If no injection was detected and the command is free of mutations, treat as read-only.
-    return not injection_check(command)
-
-
-def _collect_rule_suggestions(command: str) -> List[ToolRule]:
-    """Collect rule suggestions for a command.
-
-    Suggests two options:
-    1. Exact command match
-    2. Glob-style wildcard (git *)
-
-    Args:
-        command: The command to generate suggestions for
-
-    Returns:
-        List of suggested ToolRule objects
-    """
-    suggestions: list[ToolRule] = [
-        # Exact match
-        ToolRule(tool_name="Bash", rule_content=command)
-    ]
-
-    tokens = parse_and_clean_shell_tokens(command)
-    if tokens:
-        suggestions.append(
-            ToolRule(tool_name="Bash", rule_content=create_wildcard_rule(tokens[0]))
-        )
-
-    return suggestions
-
-
-def evaluate_shell_command_permissions(
-    tool_request: object,
-    allowed_rules: Iterable[str],
-    denied_rules: Iterable[str],
-    ask_rules: Iterable[str],
-    allowed_working_dirs: Set[str] | None = None,
-    *,
-    danger_detector: Callable[[str], bool] | None = None,
-    read_only_detector: Callable[[str, Callable[[str], bool]], bool] | None = None,
-) -> PermissionDecision:
-    """Evaluate whether a bash command should be allowed.
-
-    Args:
-        tool_request: The tool request containing the command.
-        allowed_rules: Rules that allow commands.
-        denied_rules: Rules that deny commands.
-        allowed_working_dirs: Allowed working directories.
-        danger_detector: Callable that returns True if command contains dangerous
-            shell patterns (injection, destructive commands, etc.).
-        read_only_detector: Callable that returns True if command is read-only.
-
-    Returns:
-        PermissionDecision indicating whether the command should be allowed.
-    """
-    command = tool_request.command if hasattr(tool_request, "command") else str(tool_request)
-    trimmed_command = command.strip()
-    allowed_working_dirs = allowed_working_dirs or {safe_get_cwd()}
-    danger_detector = danger_detector or (
-        lambda cmd: validate_shell_command(cmd).behavior != "passthrough"
-    )
-    read_only_detector = read_only_detector or _is_command_read_only
-
-    # Detect dangerous patterns once, reuse the result
-    has_dangerous_patterns = danger_detector(trimmed_command)
-
-    merged_denied = _merge_rules(denied_rules)
-    merged_allowed = _merge_rules(allowed_rules)
-    merged_ask = _merge_rules(ask_rules)
-
-    if any(match_rule(trimmed_command, rule) for rule in merged_denied):
-        return PermissionDecision(
-            behavior="deny",
-            message=f"Permission to run '{trimmed_command}' has been denied.",
-            decision_reason={"type": "rule"},
-            rule_suggestions=None,
-        )
-
-    if any(match_rule(trimmed_command, rule) for rule in merged_ask):
-        return PermissionDecision(
-            behavior="ask",
-            message="Command requires confirmation by rule.",
-            decision_reason={"type": "rule"},
-            rule_suggestions=None,
-        )
-
-    if any(match_rule(trimmed_command, rule) for rule in merged_allowed):
-        return PermissionDecision(
-            behavior="allow",
-            updated_input=tool_request,
-            decision_reason={"type": "rule"},
-            message="Command approved by configured rule.",
-        )
-
-    path_result = validate_shell_command_paths(
-        trimmed_command, safe_get_cwd(), allowed_working_dirs
-    )
-    if path_result.behavior != "passthrough":
-        return PermissionDecision(
-            behavior="ask",
-            message=path_result.message,
-            decision_reason={"type": "path_validation"},
-            rule_suggestions=None,
-        )
-
-    validation_result = validate_shell_command(trimmed_command)
-    if validation_result.behavior != "passthrough":
-        return PermissionDecision(
-            behavior="ask",
-            message=validation_result.message,
-            decision_reason={"type": "validation"},
-            rule_suggestions=None,
-        )
-
-    tokens = parse_shell_tokens(trimmed_command)
-    if "|" in tokens:
-        left_tokens = []
-        right_tokens = []
-        pipe_seen = False
-        for token in tokens:
-            if token == "|":
-                pipe_seen = True
-                continue
-            if pipe_seen:
-                right_tokens.append(token)
-            else:
-                left_tokens.append(token)
-        left_command = " ".join(left_tokens).strip()
-        right_command = " ".join(right_tokens).strip()
-
-        left_result = evaluate_shell_command_permissions(
-            type("Cmd", (), {"command": left_command}),
-            merged_allowed,
-            merged_denied,
-            merged_ask,
-            allowed_working_dirs,
-            danger_detector=danger_detector,
-            read_only_detector=read_only_detector,
-        )
-        right_read_only = read_only_detector(right_command, danger_detector)
-
-        if left_result.behavior == "deny":
-            return left_result
-        if not right_read_only:
-            return PermissionDecision(
-                behavior="ask",
-                message="Pipe right-hand command is not read-only.",
-                decision_reason={"type": "subcommand"},
-                rule_suggestions=_collect_rule_suggestions(right_command),
-            )
-        if left_result.behavior == "allow":
-            return PermissionDecision(
-                behavior="allow",
-                updated_input=tool_request,
-                decision_reason={"type": "subcommand"},
-            )
-        return PermissionDecision(
-            behavior="ask",
-            message="Permission required for piped command.",
-            decision_reason={"type": "subcommand"},
-            rule_suggestions=_collect_rule_suggestions(trimmed_command),
-        )
-
-    if read_only_detector(trimmed_command, danger_detector) and not has_dangerous_patterns:
-        return PermissionDecision(
-            behavior="allow",
-            updated_input=tool_request,
-            decision_reason={"type": "other", "reason": "Read-only command"},
-        )
-
-    return PermissionDecision(
-        behavior="passthrough",
-        message="Command requires permission",
-        decision_reason={"type": "default"},
-        rule_suggestions=_collect_rule_suggestions(trimmed_command),
-    )
-
-
-def is_command_read_only(command: str) -> bool:
-    """Public wrapper to test if a command is read-only using reference heuristics."""
-    return _is_command_read_only(
-        command, lambda cmd: validate_shell_command(cmd).behavior != "passthrough"
-    )
-
-
-# Command classification categories
-_READ_ONLY_COMMANDS = {
-    "cat", "head", "tail", "less", "more", "wc", "file", "stat",
-    "ls", "find", "locate", "which", "whereis", "type",
-    "echo", "printf", "date", "whoami", "hostname", "uname",
-    "env", "printenv", "id", "groups",
-    "git", "grep", "rg", "ag", "ack", "fd",
-    "diff", "comm", "sort", "uniq", "cut", "tr", "paste",
-    "curl", "wget",  # when used for reading (further checks needed)
-    "python", "python3", "node",  # typically for running scripts
-}
-_FILE_WRITE_COMMANDS = {
-    "rm", "mv", "cp", "mkdir", "rmdir", "touch", "ln",
-    "chmod", "chown", "chgrp",
-    "tee", "truncate", "dd",
-}
-_DESTRUCTIVE_COMMANDS = {
-    "rm", "rmdir", "mkfs", "dd", "shred",
-    "kill", "pkill", "killall",
-}
-_NETWORK_COMMANDS = {
-    "curl", "wget", "ssh", "scp", "rsync", "nc",
-    "ping", "traceroute", "dig", "nslookup", "host",
-    "docker", "kubectl",
-}
-_BUILD_COMMANDS = {
-    "make", "cmake", "cargo", "go", "npm", "yarn", "pnpm",
-    "pip", "pip3", "poetry", "conda",
-    "docker", "kubectl",
-}
-_TEST_COMMANDS = {
-    "pytest", "unittest", "nosetests", "jest", "mocha",
-    "go test", "cargo test", "mvn test", "gradle test",
-    "make test", "npm test",
-}
-
-
-def classify_command(command: str) -> str:
-    """Classify a shell command into a category for permission decisions.
-
-    Returns one of: "read_only", "file_write", "network", "destructive",
-    "build", "test", or "other".
-
-    Args:
-        command: The shell command string to classify.
-
-    Returns:
-        A category string.
-    """
-    tokens = parse_and_clean_shell_tokens(command)
-    if not tokens:
-        return "read_only"
-
-    first = tokens[0]
-
-    # Check destructive first (highest priority)
-    if first in _DESTRUCTIVE_COMMANDS:
-        return "destructive"
-
-    # Check file write operations
-    if first in _FILE_WRITE_COMMANDS:
-        return "file_write"
-
-    # Check network operations
-    if first in _NETWORK_COMMANDS:
-        return "network"
-
-    # Check test commands
-    cmd_str = command.strip()
-    for test_cmd in _TEST_COMMANDS:
-        if cmd_str.startswith(test_cmd):
-            return "test"
-
-    # Check build commands
-    if first in _BUILD_COMMANDS:
-        return "build"
-
-    # Check if it's a known read-only command
-    if is_command_read_only(command):
-        return "read_only"
-
-    return "other"
 
 
 __all__ = [
     "PermissionDecision",
     "ToolRule",
-    "classify_command",
+    "create_wildcard_rule",
     "create_tool_rule",
     "create_wildcard_tool_rule",
-    "evaluate_shell_command_permissions",
     "match_rule",
-    "is_command_read_only",
+    "_has_unquoted_shell_operators",
 ]

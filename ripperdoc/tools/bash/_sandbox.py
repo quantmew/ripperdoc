@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.shell.sandbox_utils import create_sandbox_wrapper, is_sandbox_available
 from ripperdoc.tools.bash._models import BashToolOutput
+from ripperdoc.tools.bash.sandbox_decision import should_use_sandbox
 
 logger = get_logger()
 
@@ -25,7 +26,7 @@ def _create_error_output(command: str, stderr: str, sandbox: bool) -> BashToolOu
 
 def setup_sandbox(
     command: str, sandbox_requested: bool
-) -> tuple[Optional[str], Optional[BashToolOutput], Optional[Any]]:
+) -> Tuple[Optional[str], Optional[BashToolOutput], Optional[Any]]:
     """Setup sandbox environment if requested.
 
     Returns:

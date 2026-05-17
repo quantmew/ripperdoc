@@ -29,7 +29,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, cast
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, cast
 
 import yaml
 
@@ -475,8 +475,8 @@ def _normalize_skill_ref(skill_name: str) -> str:
     return skill_name.strip().lstrip("/")
 
 
-def _normalize_disabled_skill_names(skill_names: Iterable[str]) -> set[str]:
-    normalized: set[str] = set()
+def _normalize_disabled_skill_names(skill_names: Iterable[str]) -> Set[str]:
+    normalized: Set[str] = set()
     for raw in skill_names:
         if not isinstance(raw, str):
             continue
@@ -495,7 +495,7 @@ def _state_file_for_location(
     return None
 
 
-def _load_disabled_from_state_file(path: Optional[Path]) -> set[str]:
+def _load_disabled_from_state_file(path: Optional[Path]) -> Set[str]:
     if path is None or not path.exists():
         return set()
     try:
@@ -510,7 +510,7 @@ def _load_disabled_from_state_file(path: Optional[Path]) -> set[str]:
     return _normalize_disabled_skill_names(raw_values)
 
 
-def _save_disabled_to_state_file(path: Optional[Path], disabled_skill_names: set[str]) -> list[str]:
+def _save_disabled_to_state_file(path: Optional[Path], disabled_skill_names: Set[str]) -> List[str]:
     normalized = sorted(_normalize_disabled_skill_names(disabled_skill_names))
     if path is None:
         return normalized
@@ -525,14 +525,14 @@ def get_disabled_skill_names(
     home: Optional[Path] = None,
     *,
     location: Optional[SkillLocation] = None,
-) -> set[str]:
+) -> Set[str]:
     """Return disabled skill names from state files under skills directories."""
     if location is not None:
         state_path = _state_file_for_location(location, project_path=project_path, home=home)
         disabled_for_location = _load_disabled_from_state_file(state_path)
         return disabled_for_location
 
-    disabled: set[str] = set()
+    disabled: Set[str] = set()
     for _, loc in skill_directories(project_path=project_path, home=home):
         disabled.update(
             get_disabled_skill_names(project_path=project_path, home=home, location=loc)
@@ -546,7 +546,7 @@ def save_disabled_skill_names(
     home: Optional[Path] = None,
     *,
     location: SkillLocation = SkillLocation.PROJECT,
-) -> list[str]:
+) -> List[str]:
     """Persist disabled skill names into the state file for a specific scope."""
     state_path = _state_file_for_location(location, project_path=project_path, home=home)
     return _save_disabled_to_state_file(state_path, set(skill_names))
@@ -597,7 +597,7 @@ def filter_enabled_skills(
 ) -> List[SkillDefinition]:
     """Filter out skills disabled in config."""
     if disabled_skill_names is None:
-        disabled_by_location: Dict[SkillLocation, set[str]] = {}
+        disabled_by_location: Dict[SkillLocation, Set[str]] = {}
         for _, location in skill_directories(project_path=project_path, home=home):
             disabled_by_location[location] = get_disabled_skill_names(
                 project_path=project_path, home=home, location=location

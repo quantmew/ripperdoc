@@ -11,7 +11,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 from rich.console import Console
 
@@ -31,7 +31,7 @@ class BridgeActivity:
     timestamp_ms: int
 
 
-def _tool_summary(tool_name: str, tool_input: dict[str, Any]) -> str:
+def _tool_summary(tool_name: str, tool_input: Dict[str, Any]) -> str:
     input_summary = ""
     for key in ("file_path", "filePath", "pattern", "url", "query"):
         value = tool_input.get(key)
@@ -43,8 +43,8 @@ def _tool_summary(tool_name: str, tool_input: dict[str, Any]) -> str:
     return tool_name
 
 
-def _extract_activities(payload: dict[str, Any], timestamp_ms: int) -> list[BridgeActivity]:
-    activities: list[BridgeActivity] = []
+def _extract_activities(payload: Dict[str, Any], timestamp_ms: int) -> List[BridgeActivity]:
+    activities: List[BridgeActivity] = []
     msg_type = str(payload.get("type") or "").strip()
 
     if msg_type == "assistant":
@@ -107,9 +107,9 @@ class ChildBridgeSession:
         session_id: str,
         access_token: str,
         verbose: bool,
-        transcript_path: Path | None = None,
-        on_activity: Callable[[str, BridgeActivity], None] | None = None,
-        on_control_message: Callable[[str, dict[str, Any]], None] | None = None,
+        transcript_path: Optional[Path] = None,
+        on_activity: Optional[Callable[[str, BridgeActivity], None]] = None,
+        on_control_message: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> None:
         self._process = process
         self.session_id = session_id
@@ -117,7 +117,7 @@ class ChildBridgeSession:
         self._verbose = verbose
         self._stderr_lines: deque[str] = deque(maxlen=10)
         self._activities: deque[BridgeActivity] = deque(maxlen=10)
-        self._current_activity: BridgeActivity | None = None
+        self._current_activity: Optional[BridgeActivity] = None
         self._on_activity = on_activity
         self._on_control_message = on_control_message
         self._transcript_path = transcript_path
@@ -183,7 +183,7 @@ class ChildBridgeSession:
                 if self._verbose:
                     console.print(f"[dim]{text}[/dim]")
 
-                payload: dict[str, Any] | None = None
+                payload: Optional[Dict[str, Any]] = None
                 try:
                     raw = json.loads(text)
                     payload = raw if isinstance(raw, dict) else None
@@ -242,7 +242,7 @@ class ChildBridgeSession:
             self._stderr_lines.append(text)
             logger.debug("[bridge:child:%s] stderr %s", self.session_id, text)
 
-    def poll(self) -> int | None:
+    def poll(self) -> Optional[int]:
         return self._process.poll()
 
     def is_running(self) -> bool:
@@ -280,29 +280,29 @@ class ChildBridgeSession:
         except OSError:
             return
 
-    def wait(self, timeout: float | None = None) -> int | None:
+    def wait(self, timeout: Optional[float] = None) -> Optional[int]:
         try:
             return self._process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             return None
 
     @property
-    def stderr_tail(self) -> list[str]:
+    def stderr_tail(self) -> List[str]:
         return list(self._stderr_lines)
 
     @property
-    def activities(self) -> list[BridgeActivity]:
+    def activities(self) -> List[BridgeActivity]:
         return list(self._activities)
 
     @property
-    def current_activity(self) -> BridgeActivity | None:
+    def current_activity(self) -> Optional[BridgeActivity]:
         return self._current_activity
 
 
 class RemoteControlProcessSpawner:
     """Spawn local ripperdoc SDK-transport subprocesses."""
 
-    def __init__(self, *, verbose: bool, debug_file: Path | None) -> None:
+    def __init__(self, *, verbose: bool, debug_file: Optional[Path]) -> None:
         self.verbose = verbose
         self.debug_file = debug_file
         self.replay_user_messages = parse_boolish(
@@ -333,8 +333,8 @@ class RemoteControlProcessSpawner:
         sdk_url: str,
         access_token: str,
         cwd: Path,
-        on_activity: Callable[[str, BridgeActivity], None] | None = None,
-        on_control_message: Callable[[str, dict[str, Any]], None] | None = None,
+        on_activity: Optional[Callable[[str, BridgeActivity], None]] = None,
+        on_control_message: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> ChildBridgeSession:
         args = [
             sys.executable,
@@ -352,8 +352,8 @@ class RemoteControlProcessSpawner:
         ]
         if self.replay_user_messages:
             args.append("--replay-user-messages")
-        session_debug: Path | None = None
-        transcript_path: Path | None = None
+        session_debug: Optional[Path] = None
+        transcript_path: Optional[Path] = None
 
         if self.verbose:
             args.append("--verbose")

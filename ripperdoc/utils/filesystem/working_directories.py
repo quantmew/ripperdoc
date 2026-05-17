@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, List, Set, Tuple, Union
 
 
-def coerce_directory_list(value: Any) -> list[str]:
+def coerce_directory_list(value: Any) -> List[str]:
     """Coerce a settings value into a list of directory strings."""
     if value is None:
         return []
@@ -14,7 +14,7 @@ def coerce_directory_list(value: Any) -> list[str]:
         trimmed = value.strip()
         return [trimmed] if trimmed else []
     if isinstance(value, (list, tuple, set)):
-        result: list[str] = []
+        result: List[str] = []
         for item in value:
             if item is None:
                 continue
@@ -25,7 +25,7 @@ def coerce_directory_list(value: Any) -> list[str]:
     return []
 
 
-def extract_additional_directories(settings_data: Any) -> list[str]:
+def extract_additional_directories(settings_data: Any) -> List[str]:
     """Extract additional directory entries from parsed settings payload."""
     if not isinstance(settings_data, dict):
         return []
@@ -35,7 +35,7 @@ def extract_additional_directories(settings_data: Any) -> list[str]:
     return []
 
 
-def resolve_directory_path(raw_path: str | Path, *, base_dir: Path) -> Path:
+def resolve_directory_path(raw_path: Union[str, Path], *, base_dir: Path) -> Path:
     """Resolve a potentially relative directory path against a base directory."""
     candidate = Path(str(raw_path).strip()).expanduser()
     if not candidate.is_absolute():
@@ -44,20 +44,20 @@ def resolve_directory_path(raw_path: str | Path, *, base_dir: Path) -> Path:
 
 
 def normalize_directory_inputs(
-    raw_paths: Iterable[str | Path],
+    raw_paths: Iterable[Union[str, Path]],
     *,
     base_dir: Path,
     require_exists: bool,
-) -> tuple[list[str], list[str]]:
+) -> Tuple[List[str], List[str]]:
     """Normalize directory inputs into resolved absolute paths.
 
     Returns:
         A tuple ``(normalized_paths, errors)`` where errors contains user-facing
         messages for invalid items.
     """
-    normalized: list[str] = []
-    errors: list[str] = []
-    seen: set[str] = set()
+    normalized: List[str] = []
+    errors: List[str] = []
+    seen: Set[str] = set()
 
     for raw in raw_paths:
         text = str(raw).strip()

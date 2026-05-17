@@ -48,7 +48,7 @@ def _summarize_subagent_progress_content(content: Any) -> str:
             if text_value:
                 return text_value
         if block_type == "tool_result":
-            return "received tool result"
+            return ""  # Handled by extract_progress_updates in formatted output
     return ""
 
 

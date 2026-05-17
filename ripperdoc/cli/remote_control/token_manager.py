@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable, Protocol, cast
+from typing import Callable, Dict, Optional, Protocol, Union, cast
 
 from ripperdoc.utils.log import get_logger
 
@@ -20,11 +20,11 @@ logger = get_logger()
 
 
 class SessionTokenSupplier(Protocol):
-    def __call__(self, session_id: str) -> str | None: ...
+    def __call__(self, session_id: str) -> Optional[str]: ...
 
 
 class StatelessTokenSupplier(Protocol):
-    def __call__(self) -> str | None: ...
+    def __call__(self) -> Optional[str]: ...
 
 
 class TokenSessionManager:
@@ -33,7 +33,7 @@ class TokenSessionManager:
     def __init__(
         self,
         *,
-        get_access_token: SessionTokenSupplier | StatelessTokenSupplier,
+        get_access_token: Union[SessionTokenSupplier, StatelessTokenSupplier],
         on_refresh: Callable[[str, str], None],
         label: str = "bridge",
         refresh_buffer_sec: int = TOKEN_REFRESH_BUFFER_SEC,
@@ -49,9 +49,9 @@ class TokenSessionManager:
         self._max_retries = max(1, int(max_retries))
         self._retry_delay_sec = max(1, int(retry_delay_sec))
 
-        self._timers: dict[str, threading.Timer] = {}
-        self._retry_counts: dict[str, int] = {}
-        self._generation: dict[str, int] = {}
+        self._timers: Dict[str, threading.Timer] = {}
+        self._retry_counts: Dict[str, int] = {}
+        self._generation: Dict[str, int] = {}
         self._lock = threading.Lock()
 
     def _next_generation(self, session_id: str) -> int:

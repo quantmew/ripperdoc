@@ -15,7 +15,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Literal, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Literal, Optional, Sequence, Set, Tuple
 from uuid import uuid4
 from weakref import WeakSet
 
@@ -67,8 +67,8 @@ TeamMessageType = Literal[
 ]
 
 
-_TeamListenerToken = tuple[str, str, int]
-_TEAM_MESSAGE_LISTENERS: dict[str, dict[str, WeakSet[PendingMessageQueue]]] = {}
+_TeamListenerToken = Tuple[str, str, int]
+_TEAM_MESSAGE_LISTENERS: Dict[str, Dict[str, WeakSet[PendingMessageQueue]]] = {}
 _TEAM_MESSAGE_LISTENER_LOCK = threading.Lock()
 
 
@@ -102,7 +102,7 @@ class TeamMember(BaseModel):
         validation_alias=AliasChoices("active", "is_active", "isActive"),
         serialization_alias="isActive",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     joined_at: float = Field(
         default_factory=time.time,
         validation_alias=AliasChoices("joined_at", "joinedAt"),
@@ -120,8 +120,8 @@ class TeamConfig(BaseModel):
         validation_alias=AliasChoices("task_list_id", "taskListId"),
         serialization_alias="taskListId",
     )
-    members: list[TeamMember] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    members: List[TeamMember] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     version: int = Field(default=1, ge=1)
     created_at: float = Field(
         default_factory=time.time,
@@ -146,14 +146,14 @@ class TeamMessage(BaseModel):
         serialization_alias="teamName",
     )
     sender: str
-    recipients: list[str] = Field(default_factory=lambda: ["*"])
+    recipients: List[str] = Field(default_factory=lambda: ["*"])
     message_type: TeamMessageType = Field(
         default="direct",
         validation_alias=AliasChoices("message_type", "messageType"),
         serialization_alias="messageType",
     )
     content: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: float = Field(
         default_factory=time.time,
         validation_alias=AliasChoices("created_at", "createdAt"),
@@ -186,7 +186,7 @@ def _team_inbox_path(team_name: str, participant: str) -> Path:
     return _team_inboxes_dir(team_name) / f"{normalized_participant}.json"
 
 
-def _load_team_inbox_entries(team_name: str, participant: str) -> list[dict[str, Any]]:
+def _load_team_inbox_entries(team_name: str, participant: str) -> List[Dict[str, Any]]:
     path = _team_inbox_path(team_name, participant)
     if not path.exists():
         return []
@@ -223,7 +223,7 @@ def _load_team_inbox_entries(team_name: str, participant: str) -> list[dict[str,
         )
         return []
 
-    loaded: list[dict[str, Any]] = []
+    loaded: List[Dict[str, Any]] = []
     for item in payload:
         if isinstance(item, dict):
             loaded.append(item)
@@ -233,7 +233,7 @@ def _load_team_inbox_entries(team_name: str, participant: str) -> list[dict[str,
 def _store_team_inbox_entries(
     team_name: str,
     participant: str,
-    entries: list[dict[str, Any]],
+    entries: List[Dict[str, Any]],
 ) -> None:
     path = _team_inbox_path(team_name, participant)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -244,7 +244,7 @@ def _resolve_inbox_recipients(
     team_name: str,
     team: Optional[TeamConfig],
     recipients: Sequence[str],
-) -> list[str]:
+) -> List[str]:
     raw_recipients = [
         _normalize_team_participant(value)
         for value in recipients
@@ -256,7 +256,7 @@ def _resolve_inbox_recipients(
     if "*" not in raw_recipients:
         return list(dict.fromkeys(raw_recipients))
 
-    names: list[str] = []
+    names: List[str] = []
     if team:
         names.extend(member.name for member in team.members if member.name)
     else:
@@ -284,7 +284,7 @@ def _build_inbox_entry(
     }
 
 
-def drain_team_inbox_messages(team_name: str, participant: str) -> list[dict[str, Any]]:
+def drain_team_inbox_messages(team_name: str, participant: str) -> List[Dict[str, Any]]:
     clean_team = (team_name or "").strip()
     clean_participant = _normalize_team_participant(participant)
     if not clean_team:
@@ -310,7 +310,7 @@ def get_inbox_path(agent_id: str, team_name: str) -> str:
     return str(_team_inbox_path(team_name, agent_id))
 
 
-def read_mailbox(user_id: str, mailbox_path: str) -> list[dict[str, Any]]:
+def read_mailbox(user_id: str, mailbox_path: str) -> List[Dict[str, Any]]:
     """Read all mailbox entries for a participant."""
     clean_team = (mailbox_path or "").strip()
     clean_user = _normalize_team_participant(user_id)
@@ -321,7 +321,7 @@ def read_mailbox(user_id: str, mailbox_path: str) -> list[dict[str, Any]]:
         return [dict(item) for item in _load_team_inbox_entries(clean_team, clean_user)]
 
 
-def read_unread_messages(user_id: str, mailbox_path: str) -> list[dict[str, Any]]:
+def read_unread_messages(user_id: str, mailbox_path: str) -> List[Dict[str, Any]]:
     """Read unread mailbox entries for a participant."""
     return [dict(item) for item in read_mailbox(user_id, mailbox_path) if not item.get("read")]
 
@@ -420,7 +420,7 @@ def unregister_team_message_listener(
 def _snapshot_listeners_for_recipients(
     team_name: str,
     recipients: Sequence[str],
-) -> dict[int, tuple[PendingMessageQueue, str]]:
+) -> Dict[int, Tuple[PendingMessageQueue, str]]:
     """Build a stable queue snapshot for recipients without holding the lock."""
     clean_team = (team_name or "").strip()
     if not clean_team:
@@ -440,7 +440,7 @@ def _snapshot_listeners_for_recipients(
         if not participants:
             return {}
 
-        snapshots: dict[int, tuple[PendingMessageQueue, str]] = {}
+        snapshots: Dict[int, Tuple[PendingMessageQueue, str]] = {}
 
         if wildcard or "*" in target_names:
             for participant_name, queues in participants.items():
@@ -491,7 +491,7 @@ def _build_queue_notification_payload(
     return payload
 
 
-def _coerce_message_recipients(recipients: Optional[Sequence[str]]) -> list[str]:
+def _coerce_message_recipients(recipients: Optional[Sequence[str]]) -> List[str]:
     values = [
         str(value).strip() for value in recipients or [] if value is not None and str(value).strip()
     ]
@@ -520,7 +520,7 @@ def set_team_member_active(
         if team is None:
             raise ValueError(f"Team '{clean_team}' not found.")
 
-        updated_members: list[TeamMember] = []
+        updated_members: List[TeamMember] = []
         found = False
         changed = False
 
@@ -669,7 +669,7 @@ def list_teams() -> List[TeamConfig]:
     if not root.exists():
         return []
 
-    teams: list[TeamConfig] = []
+    teams: List[TeamConfig] = []
     for path in sorted(root.glob("*/config.json")):
         team = _read_team_config(path)
         if team is not None:
@@ -810,7 +810,7 @@ def upsert_team_member(team_name: str, member: TeamMember) -> TeamConfig:
         if team is None:
             raise ValueError(f"Team '{team_name}' not found.")
 
-        updated_members: list[TeamMember] = []
+        updated_members: List[TeamMember] = []
         replaced = False
         for existing in team.members:
             if existing.name == member.name:
@@ -922,7 +922,7 @@ def list_team_messages(
     if not path.exists():
         return []
 
-    messages: list[TeamMessage] = []
+    messages: List[TeamMessage] = []
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, IOError, UnicodeDecodeError) as exc:
@@ -971,7 +971,7 @@ def find_team_by_task_list_id(task_list_id: str) -> Optional[TeamConfig]:
 # Session cleanup registry
 # ---------------------------------------------------------------------------
 
-_SESSION_TEAMS: dict[str, str] = {}  # team_name -> lead_session_id
+_SESSION_TEAMS: Dict[str, str] = {}  # team_name -> lead_session_id
 _SESSION_TEAMS_LOCK = threading.Lock()
 
 
@@ -993,9 +993,9 @@ def unregister_team_for_session_cleanup(team_name: str) -> None:
         _SESSION_TEAMS.pop(clean_name, None)
 
 
-def cleanup_session_teams() -> list[str]:
+def cleanup_session_teams() -> List[str]:
     """Clean up all teams registered for this session. Returns cleaned names."""
-    cleaned: list[str] = []
+    cleaned: List[str] = []
     with _SESSION_TEAMS_LOCK:
         names = list(_SESSION_TEAMS.keys())
     for name in names:

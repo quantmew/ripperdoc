@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from rich import box
 from rich.markup import escape
@@ -26,7 +28,7 @@ from ripperdoc.commands.base import SlashCommand
 logger = get_logger()
 
 
-def _format_duration(duration_ms: float | None) -> str:
+def _format_duration(duration_ms: Optional[float]) -> str:
     if duration_ms is None:
         return "-"
     try:

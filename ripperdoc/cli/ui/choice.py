@@ -11,7 +11,7 @@ import html
 import os
 import re
 import shutil
-from typing import Any, Optional, cast
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.filters import Condition, has_focus, is_done
@@ -29,7 +29,7 @@ from ripperdoc.services.theme import theme_color
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
-def _choice_diff_style_slots() -> dict[str, str]:
+def _choice_diff_style_slots() -> Dict[str, str]:
     """Return diff styles from active theme for prompt_toolkit."""
     add_bg = theme_color("diff_add_bg")
     add_fg = theme_color("diff_add_fg")
@@ -185,13 +185,13 @@ def _detect_light_background_from_colorfgbg(raw_value: str) -> Optional[bool]:
     return luminance >= 140.0
 
 
-def _xterm_index_to_rgb(index: int) -> Optional[tuple[int, int, int]]:
+def _xterm_index_to_rgb(index: int) -> Optional[Tuple[int, int, int]]:
     """Map xterm color index (0-255) to RGB."""
     if index < 0 or index > 255:
         return None
 
     # xterm standard 16-color palette
-    base_16: dict[int, tuple[int, int, int]] = {
+    base_16: Dict[int, Tuple[int, int, int]] = {
         0: (0, 0, 0),
         1: (205, 0, 0),
         2: (0, 205, 0),
@@ -399,7 +399,7 @@ def _selection_number_offset(open_character: str, close_character: str) -> int:
 
 def prompt_choice(
     message: str,
-    options: list[ChoiceOption] | list[tuple[str, str]],
+    options: Union[List[ChoiceOption], List[Tuple[str, str]]],
     *,
     title: Optional[str] = None,
     description: Optional[str] = None,
@@ -451,7 +451,7 @@ def prompt_choice(
         ```
     """
     # Normalize options to ChoiceOption objects
-    choice_options: list[ChoiceOption] = []
+    choice_options: List[ChoiceOption] = []
     for opt in options:
         if isinstance(opt, ChoiceOption):
             choice_options.append(opt)
@@ -530,7 +530,7 @@ def prompt_choice(
 
 async def prompt_choice_async(
     message: str,
-    options: list[ChoiceOption] | list[tuple[str, str]],
+    options: Union[List[ChoiceOption], List[Tuple[str, str]]],
     *,
     title: Optional[str] = None,
     description: Optional[str] = None,
@@ -546,7 +546,7 @@ async def prompt_choice_async(
     shift_tab_value: Optional[str] = None,
 ) -> str:
     """Async variant of prompt_choice for use inside running event loops."""
-    choice_options: list[ChoiceOption] = []
+    choice_options: List[ChoiceOption] = []
     for opt in options:
         if isinstance(opt, ChoiceOption):
             choice_options.append(opt)
@@ -753,7 +753,7 @@ async def prompt_choice_async(
 
 async def prompt_checkbox_async(
     message: str,
-    options: list[ChoiceOption] | list[tuple[str, str]],
+    options: Union[List[ChoiceOption], List[Tuple[str, str]]],
     *,
     title: Optional[str] = None,
     description: Optional[str] = None,
@@ -765,13 +765,13 @@ async def prompt_checkbox_async(
     next_value: Optional[str] = None,
     submit_on_right: bool = False,
     external_header: Optional[str] = None,
-) -> Optional[list[str]]:
+) -> Optional[List[str]]:
     """Prompt the user to select multiple options via a checkbox dialog.
 
     Returns:
         List of selected values, or None if the dialog was cancelled.
     """
-    choice_options: list[ChoiceOption] = []
+    choice_options: List[ChoiceOption] = []
     for opt in options:
         if isinstance(opt, ChoiceOption):
             choice_options.append(opt)
@@ -828,7 +828,7 @@ async def prompt_checkbox_async(
         padding_right=1,
         padding_bottom=0,
     )
-    body_children: list[Any] = [
+    body_children: List[Any] = [
         Box(
             Label(text=formatted_prompt, dont_extend_height=True),
             padding_top=0,
@@ -857,7 +857,7 @@ async def prompt_checkbox_async(
 
     kb = KeyBindings()
 
-    def _collect_result() -> list[str]:
+    def _collect_result() -> List[str]:
         values = [str(item) for item in checkbox_list.current_values]
         if custom_input_label:
             custom_text = custom_input.text.strip()
@@ -928,7 +928,7 @@ async def prompt_checkbox_async(
     def _interrupt(event: Any) -> None:  # noqa: ANN401
         event.app.exit(result=None, style="class:aborting")
 
-    result: Optional[list[str]] = await Application(
+    result: Optional[List[str]] = await Application(
         layout=layout,
         full_screen=False,
         key_bindings=kb,
@@ -976,7 +976,7 @@ def prompt_yes_no(
             ...
         ```
     """
-    options: list[tuple[str, str]] = [
+    options: List[Tuple[str, str]] = [
         ("y", "<yes-option>Yes</yes-option>"),
     ]
 
@@ -996,7 +996,7 @@ def prompt_yes_no(
 
 def prompt_select(
     message: str,
-    options: list[str],
+    options: List[str],
     *,
     default: Optional[str] = None,
     title: Optional[str] = None,

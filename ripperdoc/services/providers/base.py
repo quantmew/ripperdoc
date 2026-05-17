@@ -16,6 +16,8 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Set,
+    Union,
 )
 
 from ripperdoc.core.config import ModelProfile
@@ -101,8 +103,8 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
             return str(part.get("tool_use_id") or part.get("id") or "")
         return str(getattr(part, "tool_use_id", None) or getattr(part, "id", None) or "")
 
-    def _tool_result_ids(msg: Dict[str, Any]) -> set[str]:
-        ids: set[str] = set()
+    def _tool_result_ids(msg: Dict[str, Any]) -> Set[str]:
+        ids: Set[str] = set()
         content = msg.get("content")
         if not isinstance(content, list):
             return ids
@@ -115,10 +117,10 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
         return ids
 
     # Build lookahead map to identify paired tool_use IDs.
-    tool_results_after: List[set[str]] = []
+    tool_results_after: List[Set[str]] = []
     if normalized_messages:
         tool_results_after = [set() for _ in normalized_messages]
-        future_ids: set[str] = set()
+        future_ids: Set[str] = set()
         for idx in range(len(normalized_messages) - 1, -1, -1):
             tool_results_after[idx] = set(future_ids)
             future_ids.update(_tool_result_ids(normalized_messages[idx]))
@@ -181,7 +183,7 @@ def sanitize_tool_history(normalized_messages: List[Dict[str, Any]]) -> List[Dic
         # the next assistant turn, then insert a single immediate user message.
         collected_results: List[Any] = []
         consumed_user_messages: List[Dict[str, Any]] = []
-        seen_result_ids: set[str] = set()
+        seen_result_ids: Set[str] = set()
         j = i + 1
         while j < len(normalized_messages):
             next_message = normalized_messages[j]
@@ -244,7 +246,7 @@ def sanitize_openai_tool_history(normalized_messages: List[Dict[str, Any]]) -> L
             tool_response_indices.setdefault(tool_call_id, []).append(idx)
 
     sanitized: List[Dict[str, Any]] = []
-    consumed_tool_indices: set[int] = set()
+    consumed_tool_indices: Set[int] = set()
     i = 0
 
     while i < len(normalized_messages):
@@ -308,7 +310,7 @@ def sanitize_openai_tool_history(normalized_messages: List[Dict[str, Any]]) -> L
         sanitized.append({**message, "tool_calls": paired_tool_calls})
 
         expected_ids = set(paired_ids)
-        seen_ids: set[str] = set()
+        seen_ids: Set[str] = set()
         deferred_messages: List[Dict[str, Any]] = []
         j = i + 1
         while j < len(normalized_messages):
@@ -351,7 +353,7 @@ def _retry_delay_seconds(attempt: int, base_delay: float = 0.5, max_delay: float
 
 
 async def iter_with_timeout(
-    stream: Iterable[Any] | AsyncIterable[Any], timeout: Optional[float]
+    stream: Union[Iterable[Any], AsyncIterable[Any]], timeout: Optional[float]
 ) -> AsyncIterator[Any]:
     """Yield items from an async or sync iterable, enforcing per-item timeout if provided."""
     if timeout is None or timeout <= 0:

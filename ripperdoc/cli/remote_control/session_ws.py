@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, cast
 
 from ripperdoc.utils.log import get_logger
 
@@ -35,7 +35,7 @@ else:
     WebSocketConnection = Any
 
 WebSocketClosed: type[Exception]
-websocket_connect: Any | None
+websocket_connect: Optional[Any]
 
 try:
     from websockets.exceptions import ConnectionClosed as _WebSocketClosed
@@ -54,10 +54,10 @@ def _is_valid_message_type(message: Any) -> bool:
 
 @dataclass
 class SessionsWebSocketCallbacks:
-    on_message: Callable[[dict[str, Any]], None] | None = None
-    on_connected: Callable[[], None] | None = None
-    on_close: Callable[[], None] | None = None
-    on_error: Callable[[Exception], None] | None = None
+    on_message: Optional[Callable[[Dict[str, Any]], None]] = None
+    on_connected: Optional[Callable[[], None]] = None
+    on_close: Optional[Callable[[], None]] = None
+    on_error: Optional[Callable[[Exception], None]] = None
 
 
 class SessionsWebSocketManager:
@@ -81,8 +81,8 @@ class SessionsWebSocketManager:
         self._state = "closed"
         self._reconnect_attempts = 0
         self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._ws: WebSocketConnection | None = None
+        self._thread: Optional[threading.Thread] = None
+        self._ws: Optional[WebSocketConnection] = None
         self._ws_lock = threading.Lock()
 
     def _build_ws_url(self) -> str:
@@ -92,7 +92,7 @@ class SessionsWebSocketManager:
             f"?organization_uuid={self.org_uuid}"
         )
 
-    def _get_ssl_context(self) -> ssl.SSLContext | None:
+    def _get_ssl_context(self) -> Optional[ssl.SSLContext]:
         """Build an SSL context with optional mTLS certificates from env vars."""
         cert_path = os.getenv(BRIDGE_TLS_CERT_ENV, "").strip()
         key_path = os.getenv(BRIDGE_TLS_KEY_ENV, "").strip()
@@ -110,7 +110,7 @@ class SessionsWebSocketManager:
             ctx.load_cert_chain(cert_path)
         return ctx
 
-    def _get_proxy_url(self) -> str | None:
+    def _get_proxy_url(self) -> Optional[str]:
         """Get proxy URL from env vars, respecting no_proxy."""
         proxy = os.getenv(BRIDGE_PROXY_ENV, "").strip()
         if not proxy:
@@ -234,7 +234,7 @@ class SessionsWebSocketManager:
         self,
         payload: dict[str, Any],
         *,
-        request_id: str | None = None,
+        request_id: Optional[str] = None,
     ) -> str:
         resolved_request_id = request_id or str(uuid.uuid4())
         envelope = {

@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 from ripperdoc.utils.filesystem.config_paths import (
     CONFIG_DIR_NAME,
@@ -37,7 +37,7 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 
-PLUGIN_MANIFEST_CANDIDATES: tuple[tuple[str, str], ...] = (
+PLUGIN_MANIFEST_CANDIDATES: Tuple[Tuple[str, str], ...] = (
     (".ripperdoc-plugin", "plugin.json"),
     (".claude-plugin", "plugin.json"),
 )
@@ -51,7 +51,7 @@ PLUGIN_DIRS_ENV_VAR = "RIPPERDOC_PLUGIN_DIR"
 _PLUGIN_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 # Runtime-only plugin dirs set by CLI flags (e.g., --plugin-dir)
-_runtime_plugin_dirs: tuple[Path, ...] = ()
+_runtime_plugin_dirs: Tuple[Path, ...] = ()
 
 
 class PluginSettingsScope(str, Enum):
@@ -151,7 +151,7 @@ def get_plugin_settings_path(
 
 
 def set_runtime_plugin_dirs(
-    directories: Optional[Sequence[str | Path]],
+    directories: Optional[Sequence[Union[str, Path]]],
     *,
     base_dir: Optional[Path] = None,
 ) -> None:
@@ -271,7 +271,7 @@ def _configured_plugin_dirs(project_path: Optional[Path], home: Optional[Path]) 
     ]
 
     enabled: List[Path] = []
-    disabled: set[Path] = set()
+    disabled: Set[Path] = set()
 
     def _coerce_installed_entries(raw: Any) -> List[Dict[str, Any]]:
         if raw is None:
@@ -451,7 +451,7 @@ def _coerce_mixed_values(raw: Any) -> List[Any]:
 
 def _dedupe_paths(paths: Iterable[Path]) -> List[Path]:
     deduped: List[Path] = []
-    seen: set[Path] = set()
+    seen: Set[Path] = set()
     for path in paths:
         if path in seen:
             continue
@@ -575,7 +575,7 @@ def discover_plugins(
     plugin_dirs = resolve_enabled_plugin_dirs(project_path=project_path, home=home)
     plugins: List[PluginDefinition] = []
     errors: List[PluginLoadError] = []
-    seen_roots: set[Path] = set()
+    seen_roots: Set[Path] = set()
 
     for plugin_dir in plugin_dirs:
         root = plugin_dir.resolve()

@@ -52,7 +52,7 @@ def _safe_int(value: object) -> int:
         return 0
 
 
-def _get_usage_field(usage: Optional[Mapping[str, Any] | object], field: str) -> int:
+def _get_usage_field(usage: Optional[Union[Mapping[str, Any], object]], field: str) -> int:
     """Fetch a usage field from either a dict or object."""
     if usage is None:
         return 0
@@ -61,7 +61,7 @@ def _get_usage_field(usage: Optional[Mapping[str, Any] | object], field: str) ->
     return _safe_int(getattr(usage, field, 0))
 
 
-def anthropic_usage_tokens(usage: Optional[Mapping[str, Any] | object]) -> Dict[str, int]:
+def anthropic_usage_tokens(usage: Optional[Union[Mapping[str, Any], object]]) -> Dict[str, int]:
     """Extract token counts from an Anthropic response usage payload."""
     return {
         "input_tokens": _get_usage_field(usage, "input_tokens"),
@@ -71,7 +71,7 @@ def anthropic_usage_tokens(usage: Optional[Mapping[str, Any] | object]) -> Dict[
     }
 
 
-def openai_usage_tokens(usage: Optional[Mapping[str, Any] | object]) -> Dict[str, int]:
+def openai_usage_tokens(usage: Optional[Union[Mapping[str, Any], object]]) -> Dict[str, int]:
     """Extract token counts from an OpenAI-compatible response usage payload."""
     prompt_details = None
     input_details = None
@@ -570,7 +570,7 @@ def anthropic_cache_control() -> Dict[str, Any]:
 
 def build_anthropic_system_blocks(
     system_prompt: str, *, enable_prompt_caching: bool
-) -> str | List[Dict[str, Any]]:
+) -> Union[str, List[Dict[str, Any]]]:
     """Render Anthropic system blocks with optional cache-aware segmentation."""
     text = (system_prompt or "").strip()
     if not text or not enable_prompt_caching:
@@ -834,7 +834,7 @@ def format_pydantic_errors(error: ValidationError) -> str:
     """Render a compact validation error summary."""
     details = []
     for err in error.errors():
-        loc: list[Any] = list(err.get("loc") or [])
+        loc: List[Any] = list(err.get("loc") or [])
         loc_str = ".".join(str(part) for part in loc) if loc else ""
         msg = err.get("msg") or ""
         if loc_str and msg:

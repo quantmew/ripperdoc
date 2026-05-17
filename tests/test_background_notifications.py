@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from ripperdoc.core.tool import ToolUseContext
-from ripperdoc.tools.background_shell import get_background_status
+from ripperdoc.services.background_shell import get_background_status
 from ripperdoc.tools.bash import BashTool, BashToolInput
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 

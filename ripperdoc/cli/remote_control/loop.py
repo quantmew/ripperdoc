@@ -6,7 +6,7 @@ import json
 import os
 import threading
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from rich.console import Console
 
@@ -52,7 +52,7 @@ class _HeartbeatWorker:
         self._token = session_token
         self._interval = max(5.0, interval_sec)
         self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
         if self._thread is not None:
@@ -96,19 +96,19 @@ class RemoteControlBridgeRunner:
         api_client: RemoteControlApiClient,
         process_spawner: RemoteControlProcessSpawner,
         stop_event: threading.Event,
-        token_supplier: Callable[[], str | None] | None = None,
+        token_supplier: Optional[Callable[[], Optional[str]]] = None,
     ) -> None:
         self.config = config
         self.api_client = api_client
         self.process_spawner = process_spawner
         self.stop_event = stop_event
-        self.environment_id: str | None = None
-        self.environment_secret: str | None = None
-        self._initial_session_id: str | None = None
-        self._sessions: dict[str, ActiveSession] = {}
-        self._session_bridges: dict[str, RemoteSessionBridgeManager] = {}
-        self._completed_work_ids: set[str] = set()
-        self._heartbeats: dict[str, _HeartbeatWorker] = {}
+        self.environment_id: Optional[str] = None
+        self.environment_secret: Optional[str] = None
+        self._initial_session_id: Optional[str] = None
+        self._sessions: Dict[str, ActiveSession] = {}
+        self._session_bridges: Dict[str, RemoteSessionBridgeManager] = {}
+        self._completed_work_ids: Set[str] = set()
+        self._heartbeats: Dict[str, _HeartbeatWorker] = {}
         self._token_supplier = token_supplier
         self._token_manager = (
             TokenSessionManager(
@@ -122,7 +122,7 @@ class RemoteControlBridgeRunner:
 
     @staticmethod
     def _detect_sleep_gap(
-        previous_error_at: float | None,
+        previous_error_at: Optional[float],
         now: float,
         retry_cap_sec: float,
     ) -> bool:
@@ -138,7 +138,7 @@ class RemoteControlBridgeRunner:
         logger.info("[bridge] Token manager refreshed token for active session %s", session_id)
 
     @staticmethod
-    def _extract_session_ingress_token(payload: dict[str, Any]) -> str | None:
+    def _extract_session_ingress_token(payload: Dict[str, Any]) -> Optional[str]:
         for key in (
             "session_ingress_token",
             "sessionIngressToken",
@@ -150,7 +150,7 @@ class RemoteControlBridgeRunner:
                 return value.strip()
         return None
 
-    def _get_refresh_token_for_session(self, session_id: str) -> str | None:
+    def _get_refresh_token_for_session(self, session_id: str) -> Optional[str]:
         # Prefer a session-scoped token from control plane if exposed.
         try:
             session_payload = self.api_client.get_session(session_id)
@@ -193,11 +193,11 @@ class RemoteControlBridgeRunner:
 
         connection_delay = CONNECTION_RETRY_INITIAL_SEC
         general_delay = GENERAL_RETRY_INITIAL_SEC
-        connection_started_at: float | None = None
-        general_started_at: float | None = None
-        connection_last_error_at: float | None = None
-        general_last_error_at: float | None = None
-        disconnected_since: float | None = None
+        connection_started_at: Optional[float] = None
+        general_started_at: Optional[float] = None
+        connection_last_error_at: Optional[float] = None
+        general_last_error_at: Optional[float] = None
+        disconnected_since: Optional[float] = None
 
         while not self.stop_event.is_set():
             self._reap_sessions()
@@ -359,7 +359,7 @@ class RemoteControlBridgeRunner:
             activity.summary,
         )
 
-    def _handle_child_control_message(self, session_id: str, message: dict[str, Any]) -> None:
+    def _handle_child_control_message(self, session_id: str, message: Dict[str, Any]) -> None:
         active = self._sessions.get(session_id)
         if active is None:
             return
@@ -389,7 +389,7 @@ class RemoteControlBridgeRunner:
         )
         worker.start()
 
-    def _forward_child_control_request(self, session_id: str, message: dict[str, Any]) -> None:
+    def _forward_child_control_request(self, session_id: str, message: Dict[str, Any]) -> None:
         active = self._sessions.get(session_id)
         if active is None:
             return
@@ -433,7 +433,7 @@ class RemoteControlBridgeRunner:
                     },
                 }
             else:
-                payload_response: dict[str, Any] = {
+                payload_response: Dict[str, Any] = {
                     "subtype": str(response.get("subtype") or "success"),
                     "request_id": request_id,
                 }
@@ -444,7 +444,7 @@ class RemoteControlBridgeRunner:
                 payload = {"type": "control_response", "response": payload_response}
             active.process.write_stdin(json.dumps(payload, ensure_ascii=False) + "\n")
 
-    def _extract_org_uuid(self, session_payload: dict[str, Any]) -> str | None:
+    def _extract_org_uuid(self, session_payload: Dict[str, Any]) -> Optional[str]:
         for key in ("organization_uuid", "organizationUuid", "org_uuid", "orgUuid"):
             value = session_payload.get(key)
             if isinstance(value, str) and value.strip():
@@ -502,7 +502,7 @@ class RemoteControlBridgeRunner:
     def _handle_repl_permission_request(
         self,
         session_id: str,
-        request: dict[str, Any],
+        request: Dict[str, Any],
         request_id: str,
     ) -> None:
         active = self._sessions.get(session_id)
@@ -518,7 +518,7 @@ class RemoteControlBridgeRunner:
     def _send_control_response_via_events(
         self,
         session_id: str,
-        payload: dict[str, Any],
+        payload: Dict[str, Any],
     ) -> None:
         token = self._token_supplier() if self._token_supplier is not None else None
         if not token:
@@ -536,14 +536,14 @@ class RemoteControlBridgeRunner:
                 exc,
             )
 
-    def _handle_work_item(self, work: dict[str, object]) -> None:
+    def _handle_work_item(self, work: Dict[str, object]) -> None:
         work_id = str(work.get("id") or "").strip()
         if work_id and work_id in self._completed_work_ids:
             logger.debug("[bridge] Ignoring already completed work item %s", work_id)
             return
 
         raw_data = work.get("data")
-        work_data: dict[str, object] = raw_data if isinstance(raw_data, dict) else {}
+        work_data: Dict[str, object] = raw_data if isinstance(raw_data, dict) else {}
         work_type = str(work_data.get("type") or "").strip().lower()
 
         if work_type == "healthcheck":

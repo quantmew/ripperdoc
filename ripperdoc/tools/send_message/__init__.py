@@ -1,6 +1,6 @@
 """SendMessageTool — intra-team messaging and protocol handling."""
 
-from ripperdoc.tools.SendMessageTool._tool import (
+from ripperdoc.tools.send_message._tool import (
     SendMessageInput,
     SendMessageOutput,
     SendMessageRouting,

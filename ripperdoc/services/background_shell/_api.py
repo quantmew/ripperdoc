@@ -14,12 +14,12 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.tools.background_shell._models import BackgroundTask
-from ripperdoc.tools.background_shell._manager import (
+from ripperdoc.services.background_shell._models import BackgroundTask
+from ripperdoc.services.background_shell._manager import (
     BackgroundShellManager,
     DEFAULT_TASK_TTL_SEC,
 )
-from ripperdoc.tools.background_shell._utils import (
+from ripperdoc.services.background_shell._utils import (
     _compute_status,
     _finalize_reader_tasks,
     _get_manager,

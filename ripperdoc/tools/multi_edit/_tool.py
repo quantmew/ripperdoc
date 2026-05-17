@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import difflib
 import os
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,7 @@ from ripperdoc.utils.file_editing import (
     select_write_encoding,
 )
 from ripperdoc.tools.file_read import detect_file_encoding
+from ripperdoc.tools.file_read._utils import line_prefix_format_description
 
 logger = get_logger()
 
@@ -72,45 +73,51 @@ DEFAULT_ACTION = "Edit"
 TOOL_NAME_READ = "Read"
 NOTEBOOK_EDIT_TOOL_NAME = "NotebookEdit"
 
-MULTI_EDIT_DESCRIPTION = (
-    f"This is a tool for making multiple edits to a single file in one operation. "
-    f"It is built on top of the {DEFAULT_ACTION} tool and allows you to perform multiple "
-    f"find-and-replace operations efficiently. Prefer this tool over the {DEFAULT_ACTION} tool "
-    f"when you need to make multiple edits to the same file.\n\n"
-    f"Before using this tool:\n\n"
-    f"1. Use the {TOOL_NAME_READ} tool to understand the file's contents and context\n"
-    f"2. Verify the directory path is correct\n\n"
-    f"To make multiple file edits, provide the following:\n"
-    f"1. file_path: The absolute path to the file to modify (must be absolute, not relative)\n"
-    f"2. edits: An array of edit operations to perform, where each edit contains:\n"
-    f"   - old_string: The text to replace (must match the file contents exactly, including all whitespace and indentation)\n"
-    f"   - new_string: The edited text to replace the old_string\n"
-    f"   - replace_all: Replace all occurences of old_string. This parameter is optional and defaults to false.\n\n"
-    f"IMPORTANT:\n"
-    f"- All edits are applied in sequence, in the order they are provided\n"
-    f"- Each edit operates on the result of the previous edit\n"
-    f"- All edits must be valid for the operation to succeed - if any edit fails, none will be applied\n"
-    f"- This tool is ideal when you need to make several changes to different parts of the same file\n"
-    f"- For Jupyter notebooks (.ipynb files), use the {NOTEBOOK_EDIT_TOOL_NAME} instead\n\n"
-    f"CRITICAL REQUIREMENTS:\n"
-    f"1. All edits follow the same requirements as the single Edit tool\n"
-    f"2. The edits are atomic - either all succeed or none are applied\n"
-    f"3. Plan your edits carefully to avoid conflicts between sequential operations\n\n"
-    f"WARNING:\n"
-    f"- The tool will fail if edits.old_string doesn't match the file contents exactly (including whitespace)\n"
-    f"- The tool will fail if edits.old_string and edits.new_string are the same\n"
-    f"- Since edits are applied in sequence, ensure that earlier edits don't affect the text that later edits are trying to find\n\n"
-    f"When making edits:\n"
-    f"- Ensure all edits result in idiomatic, correct code\n"
-    f"- Do not leave the code in a broken state\n"
-    f"- Always use absolute file paths (starting with /)\n"
-    f"- Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.\n"
-    f"- Use replace_all for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.\n\n"
-    f"If you want to create a new file, use:\n"
-    f"- A new file path, including dir name if needed\n"
-    f"- First edit: empty old_string and the new file's contents as new_string\n"
-    f"- Subsequent edits: normal edit operations on the created content"
-)
+def get_multi_edit_description() -> str:
+    prefix_format = line_prefix_format_description()
+    return (
+        f"This is a tool for making multiple edits to a single file in one operation. "
+        f"It is built on top of the {DEFAULT_ACTION} tool and allows you to perform multiple "
+        f"find-and-replace operations efficiently. Prefer this tool over the {DEFAULT_ACTION} tool "
+        f"when you need to make multiple edits to the same file.\n\n"
+        f"Before using this tool:\n\n"
+        f"1. Use the {TOOL_NAME_READ} tool to understand the file's contents and context\n"
+        f"2. Verify the directory path is correct\n\n"
+        f"To make multiple file edits, provide the following:\n"
+        f"1. file_path: The absolute path to the file to modify (must be absolute, not relative)\n"
+        f"2. edits: An array of edit operations to perform, where each edit contains:\n"
+        f"   - old_string: The text to replace (must match the file contents exactly, including all whitespace and indentation)\n"
+        f"   - new_string: The edited text to replace the old_string\n"
+        f"   - replace_all: Replace all occurences of old_string. This parameter is optional and defaults to false.\n\n"
+        f"IMPORTANT:\n"
+        f"- All edits are applied in sequence, in the order they are provided\n"
+        f"- Each edit operates on the result of the previous edit\n"
+        f"- All edits must be valid for the operation to succeed - if any edit fails, none will be applied\n"
+        f"- This tool is ideal when you need to make several changes to different parts of the same file\n"
+        f"- For Jupyter notebooks (.ipynb files), use the {NOTEBOOK_EDIT_TOOL_NAME} instead\n\n"
+        f"CRITICAL REQUIREMENTS:\n"
+        f"1. All edits follow the same requirements as the single Edit tool\n"
+        f"2. The edits are atomic - either all succeed or none are applied\n"
+        f"3. Plan your edits carefully to avoid conflicts between sequential operations\n"
+        f"4. When editing text from Read tool output, preserve the exact indentation after the line number prefix. The line number prefix format is: {prefix_format}. Never include any part of the line number prefix in old_string or new_string.\n\n"
+        f"WARNING:\n"
+        f"- The tool will fail if edits.old_string doesn't match the file contents exactly (including whitespace)\n"
+        f"- The tool will fail if edits.old_string and edits.new_string are the same\n"
+        f"- Since edits are applied in sequence, ensure that earlier edits don't affect the text that later edits are trying to find\n\n"
+        f"When making edits:\n"
+        f"- Ensure all edits result in idiomatic, correct code\n"
+        f"- Do not leave the code in a broken state\n"
+        f"- Always use absolute file paths (starting with /)\n"
+        f"- Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.\n"
+        f"- Use replace_all for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.\n\n"
+        f"If you want to create a new file, use:\n"
+        f"- A new file path, including dir name if needed\n"
+        f"- First edit: empty old_string and the new file's contents as new_string\n"
+        f"- Subsequent edits: normal edit operations on the created content"
+    )
+
+
+MULTI_EDIT_DESCRIPTION = get_multi_edit_description()
 
 
 class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
@@ -121,7 +128,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         return "MultiEdit"
 
     async def description(self) -> str:
-        return MULTI_EDIT_DESCRIPTION
+        return get_multi_edit_description()
 
     @property
     def input_schema(self) -> type[MultiEditToolInput]:
@@ -152,7 +159,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
         ]
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        return MULTI_EDIT_DESCRIPTION
+        return get_multi_edit_description()
 
     def is_read_only(self) -> bool:
         return False
@@ -224,7 +231,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
     ) -> str:
         return f"Multi-editing: {input_data.file_path} ({len(input_data.edits)} edits)"
 
-    def _apply_edits(self, content: str, edits: List[EditOperation]) -> tuple[str, int]:
+    def _apply_edits(self, content: str, edits: List[EditOperation]) -> Tuple[str, int]:
         current = content
         total_replacements = 0
 
@@ -260,7 +267,7 @@ class MultiEditTool(Tool[MultiEditToolInput, MultiEditToolOutput]):
 
     def _build_diff(
         self, original: str, updated: str, file_path: str
-    ) -> tuple[list[str], int, int]:
+    ) -> Tuple[List[str], int, int]:
         old_lines = original.splitlines(keepends=True)
         new_lines = updated.splitlines(keepends=True)
 

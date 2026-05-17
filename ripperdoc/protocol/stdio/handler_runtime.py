@@ -8,13 +8,13 @@ import logging
 import os
 import time
 import uuid
-from typing import Any
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import ValidationError
 
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.protocol.models import IncomingUserStreamMessage
-from ripperdoc.tools.background_shell import shutdown_background_shell
+from ripperdoc.services.background_shell import shutdown_background_shell
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.lsp import shutdown_lsp_manager
 from ripperdoc.utils.messaging.messages import create_user_message
@@ -31,7 +31,7 @@ logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 _EXIT_AFTER_STOP_DELAY_ENV = "RIPPERDOC_EXIT_AFTER_STOP_DELAY"
 
 
-def _parse_exit_after_stop_delay_ms() -> int | None:
+def _parse_exit_after_stop_delay_ms() -> Optional[int]:
     """Return positive idle-exit delay in ms, or None when disabled/invalid."""
     raw = os.getenv(_EXIT_AFTER_STOP_DELAY_ENV)
     if raw is None:
@@ -52,17 +52,17 @@ def _parse_exit_after_stop_delay_ms() -> int | None:
 
 
 class StdioRuntimeMixin:
-    _task_notification_task: asyncio.Task[None] | None
+    _task_notification_task: Optional[asyncio.Task[None]]
     _query_in_progress: bool
     _inflight_tasks: set[asyncio.Task[None]]
     _pending_requests: dict[str, Any]
     _request_subtypes: dict[str, str]
-    _idle_exit_delay_ms: int | None
-    _idle_exit_task: asyncio.Task[None] | None
-    _runtime_task: asyncio.Task[Any] | None
+    _idle_exit_delay_ms: Optional[int]
+    _idle_exit_task: Optional[asyncio.Task[None]]
+    _runtime_task: Optional[asyncio.Task[Any]]
     _idle_exit_triggered: bool
     _replay_user_messages: bool
-    _session_id: str | None
+    _session_id: Optional[str]
     _conversation_messages: list[Any]
     _seen_user_message_ids: set[str]
 
@@ -122,7 +122,7 @@ class StdioRuntimeMixin:
         )
         runtime_task.cancel()
 
-    def _extract_prompt_from_user_content(self, content: str | list[dict[str, Any]]) -> str | None:
+    def _extract_prompt_from_user_content(self, content: Union[str, List[Dict[str, Any]]]) -> Optional[str]:
         """Extract plain-text prompt from validated user message content."""
         if isinstance(content, str):
             prompt = content.strip()
@@ -147,7 +147,7 @@ class StdioRuntimeMixin:
 
     def _coerce_user_message_to_control_request(
         self, message: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    ) -> Optional[Dict[str, Any]]:
         """Convert incoming `type=user` stream message into a control request."""
         try:
             validated_message = IncomingUserStreamMessage.model_validate(message)
@@ -173,7 +173,7 @@ class StdioRuntimeMixin:
             },
         }
 
-    def _build_user_replay_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
+    def _build_user_replay_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Build a replay/ack user payload from inbound stream message."""
         try:
             validated_message = IncomingUserStreamMessage.model_validate(message)

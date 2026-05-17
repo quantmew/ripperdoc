@@ -8,7 +8,7 @@ import os
 import random
 import string
 from textwrap import dedent
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
@@ -333,7 +333,7 @@ class NotebookEditTool(Tool[NotebookEditInput, NotebookEditOutput]):
 
     def _resolve_cell_index(
         self, cells: list, cell_id: Optional[str], mode: str
-    ) -> tuple[Optional[int], Optional[str]]:
+    ) -> Tuple[Optional[int], Optional[str]]:
         """Return target index and resolved id."""
         if cell_id is None:
             return (0 if mode == "insert" else None, None)

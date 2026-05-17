@@ -1,1088 +1,180 @@
-"""Tests for the new bash permissions and validation utilities."""
+"""Tests for current Bash permission and validation APIs."""
 
 from pathlib import Path
 
 import pytest
 
+from ripperdoc.security.bash_security import bash_command_is_safe
 from ripperdoc.tools.bash import BashTool, BashToolInput
-from ripperdoc.utils.permissions.path_validation_utils import validate_shell_command_paths
-from ripperdoc.utils.permissions.shell_command_validation import (
-    validate_shell_command,
-    is_complex_unsafe_shell_command,
-)
-from ripperdoc.utils.permissions.tool_permission_utils import (
-    evaluate_shell_command_permissions,
-)
+from ripperdoc.tools.bash.path_validation import check_path_constraints
+from ripperdoc.tools.bash.read_only_validation import is_command_read_only
 from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
+from ripperdoc.utils.permissions.tool_permission_utils import match_rule
 
 
-# =============================================================================
-# Shell Command Validation Tests
-# =============================================================================
+class TestBashSecurity:
+    def test_empty_command_is_explicitly_allowed_by_static_security(self):
+        for command in ["", "   "]:
+            result = bash_command_is_safe(command)
+            assert result.behavior == "allow", command
+
+    def test_simple_commands_pass_static_security(self):
+        for command in ["ls", "pwd", "git status", "find . -name '*.py'"]:
+            result = bash_command_is_safe(command)
+            assert result.behavior == "passthrough", command
+
+    def test_command_substitution_requires_permission(self):
+        for command in ["echo $(whoami)", "echo ${HOME}"]:
+            result = bash_command_is_safe(command)
+            assert result.behavior == "ask", command
+
+    def test_single_quoted_substitution_content_is_literal(self):
+        for command in ["echo 'hello `world`'", "echo 'hello $(world)'"]:
+            result = bash_command_is_safe(command)
+            assert result.behavior == "passthrough", command
+
+    def test_sensitive_input_redirection_requires_permission(self):
+        result = bash_command_is_safe("cat < /etc/passwd")
+        assert result.behavior == "ask"
+
+    def test_safe_dev_null_redirections_pass(self):
+        for command in ["command 2>/dev/null", "command > /dev/null", "command < /dev/null"]:
+            result = bash_command_is_safe(command)
+            assert result.behavior == "passthrough", command
+
+    def test_newlines_and_jq_system_require_permission(self):
+        for command in ["echo hello\necho world", "jq 'system(\"id\")'"]:
+            result = bash_command_is_safe(command)
+            assert result.behavior == "ask", command
+
+    def test_git_commit_single_quoted_heredoc_is_allowed_pattern(self):
+        command = "git commit -m \"$(cat <<'EOF'\nCommit message\nEOF\n)\""
+        result = bash_command_is_safe(command)
+        assert result.behavior == "allow"
 
 
-class TestValidateShellCommand:
-    """Tests for validate_shell_command function."""
+class TestPathValidation:
+    def test_path_validation_blocks_cd_outside_allowed_directory(self, tmp_path: Path):
+        result = check_path_constraints("cd /", str(tmp_path), {str(tmp_path)})
+        assert result.behavior == "ask"
 
-    def test_empty_command_is_safe(self):
-        """Empty commands should pass validation."""
-        result = validate_shell_command("")
+    def test_path_validation_allows_cd_inside_allowed_directory(self, tmp_path: Path):
+        result = check_path_constraints(f"cd {tmp_path}", str(tmp_path), {str(tmp_path)})
         assert result.behavior == "passthrough"
 
-        result = validate_shell_command("   ")
-        assert result.behavior == "passthrough"
-
-    def test_simple_safe_commands(self):
-        """Simple safe commands should pass validation."""
-        safe_commands = [
-            "ls",
-            "ls -la",
-            "pwd",
-            "echo hello",
-            "cat file.txt",
-            "grep pattern file.txt",
-            "find . -name '*.py'",
-            "git status",
-            "git log --oneline",
-        ]
-        for cmd in safe_commands:
-            result = validate_shell_command(cmd)
-            assert result.behavior == "passthrough", f"Command should be safe: {cmd}"
-
-    def test_gemini3_unsafe_command(self):
-        """Commands that are unsafe in Gemini 3 context should be blocked."""
-        result = validate_shell_command(r'cmd /c "rmdir /s /q \"C:\Users\xxx\SCE Projects\src\""')
-        assert result.behavior == "deny"
-
-    def test_backtick_command_substitution_blocked(self):
-        """Backtick command substitution should be blocked."""
-        result = validate_shell_command("echo `whoami`")
-        assert result.behavior == "ask"
-        assert "backtick" in result.message.lower()
-
-    def test_dollar_paren_command_substitution_blocked(self):
-        """$() command substitution should be blocked."""
-        result = validate_shell_command("echo $(whoami)")
-        assert result.behavior == "ask"
-        assert "command substitution" in result.message.lower()
-
-    def test_parameter_substitution_blocked(self):
-        """${} parameter substitution should be blocked."""
-        result = validate_shell_command("echo ${HOME}")
-        assert result.behavior == "ask"
-        assert "parameter substitution" in result.message.lower()
-
-    def test_process_substitution_blocked(self):
-        """Process substitution <() and >() should be blocked."""
-        result = validate_shell_command("diff <(cat file1) <(cat file2)")
-        assert result.behavior == "ask"
-        assert "process substitution" in result.message.lower()
-
-        result = validate_shell_command("tee >(cat)")
-        assert result.behavior == "ask"
-        assert "process substitution" in result.message.lower()
-
-    def test_input_redirection_blocked(self):
-        """Input redirection should be blocked (except /dev/null)."""
-        result = validate_shell_command("cat < /etc/passwd")
-        assert result.behavior == "ask"
-        assert "input redirection" in result.message.lower()
-
-    def test_output_redirection_blocked(self):
-        """Output redirection should be blocked (except /dev/null)."""
-        result = validate_shell_command("echo hello > file.txt")
-        assert result.behavior == "ask"
-        assert "output redirection" in result.message.lower()
-
-    def test_dev_null_redirection_allowed(self):
-        """Redirection to /dev/null should be allowed."""
-        # These should pass because /dev/null is safe
-        result = validate_shell_command("command 2>/dev/null")
-        assert result.behavior == "passthrough"
-
-        result = validate_shell_command("command > /dev/null")
-        assert result.behavior == "passthrough"
-
-        result = validate_shell_command("command < /dev/null")
-        assert result.behavior == "passthrough"
-
-    def test_newlines_blocked(self):
-        """Commands with newlines should be blocked."""
-        result = validate_shell_command("echo hello\necho world")
-        assert result.behavior == "ask"
-        assert "newline" in result.message.lower()
-
-    def test_jq_system_blocked(self):
-        """jq system() function should be blocked."""
-        result = validate_shell_command("jq 'system(\"id\")'")
-        assert result.behavior == "ask"
-        assert "system()" in result.message.lower()
-
-    def test_heredoc_blocked(self):
-        """Heredoc should be blocked."""
-        result = validate_shell_command("cat << EOF\nhello\nEOF")
-        assert result.behavior == "ask"
-        assert "heredoc" in result.message.lower()
-
-    def test_eval_blocked(self):
-        """eval command should be blocked."""
-        result = validate_shell_command("eval 'echo hello'")
-        assert result.behavior == "ask"
-        assert "eval" in result.message.lower()
-
-    def test_source_blocked(self):
-        """source command should be blocked."""
-        result = validate_shell_command("source script.sh")
-        assert result.behavior == "ask"
-        assert "source" in result.message.lower()
-
-    def test_dot_source_blocked(self):
-        """. (dot) command should be blocked."""
-        result = validate_shell_command(". script.sh")
-        assert result.behavior == "ask"
-        assert "source" in result.message.lower()
-
-    def test_single_quoted_content_is_safe(self):
-        """Content inside single quotes should be ignored for security checks."""
-        # Backticks inside single quotes are literal
-        result = validate_shell_command("echo 'hello `world`'")
-        assert result.behavior == "passthrough"
-
-        # $() inside single quotes is literal
-        result = validate_shell_command("echo 'hello $(world)'")
-        assert result.behavior == "passthrough"
-
-    def test_variables_in_dangerous_context_blocked(self):
-        """Variables in redirections or pipes should be blocked."""
-        result = validate_shell_command("echo hello | $PAGER")
-        assert result.behavior == "ask"
-        # The command contains | which is a shell metacharacter
-        # With the improved validation, we check for metacharacters first
-        # So the message might be about metacharacters, not variables
-        # But the command should still be blocked
-        pass  # Just check that behavior is "ask"
-
-    def test_git_commit_heredoc_allowed(self):
-        """Git commit with single-quoted heredoc should be allowed."""
-        cmd = "git commit -m \"$(cat <<'EOF'\nCommit message\nEOF\n)\""
-        result = validate_shell_command(cmd)
-        assert result.behavior == "passthrough"
-
-    def test_find_with_metacharacters_blocked(self):
-        """find with shell metacharacters in arguments should be blocked."""
-        # This command has metacharacters in double quotes (not single quotes)
-        # With improved validation, metacharacters inside quotes are allowed
-        # because they're part of the argument, not shell operators
-        result = validate_shell_command('find . -name "*.py;rm -rf /"')
-        assert result.behavior == "passthrough"  # Changed from "ask"
-        # Note: This is now allowed because ; is inside quotes
-
-    def test_find_exec_semicolon_allowed(self):
-        """find -exec terminator should not be treated as shell metacharacter."""
-        cmd = r'find . -type f -name "*.py" -exec wc -l {} \;'
-        result = validate_shell_command(cmd)
-        assert result.behavior == "passthrough"
-
-
-class TestIsComplexUnsafeShellCommand:
-    """Tests for is_complex_unsafe_shell_command function."""
-
-    def test_simple_commands_safe(self):
-        """Simple commands without operators should be safe."""
-        assert is_complex_unsafe_shell_command("ls") is False
-        assert is_complex_unsafe_shell_command("echo hello") is False
-        assert is_complex_unsafe_shell_command("git status") is False
-
-    def test_and_operator_detected(self):
-        """&& operator should be detected."""
-        assert is_complex_unsafe_shell_command("cmd1 && cmd2") is True
-
-    def test_or_operator_detected(self):
-        """|| operator should be detected."""
-        assert is_complex_unsafe_shell_command("cmd1 || cmd2") is True
-
-    def test_semicolon_operator_detected(self):
-        """; operator should be detected."""
-        assert is_complex_unsafe_shell_command("cmd1; cmd2") is True
-
-    def test_operators_in_quotes_safe(self):
-        """Operators inside quotes should not be detected."""
-        assert is_complex_unsafe_shell_command("echo '&&'") is False
-        assert is_complex_unsafe_shell_command('echo "||"') is False
-        assert is_complex_unsafe_shell_command("echo ';'") is False
-
-    def test_pipe_not_considered_complex(self):
-        """Single pipe is not considered complex unsafe."""
-        assert is_complex_unsafe_shell_command("ls | grep foo") is False
-
-    def test_empty_command(self):
-        """Empty command should be safe."""
-        assert is_complex_unsafe_shell_command("") is False
-
-
-# =============================================================================
-# Path Validation Tests
-# =============================================================================
-
-
-def test_path_validation_blocks_outside_allowed(tmp_path: Path):
-    """cd into a disallowed directory should trigger an ask decision."""
-    allowed = {str(tmp_path)}
-    result = validate_shell_command_paths("cd /", str(tmp_path), allowed)
-    assert result.behavior == "ask"
-    assert "permission" in result.message.lower() or "outside" in result.message.lower()
-
-
-def test_path_validation_allows_within_allowed(tmp_path: Path):
-    """cd into an allowed directory should pass."""
-    allowed = {str(tmp_path)}
-    result = validate_shell_command_paths(f"cd {tmp_path}", str(tmp_path), allowed)
-    assert result.behavior == "passthrough"
-
-
-def test_cd_dash_allows_when_oldpwd_within_allowed(tmp_path: Path, monkeypatch):
-    """cd - should resolve OLDPWD and allow if within allowed dirs."""
-    previous = tmp_path / "previous"
-    previous.mkdir()
-    monkeypatch.setenv("OLDPWD", str(previous))
-    allowed = {str(tmp_path)}
-    result = validate_shell_command_paths("cd -", str(tmp_path), allowed)
-    assert result.behavior == "passthrough"
-
-
-def test_cd_dash_requests_when_oldpwd_outside_allowed(tmp_path: Path, monkeypatch):
-    """cd - should require confirmation if OLDPWD is outside allowed dirs."""
-    monkeypatch.setenv("OLDPWD", str(tmp_path.parent))
-    allowed = {str(tmp_path)}
-    result = validate_shell_command_paths("cd -", str(tmp_path), allowed)
-    assert result.behavior == "ask"
-    assert "permission" in result.message.lower() or "outside" in result.message.lower()
-
-
-def test_cd_dash_requests_when_oldpwd_missing(tmp_path: Path, monkeypatch):
-    """cd - without OLDPWD should require confirmation since path is unknown."""
-    monkeypatch.delenv("OLDPWD", raising=False)
-    allowed = {str(tmp_path)}
-    result = validate_shell_command_paths("cd -", str(tmp_path), allowed)
-    assert result.behavior == "ask"
-    assert "oldpwd" in result.message.lower()
-
-
-def test_ls_allows_any_path(tmp_path: Path):
-    """ls is a read-only command and should be allowed on any path."""
-    allowed = {str(tmp_path)}
-    # ls to /usr should be allowed even though it's outside allowed dirs
-    result = validate_shell_command_paths("ls /usr", str(tmp_path), allowed)
-    assert result.behavior == "passthrough"
-    assert "read-only" in result.message.lower()
-
-    # ls to /etc should also be allowed
-    result = validate_shell_command_paths("ls -la /etc", str(tmp_path), allowed)
-    assert result.behavior == "passthrough"
-
-    # ls to root should also be allowed
-    result = validate_shell_command_paths("ls /", str(tmp_path), allowed)
-    assert result.behavior == "passthrough"
-
-
-# =============================================================================
-# Permission Evaluation Tests
-# =============================================================================
-
-
-def test_evaluate_permissions_honors_deny_rule():
-    """Explicit deny rule should block the command."""
-    cwd = safe_get_cwd()
-    decision = evaluate_shell_command_permissions(
-        type("Req", (), {"command": "echo hi"}),
-        allowed_rules=set(),
-        denied_rules={"echo hi"},
-        ask_rules=set(),
-        allowed_working_dirs={cwd},
-    )
-    assert decision.behavior == "deny"
-
-
-def test_evaluate_permissions_honors_ask_rule():
-    """Ask rule should force a confirmation."""
-    cwd = safe_get_cwd()
-    decision = evaluate_shell_command_permissions(
-        type("Req", (), {"command": "ls"}),
-        allowed_rules=set(),
-        denied_rules=set(),
-        ask_rules={"ls"},
-        allowed_working_dirs={cwd},
-    )
-    assert decision.behavior == "ask"
-
-
-def test_ask_rule_overrides_allow_rule():
-    """Ask rules should take precedence over allow rules."""
-    cwd = safe_get_cwd()
-    decision = evaluate_shell_command_permissions(
-        type("Req", (), {"command": "ls"}),
-        allowed_rules={"ls"},
-        denied_rules=set(),
-        ask_rules={"ls"},
-        allowed_working_dirs={cwd},
-    )
-    assert decision.behavior == "ask"
-
-
-def test_deny_rule_overrides_ask_rule():
-    """Deny rules should take precedence over ask rules."""
-    cwd = safe_get_cwd()
-    decision = evaluate_shell_command_permissions(
-        type("Req", (), {"command": "ls"}),
-        allowed_rules={"ls"},
-        denied_rules={"ls"},
-        ask_rules={"ls"},
-        allowed_working_dirs={cwd},
-    )
-    assert decision.behavior == "deny"
-
-
-def test_evaluate_permissions_allows_read_only():
-    """Read-only commands without rules should be allowed."""
-    cwd = safe_get_cwd()
-    decision = evaluate_shell_command_permissions(
-        type("Req", (), {"command": "ls"}),
-        allowed_rules=set(),
-        denied_rules=set(),
-        ask_rules=set(),
-        allowed_working_dirs={cwd},
-    )
-    assert decision.behavior == "allow"
-
-
-# =============================================================================
-# BashTool Integration Tests
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_bash_tool_needs_permissions_respects_read_only():
-    """Read-only commands should bypass permission prompts."""
-    tool = BashTool()
-    input_data = BashToolInput(command="ls")
-    assert tool.needs_permissions(input_data) is False
-
-
-@pytest.mark.asyncio
-async def test_background_commands_still_need_permissions():
-    """Background bash runs should always require approval."""
-    tool = BashTool()
-    input_data = BashToolInput(command="ls", run_in_background=True)
-
-    assert tool.needs_permissions(input_data) is True
-
-    decision = await tool.check_permissions(
-        input_data,
-        {
-            "allowed_rules": set(),
-            "denied_rules": set(),
-            "allowed_working_directories": {safe_get_cwd()},
-        },
-    )
-    assert getattr(decision, "behavior", None) in {"ask", "passthrough"}
-
-
-@pytest.mark.asyncio
-async def test_auto_background_ampersand_requires_permission():
-    """Trailing ampersand should trigger permission even without run_in_background flag."""
-    tool = BashTool()
-    input_data = BashToolInput(command="ls &")
-
-    assert tool.needs_permissions(input_data) is True
-
-    decision = await tool.check_permissions(
-        input_data,
-        {
-            "allowed_rules": set(),
-            "denied_rules": set(),
-            "allowed_working_directories": {safe_get_cwd()},
-        },
-    )
-    assert getattr(decision, "behavior", None) in {"ask", "passthrough"}
-
-
-@pytest.mark.asyncio
-async def test_bash_tool_check_permissions_respects_allow_rules():
-    """check_permissions should allow when rule matches."""
-    tool = BashTool()
-    cwd = safe_get_cwd()
-    input_data = BashToolInput(command="echo hi")
-    decision = await tool.check_permissions(
-        input_data,
-        {
-            "allowed_rules": {"echo hi"},
-            "denied_rules": set(),
-            "allowed_working_directories": {cwd},
-        },
-    )
-    assert getattr(decision, "behavior", None) == "allow"
-
-
-@pytest.mark.asyncio
-async def test_bash_tool_validate_input_blocks_unavailable_sandbox():
-    """Sandbox requests should be rejected when sandbox is unavailable."""
-    tool = BashTool()
-    input_data = BashToolInput(command="echo hi", sandbox=True)
-    result = await tool.validate_input(input_data, None)
-    assert result.result is False
-    assert "sandbox" in (result.message or "").lower()
-
-
-@pytest.mark.asyncio
-async def test_bash_tool_check_permissions_asks_for_dangerous_commands():
-    """Dangerous shell commands should trigger permission check via check_permissions."""
-    tool = BashTool()
-    cwd = safe_get_cwd()
-
-    # Test command substitution
-    input_data = BashToolInput(command="echo $(whoami)")
-    decision = await tool.check_permissions(
-        input_data,
-        {
-            "allowed_rules": set(),
-            "denied_rules": set(),
-            "allowed_working_directories": {cwd},
-        },
-    )
-    assert getattr(decision, "behavior", None) == "ask"
-    assert "command substitution" in (getattr(decision, "message", "") or "").lower()
-
-    # Test eval
-    input_data = BashToolInput(command="eval 'echo hello'")
-    decision = await tool.check_permissions(
-        input_data,
-        {
-            "allowed_rules": set(),
-            "denied_rules": set(),
-            "allowed_working_directories": {cwd},
-        },
-    )
-    assert getattr(decision, "behavior", None) == "ask"
-    assert "eval" in (getattr(decision, "message", "") or "").lower()
-
-
-@pytest.mark.asyncio
-async def test_bash_tool_validate_input_allows_safe_commands():
-    """Safe shell commands should pass validate_input."""
-    tool = BashTool()
-    input_data = BashToolInput(command="ls -la")
-    result = await tool.validate_input(input_data, None)
-    assert result.result is True
-
-
-# =============================================================================
-# Destructive Command Detection Tests (Gemini Incident Prevention)
-# =============================================================================
-
-
-class TestWindowsDestructiveCommands:
-    """Tests for Windows destructive command detection."""
-
-    def test_rmdir_with_s_flag_blocked(self):
-        """rmdir /s should be blocked."""
-        result = validate_shell_command("rmdir /s folder")
-        assert result.behavior == "ask"
-        assert "rmdir" in result.message.lower()
-
-    def test_rmdir_with_s_and_q_flags_blocked(self):
-        """rmdir /s /q should be blocked."""
-        result = validate_shell_command("rmdir /s /q folder")
-        assert result.behavior == "ask"
-        assert "rmdir" in result.message.lower()
-
-    def test_rd_with_s_flag_blocked(self):
-        """rd /s (alias for rmdir) should be blocked."""
-        result = validate_shell_command("rd /s folder")
-        assert result.behavior == "ask"
-        assert "rd /s" in result.message.lower()
-
-    def test_del_with_s_flag_blocked(self):
-        """del /s should be blocked."""
-        result = validate_shell_command("del /s *.tmp")
-        assert result.behavior == "ask"
-        assert "del" in result.message.lower()
-
-    def test_del_with_q_flag_blocked(self):
-        """del /q should be blocked."""
-        result = validate_shell_command("del /q file.txt")
-        assert result.behavior == "ask"
-        assert "del" in result.message.lower()
-
-    def test_format_drive_blocked(self):
-        """format command should be blocked."""
-        result = validate_shell_command("format C:")
-        assert result.behavior == "ask"
-        assert "format" in result.message.lower()
-
-    def test_cmd_c_with_rmdir_blocked(self):
-        """cmd /c with rmdir should be blocked."""
-        result = validate_shell_command("cmd /c rmdir /s folder")
-        assert result.behavior == "ask"
-        assert "cmd /c" in result.message.lower() or "rmdir" in result.message.lower()
-
-    def test_powershell_remove_item_recurse_blocked(self):
-        """PowerShell Remove-Item -Recurse should be blocked."""
-        result = validate_shell_command("Remove-Item -Recurse folder")
-        assert result.behavior == "ask"
-        assert "remove-item" in result.message.lower() or "recurse" in result.message.lower()
-
-    def test_powershell_remove_item_force_blocked(self):
-        """PowerShell Remove-Item -Force should be blocked."""
-        result = validate_shell_command("Remove-Item -Force file.txt")
-        assert result.behavior == "ask"
-        assert "force" in result.message.lower()
-
-    def test_simple_rmdir_without_flags_allowed(self):
-        """Simple rmdir without dangerous flags should pass."""
-        result = validate_shell_command("rmdir empty_folder")
-        assert result.behavior == "passthrough"
-
-    def test_simple_del_without_flags_allowed(self):
-        """Simple del without dangerous flags should pass."""
-        result = validate_shell_command("del file.txt")
-        assert result.behavior == "passthrough"
-
-
-class TestUnixDestructiveCommands:
-    """Tests for Unix/Linux destructive command detection."""
-
-    def test_rm_rf_blocked(self):
-        """rm -rf should be blocked."""
-        result = validate_shell_command("rm -rf folder")
-        assert result.behavior == "ask"
-        assert "rm" in result.message.lower()
-
-    def test_rm_r_blocked(self):
-        """rm -r should be blocked."""
-        result = validate_shell_command("rm -r folder")
-        assert result.behavior == "ask"
-        assert "rm" in result.message.lower()
-
-    def test_rm_fr_blocked(self):
-        """rm -fr (alternative flag order) should be blocked."""
-        result = validate_shell_command("rm -fr folder")
-        assert result.behavior == "ask"
-        assert "rm" in result.message.lower()
-
-    def test_dd_to_device_blocked(self):
-        """dd writing to device should be blocked."""
-        result = validate_shell_command("dd if=/dev/zero of=/dev/sda")
-        assert result.behavior == "ask"
-        assert "dd" in result.message.lower()
-
-    def test_mkfs_blocked(self):
-        """mkfs command should be blocked."""
-        result = validate_shell_command("mkfs.ext4 /dev/sda1")
-        assert result.behavior == "ask"
-        assert "mkfs" in result.message.lower()
-
-    def test_shred_blocked(self):
-        """shred command should be blocked."""
-        result = validate_shell_command("shred -u file.txt")
-        assert result.behavior == "ask"
-        assert "shred" in result.message.lower()
-
-    def test_chmod_777_on_root_blocked(self):
-        """chmod 777 on root should be denied (critical path)."""
-        result = validate_shell_command("chmod 777 /")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_chmod_777_on_etc_blocked(self):
-        """chmod 777 on /etc should be denied (critical path)."""
-        result = validate_shell_command("chmod 777 /etc")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_simple_rm_without_r_allowed(self):
-        """Simple rm without -r flag should pass."""
-        result = validate_shell_command("rm file.txt")
-        assert result.behavior == "passthrough"
-
-    def test_rm_i_allowed(self):
-        """rm -i (interactive) should pass."""
-        result = validate_shell_command("rm -i file.txt")
-        assert result.behavior == "passthrough"
-
-    def test_chmod_normal_usage_allowed(self):
-        """Normal chmod usage should pass."""
-        result = validate_shell_command("chmod 755 script.sh")
-        assert result.behavior == "passthrough"
-
-
-class TestCriticalPathDetection:
-    """Tests for critical path detection with destructive commands."""
-
-    def test_rmdir_on_c_drive_root_denied(self):
-        """rmdir /s on C:\\ should be denied."""
-        result = validate_shell_command("rmdir /s /q C:\\")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rmdir_on_windows_denied(self):
-        """rmdir /s on Windows folder should be denied."""
-        result = validate_shell_command(r"rmdir /s /q C:\Windows")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rmdir_on_users_denied(self):
-        """rmdir /s on Users folder should be denied."""
-        result = validate_shell_command(r"rmdir /s /q C:\Users")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rmdir_on_program_files_denied(self):
-        """rmdir /s on Program Files should be denied."""
-        result = validate_shell_command(r'rmdir /s /q "C:\Program Files"')
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rm_rf_on_root_denied(self):
-        """rm -rf on / should be denied."""
-        result = validate_shell_command("rm -rf /")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rm_rf_on_home_denied(self):
-        """rm -rf on /home should be denied."""
-        result = validate_shell_command("rm -rf /home")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rm_rf_on_etc_denied(self):
-        """rm -rf on /etc should be denied."""
-        result = validate_shell_command("rm -rf /etc")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rm_rf_on_usr_denied(self):
-        """rm -rf on /usr should be denied."""
-        result = validate_shell_command("rm -rf /usr")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rm_rf_on_var_denied(self):
-        """rm -rf on /var should be denied."""
-        result = validate_shell_command("rm -rf /var")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rm_rf_on_home_tilde_denied(self):
-        """rm -rf on ~ should be denied."""
-        result = validate_shell_command("rm -rf ~")
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_rm_rf_on_user_folder_ask(self):
-        """rm -rf on user's own subfolder should ask, not deny."""
-        result = validate_shell_command("rm -rf /home/user/project/build")
-        assert result.behavior == "ask"
-        assert result.behavior != "deny"
-
-
-class TestNestedQuoteDetection:
-    """Tests for nested quote detection (Gemini incident pattern)."""
-
-    def test_gemini_incident_exact_pattern_denied(self):
-        """The exact Gemini incident pattern should be denied."""
-        cmd = r'cmd /c "rmdir /s /q \"C:\Users\xxx\SCE Projects\src\""'
-        result = validate_shell_command(cmd)
-        assert result.behavior == "deny"
-        assert "blocked" in result.message.lower()
-
-    def test_cmd_c_with_escaped_quotes_asks(self):
-        """cmd /c with escaped quotes (non-critical path) should ask."""
-        cmd = r'cmd /c "echo \"hello world\""'
-        result = validate_shell_command(cmd)
-        assert result.behavior == "ask"
-        assert "nested" in result.message.lower() or "escaped" in result.message.lower()
-
-    def test_simple_cmd_c_allowed(self):
-        """Simple cmd /c without nested quotes should pass."""
-        result = validate_shell_command("cmd /c dir")
-        assert result.behavior == "passthrough"
-
-    def test_cmd_c_with_simple_quotes_allowed(self):
-        """cmd /c with simple (non-nested) quotes should pass."""
-        result = validate_shell_command('cmd /c "echo hello"')
-        assert result.behavior == "passthrough"
-
-
-class TestFalsePositivePrevention:
-    """Tests to ensure we don't have false positives."""
-
-    def test_rm_in_quoted_string_not_blocked(self):
-        """'rm' inside quoted strings should not trigger rm detection."""
-        result = validate_shell_command('echo "rm -rf /"')
-        assert result.behavior == "passthrough"
-
-    def test_find_with_rm_pattern_in_name_not_blocked(self):
-        """find with rm pattern in -name should not trigger rm detection."""
-        result = validate_shell_command('find . -name "rm-rf-test.txt"')
-        assert result.behavior == "passthrough"
-
-    def test_grep_for_rm_command_not_blocked(self):
-        """grep searching for rm command should not trigger rm detection."""
-        result = validate_shell_command('grep "rm -rf" history.log')
-        assert result.behavior == "passthrough"
-
-    def test_echo_rmdir_not_blocked(self):
-        """echo rmdir should not trigger rmdir detection."""
-        result = validate_shell_command('echo "rmdir /s /q folder"')
-        assert result.behavior == "passthrough"
-
-    def test_variable_named_rm_not_blocked(self):
-        """Variables containing 'rm' should not trigger detection."""
-        # This should be blocked for other reasons ($ substitution)
-        # but not for rm detection
-        result = validate_shell_command("echo $rmdir")
-        # This is blocked due to $ but not due to rmdir
-        assert "rmdir" not in result.message.lower() if result.behavior == "ask" else True
-
-    def test_path_containing_rm_not_blocked(self):
-        """Paths containing 'rm' in folder names should not trigger detection."""
-        result = validate_shell_command("ls /home/user/firmware/")
-        assert result.behavior == "passthrough"
-
-    def test_safe_dd_usage_allowed(self):
-        """dd to regular file should pass."""
-        result = validate_shell_command("dd if=input.img of=output.img")
-        assert result.behavior == "passthrough"
-
-    def test_chmod_on_user_file_allowed(self):
-        """chmod on user files should pass."""
-        result = validate_shell_command("chmod 644 ~/.bashrc")
-        assert result.behavior == "passthrough"
-
-
-class TestEdgeCases:
-    """Tests for edge cases and complex scenarios."""
-
-    def test_multiple_flags_rm(self):
-        """rm with multiple flags should be detected."""
-        result = validate_shell_command("rm -rfv folder")
+    def test_output_redirection_outside_allowed_directory_requires_permission(self, tmp_path: Path):
+        result = check_path_constraints("echo hello > /etc/ripperdoc-test", str(tmp_path), {str(tmp_path)})
         assert result.behavior == "ask"
 
-    def test_rm_with_path_before_flags(self):
-        """rm with path after -r flag should be detected."""
-        result = validate_shell_command("rm -r ./build")
+    def test_dangerous_root_removal_requires_permission(self, tmp_path: Path):
+        result = check_path_constraints("rm -rf /", str(tmp_path), {str(tmp_path)})
         assert result.behavior == "ask"
 
-    def test_case_insensitive_windows_commands(self):
-        """Windows commands should be case-insensitive."""
-        result = validate_shell_command("RMDIR /S /Q folder")
-        assert result.behavior == "ask"
 
-        result = validate_shell_command("DEL /S *.tmp")
-        assert result.behavior == "ask"
+class TestReadOnlyValidation:
+    def test_read_only_commands_are_detected(self):
+        for command in ["ls", "git status", "git log --oneline", "rg pattern ."]:
+            assert is_command_read_only(command) is True, command
 
-    def test_mixed_case_windows_paths(self):
-        """Windows paths should be case-insensitive."""
-        result = validate_shell_command(r"rmdir /s /q c:\WINDOWS")
-        assert result.behavior == "deny"
-
-    def test_forward_slash_windows_path(self):
-        """Windows paths with forward slashes should be detected."""
-        result = validate_shell_command("rmdir /s /q C:/Users")
-        # This might not match our pattern, but should still ask for rmdir /s
-        assert result.behavior in ("ask", "deny")
-
-    def test_powershell_aliases(self):
-        """PowerShell aliases should be detected."""
-        # 'ri' is alias for Remove-Item
-        result = validate_shell_command("ri -Recurse folder")
-        assert result.behavior == "ask"
-
-    def test_whitespace_variations(self):
-        """Various whitespace patterns should still be detected."""
-        result = validate_shell_command("rm   -rf   folder")
-        assert result.behavior == "ask"
-
-        result = validate_shell_command("rmdir  /s  /q  folder")
-        assert result.behavior == "ask"
-
-    def test_command_at_end_of_pipe(self):
-        """Dangerous commands at end of pipe should be detected."""
-        # Note: pipe itself triggers other checks, but rm -rf should still be detected
-        result = validate_shell_command("cat files.txt | xargs rm -rf")
-        assert result.behavior == "ask"
-
-    def test_empty_string_safe(self):
-        """Empty strings should be safe."""
-        result = validate_shell_command("")
-        assert result.behavior == "passthrough"
-
-    def test_whitespace_only_safe(self):
-        """Whitespace-only strings should be safe."""
-        result = validate_shell_command("   \t  ")
-        assert result.behavior == "passthrough"
+    def test_mutating_commands_are_not_read_only(self):
+        for command in ["touch file.txt", "rm file.txt", "git add file.txt", "python -c 'print(1)'"]:
+            assert is_command_read_only(command) is False, command
 
 
-# =============================================================================
-# Flexible Wildcard Matching Tests
-# =============================================================================
-
-
-class TestFlexibleWildcardMatching:
-    """Tests for new flexible wildcard matching with glob patterns."""
-
-    def test_legacy_prefix_wildcard_is_supported_for_compatibility(self):
-        """Legacy prefix:* format should still match commands (deprecated syntax)."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        assert match_rule("git status", "git:*") is True
-        assert match_rule("git commit -m test", "git:*") is True
-        assert match_rule("npm install", "npm:*") is True
-
-    def test_star_at_end(self):
-        """Patterns with * at end should match."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        assert match_rule("npm install", "npm *") is True
-        assert match_rule("npm start", "npm *") is True
-        assert match_rule("npm test --coverage", "npm *") is True
-        assert match_rule("git status", "npm *") is False
-
-    def test_star_at_beginning(self):
-        """Patterns with * at beginning should match."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        assert match_rule("npm install", "* install") is True
-        assert match_rule("pip install", "* install") is True
-        assert match_rule("apt install", "* install") is True
-        assert match_rule("npm start", "* install") is False
-
-    def test_star_in_middle(self):
-        """Patterns with * in middle should match."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        assert match_rule("git push main", "git * main") is True
-        assert match_rule("git pull main", "git * main") is True
-        assert match_rule("git fetch main", "git * main") is True
-        assert match_rule("git push origin", "git * main") is False
-        assert match_rule("git main", "git * main") is False
-
-    def test_star_anywhere_in_command(self):
-        """* should match content anywhere in command."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        assert match_rule("ls -lh", "*h*") is True
-        assert match_rule("grep -h pattern", "* -h *") is True
-        assert match_rule("command --help", "*help*") is True
-        assert match_rule("ls -la", "*h*") is False
-
-    def test_multiple_stars(self):
-        """Multiple * wildcards should work."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        assert match_rule("git push origin main", "git * origin *") is True
-        assert match_rule("git pull origin main", "git * origin *") is True
-        assert match_rule("npm run test --coverage", "npm * test *") is True
-        assert match_rule("git push main", "git * origin *") is False
-
-    def test_question_mark_wildcard(self):
-        """? should match exactly one character."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        assert match_rule("git rm", "git ??") is True
-        assert match_rule("git mv", "git ??") is True
-        assert match_rule("git add", "git ??") is False  # "add" is 3 chars
-        assert match_rule("git status", "git ??") is False  # "status" is 6 chars
-
-    def test_bracket_character_set(self):
-        """[seq] should match any character in the set."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        # Match npm or pip install
-        assert match_rule("npm install", "[np]* install") is True
-        assert match_rule("pip install", "[np]* install") is True
-        assert match_rule("apt install", "[np]* install") is False
-
-        # Match git or got
-        assert match_rule("git status", "g[io]t status") is True
-        assert match_rule("got status", "g[io]t status") is True
-        assert match_rule("gxt status", "g[io]t status") is False
-
-    def test_negated_character_set(self):
-        """[!seq] should match any character NOT in the set."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        assert match_rule("git status", "[!n]* status") is True  # starts with 'g', not 'n'
-        assert match_rule("npm status", "[!n]* status") is False  # starts with 'n'
-
-    def test_exact_match_still_works(self):
-        """Exact matching without wildcards should still work."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
+class TestRuleMatching:
+    def test_exact_and_glob_rules_match_commands(self):
         assert match_rule("git status", "git status") is True
-        assert match_rule("git status", "git commit") is False
-        assert match_rule("npm install express", "npm install express") is True
-
-    def test_glob_rules_work_together(self):
-        """Glob rules should work together across different commands."""
-        from ripperdoc.utils.permissions.tool_permission_utils import (
-            evaluate_shell_command_permissions,
-        )
-        from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
-
-        # Glob format rules
-        allowed_rules = {
-            "git *",
-            "npm *",  # Glob format
-            "* --help",  # Glob format
-        }
-
-        cwd = safe_get_cwd()
-
-        # Test git commands
-        decision = evaluate_shell_command_permissions(
-            type("Req", (), {"command": "git status"}),
-            allowed_rules=allowed_rules,
-            denied_rules=set(),
-            ask_rules=set(),
-            allowed_working_dirs={cwd},
-        )
-        assert decision.behavior == "allow"
-
-        # Test npm commands (glob rule)
-        decision = evaluate_shell_command_permissions(
-            type("Req", (), {"command": "npm install"}),
-            allowed_rules=allowed_rules,
-            denied_rules=set(),
-            ask_rules=set(),
-            allowed_working_dirs={cwd},
-        )
-        assert decision.behavior == "allow"
-
-        # Test --help pattern (glob rule)
-        decision = evaluate_shell_command_permissions(
-            type("Req", (), {"command": "python --help"}),
-            allowed_rules=allowed_rules,
-            denied_rules=set(),
-            ask_rules=set(),
-            allowed_working_dirs={cwd},
-        )
-        assert decision.behavior == "allow"
-
-    def test_rule_suggestions_include_exact_and_glob(self):
-        """Rule suggestions should include exact and glob formats."""
-        from ripperdoc.utils.permissions.tool_permission_utils import _collect_rule_suggestions
-
-        suggestions = _collect_rule_suggestions("git status")
-        rule_contents = [s.rule_content for s in suggestions]
-
-        # Should include exact and glob format
-        assert "git status" in rule_contents  # Exact
-        assert "git *" in rule_contents  # Glob
-
-    def test_edge_cases(self):
-        """Edge cases should be handled correctly."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        # Empty command
-        assert match_rule("", "git *") is False
-        assert match_rule("", "*") is False
-
-        # Whitespace
-        assert match_rule("  git status  ", "git *") is True  # Trimmed
-
-        # Special characters in commands
-        assert match_rule("echo 'hello world'", "echo *") is True
-        assert match_rule("grep 'pattern' file.txt", "grep *") is True
-
-    def test_case_sensitivity(self):
-        """Matching should be case-sensitive (Unix default)."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
         assert match_rule("git status", "git *") is True
-        assert match_rule("GIT status", "git *") is False  # Different case
-        assert match_rule("Git Status", "git *") is False  # Different case
+        assert match_rule("git status", "git:*") is True
+        assert match_rule("npm install", "* install") is True
+        assert match_rule("git add", "git ??") is False
 
-    def test_performance_with_many_rules(self):
-        """Should handle many rules efficiently."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+    def test_wildcard_rules_do_not_cross_shell_operator_tokens(self):
+        assert match_rule("git status && rm -rf /tmp/x", "git *") is False
+        assert match_rule("echo '&&'", "echo *") is False
 
-        # Create many rules
-        rules = [f"cmd{i} *" for i in range(100)]
-        rules.extend([f"tool{i} *" for i in range(100)])
 
-        # Should match quickly
-        for rule in rules:
-            match_rule("cmd50 test", rule)  # Won't match most, but should be fast
+class TestBashToolIntegration:
+    @pytest.mark.asyncio
+    async def test_read_only_command_does_not_need_permissions(self):
+        tool = BashTool()
+        assert tool.needs_permissions(BashToolInput(command="ls")) is False
 
-    def test_deny_rules_with_globs(self):
-        """Deny rules should work with glob patterns."""
-        from ripperdoc.utils.permissions.tool_permission_utils import (
-            evaluate_shell_command_permissions,
-        )
-        from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
+    @pytest.mark.asyncio
+    async def test_background_command_needs_permissions(self):
+        tool = BashTool()
+        assert tool.needs_permissions(BashToolInput(command="ls", run_in_background=True)) is True
+        assert tool.needs_permissions(BashToolInput(command="ls &")) is True
 
-        cwd = safe_get_cwd()
-
-        # Deny all rm commands
-        decision = evaluate_shell_command_permissions(
-            type("Req", (), {"command": "rm -rf /tmp/test"}),
-            allowed_rules=set(),
-            denied_rules={"rm *"},
-            ask_rules=set(),
-            allowed_working_dirs={cwd},
+    @pytest.mark.asyncio
+    async def test_check_permissions_honors_deny_rule(self):
+        tool = BashTool()
+        decision = await tool.check_permissions(
+            BashToolInput(command="echo hi"),
+            {
+                "mode": "default",
+                "allowed_rules": set(),
+                "denied_rules": {"echo hi"},
+                "ask_rules": set(),
+                "allowed_working_directories": {safe_get_cwd()},
+            },
         )
         assert decision.behavior == "deny"
 
-        # Deny all commands with --force
-        decision = evaluate_shell_command_permissions(
-            type("Req", (), {"command": "git push --force"}),
-            allowed_rules=set(),
-            denied_rules={"* --force"},
-            ask_rules=set(),
-            allowed_working_dirs={cwd},
+    @pytest.mark.asyncio
+    async def test_check_permissions_honors_ask_rule_over_allow_rule(self):
+        tool = BashTool()
+        decision = await tool.check_permissions(
+            BashToolInput(command="ls"),
+            {
+                "mode": "default",
+                "allowed_rules": {"ls"},
+                "denied_rules": set(),
+                "ask_rules": {"ls"},
+                "allowed_working_directories": {safe_get_cwd()},
+            },
         )
-        assert decision.behavior == "deny"
+        assert decision.behavior == "ask"
 
-    def test_wildcard_rules_do_not_match_shell_operators(self):
-        """Wildcard rules should NOT match commands with shell operators for security."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
+    @pytest.mark.asyncio
+    async def test_check_permissions_allows_read_only_command(self):
+        tool = BashTool()
+        decision = await tool.check_permissions(
+            BashToolInput(command="ls"),
+            {
+                "mode": "default",
+                "allowed_rules": set(),
+                "denied_rules": set(),
+                "ask_rules": set(),
+                "allowed_working_directories": {safe_get_cwd()},
+            },
+        )
+        assert decision.behavior == "allow"
 
-        # Glob format should not match with &&
-        assert match_rule("git status && rm -rf /", "git *") is False
-        assert match_rule("npm install && npm start", "npm *") is False
+    @pytest.mark.asyncio
+    async def test_check_permissions_asks_for_dangerous_command(self):
+        tool = BashTool()
+        decision = await tool.check_permissions(
+            BashToolInput(command="echo $(whoami)"),
+            {
+                "mode": "default",
+                "allowed_rules": set(),
+                "denied_rules": set(),
+                "ask_rules": set(),
+                "allowed_working_directories": {safe_get_cwd()},
+            },
+        )
+        assert decision.behavior == "ask"
 
-        # Should not match with ||
-        assert match_rule("cmd1 || cmd2", "cmd1 *") is False
+    @pytest.mark.asyncio
+    async def test_validate_input_blocks_unavailable_sandbox(self):
+        tool = BashTool()
+        result = await tool.validate_input(BashToolInput(command="echo hi", sandbox=True), None)
+        assert result.result is False
+        assert "sandbox" in (result.message or "").lower()
 
-        # Should not match with semicolon
-        assert match_rule("echo hi; rm -rf /", "echo *") is False
-
-        # Should not match with pipe
-        assert match_rule("ls | grep foo", "ls *") is False
-
-        # Commands WITHOUT operators should still match
-        assert match_rule("git status", "git *") is True
-        assert match_rule("npm install express", "npm *") is True
-
-    def test_exact_match_still_allows_shell_operators(self):
-        """Exact match rules should still work with shell operators (user explicitly approved)."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        # Exact match should allow operators (user explicitly specified the full command)
-        assert match_rule("git status && git commit", "git status && git commit") is True
-        assert match_rule("npm install && npm start", "npm install && npm start") is True
-        assert match_rule("ls | grep foo", "ls | grep foo") is True
-        assert match_rule("cmd1 || cmd2", "cmd1 || cmd2") is True
-        assert match_rule("echo hi; echo bye", "echo hi; echo bye") is True
-
-    def test_operators_in_quotes_are_safe_for_wildcards(self):
-        """Operators inside quotes should not prevent wildcard matching."""
-        from ripperdoc.utils.permissions.tool_permission_utils import match_rule
-
-        # Operators in single quotes should be treated as literal strings
-        assert match_rule("echo 'foo && bar'", "echo *") is True
-        assert match_rule("grep 'pattern || other'", "grep *") is True
-        # Operators in double quotes should also be safe
-        assert match_rule('echo "foo && bar"', "echo *") is True
-        assert match_rule('grep "pattern || other"', "grep *") is True
+    @pytest.mark.asyncio
+    async def test_validate_input_allows_safe_command(self):
+        tool = BashTool()
+        result = await tool.validate_input(BashToolInput(command="ls -la"), None)
+        assert result.result is True

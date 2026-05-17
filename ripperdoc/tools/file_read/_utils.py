@@ -6,6 +6,33 @@ import itertools
 import os
 from typing import List, Optional, Tuple
 
+
+def is_compact_line_prefix_enabled() -> bool:
+    return os.getenv("RIPPERDOC_COMPACT_LINE_PREFIX_KILLSWITCH", "").lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def format_line_with_number(line_number: int, line: str) -> str:
+    if is_compact_line_prefix_enabled():
+        return f"{line_number}\t{line}"
+
+    return f"{line_number:6d}→{line}"
+
+
+def line_prefix_format_description() -> str:
+    return "line number + tab" if is_compact_line_prefix_enabled() else "spaces + line number + arrow"
+
+
+def strip_line_number_prefix(line: str) -> str:
+    import re
+
+    match = re.match(r"^\s*\d+[→\t](.*)$", line)
+    return match.group(1) if match else line
+
 from charset_normalizer import from_bytes
 
 from ripperdoc.utils.log import get_logger

@@ -1105,7 +1105,7 @@ class AgentsApp(App[None]):
         return text[: max(0, limit - 3)] + "..."
 
     @staticmethod
-    def _format_duration(duration_ms: float | None) -> str:
+    def _format_duration(duration_ms: Optional[float]) -> str:
         if duration_ms is None:
             return "-"
         try:

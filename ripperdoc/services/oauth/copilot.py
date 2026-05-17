@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import urllib.parse
 import webbrowser
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Union
 
 import httpx
 
@@ -32,7 +32,7 @@ def _normalize_domain(raw: str) -> str:
     return host
 
 
-def _urls_for_domain(domain: str) -> tuple[str, str]:
+def _urls_for_domain(domain: str) -> Tuple[str, str]:
     return (
         f"https://{domain}/login/device/code",
         f"https://{domain}/login/oauth/access_token",

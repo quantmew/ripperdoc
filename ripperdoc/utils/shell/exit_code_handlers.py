@@ -1,5 +1,7 @@
 """Smart exit code handlers for common shell commands and related helpers.
 
+from __future__ import annotations
+
 Provides intelligent interpretation of exit codes for commands like grep, diff, test, etc.
 where non-zero exit codes don't necessarily indicate errors. Also includes small utilities
 shared by bash tooling such as command classification, preview sizing, and lightweight

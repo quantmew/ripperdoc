@@ -2,7 +2,7 @@
 
 import asyncio
 
-from ripperdoc.tools import background_shell
+from ripperdoc.services import background_shell
 
 
 def test_shutdown_waits_for_background_process():

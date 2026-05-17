@@ -698,6 +698,13 @@ def _get_ignore_details(file_path: Path, root_path: Optional[Path] = None) -> Di
     }
 
 
+# Paths under these ignored-directory prefixes are internal tool paths
+# that should never trigger a warning (e.g. plan files, task outputs).
+_TOOL_INTERNAL_PREFIXES: Tuple[Tuple[str, str], ...] = (
+    (".ripperdoc", "plans"),
+)
+
+
 def check_path_for_tool(
     file_path: Path,
     tool_name: str = "unknown",
@@ -720,6 +727,14 @@ def check_path_for_tool(
         - should_proceed: True if the operation should continue
         - warning_message: Warning or error message if path is ignored
     """
+    # Skip checks for internal tool paths (e.g. .ripperdoc/plans/)
+    parts = file_path.parts
+    for dir_name, sub_dir in _TOOL_INTERNAL_PREFIXES:
+        if dir_name in parts:
+            idx = parts.index(dir_name)
+            if idx + 1 < len(parts) and parts[idx + 1] == sub_dir:
+                return True, None
+
     details = _get_ignore_details(file_path)
     if details["ignored"]:
         file_name = file_path.name

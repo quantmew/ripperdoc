@@ -7,7 +7,7 @@ import os
 import fnmatch
 from collections import deque
 from pathlib import Path
-from typing import AsyncGenerator, List, Optional, Dict, Any
+from typing import AsyncGenerator, List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel, Field
 
 from ripperdoc.core.tool import (
@@ -123,7 +123,7 @@ def _resolve_directory_path(raw_path: str) -> Path:
         return candidate
 
 
-def _matches_ignore(path: Path, root_path: Path, patterns: list[str]) -> bool:
+def _matches_ignore(path: Path, root_path: Path, patterns: List[str]) -> bool:
     if not patterns:
         return False
 
@@ -141,7 +141,7 @@ def _matches_ignore(path: Path, root_path: Path, patterns: list[str]) -> bool:
 def _should_skip(
     path: Path,
     root_path: Path,
-    patterns: list[str],
+    patterns: List[str],
     ignore_map: Optional[Any] = None,
 ) -> bool:
     name = path.name
@@ -185,13 +185,13 @@ def _relative_path_for_display(path: Path, base_path: Path) -> str:
 def _collect_paths(
     root_path: Path,
     base_path: Path,
-    ignore_patterns: list[str],
+    ignore_patterns: List[str],
     include_gitignore: bool = True,
     abort_signal: Optional[Any] = None,
     max_depth: Optional[int] = MAX_DEPTH,
-) -> tuple[list[str], bool, List[str], bool]:
+) -> Tuple[List[str], bool, List[str], bool]:
     """Collect paths under root_path relative to base_path with early-exit controls."""
-    entries: list[str] = []
+    entries: List[str] = []
     total_chars = 0
     truncated = False
     aborted = False
@@ -249,7 +249,7 @@ def _collect_paths(
     return entries, truncated, ignored_entries, aborted
 
 
-def build_file_tree(entries: list[str]) -> dict:
+def build_file_tree(entries: List[str]) -> dict:
     """Build a nested tree structure from flat entry paths."""
     tree: dict = {}
     for entry in entries:
@@ -275,7 +275,7 @@ def build_tree_string(tree: dict, root_label: str, indent: str = "  ") -> str:
     if not tree:
         return f"{root_line}\n{indent}(empty directory)"
 
-    lines: list[str] = [root_line]
+    lines: List[str] = [root_line]
 
     def _render(node: dict, current_indent: str) -> None:
         for name in sorted(node):
@@ -416,7 +416,7 @@ class LSTool(Tool[LSToolInput, LSToolOutput]):
         sorted_entries = sorted(entries)
         tree = build_tree_string(build_file_tree(sorted_entries), base_path.as_posix())
 
-        warnings: list[str] = []
+        warnings: List[str] = []
         if aborted:
             warnings.append("Listing aborted; partial results shown.\n\n")
         if truncated:

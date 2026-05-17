@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
@@ -63,7 +63,7 @@ class OutputStyleLoadResult:
         return {style.key: style for style in self.styles}
 
 
-_BUILTIN_OUTPUT_STYLES: tuple[OutputStyleDefinition, ...] = (
+_BUILTIN_OUTPUT_STYLES: Tuple[OutputStyleDefinition, ...] = (
     OutputStyleDefinition(
         key="default",
         name="Default",
@@ -154,7 +154,7 @@ _BUILTIN_OUTPUT_STYLES: tuple[OutputStyleDefinition, ...] = (
 )
 
 
-def builtin_output_styles() -> list[OutputStyleDefinition]:
+def builtin_output_styles() -> List[OutputStyleDefinition]:
     """Return built-in output styles in fixed display order."""
     return list(_BUILTIN_OUTPUT_STYLES)
 
@@ -231,7 +231,7 @@ def _load_style_file(
     path: Path,
     location: OutputStyleLocation,
     base_dir: Path,
-) -> tuple[OutputStyleDefinition | None, OutputStyleLoadError | None]:
+) -> Tuple[Optional[OutputStyleDefinition], Optional[OutputStyleLoadError]]:
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, IOError, UnicodeDecodeError) as exc:
@@ -291,9 +291,9 @@ def _load_style_file(
 def _load_styles_from_dir(
     styles_dir: Path,
     location: OutputStyleLocation,
-) -> tuple[list[OutputStyleDefinition], list[OutputStyleLoadError]]:
-    styles: list[OutputStyleDefinition] = []
-    errors: list[OutputStyleLoadError] = []
+) -> Tuple[List[OutputStyleDefinition], List[OutputStyleLoadError]]:
+    styles: List[OutputStyleDefinition] = []
+    errors: List[OutputStyleLoadError] = []
     if not styles_dir.exists() or not styles_dir.is_dir():
         return styles, errors
 
@@ -324,7 +324,7 @@ def load_all_output_styles(
     """
 
     styles_by_key: Dict[str, OutputStyleDefinition] = {s.key: s for s in _BUILTIN_OUTPUT_STYLES}
-    errors: list[OutputStyleLoadError] = []
+    errors: List[OutputStyleLoadError] = []
 
     for directory, location in output_style_directories(project_path=project_path, home=home):
         loaded, load_errors = _load_styles_from_dir(directory, location)
@@ -332,7 +332,7 @@ def load_all_output_styles(
         for style in loaded:
             styles_by_key[style.key] = style
 
-    ordered: list[OutputStyleDefinition] = list(_BUILTIN_OUTPUT_STYLES)
+    ordered: List[OutputStyleDefinition] = list(_BUILTIN_OUTPUT_STYLES)
     builtin_keys = {style.key for style in _BUILTIN_OUTPUT_STYLES}
     custom_styles = [style for key, style in styles_by_key.items() if key not in builtin_keys]
     ordered.extend(sorted(custom_styles, key=lambda style: (style.name.lower(), style.key)))
@@ -345,7 +345,7 @@ def find_output_style(
     *,
     project_path: Optional[Path] = None,
     home: Optional[Path] = None,
-) -> tuple[OutputStyleDefinition | None, OutputStyleLoadResult]:
+) -> Tuple[Optional[OutputStyleDefinition], OutputStyleLoadResult]:
     """Find an output style by key or display name."""
     result = load_all_output_styles(project_path=project_path, home=home)
     candidate = _normalize_style_key(style_name)
@@ -368,7 +368,7 @@ def resolve_output_style(
     *,
     project_path: Optional[Path] = None,
     home: Optional[Path] = None,
-) -> tuple[OutputStyleDefinition, OutputStyleLoadResult]:
+) -> Tuple[OutputStyleDefinition, OutputStyleLoadResult]:
     """Resolve a style name and fall back to built-in default when needed."""
     result = load_all_output_styles(project_path=project_path, home=home)
     if isinstance(style_name, str):

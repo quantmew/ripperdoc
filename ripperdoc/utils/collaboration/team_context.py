@@ -6,13 +6,13 @@ Team context resolution utilities for swarm-style multi-agent coordination.
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Dict, Optional
 
 from ripperdoc.core.tool import ToolUseContext
 from ripperdoc.utils.collaboration.teams import get_active_team_name, list_teams
 
 
-_ACTIVE_TEAM_BY_AGENT: dict[str, str] = {}
+_ACTIVE_TEAM_BY_AGENT: Dict[str, str] = {}
 
 
 def context_key(context: ToolUseContext) -> str:

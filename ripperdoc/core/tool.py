@@ -6,7 +6,7 @@ Tools are the primary way that the AI agent interacts with the environment.
 
 import json
 from abc import ABC, abstractmethod
-from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, TypeVar, Generic, Union
+from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, Type, TypeVar, Generic, Union
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 from ripperdoc.utils.fileStateCache import FileCacheType
 from ripperdoc.utils.log import get_logger
@@ -29,8 +29,8 @@ class ToolProgress(BaseModel):
 
     type: str = "progress"
     content: Any
-    normalized_messages: list = []
-    tools: list = []
+    normalized_messages: List = []
+    tools: List = []
     progress_sender: Optional[str] = None
     # Flag to indicate if content is a subagent message that should be forwarded to SDK
     is_subagent_message: bool = False
@@ -139,7 +139,7 @@ class Tool(ABC, Generic[TInput, TOutput]):
 
     @property
     @abstractmethod
-    def input_schema(self) -> type[BaseModel]:
+    def input_schema(self) -> Type[BaseModel]:
         """Get the Pydantic model for input validation."""
         pass
 
@@ -149,7 +149,7 @@ class Tool(ABC, Generic[TInput, TOutput]):
         pass
 
     @property
-    def aliases(self) -> list[str]:
+    def aliases(self) -> List[str]:
         """Alternate names under which this tool can be invoked."""
         return []
 

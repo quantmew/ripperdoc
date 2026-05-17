@@ -473,11 +473,13 @@ def test_permission_checker_preview_detects_ask_for_read_only_bash(tmp_path: Pat
 
 
 def test_permission_checker_preview_skips_user_input_when_not_required(tmp_path: Path):
-    """Preview should auto-allow read-only Bash commands without matching ask-rules."""
+    """Preview should auto-allow read-only Bash commands within allowed working directories."""
     checker = make_permission_checker(
         tmp_path, yolo_mode=False, prompt_fn=lambda _: pytest.fail("prompted unexpectedly")
     )
-    preview = asyncio.run(checker.preview(BashTool(), BashToolInput(command="ls")))
+    preview = asyncio.run(
+        checker.preview(BashTool(), BashToolInput(command=f"ls {tmp_path}"))
+    )
 
     assert isinstance(preview, PermissionPreview)
     assert preview.requires_user_input is False
@@ -486,7 +488,13 @@ def test_permission_checker_preview_skips_user_input_when_not_required(tmp_path:
 
 
 def test_permission_checker_respects_session_additional_working_dirs(tmp_path: Path):
-    """Session-scoped additional working dirs should bypass path prompts for find/cd."""
+    """Session-scoped additional working dirs are tracked via list_working_directories.
+
+    When a command accesses directories outside the allowed working directories,
+    the path-constraint check triggers an 'ask' decision even for read-only commands
+    (path constraints are evaluated before read-only auto-allow in the pipeline).
+    Adding the directory to session_additional_working_dirs resolves this.
+    """
     outside_dir = tmp_path.parent / f"{tmp_path.name}_outside"
     outside_dir.mkdir(exist_ok=True)
 
@@ -497,6 +505,7 @@ def test_permission_checker_respects_session_additional_working_dirs(tmp_path: P
         checker_without_extra.preview(BashTool(), BashToolInput(command=f"find {outside_dir} -maxdepth 1"))
     )
     assert isinstance(preview_without, PermissionPreview)
+    # Path constraint triggers ask for access outside allowed directories
     assert preview_without.requires_user_input is True
 
     checker_with_extra = make_permission_checker(
@@ -513,6 +522,12 @@ def test_permission_checker_respects_session_additional_working_dirs(tmp_path: P
     assert isinstance(preview_with.result, PermissionResult)
     assert preview_with.result.result is True
 
+    # Verify the directory was tracked
+    lister = getattr(checker_with_extra, "list_working_directories", None)
+    if lister:
+        listed = lister()
+        assert str(outside_dir.resolve()) in listed
+
 
 def test_permission_checker_can_add_session_working_dir_dynamically(tmp_path: Path):
     """Permission checker should support runtime add directory updates."""
@@ -526,11 +541,17 @@ def test_permission_checker_can_add_session_working_dir_dynamically(tmp_path: Pa
         checker.preview(BashTool(), BashToolInput(command=f"find {outside_dir} -maxdepth 1"))
     )
     assert isinstance(first_preview, PermissionPreview)
+    # Before adding the directory: path constraint triggers ask
     assert first_preview.requires_user_input is True
 
     adder = getattr(checker, "add_working_directory")
     added_path = adder(str(outside_dir))
     assert added_path == str(outside_dir.resolve())
+
+    # Verify the directory was actually added
+    lister = getattr(checker, "list_working_directories")
+    listed = lister()
+    assert str(outside_dir.resolve()) in listed
 
     second_preview = asyncio.run(
         checker.preview(BashTool(), BashToolInput(command=f"find {outside_dir} -maxdepth 1"))
@@ -575,6 +596,59 @@ async def test_glob_rules_in_permission_checker(tmp_path: Path):
     # Test glob pattern matching
     result = await can_use_tool(tool, BashToolInput(command="python --version"))
     assert result.result is True
+
+
+def test_permission_request_hook_allow_does_not_override_explicit_ask(
+    tmp_path: Path, monkeypatch, isolated_config
+):
+    monkeypatch.setattr("ripperdoc.core.hooks.config.Path.home", lambda: tmp_path)
+    save_global_config(UserConfig(user_ask_rules=["ls"]))
+
+    allow_output = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {"behavior": "allow", "message": "Allowed by hook"},
+            }
+        }
+    )
+
+    config_dir = tmp_path / ".ripperdoc"
+    config_dir.mkdir(parents=True)
+    (config_dir / "hooks.local.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PermissionRequest": [
+                        {
+                            "matcher": "*",
+                            "hooks": [{"type": "command", "command": f"echo '{allow_output}'"}],
+                        }
+                    ]
+                }
+            }
+        )
+    )
+
+    original_project_dir = hook_manager.project_dir
+    prompt_calls = 0
+
+    def prompt_fn(_: str) -> str:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "n"
+
+    try:
+        hook_manager.set_project_dir(tmp_path)
+        hook_manager.reload_config()
+        checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=prompt_fn)
+        result = asyncio.run(checker(BashTool(), BashToolInput(command="ls")))
+        assert result.result is False
+        assert prompt_calls == 1
+    finally:
+        hook_manager.set_project_dir(original_project_dir)
+        hook_manager.reload_config()
+
 
 
 def test_permission_request_hooks_deny_overrides_allow(tmp_path: Path, monkeypatch):

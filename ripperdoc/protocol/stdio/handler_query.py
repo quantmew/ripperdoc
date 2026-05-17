@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import ValidationError
 
@@ -55,8 +55,8 @@ class _QueryRuntimeState:
     is_error: bool = False
     stop_reason: str = "endTurn"
     final_result_text: Optional[str] = None
-    final_result_content: list[dict[str, Any]] | str | dict[str, Any] | None = None
-    final_model: str | None = None
+    final_result_content: Union[List[Dict[str, Any]], str, Dict[str, Any], None] = None
+    final_model: Optional[str] = None
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cache_read_tokens: int = 0
@@ -73,7 +73,7 @@ class _QueryRuntimeState:
             "cache_creation_input_tokens": self.total_cache_creation_tokens,
         }
 
-    def build_usage_info(self) -> UsageInfo | None:
+    def build_usage_info(self) -> Optional[UsageInfo]:
         if not (self.total_input_tokens or self.total_output_tokens):
             return None
         return UsageInfo(
@@ -96,9 +96,9 @@ class _PreparedQuery:
 
 
 class StdioQueryMixin:
-    _session_history: SessionHistory | None
-    _session_id: str | None
-    _json_schema: dict[str, Any] | None
+    _session_history: Optional[SessionHistory]
+    _session_id: Optional[str]
+    _json_schema: Optional[dict[str, Any]]
     _clear_context_after_turn: bool
 
     async def _handle_query(self, request: dict[str, Any], request_id: str) -> None:
@@ -147,7 +147,7 @@ class StdioQueryMixin:
         request: dict[str, Any],
         request_id: str,
         state: _QueryRuntimeState,
-    ) -> _PreparedQuery | None:
+    ) -> Optional[_PreparedQuery]:
         """Prepare messages/system prompt and optional hook notices for this request."""
         if not self._initialized:
             await self._fail_query_request(request_id, state, "Not initialized")
@@ -474,11 +474,11 @@ class StdioQueryMixin:
     async def _collect_prepare_inputs(
         self,
         prompt: str,
-    ) -> tuple[list[Any], list[dict[str, Any]], str | None]:
+    ) -> Tuple[List[Any], List[Dict[str, Any]], Optional[str]]:
         """Collect hook notices and model-visible hook context messages before execution."""
-        hook_context_messages: list[Any] = []
-        hook_notices: list[dict[str, Any]] = []
-        blocked_reason: str | None = None
+        hook_context_messages: List[Any] = []
+        hook_notices: List[Dict[str, Any]] = []
+        blocked_reason: Optional[str] = None
 
         queue = self._query_context.pending_message_queue if self._query_context else None
         hook_scopes = self._query_context.hook_scopes if self._query_context else []
@@ -631,7 +631,7 @@ class StdioQueryMixin:
             return False
         return tool_result_ids == tool_use_ids
 
-    def _extract_latest_user_prompt(self, messages: list[Any], request_messages: list[dict[str, Any]]) -> str | None:
+    def _extract_latest_user_prompt(self, messages: List[Any], request_messages: List[Dict[str, Any]]) -> Optional[str]:
         for request_message in reversed(request_messages):
             if request_message.get("role") != "user":
                 continue
@@ -818,7 +818,7 @@ class StdioQueryMixin:
                     normalized.append(normalized_block)
         return normalized
 
-    def _convert_content_block(self, block: Any) -> dict[str, Any] | None:
+    def _convert_content_block(self, block: Any) -> Optional[Dict[str, Any]]:
         """Convert a message content block to SDK-compatible dictionary."""
         block_type = getattr(block, "type", None)
 

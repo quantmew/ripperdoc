@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 from ripperdoc.utils.token_estimation import estimate_tokens
 
@@ -12,7 +12,7 @@ MIN_MCP_OUTPUT_TOKENS = 1_000
 DEFAULT_MCP_WARNING_FRACTION = 0.8
 
 
-def _get_mcp_token_limits() -> tuple[int, int]:
+def _get_mcp_token_limits() -> Tuple[int, int]:
     """Compute warning and hard limits for MCP output size."""
     max_tokens = os.getenv("RIPPERDOC_MCP_MAX_OUTPUT_TOKENS")
     try:
@@ -36,7 +36,7 @@ def evaluate_mcp_output_size(
     result_text: Optional[str],
     server_name: str,
     tool_name: str,
-) -> tuple[Optional[str], Optional[str], int]:
+) -> Tuple[Optional[str], Optional[str], int]:
     """Return (warning, error, token_estimate) for an MCP result text."""
     warn_tokens, max_tokens = _get_mcp_token_limits()
     token_estimate = estimate_tokens(result_text or "")

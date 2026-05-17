@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Callable, Dict, List, Literal, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Literal, Optional, Set, Tuple
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,7 +17,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ValidationResult,
 )
-from ripperdoc.tools.SendMessageTool._prompt import SEND_MESSAGE_PROMPT
+from ripperdoc.tools.send_message._prompt import SEND_MESSAGE_PROMPT
 from ripperdoc.utils.collaboration.team_context import (
     resolve_active_team_name,
     sender_name,
@@ -38,7 +38,7 @@ def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _normalize_recipient_name(team: Any, recipient: str) -> tuple[str, bool]:
+def _normalize_recipient_name(team: Any, recipient: str) -> Tuple[str, bool]:
     raw = (recipient or "").strip()
     if not raw:
         return raw, False
@@ -103,7 +103,7 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
     def input_schema(self) -> type[SendMessageInput]:
         return SendMessageInput
 
-    def input_examples(self) -> list[ToolUseExample]:
+    def input_examples(self) -> List[ToolUseExample]:
         return [
             ToolUseExample(
                 description="Direct teammate message",
@@ -144,7 +144,7 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
         return None
 
     def _validate_message_type(
-        self, message_type: str, allowed_types: set[str]
+        self, message_type: str, allowed_types: Set[str]
     ) -> Optional[str]:
         if message_type not in allowed_types:
             return "Unsupported message type"
@@ -167,7 +167,7 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
         if error := self._validate_message_type(message_type, allowed_types):
             return ValidationResult(result=False, message=error)
 
-        validators: dict[str, list[Callable[[], Optional[str]]]] = {
+        validators: Dict[str, List[Callable[[], Optional[str]]]] = {
             "message": [
                 lambda: self._require_field(input_data.recipient, "recipient"),
                 lambda: self._require_field(input_data.content, "content"),
@@ -374,7 +374,7 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
             sender_pane_id = sender_member.tmux_pane_id if sender_member else None
 
             if approve:
-                response_payload: dict[str, Any] = {
+                response_payload: Dict[str, Any] = {
                     "type": "shutdown_approved",
                     "requestId": request_id,
                     "from": _sender,
@@ -458,7 +458,7 @@ class SendMessageTool(Tool[SendMessageInput, SendMessageOutput]):
             )
         content = (input_data.content or "").strip()
         if approve:
-            protocol_payload: dict[str, Any] = {
+            protocol_payload: Dict[str, Any] = {
                 "type": "plan_approval_response",
                 "requestId": request_id,
                 "approved": True,

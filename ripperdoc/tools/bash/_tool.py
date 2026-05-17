@@ -7,7 +7,7 @@ import contextlib
 import os
 from pathlib import Path
 from textwrap import dedent
-from typing import AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from ripperdoc.core.tool import (
     Tool,
@@ -27,7 +27,7 @@ from ripperdoc.utils.shell.bash_constants import (
 from ripperdoc.utils.shell.exit_code_handlers import IGNORED_COMMANDS
 from ripperdoc.utils.shell.output_utils import format_duration, get_last_n_lines, sanitize_output
 from ripperdoc.utils.shell.sandbox_utils import is_sandbox_available
-from ripperdoc.utils.permissions.tool_permission_utils import is_command_read_only
+from ripperdoc.tools.bash.read_only_validation import is_command_read_only
 from ripperdoc.utils.shell.shell_utils import build_shell_command, find_suitable_shell
 from ripperdoc.utils.collaboration.task_notifications import enqueue_task_notification
 from ripperdoc.utils.filesystem.safe_get_cwd import get_original_cwd, safe_get_cwd
@@ -217,7 +217,7 @@ build projects, run tests, and interact with the file system."""
         return True
 
     async def check_permissions(
-        self, input_data: BashToolInput, permission_context: dict[str, Any]
+        self, input_data: BashToolInput, permission_context: Dict[str, Any]
     ) -> Any:
         return await check_permissions(input_data, permission_context)
 
@@ -325,7 +325,7 @@ build projects, run tests, and interact with the file system."""
         *,
         context: Optional[ToolUseContext],
         effective_command: str,
-    ) -> Optional[list[Any]]:
+    ) -> Optional[List[Any]]:
         queue = getattr(context, "task_notification_queue", None) if context else None
         if queue is None:
             return None
@@ -378,7 +378,7 @@ build projects, run tests, and interact with the file system."""
         working_directory: Optional[str] = None,
     ) -> Optional[BashToolOutput]:
         try:
-            from ripperdoc.tools.background_shell import start_background_command
+            from ripperdoc.services.background_shell import start_background_command
         except (ImportError, ModuleNotFoundError) as e:
             logger.warning(
                 "[bash_tool] Failed to import background shell runner: %s: %s",
@@ -419,12 +419,12 @@ build projects, run tests, and interact with the file system."""
         start_time: float,
         sandbox_requested: bool,
         context: Optional[ToolUseContext],
-        stdout_lines: list[str],
-        stderr_lines: list[str],
-        pump_tasks: list[asyncio.Task[Any]],
+        stdout_lines: List[str],
+        stderr_lines: List[str],
+        pump_tasks: List[asyncio.Task[Any]],
     ) -> Optional[BashToolOutput]:
         try:
-            from ripperdoc.tools.background_shell import register_existing_process
+            from ripperdoc.services.background_shell import register_existing_process
         except (ImportError, ModuleNotFoundError) as exc:
             logger.warning(
                 "[bash_tool] Failed to import process adoption helper: %s: %s",
@@ -540,8 +540,8 @@ build projects, run tests, and interact with the file system."""
                 cwd=(context.working_directory if context and context.working_directory else None),
             )
 
-            stdout_lines: list[str] = []
-            stderr_lines: list[str] = []
+            stdout_lines: List[str] = []
+            stderr_lines: List[str] = []
             timed_out = False
 
             async for event in execute_foreground_process(process, start, timeout_seconds):

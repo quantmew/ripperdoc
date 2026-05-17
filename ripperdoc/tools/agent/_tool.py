@@ -16,6 +16,8 @@ from typing import (
     Literal,
     Optional,
     Sequence,
+    Tuple,
+    Union,
 )
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -417,8 +419,8 @@ class AgentTool(Tool[AgentToolInput, AgentToolOutput]):
         result: HookResult,
         *,
         parent_tool_use_id: Optional[str] = None,
-    ) -> List[UserMessage | AttachmentMessage]:
-        messages: List[UserMessage | AttachmentMessage] = []
+    ) -> List[Union[UserMessage, AttachmentMessage]]:
+        messages: List[Union[UserMessage, AttachmentMessage]] = []
         if result.additional_context:
             additional_context_message = create_hook_additional_context_message(
                 str(result.additional_context),
@@ -463,7 +465,7 @@ class AgentTool(Tool[AgentToolInput, AgentToolOutput]):
         team_name: Optional[str],
         teammate_name: Optional[str],
         fallback_agent_type: Optional[str],
-    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Resolve agent type from team roster when team context is provided."""
         from ripperdoc.utils.collaboration.teams import get_team, upsert_team_member, TeamMember
 

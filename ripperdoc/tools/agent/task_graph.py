@@ -1,7 +1,8 @@
+from __future__ import annotations
 """Task graph tool suite — re-exported from split modules for backward compatibility."""
 
 from textwrap import dedent
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, TypeVar
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Set, Tuple, TypeVar, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -406,7 +407,7 @@ def _resolve_active_task_list_id() -> str:
     return resolve_task_list_id()
 
 
-def _task_id_sort_key(task_id: str) -> tuple[int, int | str]:
+def _task_id_sort_key(task_id: str) -> Tuple[int, Union[int, str]]:
     if str(task_id).isdigit():
         return (0, int(task_id))
     return (1, str(task_id))
@@ -417,9 +418,9 @@ def _is_team_task_context() -> bool:
     return team is not None
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
+def _dedupe(values: List[str]) -> List[str]:
+    seen: Set[str] = set()
+    result: List[str] = []
     for value in values:
         token = str(value or "").strip()
         if not token or token in seen:
@@ -444,7 +445,7 @@ class TaskCreateTool(_BaseTaskGraphTool[TaskCreateInput, TaskCreateOutput]):
     def input_schema(self) -> type[TaskCreateInput]:
         return TaskCreateInput
 
-    def input_examples(self) -> list[ToolUseExample]:
+    def input_examples(self) -> List[ToolUseExample]:
         return [
             ToolUseExample(
                 description="Create a coding task with metadata",
@@ -581,7 +582,7 @@ class TaskUpdateTool(_BaseTaskGraphTool[TaskUpdateInput, TaskUpdateOutput]):
     def input_schema(self) -> type[TaskUpdateInput]:
         return TaskUpdateInput
 
-    def input_examples(self) -> list[ToolUseExample]:
+    def input_examples(self) -> List[ToolUseExample]:
         return [
             ToolUseExample(
                 description="Start work on a task",
@@ -716,7 +717,7 @@ class TaskUpdateTool(_BaseTaskGraphTool[TaskUpdateInput, TaskUpdateOutput]):
         try:
             updated = update_task(input_data.task_id, patch, task_list_id=task_list_id)
 
-            updated_fields: list[str] = []
+            updated_fields: List[str] = []
             if updated.subject != previous_task.subject:
                 updated_fields.append("subject")
             if updated.description != previous_task.description:
@@ -796,7 +797,7 @@ class TaskListTool(_BaseTaskGraphTool[TaskListInput, TaskListOutput]):
     def input_schema(self) -> type[TaskListInput]:
         return TaskListInput
 
-    def input_examples(self) -> list[ToolUseExample]:
+    def input_examples(self) -> List[ToolUseExample]:
         return [
             ToolUseExample(
                 description="List current task board summary",
@@ -837,7 +838,7 @@ class TaskListTool(_BaseTaskGraphTool[TaskListInput, TaskListOutput]):
         tasks = list_tasks(task_list_id=task_list_id)
 
         by_id = {task.id: task for task in tasks}
-        visible: list[TaskItem] = []
+        visible: List[TaskItem] = []
         for task in tasks:
             metadata = task.metadata if isinstance(task.metadata, dict) else {}
             if metadata.get("_internal"):
@@ -846,7 +847,7 @@ class TaskListTool(_BaseTaskGraphTool[TaskListInput, TaskListOutput]):
 
         visible.sort(key=lambda item: _task_id_sort_key(item.id))
 
-        entries: list[TaskListEntry] = []
+        entries: List[TaskListEntry] = []
         for task in visible:
             blockers = [
                 dep

@@ -6,7 +6,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from rich.markup import escape
 
@@ -20,7 +20,7 @@ ExportFormat = Literal["txt", "md", "jsonl"]
 JSONL_EXPORT_SCHEMA_VERSION = 1
 
 
-def _build_export_content(ui: Any, messages: list[Any], export_format: ExportFormat) -> str:
+def _build_export_content(ui: Any, messages: List[Any], export_format: ExportFormat) -> str:
     if export_format == "jsonl":
         lines = []
         for index, message in enumerate(messages):
@@ -61,7 +61,7 @@ def _build_export_content(ui: Any, messages: list[Any], export_format: ExportFor
     return transcript.rstrip() + "\n"
 
 
-def _extract_first_prompt(messages: list[Any]) -> str:
+def _extract_first_prompt(messages: List[Any]) -> str:
     for message in messages:
         if getattr(message, "type", None) != "user":
             continue
@@ -118,7 +118,7 @@ def _default_export_path(ui: Any, extension: str = ".txt") -> Path:
     return Path.cwd() / filename
 
 
-def _detect_export_format(path: str | Path) -> ExportFormat:
+def _detect_export_format(path: Union[str, Path]) -> ExportFormat:
     suffix = Path(path).suffix.lower()
     if suffix == ".md":
         return "md"
@@ -138,11 +138,11 @@ def _resolve_export_path(ui: Any, raw_path: Optional[str], default_extension: st
     return candidate
 
 
-def _copy_to_clipboard(text: str) -> tuple[bool, str]:
+def _copy_to_clipboard(text: str) -> Tuple[bool, str]:
     return copy_to_clipboard(text)
 
 
-def _save_to_file(path: Path, content: str) -> tuple[bool, str]:
+def _save_to_file(path: Path, content: str) -> Tuple[bool, str]:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -220,7 +220,7 @@ def _handle(ui: Any, arg: str) -> bool:
         return True
 
     if action in {"file", "file_txt", "file_md", "file_jsonl"}:
-        format_map: dict[str, tuple[ExportFormat, str]] = {
+        format_map: Dict[str, Tuple[ExportFormat, str]] = {
             "file": ("txt", ".txt"),
             "file_txt": ("txt", ".txt"),
             "file_md": ("md", ".md"),

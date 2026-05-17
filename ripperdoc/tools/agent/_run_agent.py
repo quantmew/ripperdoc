@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from ripperdoc.core.query import QueryContext, query
 from ripperdoc.core.tool import Tool, ToolProgress
@@ -433,8 +433,8 @@ def track_subagent_message(
     history: List[Any],
     assistant_messages: List[AssistantMessage],
     tool_use_count: int,
-) -> tuple[int, List[tuple[str, str]]]:
-    updates: List[tuple[str, str]] = []
+) -> Tuple[int, List[Tuple[str, str]]]:
+    updates: List[Tuple[str, str]] = []
     msg_type = getattr(message, "type", "")
     if msg_type in ("assistant", "user"):
         history.append(message)  # type: ignore[arg-type]

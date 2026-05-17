@@ -13,7 +13,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Callable, MutableMapping, Optional
+from typing import Callable, Dict, List, MutableMapping, Optional, Tuple
 
 from ripperdoc.utils.filesystem.git_utils import get_git_root
 from ripperdoc.utils.collaboration.worktree import (
@@ -48,7 +48,7 @@ def _extract_pr_number_from_worktree(value: str) -> Optional[int]:
     return None
 
 
-def _resolve_worktree_name_and_pr(raw_name: Optional[str]) -> tuple[Optional[str], Optional[int]]:
+def _resolve_worktree_name_and_pr(raw_name: Optional[str]) -> Tuple[Optional[str], Optional[int]]:
     """Resolve worktree name and optional PR number from CLI/user input."""
     clean = (raw_name or "").strip()
     if not clean:
@@ -59,7 +59,7 @@ def _resolve_worktree_name_and_pr(raw_name: Optional[str]) -> tuple[Optional[str
     return f"pr-{pr_number}", pr_number
 
 
-def _has_tmux_worktree_flags(argv: list[str]) -> bool:
+def _has_tmux_worktree_flags(argv: List[str]) -> bool:
     has_tmux = "--tmux" in argv or "--tmux=classic" in argv
     if not has_tmux:
         return False
@@ -71,7 +71,7 @@ def _has_tmux_worktree_flags(argv: list[str]) -> bool:
     return has_worktree
 
 
-def _extract_worktree_arg(argv: list[str]) -> Optional[str]:
+def _extract_worktree_arg(argv: List[str]) -> Optional[str]:
     for idx, token in enumerate(argv):
         if token in ("-w", "--worktree"):
             candidate = argv[idx + 1] if idx + 1 < len(argv) else None
@@ -92,7 +92,7 @@ def _extract_worktree_arg(argv: list[str]) -> Optional[str]:
     return None
 
 
-def _extract_cwd_arg(argv: list[str]) -> Optional[Path]:
+def _extract_cwd_arg(argv: List[str]) -> Optional[Path]:
     for idx, token in enumerate(argv):
         if token == "--cwd":
             candidate = argv[idx + 1] if idx + 1 < len(argv) else None
@@ -107,8 +107,8 @@ def _extract_cwd_arg(argv: list[str]) -> Optional[Path]:
     return None
 
 
-def _strip_tmux_worktree_args(argv: list[str]) -> list[str]:
-    processed: list[str] = []
+def _strip_tmux_worktree_args(argv: List[str]) -> List[str]:
+    processed: List[str] = []
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -130,8 +130,8 @@ def _strip_tmux_worktree_args(argv: list[str]) -> list[str]:
     return processed
 
 
-def _strip_cwd_args(argv: list[str]) -> list[str]:
-    processed: list[str] = []
+def _strip_cwd_args(argv: List[str]) -> List[str]:
+    processed: List[str] = []
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -176,10 +176,10 @@ def _build_tmux_session_name(repo_root: Path, worktree_hint: str) -> str:
 
 
 def _run_tmux_command(
-    args: list[str],
+    args: List[str],
     *,
     cwd: Optional[Path] = None,
-    env: Optional[dict[str, str]] = None,
+    env: Optional[Dict[str, str]] = None,
     capture: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -194,7 +194,7 @@ def _run_tmux_command(
 
 
 def _exec_into_tmux_worktree(
-    argv: list[str],
+    argv: List[str],
     *,
     get_git_root_fn: Callable[[Path], Optional[Path]] = get_git_root,
     create_task_worktree_fn: Callable[..., WorktreeSession] = create_task_worktree,
@@ -204,7 +204,7 @@ def _exec_into_tmux_worktree(
     environ: Optional[MutableMapping[str, str]] = None,
     platform_name: Optional[str] = None,
     python_executable: Optional[str] = None,
-) -> tuple[bool, Optional[str]]:
+) -> Tuple[bool, Optional[str]]:
     """Fast path for --tmux + --worktree startup."""
     env_map = environ if environ is not None else os.environ
     effective_platform = platform_name if platform_name is not None else sys.platform

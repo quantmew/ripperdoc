@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
-from typing import Any, Awaitable, Callable, Coroutine, Optional, cast
+from typing import Any, Awaitable, Callable, Coroutine, Dict, List, Optional, Set, Tuple, Union, cast
 
 from ripperdoc.core.config import get_effective_config
 from ripperdoc.core.tool_defaults import filter_tools_by_names
@@ -29,19 +29,19 @@ logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
 class StdioConfigMixin:
     _PERMISSION_MODES: set[str]
-    _can_use_tool: Any | None
-    _local_can_use_tool: Any | None
-    _query_context: Any | None
-    _custom_system_prompt: str | None
-    _append_system_prompt: str | None
-    _skill_instructions: str | None
+    _can_use_tool: Optional[Any]
+    _local_can_use_tool: Optional[Any]
+    _query_context: Optional[Any]
+    _custom_system_prompt: Optional[str]
+    _append_system_prompt: Optional[str]
+    _skill_instructions: Optional[str]
     _output_style: str
     _output_language: str
-    _session_id: str | None
-    _sdk_hook_scope: HooksConfig | None
-    _session_additional_working_dirs: set[str]
-    _session_agent_prompt: str | None
-    _pre_plan_mode: str | None
+    _session_id: Optional[str]
+    _sdk_hook_scope: Optional[HooksConfig]
+    _session_additional_working_dirs: Set[str]
+    _session_agent_prompt: Optional[str]
+    _pre_plan_mode: Optional[str]
     _clear_context_after_turn: bool
 
     def _normalize_permission_mode(self, mode: Any) -> str:
@@ -54,7 +54,7 @@ class StdioConfigMixin:
         config = get_effective_config(self._project_path)
         return not bool(getattr(config, "disable_bypass_permissions_mode", False))
 
-    def _normalize_tool_list(self, value: Any) -> list[str] | None:
+    def _normalize_tool_list(self, value: Any) -> Optional[List[str]]:
         """Normalize tool list inputs from SDK/CLI options."""
         if value is None:
             return None
@@ -78,9 +78,9 @@ class StdioConfigMixin:
         self,
         tools: list[Any],
         *,
-        allowed_tools: list[str] | None,  # noqa: ARG002 – permission: auto-approve
-        disallowed_tools: list[str] | None,  # noqa: ARG002 – permission: auto-deny
-        tools_list: list[str] | None,
+        allowed_tools: Optional[List[str]],  # noqa: ARG002 – permission: auto-approve
+        disallowed_tools: Optional[List[str]],  # noqa: ARG002 – permission: auto-deny
+        tools_list: Optional[List[str]],
     ) -> list[Any]:
         """Apply tool-set filters while keeping Task tool consistent.
 
@@ -97,7 +97,7 @@ class StdioConfigMixin:
             return tools
 
         tool_names = [getattr(tool, "name", tool.__class__.__name__) for tool in tools]
-        allow_set: set[str] | None = None
+        allow_set: Optional[Set[str]] = None
 
         if tools_list is not None:
             allow_set = set(tools_list)
@@ -450,7 +450,7 @@ class StdioConfigMixin:
         text: str,
         hook_event: str,
         *,
-        tool_name: str | None = None,
+        tool_name: Optional[str] = None,
         level: str = "info",
     ) -> UserStreamMessage:
         return UserStreamMessage(
@@ -470,10 +470,10 @@ class StdioConfigMixin:
         self,
         tools: list[Any],
         prompt: str,
-        mcp_instructions: str | None,
-        hook_instructions: list[str] | None = None,
-        custom_system_prompt: str | None = None,
-        append_system_prompt: str | None = None,
+        mcp_instructions: Optional[str],
+        hook_instructions: Optional[List[str]] = None,
+        custom_system_prompt: Optional[str] = None,
+        append_system_prompt: Optional[str] = None,
     ) -> str:
         """Resolve the system prompt for the current session/query."""
         additional_instructions: list[str] = []
@@ -564,8 +564,8 @@ class StdioConfigMixin:
         self,
         callback_id: str,
         input_data: dict[str, Any],
-        tool_use_id: str | None,
-        timeout: float | None,
+        tool_use_id: Optional[str],
+        timeout: Optional[float],
     ) -> HookOutput:
         """Invoke an SDK hook callback via control protocol."""
         safe_input = self._sanitize_for_json(input_data)

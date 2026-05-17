@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple, Union
 
 from rich.markup import escape
 
@@ -29,7 +29,7 @@ class ForkedCustomCommandRequest:
 def suggest_slash_commands(
     name: str,
     project_path: Optional[Path],
-    completions_fn: Callable[[Optional[Path]], List[tuple[str, object]]],
+    completions_fn: Callable[[Optional[Path]], List[Tuple[str, object]]],
 ) -> List[str]:
     """Return close matching slash commands for a mistyped name."""
     if not name:
@@ -47,7 +47,7 @@ def handle_slash_command(
     ui: object,
     user_input: str,
     suggest_fn: Callable[[str, Optional[Path]], List[str]],
-) -> bool | str | ForkedCustomCommandRequest:
+) -> Union[bool, str, ForkedCustomCommandRequest]:
     """Handle slash commands.
 
     Returns True if handled as a built-in, False if not a command,

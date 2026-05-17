@@ -26,9 +26,9 @@ from ripperdoc.tools.task_create import TaskCreateTool
 from ripperdoc.tools.task_get import TaskGetTool
 from ripperdoc.tools.task_list import TaskListTool
 from ripperdoc.tools.task_update import TaskUpdateTool
-from ripperdoc.tools.SendMessageTool import SendMessageTool
-from ripperdoc.tools.TeamCreateTool import TeamCreateTool
-from ripperdoc.tools.TeamDeleteTool import TeamDeleteTool
+from ripperdoc.tools.send_message import SendMessageTool
+from ripperdoc.tools.team_create import TeamCreateTool
+from ripperdoc.tools.team_delete import TeamDeleteTool
 from ripperdoc.tools.ask_user_question import AskUserQuestionTool
 from ripperdoc.tools.enter_plan_mode import EnterPlanModeTool
 from ripperdoc.tools.enter_worktree import EnterWorktreeTool

@@ -15,7 +15,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Callable, Dict, Optional, Awaitable, Any
+from typing import Callable, Dict, List, Optional, Awaitable, Any, Union
 
 from ripperdoc.core.hooks.config import HookDefinition
 from ripperdoc.core.hooks.events import (
@@ -57,7 +57,7 @@ def _extract_message_text(message: AssistantMessage) -> str:
     return ""
 
 
-def _build_hook_agent_tools() -> list[Any]:
+def _build_hook_agent_tools() -> List[Any]:
     """Create a constrained toolset for agent-based hooks."""
     # Lazily import task tools to avoid import cycles during hooks bootstrap.
     from ripperdoc.tools.task_output import TaskOutputTool
@@ -82,7 +82,7 @@ LLMCallback = Callable[[str], Awaitable[str]]
 # Takes (callback_id, input_data, tool_use_id, timeout_sec) and returns HookOutput or raw dict
 HookCallback = Callable[
     [str, Dict[str, Any], Optional[str], Optional[float]],
-    Awaitable[HookOutput | Dict[str, Any] | None],
+    Awaitable[Union[HookOutput, Dict[str, Any], None]],
 ]
 
 
@@ -295,7 +295,7 @@ class HookExecutor:
         system_prompt = self._build_agent_system_prompt(tool_names)
 
         async def _run_agent() -> str:
-            assistant_messages: list[AssistantMessage] = []
+            assistant_messages: List[AssistantMessage] = []
             from ripperdoc.core.query import QueryContext, query
 
             query_context = QueryContext(
@@ -660,9 +660,9 @@ class HookExecutor:
 
     async def execute_hooks_async(
         self,
-        hooks: list[HookDefinition],
+        hooks: List[HookDefinition],
         input_data: AnyHookInput,
-    ) -> list[HookOutput]:
+    ) -> List[HookOutput]:
         """Execute multiple hooks in sequence.
 
         Hooks are executed in order. If a hook returns a blocking decision,
@@ -683,9 +683,9 @@ class HookExecutor:
 
     def execute_hooks_sync(
         self,
-        hooks: list[HookDefinition],
+        hooks: List[HookDefinition],
         input_data: AnyHookInput,
-    ) -> list[HookOutput]:
+    ) -> List[HookOutput]:
         """Execute multiple hooks synchronously in sequence.
 
         Args:

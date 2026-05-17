@@ -15,7 +15,7 @@ import uuid
 from collections import deque
 from collections.abc import AsyncIterator
 from urllib.parse import urlparse, urlunparse
-from typing import Any, Callable, cast
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
 
 from ripperdoc.protocol.models import (
     JsonRpcError,
@@ -27,20 +27,20 @@ from ripperdoc.utils.coerce import parse_boolish
 
 from .timeouts import STDIO_HOOK_TIMEOUT_SEC
 
-_httpx_module: Any | None
+_httpx_module: Optional[Any]
 try:
     _httpx_module = importlib.import_module("httpx")
 except Exception:  # pragma: no cover - optional dependency for hybrid send mode
     _httpx_module = None
 
-_websockets_module: Any | None
+_websockets_module: Optional[Any]
 try:
     _websockets_module = importlib.import_module("websockets")
 except Exception:  # pragma: no cover - compatibility fallback for missing optional dependency
     _websockets_module = None
 
-_httpx: Any | None = _httpx_module
-_websockets: Any | None = _websockets_module
+_httpx: Optional[Any] = _httpx_module
+_websockets: Optional[Any] = _websockets_module
 
 logger = logging.getLogger("ripperdoc.protocol.stdio.handler")
 
@@ -68,30 +68,30 @@ class _SDKWebSocketTransport:
         self,
         url: str,
         *,
-        headers: dict[str, str] | None = None,
+        headers: Optional[Dict[str, str]] = None,
         auto_reconnect: bool = True,
-        refresh_headers: Callable[[], dict[str, str] | None] | None = None,
+        refresh_headers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
     ) -> None:
         self.url = url
         self.headers = headers or {}
         self._refresh_headers = refresh_headers
         self.auto_reconnect = auto_reconnect
         self._state = "idle"
-        self._ws: Any | None = None
+        self._ws: Optional[Any] = None
         self._running = False
-        self._loop_task: asyncio.Task[None] | None = None
-        self._ping_task: asyncio.Task[None] | None = None
-        self._keepalive_task: asyncio.Task[None] | None = None
-        self._incoming_queue: asyncio.Queue[str | None] = asyncio.Queue()
-        self._outgoing_queue: asyncio.Queue[dict[str, Any] | object | None] = asyncio.Queue()
-        self._last_sent_id: str | None = None
-        self._last_confirmed_id: str | None = None
+        self._loop_task: Optional[asyncio.Task[None]] = None
+        self._ping_task: Optional[asyncio.Task[None]] = None
+        self._keepalive_task: Optional[asyncio.Task[None]] = None
+        self._incoming_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        self._outgoing_queue: asyncio.Queue[Union[Dict[str, Any], object, None]] = asyncio.Queue()
+        self._last_sent_id: Optional[str] = None
+        self._last_confirmed_id: Optional[str] = None
         self._message_buffer = deque[dict[str, Any]](maxlen=_SDK_MESSAGE_BUFFER_MAX)
         self._stop_sentinel: object = object()
-        self._last_reconnect_attempt_time: float | None = None
-        self._reconnect_start_time: float | None = None
+        self._last_reconnect_attempt_time: Optional[float] = None
+        self._reconnect_start_time: Optional[float] = None
         self._reconnect_attempts = 0
-        self._on_close_callback: Callable[[int | None], None] | None = None
+        self._on_close_callback: Optional[Callable[[Optional[int]], None]] = None
         self._pong_received = True
 
     async def start(self) -> None:
@@ -132,13 +132,13 @@ class _SDKWebSocketTransport:
 
         await self._outgoing_queue.put(message)
 
-    async def read_line(self) -> str | None:
+    async def read_line(self) -> Optional[str]:
         line = await self._incoming_queue.get()
         if line is None:
             return None
         return line
 
-    def setOnClose(self, callback: Callable[[int | None], None] | None) -> None:
+    def setOnClose(self, callback: Optional[Callable[[Optional[int]], None]]) -> None:
         self._on_close_callback = callback
 
     def _collect_connect_headers(self, *, include_last_request_id: bool = True) -> dict[str, str]:
@@ -200,7 +200,7 @@ class _SDKWebSocketTransport:
         finally:
             await self._incoming_queue.put(None)
 
-    async def _connect_and_run(self) -> float | None:
+    async def _connect_and_run(self) -> Optional[float]:
         if self._state not in {"idle", "reconnecting"}:
             logger.error(
                 "[stdio-sdk] WebSocket connect rejected; current state is %s",
@@ -253,7 +253,7 @@ class _SDKWebSocketTransport:
             await self._close_socket()
             return None
 
-        exception: BaseException | None = None
+        exception: Optional[BaseException] = None
         close_code = getattr(ws, "close_code", None)
         for task in done:
             if task.cancelled():
@@ -355,9 +355,9 @@ class _SDKWebSocketTransport:
 
     async def _handle_connection_close(
         self,
-        close_code: int | None,
-        exception: BaseException | None,
-    ) -> float | None:
+        close_code: Optional[int],
+        exception: Optional[BaseException],
+    ) -> Optional[float]:
         await self._stop_ping_loop()
         await self._stop_keepalive_loop()
         if self._state in {"closing", "closed"}:
@@ -448,7 +448,7 @@ class _SDKWebSocketTransport:
                 **connect_kwargs,
             )
 
-    async def _replay_buffer(self, last_request_id: str | None = None) -> None:
+    async def _replay_buffer(self, last_request_id: Optional[str] = None) -> None:
         if not self._message_buffer:
             return
 
@@ -485,7 +485,7 @@ class _SDKWebSocketTransport:
             self._ws = None
             self._state = "closed"
 
-    def _extract_tracking_id(self, message: dict[str, Any]) -> str | None:
+    def _extract_tracking_id(self, message: Dict[str, Any]) -> Optional[str]:
         for key in ("uuid", "request_id", "id"):
             value = message.get(key)
             if isinstance(value, str) and value.strip():
@@ -551,9 +551,9 @@ class _SDKHybridWebSocketTransport(_SDKWebSocketTransport):
         self,
         url: str,
         *,
-        headers: dict[str, str] | None = None,
+        headers: Optional[Dict[str, str]] = None,
         auto_reconnect: bool = True,
-        refresh_headers: Callable[[], dict[str, str] | None] | None = None,
+        refresh_headers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
     ) -> None:
         super().__init__(
             url,
@@ -650,14 +650,14 @@ class _SDKHybridWebSocketTransport(_SDKWebSocketTransport):
 
 class StdioIOMixin:
     _resolved_tool_use_ids: set[str]
-    _sdk_transport: _SDKWebSocketTransport | None
-    _mcp_server_overrides: dict[str, Any] | None
+    _sdk_transport: Optional[_SDKWebSocketTransport]
+    _mcp_server_overrides: Optional[dict[str, Any]]
 
     def _is_sdk_transport_enabled(self) -> bool:
         return bool(getattr(self, "_sdk_url", None))
 
     @staticmethod
-    def _readable_stripped_env(*env_keys: str) -> str | None:
+    def _readable_stripped_env(*env_keys: str) -> Optional[str]:
         for env_key in env_keys:
             value = os.getenv(env_key, "")
             if value:
@@ -743,8 +743,8 @@ class StdioIOMixin:
 
     def _extract_tool_use_id_from_control_response(
         self,
-        response_payload: dict[str, Any] | None,
-    ) -> str | None:
+        response_payload: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
         response_data = (response_payload or {}).get("response")
         if isinstance(response_data, dict):
             for key in ("toolUseID", "tool_use_id"):
@@ -769,7 +769,7 @@ class StdioIOMixin:
 
         return "success"
 
-    async def _send_control_cancel_request(self, request_id: str | int) -> None:
+    async def _send_control_cancel_request(self, request_id: Union[str, int]) -> None:
         """Send a best-effort control cancel envelope for an in-flight request id."""
         if request_id is None:
             return
@@ -852,9 +852,9 @@ class StdioIOMixin:
 
     async def _write_control_response(
         self,
-        request_id: str | int,
-        response: dict[str, Any] | None = None,
-        error: str | JsonRpcError | dict[str, Any] | JsonRpcResponseError | None = None,
+        request_id: Union[str, int],
+        response: Optional[Dict[str, Any]] = None,
+        error: Union[str, JsonRpcError, Dict[str, Any], JsonRpcResponseError, None] = None,
     ) -> None:
         """Write a control protocol response envelope."""
 
@@ -912,8 +912,8 @@ class StdioIOMixin:
     async def _handle_control_response(self, message: dict[str, Any]) -> None:
         """Handle protocol responses from the SDK and resolve awaiters."""
 
-        request_id: str | None = None
-        response_payload: dict[str, Any] | None = None
+        request_id: Optional[str] = None
+        response_payload: Optional[Dict[str, Any]] = None
         if message.get("type") == "control_response":
             payload = message.get("response")
             if isinstance(payload, dict):
@@ -990,10 +990,10 @@ class StdioIOMixin:
     async def _send_control_request(
         self,
         *args: Any,
-        timeout: float | None = None,
-        request_id: str | None = None,
-        subtype: str | None = None,
-        request: dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
+        request_id: Optional[str] = None,
+        subtype: Optional[str] = None,
+        request: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Send a control request and await the response."""
         if args:
@@ -1056,7 +1056,7 @@ class StdioIOMixin:
 
         await self._write_message(message_dict)
 
-    async def _read_line(self) -> str | None:
+    async def _read_line(self) -> Optional[str]:
         """Read a single line from stdin.
 
         Uses ``run_in_executor`` to avoid blocking the event loop.  The call is
@@ -1275,7 +1275,7 @@ class StdioIOMixin:
         self,
         prompt: str,
         *,
-        request_id: str | None = None,
+        request_id: Optional[str] = None,
         max_tokens: int = 1024,
     ) -> dict[str, Any]:
         """Build a control query request from user prompt input."""

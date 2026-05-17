@@ -8,7 +8,7 @@ echo/re-delivery filtering).
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Set
 
 
 class BoundedUUIDSet:
@@ -21,8 +21,8 @@ class BoundedUUIDSet:
 
     def __init__(self, capacity: int = 2000) -> None:
         self._capacity = max(1, capacity)
-        self._ring: list[str | None] = [None] * self._capacity
-        self._set: set[str] = set()
+        self._ring: List[Optional[str]] = [None] * self._capacity
+        self._set: Set[str] = set()
         self._write_idx = 0
 
     def add(self, uuid: str) -> None:
@@ -83,9 +83,9 @@ def handle_ingress_message(
     data: str,
     recent_posted_uuids: BoundedUUIDSet,
     recent_inbound_uuids: BoundedUUIDSet,
-    on_inbound_message: Callable[[dict[str, Any]], None] | None = None,
-    on_permission_response: Callable[[dict[str, Any]], None] | None = None,
-    on_control_request: Callable[[dict[str, Any]], None] | None = None,
+    on_inbound_message: Optional[Callable[[Dict[str, Any]], None]] = None,
+    on_permission_response: Optional[Callable[[Dict[str, Any]], None]] = None,
+    on_control_request: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
     """Parse an ingress WebSocket message and route it to the appropriate handler.
 

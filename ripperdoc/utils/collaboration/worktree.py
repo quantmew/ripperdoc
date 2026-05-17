@@ -13,7 +13,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from ripperdoc.core.config import (
     get_global_config,
@@ -30,7 +30,7 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 _MAX_NAME_ATTEMPTS = 100
-_SESSION_WORKTREES: dict[str, "WorktreeSession"] = {}
+_SESSION_WORKTREES: Dict[str, "WorktreeSession"] = {}
 _SESSION_WORKTREES_LOCK = threading.Lock()
 _CLI_WORKTREE_ADJECTIVES = ("swift", "bright", "calm", "keen", "bold")
 _CLI_WORKTREE_NOUNS = ("fox", "owl", "elm", "oak", "ray")
@@ -97,7 +97,7 @@ def _to_base36(value: int) -> str:
 
 
 def _run_git(
-    args: list[str],
+    args: List[str],
     *,
     cwd: Path,
     env: Optional[Mapping[str, str]] = None,
@@ -135,7 +135,7 @@ def _has_worktree_remove_hook() -> bool:
 
 
 def _extract_worktree_path_from_hook_result(result: HookResult) -> Optional[str]:
-    def _from_mapping(payload: dict[str, object]) -> Optional[str]:
+    def _from_mapping(payload: Dict[str, object]) -> Optional[str]:
         for key in ("worktreePath", "worktree_path", "path"):
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
@@ -184,20 +184,20 @@ def register_session_worktree(session: WorktreeSession) -> None:
         _SESSION_WORKTREES[str(session.worktree_path)] = session
 
 
-def unregister_session_worktree(worktree_path: Path | str) -> None:
+def unregister_session_worktree(worktree_path: Union[Path, str]) -> None:
     """Remove one worktree from the session registry."""
     key = str(Path(worktree_path))
     with _SESSION_WORKTREES_LOCK:
         _SESSION_WORKTREES.pop(key, None)
 
 
-def list_session_worktrees() -> list[WorktreeSession]:
+def list_session_worktrees() -> List[WorktreeSession]:
     """Return worktrees created in this process/session."""
     with _SESSION_WORKTREES_LOCK:
         return list(_SESSION_WORKTREES.values())
 
 
-def consume_session_worktrees() -> list[WorktreeSession]:
+def consume_session_worktrees() -> List[WorktreeSession]:
     """Return and clear the session worktree registry."""
     with _SESSION_WORKTREES_LOCK:
         sessions = list(_SESSION_WORKTREES.values())
@@ -215,7 +215,7 @@ def _pick_unique_name(
     repo_root: Path,
     base_name: str,
     branch_prefix: str,
-) -> tuple[str, str, Path]:
+) -> Tuple[str, str, Path]:
     worktrees_root = _worktrees_root(repo_root)
     worktrees_root.mkdir(parents=True, exist_ok=True)
 
@@ -274,7 +274,7 @@ def _maybe_resume_existing_worktree(
     )
 
 
-def _normalize_git_file_list(output: str) -> list[str]:
+def _normalize_git_file_list(output: str) -> List[str]:
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
@@ -285,11 +285,11 @@ def _is_safe_relative_path(path_value: str) -> bool:
     return True
 
 
-def _symlink_directories_from_config(repo_root: Path) -> list[str]:
+def _symlink_directories_from_config(repo_root: Path) -> List[str]:
     global_cfg = get_global_config()
     project_cfg = get_project_config(repo_root)
     local_cfg = get_project_local_config(repo_root)
-    configured: list[str] = []
+    configured: List[str] = []
     for cfg in (global_cfg, project_cfg, local_cfg):
         worktree_cfg = getattr(cfg, "worktree", None)
         if not isinstance(worktree_cfg, dict):
@@ -388,7 +388,7 @@ def copy_worktree_include_files(
     *,
     repo_root: Path,
     worktree_path: Path,
-) -> list[str]:
+) -> List[str]:
     """Copy ignored/untracked files selected by `.worktreeinclude` into a worktree.
 
     Include behavior:
@@ -431,7 +431,7 @@ def copy_worktree_include_files(
     if not files_to_copy:
         return []
 
-    copied: list[str] = []
+    copied: List[str] = []
     for rel_path in files_to_copy:
         normalized_rel = os.path.normpath(rel_path)
         if not _is_safe_relative_path(normalized_rel):
@@ -785,12 +785,12 @@ def cleanup_worktree_sessions(
     sessions: Sequence[WorktreeSession],
     *,
     force: bool = True,
-) -> list[WorktreeCleanupResult]:
+) -> List[WorktreeCleanupResult]:
     """Cleanup a batch of worktree sessions."""
     return [cleanup_worktree_session(session, force=force) for session in sessions]
 
 
-def cleanup_registered_worktrees(*, force: bool = True) -> list[WorktreeCleanupResult]:
+def cleanup_registered_worktrees(*, force: bool = True) -> List[WorktreeCleanupResult]:
     """Cleanup and clear all registered session worktrees."""
     sessions = consume_session_worktrees()
     return cleanup_worktree_sessions(sessions, force=force)

@@ -16,7 +16,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Literal, Optional, Sequence
+from typing import Any, Dict, Iterable, Iterator, List, Literal, Optional, Sequence, Set, Tuple
 from uuid import uuid4
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
@@ -31,7 +31,7 @@ from ripperdoc.utils.filesystem.path_utils import sanitize_project_path
 logger = get_logger()
 
 TaskStatus = Literal["pending", "in_progress", "completed"]
-_RUNTIME_TASK_SCOPE: tuple[str, Path] | None = None
+_RUNTIME_TASK_SCOPE: Optional[Tuple[str, Path]] = None
 
 
 class TaskItem(BaseModel):
@@ -48,14 +48,14 @@ class TaskItem(BaseModel):
     )
     owner: Optional[str] = Field(default=None, description="Assigned owner/teammate")
     status: TaskStatus = Field(default="pending")
-    blocks: list[str] = Field(default_factory=list, description="Tasks this task blocks")
-    blocked_by: list[str] = Field(
+    blocks: List[str] = Field(default_factory=list, description="Tasks this task blocks")
+    blocked_by: List[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("blocked_by", "blockedBy"),
         serialization_alias="blockedBy",
         description="Tasks blocking this task",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     version: int = Field(default=1, ge=1)
     created_at: float = Field(
         default_factory=time.time,
@@ -83,13 +83,13 @@ class TaskPatch(BaseModel):
     )
     owner: Optional[str] = None
     status: Optional[TaskStatus] = None
-    blocks: Optional[list[str]] = None
-    blocked_by: Optional[list[str]] = Field(
+    blocks: Optional[List[str]] = None
+    blocked_by: Optional[List[str]] = Field(
         default=None,
         validation_alias=AliasChoices("blocked_by", "blockedBy"),
         serialization_alias="blockedBy",
     )
-    metadata: Optional[dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
     merge_metadata: bool = True
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -280,9 +280,9 @@ def _read_task_file(path: Path) -> Optional[TaskItem]:
         return None
 
 
-def _normalize_ids(values: Sequence[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
+def _normalize_ids(values: Sequence[str]) -> List[str]:
+    seen: Set[str] = set()
+    ordered: List[str] = []
     for value in values:
         raw = str(value or "").strip()
         if not raw or raw in seen:
@@ -347,12 +347,12 @@ def _reconcile_dependency_edges(
     *,
     tasks: Dict[str, TaskItem],
     task_id: str,
-    old_blocks: set[str],
-    old_blocked_by: set[str],
-) -> set[str]:
+    old_blocks: Set[str],
+    old_blocked_by: Set[str],
+) -> Set[str]:
     """Keep `blocks` and `blockedBy` relationships bidirectionally consistent."""
 
-    changed: set[str] = {task_id}
+    changed: Set[str] = {task_id}
     task = tasks[task_id]
     new_blocks = set(task.blocks)
     new_blocked_by = set(task.blocked_by)
@@ -568,7 +568,7 @@ def delete_task(
             return False
 
         tasks.pop(task_id, None)
-        changed: set[str] = {task_id}
+        changed: Set[str] = {task_id}
         for candidate in tasks.values():
             before_blocks = list(candidate.blocks)
             before_blocked_by = list(candidate.blocked_by)
@@ -583,11 +583,11 @@ def delete_task(
         return True
 
 
-def unresolved_blockers(task: TaskItem, tasks: Sequence[TaskItem]) -> list[str]:
+def unresolved_blockers(task: TaskItem, tasks: Sequence[TaskItem]) -> List[str]:
     """Return blocker ids that still exist and are not completed."""
 
     by_id = {item.id: item for item in tasks}
-    unresolved: list[str] = []
+    unresolved: List[str] = []
     for blocker_id in task.blocked_by:
         blocker = by_id.get(blocker_id)
         if blocker and blocker.status != "completed":

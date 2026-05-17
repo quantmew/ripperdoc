@@ -2,7 +2,7 @@
 
 import asyncio
 import inspect
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 from ripperdoc.core.permission_engine import PermissionResult
 from ripperdoc.core.tool import Tool
@@ -31,7 +31,7 @@ async def _check_tool_permissions(
     can_use_tool_fn: Optional[ToolPermissionCallable],
     *,
     force_prompt: bool = False,
-) -> tuple[bool, Optional[str], Optional[Any]]:
+) -> Tuple[bool, Optional[str], Optional[Any]]:
     """Evaluate whether a tool call is allowed."""
     try:
         if can_use_tool_fn is not None:

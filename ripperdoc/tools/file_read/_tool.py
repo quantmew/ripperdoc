@@ -31,6 +31,7 @@ from ripperdoc.utils.messaging.messages import (
 from ripperdoc.utils.image_utils import is_image_file, read_image_as_base64
 from ripperdoc.utils.pdf_utils import read_pdf_text
 from ripperdoc.tools.file_read._utils import (
+    format_line_with_number,
     read_file_with_encoding,
     read_file_slice_with_encoding,
 )
@@ -141,7 +142,7 @@ and limit to read only a portion of the file."""
         for i, line in enumerate(lines, start=output.offset + 1):
             if len(line) > 2000:
                 line = line[:2000] + "... [truncated]"
-            numbered_lines.append(f"{i:6d}\t{line}")
+            numbered_lines.append(format_line_with_number(i, line))
         return "\n".join(numbered_lines)
 
     def render_tool_use_message(self, input_data: FileReadToolInput, verbose: bool = False) -> str:
@@ -245,7 +246,7 @@ and limit to read only a portion of the file."""
                     )
                     return
 
-                parts: list[str] = []
+                parts: List[str] = []
                 for i, cell in enumerate(notebook.get("cells", [])):
                     cell_type = cell.get("cell_type", "unknown")
                     source = "".join(cell.get("source", []))

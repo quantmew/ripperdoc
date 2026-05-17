@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ripperdoc.utils.shell.exit_code_handlers import interpret_exit_code
 from ripperdoc.utils.shell.output_utils import (
@@ -62,8 +62,8 @@ def render_result_for_assistant(output: BashToolOutput) -> str:
 
 def build_final_output(
     command: str,
-    stdout_lines: list[str],
-    stderr_lines: list[str],
+    stdout_lines: List[str],
+    stderr_lines: List[str],
     exit_code: int,
     duration_ms: float,
     timeout_ms: int,
@@ -98,7 +98,7 @@ def build_final_output(
     stdout_result = truncate_output(trimmed_stdout, max_chars=MAX_OUTPUT_CHARS)
     stderr_result = truncate_output(trimmed_stderr, max_chars=MAX_OUTPUT_CHARS)
     is_image = stdout_result.get("is_image", False) or stderr_result.get("is_image", False)
-    truncation_details: list[str] = []
+    truncation_details: List[str] = []
     stdout_notice = _build_truncation_notice("stdout", stdout_result)
     if stdout_notice:
         truncation_details.append(stdout_notice)
@@ -133,7 +133,7 @@ def build_final_output(
     )
 
 
-def _build_truncation_notice(stream_name: str, truncation: dict[str, Any]) -> Optional[str]:
+def _build_truncation_notice(stream_name: str, truncation: Dict[str, Any]) -> Optional[str]:
     """Build a machine-readable truncation message."""
     if not truncation.get("is_truncated"):
         return None
@@ -146,7 +146,7 @@ def _build_truncation_notice(stream_name: str, truncation: dict[str, Any]) -> Op
     start_char = truncation.get("omitted_start_char")
     end_char = truncation.get("omitted_end_char")
 
-    location_parts: list[str] = []
+    location_parts: List[str] = []
     if isinstance(start_line, int) and start_line > 0:
         if isinstance(end_line, int) and end_line >= start_line:
             if start_line == end_line:

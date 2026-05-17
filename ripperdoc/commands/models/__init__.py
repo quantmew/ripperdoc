@@ -1,6 +1,6 @@
 import sys
 import textwrap
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
 
 from rich import box
 from rich.layout import Layout
@@ -73,7 +73,7 @@ def _prompt_openai_mode(console: Any, default_value: str) -> str:
 
 def _prompt_oauth_token_selection(
     console: Any, default_name: Optional[str]
-) -> tuple[Optional[str], Optional[OAuthTokenType]]:
+) -> Tuple[Optional[str], Optional[OAuthTokenType]]:
     tokens = list_oauth_tokens()
     if not tokens:
         console.print(
@@ -236,7 +236,7 @@ def _prompt_thinking_mode_edit(console: Any, current_value: Optional[str]) -> Op
     return thinking_mode
 
 
-def _thinking_prompt_kind(protocol: ProtocolType, model_name: str, api_base: Optional[str], thinking_mode: Optional[str]) -> tuple[str, str]:
+def _thinking_prompt_kind(protocol: ProtocolType, model_name: str, api_base: Optional[str], thinking_mode: Optional[str]) -> Tuple[str, str]:
     spec = thinking_control_spec(protocol, model_name, api_base, thinking_mode)
     if spec.kind == "none":
         return "none", ""
@@ -253,7 +253,7 @@ def _prompt_thinking_config_add(
     api_base: Optional[str],
     thinking_mode: Optional[str],
     existing_profile: Optional[ModelProfile],
-) -> tuple[Optional[int], Optional[str]]:
+) -> Tuple[Optional[int], Optional[str]]:
     prompt_kind, prompt_text = _thinking_prompt_kind(protocol, model_name, api_base, thinking_mode)
     if prompt_kind == "none":
         return None, None
@@ -294,7 +294,7 @@ def _prompt_thinking_config_edit(
     api_base: Optional[str],
     thinking_mode: Optional[str],
     existing_profile: ModelProfile,
-) -> tuple[Optional[int], Optional[str]]:
+) -> Tuple[Optional[int], Optional[str]]:
     prompt_kind, _prompt_text = _thinking_prompt_kind(protocol, model_name, api_base, thinking_mode)
     if prompt_kind == "none":
         return None, None
@@ -334,7 +334,7 @@ def _parse_int(console: Any, prompt_text: str, default_value: Optional[int]) -> 
         return default_value
 
 
-def _prompt_custom_headers_add(console: Any) -> Optional[dict[str, str]]:
+def _prompt_custom_headers_add(console: Any) -> Optional[Dict[str, str]]:
     """Prompt for custom headers during profile creation."""
     raw = console.input(
         "Custom headers (JSON or 'key:value,key:value', leave blank to skip): "
@@ -345,8 +345,8 @@ def _prompt_custom_headers_add(console: Any) -> Optional[dict[str, str]]:
 
 
 def _prompt_custom_headers_edit(
-    console: Any, current_headers: Optional[dict[str, str]]
-) -> Optional[dict[str, str]]:
+    console: Any, current_headers: Optional[Dict[str, str]]
+) -> Optional[Dict[str, str]]:
     """Prompt for custom headers during profile edit."""
     current_label = ""
     if current_headers:
@@ -361,7 +361,7 @@ def _prompt_custom_headers_edit(
     return _parse_headers_input(raw)
 
 
-def _parse_headers_input(raw: str) -> Optional[dict[str, str]]:
+def _parse_headers_input(raw: str) -> Optional[Dict[str, str]]:
     """Parse headers from JSON or key:value comma-separated format."""
     # Try JSON first
     import json
@@ -372,7 +372,7 @@ def _parse_headers_input(raw: str) -> Optional[dict[str, str]]:
     except (json.JSONDecodeError, TypeError):
         pass
     # Try key:value,key:value format
-    headers: dict[str, str] = {}
+    headers: Dict[str, str] = {}
     for pair in raw.split(","):
         pair = pair.strip()
         if ":" in pair:
@@ -454,7 +454,7 @@ def _collect_add_profile_input(
     config: Any,
     existing_profile: Optional[ModelProfile],
     current_profile: Optional[ModelProfile],
-) -> tuple[Optional[ModelProfile], bool]:
+) -> Tuple[Optional[ModelProfile], bool]:
     default_protocol = (
         (current_profile.protocol.value) if current_profile else ProtocolType.ANTHROPIC.value
     )
@@ -814,11 +814,11 @@ def _collect_edit_profile_input(
     return updated_profile
 
 
-def _pointer_markers(pointer_map: dict[str, str], name: str) -> list[str]:
+def _pointer_markers(pointer_map: Dict[str, str], name: str) -> List[str]:
     return [ptr for ptr, value in pointer_map.items() if value == name]
 
 
-def _vision_labels(profile: ModelProfile) -> tuple[str, str]:
+def _vision_labels(profile: ModelProfile) -> Tuple[str, str]:
     if profile.supports_vision is None:
         detected = model_supports_vision(profile)
         return "auto", f"auto (detected {'yes' if detected else 'no'})"
@@ -957,7 +957,7 @@ def _render_models_table(console: Any, config: Any) -> None:
 
 
 def _build_model_details_panel(
-    name: str, profile: ModelProfile, pointer_map: dict[str, str]
+    name: str, profile: ModelProfile, pointer_map: Dict[str, str]
 ) -> Panel:
     markers = _pointer_markers(pointer_map, name)
     marker_text = ", ".join(markers) if markers else "-"
@@ -1028,7 +1028,7 @@ def _build_model_details_panel(
 
 
 def _render_model_details(
-    console: Any, name: str, profile: ModelProfile, pointer_map: dict[str, str]
+    console: Any, name: str, profile: ModelProfile, pointer_map: Dict[str, str]
 ) -> None:
     console.print(_build_model_details_panel(name, profile, pointer_map))
 
@@ -1045,7 +1045,7 @@ def _default_selected_model(config: Any, preferred: Optional[str] = None) -> Opt
 
 
 def _build_models_list_panel(
-    config: Any, selected_name: Optional[str], pointer_map: dict[str, str]
+    config: Any, selected_name: Optional[str], pointer_map: Dict[str, str]
 ) -> Panel:
     table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
     table.add_column("#", width=3, no_wrap=True, style="dim")
@@ -1210,7 +1210,7 @@ def _resolve_model_selection(
     return lower_map.get(raw.lower(), selected_name)
 
 
-def _next_copied_profile_name(source_name: str, existing_names: set[str]) -> str:
+def _next_copied_profile_name(source_name: str, existing_names: Set[str]) -> str:
     """Return the next available copied profile name, e.g. `x (1)`."""
     index = 1
     while True:

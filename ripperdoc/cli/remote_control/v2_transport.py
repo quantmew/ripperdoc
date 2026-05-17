@@ -12,7 +12,7 @@ import json
 import threading
 import time
 import uuid
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol
 from urllib.parse import urlparse
 
 import httpx
@@ -25,11 +25,11 @@ logger = get_logger()
 class ReplBridgeTransport(Protocol):
     """Transport protocol for bridge read/write operations."""
 
-    def write(self, message: dict[str, Any]) -> None: ...
-    def write_batch(self, messages: list[dict[str, Any]]) -> None: ...
+    def write(self, message: Dict[str, Any]) -> None: ...
+    def write_batch(self, messages: List[Dict[str, Any]]) -> None: ...
     def close(self) -> None: ...
     def set_on_data(self, callback: Callable[[str], None]) -> None: ...
-    def set_on_close(self, callback: Callable[[int | None], None]) -> None: ...
+    def set_on_close(self, callback: Callable[[Optional[int]], None]) -> None: ...
     def set_on_connect(self, callback: Callable[[], None]) -> None: ...
     def connect(self) -> None: ...
     def get_last_sequence_num(self) -> int: ...
@@ -58,11 +58,11 @@ class SSETransportAdapter:
         self._closed = False
         self._connected = False
 
-        self._on_data: Callable[[str], None] | None = None
-        self._on_close: Callable[[int | None], None] | None = None
-        self._on_connect: Callable[[], None] | None = None
+        self._on_data: Optional[Callable[[str], None]] = None
+        self._on_close: Optional[Callable[[Optional[int]], None]] = None
+        self._on_connect: Optional[Callable[[], None]] = None
 
-        self._thread: threading.Thread | None = None
+        self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._http = httpx.Client(timeout=30.0)
 
@@ -73,13 +73,13 @@ class SSETransportAdapter:
         self._events_url = f"{self._base_url}/worker/events"
         self._state_url = f"{self._base_url}/worker/state"
 
-    def _auth_headers(self) -> dict[str, str]:
+    def _auth_headers(self) -> Dict[str, str]:
         return {
             "Authorization": f"Bearer {self._auth_token}",
             "Content-Type": "application/json",
         }
 
-    def write(self, message: dict[str, Any]) -> None:
+    def write(self, message: Dict[str, Any]) -> None:
         if self._closed:
             return
         try:
@@ -87,7 +87,7 @@ class SSETransportAdapter:
         except httpx.HTTPError as exc:
             logger.debug("[v2:transport] write failed: %s", exc)
 
-    def write_batch(self, messages: list[dict[str, Any]]) -> None:
+    def write_batch(self, messages: List[Dict[str, Any]]) -> None:
         if self._closed:
             return
         for msg in messages:
@@ -106,7 +106,7 @@ class SSETransportAdapter:
     def set_on_data(self, callback: Callable[[str], None]) -> None:
         self._on_data = callback
 
-    def set_on_close(self, callback: Callable[[int | None], None]) -> None:
+    def set_on_close(self, callback: Callable[[Optional[int]], None]) -> None:
         self._on_close = callback
 
     def set_on_connect(self, callback: Callable[[], None]) -> None:
@@ -213,10 +213,10 @@ class CCRClientAdapter:
         self._state_url = f"{base}/worker/state"
         self._heartbeat_url = f"{base}/worker/heartbeat"
 
-        self._heartbeat_thread: threading.Thread | None = None
+        self._heartbeat_thread: Optional[threading.Thread] = None
         self._heartbeat_stop = threading.Event()
 
-    def _auth_headers(self) -> dict[str, str]:
+    def _auth_headers(self) -> Dict[str, str]:
         return {
             "Authorization": f"Bearer {self._auth_token}",
             "Content-Type": "application/json",
@@ -227,7 +227,7 @@ class CCRClientAdapter:
         self._epoch = epoch
         self._start_heartbeat()
 
-    def write_event(self, event: dict[str, Any]) -> None:
+    def write_event(self, event: Dict[str, Any]) -> None:
         if self._closed:
             return
         try:
@@ -290,10 +290,10 @@ def create_v2_repl_transport(
     )
 
     class _V2Transport:
-        def write(self, message: dict[str, Any]) -> None:
+        def write(self, message: Dict[str, Any]) -> None:
             ccr.write_event(message)
 
-        def write_batch(self, messages: list[dict[str, Any]]) -> None:
+        def write_batch(self, messages: List[Dict[str, Any]]) -> None:
             for msg in messages:
                 ccr.write_event(msg)
 
@@ -304,7 +304,7 @@ def create_v2_repl_transport(
         def set_on_data(self, callback: Callable[[str], None]) -> None:
             sse.set_on_data(callback)
 
-        def set_on_close(self, callback: Callable[[int | None], None]) -> None:
+        def set_on_close(self, callback: Callable[[Optional[int]], None]) -> None:
             sse.set_on_close(callback)
 
         def set_on_connect(self, callback: Callable[[], None]) -> None:

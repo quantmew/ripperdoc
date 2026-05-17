@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import PureWindowsPath
-from typing import Iterable, List
+from typing import Iterable, List, Optional, Tuple
 
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.platform import is_windows
@@ -18,16 +18,16 @@ from ripperdoc.utils.platform import is_windows
 logger = get_logger()
 
 # Common locations to probe if shutil.which misses an otherwise standard path.
-_COMMON_BIN_DIRS: tuple[str, ...] = ("/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin")
+_COMMON_BIN_DIRS: Tuple[str, ...] = ("/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin")
 
 
 def _is_executable(path: str) -> bool:
     return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
 
 
-def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
+def _dedupe_preserve_order(items: Iterable[str]) -> List[str]:
     seen = set()
-    ordered: list[str] = []
+    ordered: List[str] = []
     for item in items:
         if item and item not in seen:
             ordered.append(item)
@@ -35,7 +35,7 @@ def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
     return ordered
 
 
-def _find_git_bash_windows() -> str | None:
+def _find_git_bash_windows() -> Optional[str]:
     env_path = os.environ.get("GIT_BASH_PATH") or os.environ.get("GITBASH")
     if env_path and _is_executable(env_path):
         return env_path
@@ -56,7 +56,7 @@ def _find_git_bash_windows() -> str | None:
     return None
 
 
-def _windows_cmd_path() -> str | None:
+def _windows_cmd_path() -> Optional[str]:
     comspec = os.environ.get("ComSpec")
     if _is_executable(comspec or ""):
         return comspec
@@ -103,7 +103,7 @@ def find_suitable_shell() -> str:
         zsh_path = shutil.which("zsh") or ""
         preferred_order = ["bash", "zsh"] if current_is_bash else ["zsh", "bash"]
 
-        candidates: list[str] = []
+        candidates: List[str] = []
         for name in preferred_order:
             if name == "bash" and bash_path:
                 candidates.append(bash_path)

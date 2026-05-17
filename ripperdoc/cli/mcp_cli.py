@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from ripperdoc.utils.filesystem.config_paths import config_dir_for_scope, config_file_for_scope
@@ -26,7 +26,7 @@ def _candidate_paths(
     scope: str = "all",
     *,
     include_managed: bool = False,
-) -> list[Path]:
+) -> List[Path]:
     managed_paths = [
         config_file_for_scope("managed", "managed-mcp.json", project_path=project_path).resolve(),
     ]
@@ -76,7 +76,7 @@ def _looks_like_server_entry(raw: Any) -> bool:
     return any(key in raw for key in known_keys)
 
 
-def _load_mcp_json(path: Path) -> tuple[dict[str, Any], str]:
+def _load_mcp_json(path: Path) -> Tuple[Dict[str, Any], str]:
     if not path.exists():
         return {}, "servers"
     try:
@@ -100,12 +100,12 @@ def _load_mcp_json(path: Path) -> tuple[dict[str, Any], str]:
     return payload, "servers"
 
 
-def _resolve_servers_container(data: dict[str, Any], servers_key: str) -> dict[str, Any]:
+def _resolve_servers_container(data: Dict[str, Any], servers_key: str) -> Dict[str, Any]:
     if servers_key == _TOP_LEVEL_SERVERS_KEY:
         return data
     raw = data.get(servers_key)
     if raw is None:
-        servers: dict[str, Any] = {}
+        servers: Dict[str, Any] = {}
         data[servers_key] = servers
         return servers
     if not isinstance(raw, dict):
@@ -113,12 +113,12 @@ def _resolve_servers_container(data: dict[str, Any], servers_key: str) -> dict[s
     return raw
 
 
-def _write_config(path: Path, data: dict[str, Any]) -> None:
+def _write_config(path: Path, data: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-def _resolve_server_key(servers: dict[str, Any], requested: str) -> Optional[str]:
+def _resolve_server_key(servers: Dict[str, Any], requested: str) -> Optional[str]:
     if requested in servers:
         return requested
     lowered = [name for name in servers if name.lower() == requested.lower()]
@@ -127,8 +127,8 @@ def _resolve_server_key(servers: dict[str, Any], requested: str) -> Optional[str
     return None
 
 
-def _parse_env_entries(raw_entries: tuple[str, ...]) -> dict[str, str]:
-    parsed: dict[str, str] = {}
+def _parse_env_entries(raw_entries: Tuple[str, ...]) -> Dict[str, str]:
+    parsed: Dict[str, str] = {}
     for raw in raw_entries:
         if "=" not in raw:
             raise click.ClickException(
@@ -142,8 +142,8 @@ def _parse_env_entries(raw_entries: tuple[str, ...]) -> dict[str, str]:
     return parsed
 
 
-def _parse_header_entries(raw_entries: tuple[str, ...]) -> dict[str, str]:
-    parsed: dict[str, str] = {}
+def _parse_header_entries(raw_entries: Tuple[str, ...]) -> Dict[str, str]:
+    parsed: Dict[str, str] = {}
     for raw in raw_entries:
         if ":" in raw:
             key, value = raw.split(":", 1)
@@ -161,7 +161,7 @@ def _parse_header_entries(raw_entries: tuple[str, ...]) -> dict[str, str]:
     return parsed
 
 
-def _infer_transport(transport: Optional[str], command_or_url: Optional[str], args: list[str]) -> str:
+def _infer_transport(transport: Optional[str], command_or_url: Optional[str], args: List[str]) -> str:
     if transport:
         return transport
     first = (command_or_url or (args[0] if args else "")).strip().lower()
@@ -170,10 +170,10 @@ def _infer_transport(transport: Optional[str], command_or_url: Optional[str], ar
     return "stdio"
 
 
-def _format_stdio_target(entry: dict[str, Any]) -> str:
+def _format_stdio_target(entry: Dict[str, Any]) -> str:
     command = entry.get("command")
     args = entry.get("args")
-    parts: list[str] = []
+    parts: List[str] = []
     if isinstance(command, str) and command.strip():
         parts.append(command.strip())
     elif isinstance(command, list):
@@ -183,7 +183,7 @@ def _format_stdio_target(entry: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
-def _entry_transport(entry: dict[str, Any]) -> str:
+def _entry_transport(entry: Dict[str, Any]) -> str:
     transport = str(entry.get("type") or entry.get("transport") or "").strip().lower()
     if transport in _SUPPORTED_TRANSPORTS:
         return transport
@@ -192,8 +192,8 @@ def _entry_transport(entry: dict[str, Any]) -> str:
     return "stdio"
 
 
-def _load_merged_servers(project_path: Path) -> dict[str, tuple[dict[str, Any], Path]]:
-    merged: dict[str, tuple[dict[str, Any], Path]] = {}
+def _load_merged_servers(project_path: Path) -> Dict[str, Tuple[Dict[str, Any], Path]]:
+    merged: Dict[str, Tuple[Dict[str, Any], Path]] = {}
     for path in _candidate_paths(project_path, scope="all", include_managed=True):
         if not path.exists():
             continue
@@ -209,7 +209,7 @@ def _load_merged_servers(project_path: Path) -> dict[str, tuple[dict[str, Any], 
     return merged
 
 
-def _upsert_server(path: Path, name: str, entry: dict[str, Any], *, overwrite: bool) -> bool:
+def _upsert_server(path: Path, name: str, entry: Dict[str, Any], *, overwrite: bool) -> bool:
     data, servers_key = _load_mcp_json(path)
     servers = _resolve_servers_container(data, servers_key)
     existing_key = _resolve_server_key(servers, name)
@@ -252,7 +252,7 @@ def mcp_group(ctx: click.Context) -> None:
 def list_servers(json_output: bool) -> None:
     project_path = Path.cwd()
     merged = _load_merged_servers(project_path)
-    records: list[dict[str, Any]] = []
+    records: List[Dict[str, Any]] = []
     for name in sorted(merged, key=str.lower):
         entry, path = merged[name]
         records.append(
@@ -344,13 +344,13 @@ def get_server(name: str, json_output: bool) -> None:
 def add_server(
     transport: Optional[str],
     scope: str,
-    env_entries: tuple[str, ...],
-    header_entries: tuple[str, ...],
+    env_entries: Tuple[str, ...],
+    header_entries: Tuple[str, ...],
     description: str,
     overwrite: bool,
     name: str,
     command_or_url: Optional[str],
-    args: tuple[str, ...],
+    args: Tuple[str, ...],
 ) -> None:
     clean_name = name.strip()
     if not clean_name:
@@ -362,7 +362,7 @@ def add_server(
     resolved_transport = _infer_transport(transport, command_or_url, args_list)
     env_map = _parse_env_entries(env_entries) if env_entries else {}
     header_map = _parse_header_entries(header_entries) if header_entries else {}
-    entry: dict[str, Any] = {}
+    entry: Dict[str, Any] = {}
 
     if resolved_transport == "stdio":
         if header_map:
@@ -454,7 +454,7 @@ def remove_server(scope: str, name: str) -> None:
     clean_name = name.strip()
     if not clean_name:
         raise click.ClickException("Server name is required.")
-    removed_paths: list[Path] = []
+    removed_paths: List[Path] = []
     for path in _candidate_paths(Path.cwd(), scope=scope):
         if not path.exists():
             continue
@@ -475,7 +475,7 @@ def reset_project_choices() -> None:
         project_config_dir / "mcp_project_choices.json",
         project_config_dir / "mcp_server_choices.json",
     ]
-    deleted: list[Path] = []
+    deleted: List[Path] = []
     for path in candidates:
         if not path.exists():
             continue

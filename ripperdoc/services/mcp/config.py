@@ -11,7 +11,7 @@ import json
 import os
 import shlex
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 
 from ripperdoc import __version__
 from ripperdoc.services.mcp.types import (
@@ -63,7 +63,7 @@ def _ensure_str_dict(raw: object) -> Dict[str, str]:
 
 def _normalize_command(
     raw_command: Any, raw_args: Any
-) -> tuple[Optional[str], List[str]]:
+) -> Tuple[Optional[str], List[str]]:
     """Normalize MCP server command/args.
 
     Supports:
@@ -170,7 +170,7 @@ def parse_servers(data: Dict[str, Any]) -> Dict[str, McpServerInfo]:
 
 
 def parse_mcp_config_option(
-    raw_value: str | Path | None,
+    raw_value: Union[str, Path, None],
     *,
     base_dir: Optional[Path] = None,
 ) -> Dict[str, McpServerInfo]:
@@ -235,7 +235,7 @@ def parse_mcp_server_configs(raw: Any) -> Dict[str, McpServerInfo]:
 
 # Runtime overrides (injected by control requests, tests, etc.)
 _mcp_runtime_server_overrides: Dict[str, Dict[str, McpServerInfo]] = {}
-_mcp_runtime_disabled_servers: Dict[str, set[str]] = {}
+_mcp_runtime_disabled_servers: Dict[str, Set[str]] = {}
 
 
 def _project_scope_key(project_path: Optional[Path]) -> str:
@@ -250,7 +250,7 @@ def set_mcp_runtime_overrides(
     project_path: Optional[Path] = None,
     *,
     servers: Optional[Dict[str, McpServerInfo]] = None,
-    disabled: Optional[set[str]] = None,
+    disabled: Optional[Set[str]] = None,
 ) -> None:
     """Set runtime-only MCP server overrides for a project scope."""
     key = _project_scope_key(project_path)

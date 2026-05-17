@@ -7,6 +7,7 @@ import json
 import os
 import random
 from datetime import datetime
+from typing import Optional
 from urllib.parse import urlparse
 
 from .constants import CONNECT_TEMPLATE_ENV, IDENTIFIER_RE
@@ -106,7 +107,7 @@ def build_connect_url(base_url: str, bridge_id: str) -> str:
     return f"{scheme}://{app_host}/code?bridge={bridge_id}"
 
 
-def get_token_expiration_epoch(token: str) -> int | None:
+def get_token_expiration_epoch(token: str) -> Optional[int]:
     """Decode JWT-like token and return exp timestamp if present."""
     token_value = token.strip()
     if not token_value:

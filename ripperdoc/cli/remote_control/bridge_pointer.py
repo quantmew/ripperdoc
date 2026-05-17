@@ -18,7 +18,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import List, Literal, Optional, Tuple
 
 from ripperdoc.utils.log import get_logger
 
@@ -74,7 +74,7 @@ def write_bridge_pointer(dir_path: str, pointer: BridgePointer) -> None:
         logger.debug("[bridge:pointer] write failed: %s", exc)
 
 
-def read_bridge_pointer(dir_path: str) -> BridgePointer | None:
+def read_bridge_pointer(dir_path: str) -> Optional[BridgePointer]:
     """Read the pointer and check staleness via mtime.
 
     Returns None on any failure: missing file, corrupted JSON,
@@ -124,7 +124,7 @@ def read_bridge_pointer(dir_path: str) -> BridgePointer | None:
     )
 
 
-def read_bridge_pointer_across_worktrees(dir_path: str) -> tuple[BridgePointer, str] | None:
+def read_bridge_pointer_across_worktrees(dir_path: str) -> Optional[Tuple[BridgePointer, str]]:
     """Worktree-aware read for --continue.
 
     Checks `dir_path` first, then fans out across git worktree siblings
@@ -149,7 +149,7 @@ def read_bridge_pointer_across_worktrees(dir_path: str) -> tuple[BridgePointer, 
     abs_dir = os.path.abspath(dir_path)
     candidates = [wt for wt in worktrees if os.path.abspath(wt) != abs_dir]
 
-    freshest: tuple[BridgePointer, str] | None = None
+    freshest: Optional[Tuple[BridgePointer, str]] = None
     # We don't have mtime age from read_bridge_pointer, so just use the first found
     for wt in candidates:
         p = read_bridge_pointer(wt)
@@ -177,7 +177,7 @@ def _clear_path(path: Path) -> None:
         pass
 
 
-def _get_worktree_paths(dir_path: str) -> list[str]:
+def _get_worktree_paths(dir_path: str) -> List[str]:
     """Get git worktree paths. Returns [] on any error."""
     try:
         result = subprocess.run(
@@ -189,7 +189,7 @@ def _get_worktree_paths(dir_path: str) -> list[str]:
         )
         if result.returncode != 0:
             return []
-        paths: list[str] = []
+        paths: List[str] = []
         for line in result.stdout.splitlines():
             if line.startswith("worktree "):
                 wt = line[len("worktree "):].strip()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import re
-from typing import Any, Optional
+from typing import Any, List, Optional, Tuple
 
 from rich.markup import escape
 
@@ -172,7 +172,7 @@ def _confirm_action(console: Any, prompt_text: str, *, default: bool = False) ->
     return raw in ("y", "yes")
 
 
-def _parse_login_args(args: list[str]) -> tuple[str, str, str]:
+def _parse_login_args(args: List[str]) -> Tuple[str, str, str]:
     provider = "codex"
     token_name = "codex"
     mode = "browser"

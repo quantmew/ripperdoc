@@ -13,7 +13,7 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ValidationResult,
 )
-from ripperdoc.tools.TeamDeleteTool._prompt import TEAM_DELETE_PROMPT
+from ripperdoc.tools.team_delete._prompt import TEAM_DELETE_PROMPT
 from ripperdoc.utils.collaboration.team_context import (
     clear_agent_active_team,
     resolve_active_team_name,

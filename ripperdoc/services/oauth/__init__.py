@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -50,7 +50,7 @@ class OAuthModelOption(BaseModel):
     description: str
 
 
-_CODEX_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
+_CODEX_MODEL_OPTIONS: Tuple[OAuthModelOption, ...] = (
     OAuthModelOption(
         model="gpt-5.4",
         label="gpt-5.4",
@@ -88,7 +88,7 @@ _CODEX_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
     ),
 )
 
-_COPILOT_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
+_COPILOT_MODEL_OPTIONS: Tuple[OAuthModelOption, ...] = (
     OAuthModelOption(
         model="gpt-4.1",
         label="GPT-4.1",
@@ -206,7 +206,7 @@ _COPILOT_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
     ),
 )
 
-_GITLAB_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
+_GITLAB_MODEL_OPTIONS: Tuple[OAuthModelOption, ...] = (
     OAuthModelOption(
         model="duo-chat-haiku-4-5",
         label="duo-chat-haiku-4-5 (default)",
@@ -224,7 +224,7 @@ _GITLAB_MODEL_OPTIONS: tuple[OAuthModelOption, ...] = (
     ),
 )
 
-OAUTH_MODEL_OPTIONS: Dict[OAuthTokenType, tuple[OAuthModelOption, ...]] = {
+OAUTH_MODEL_OPTIONS: Dict[OAuthTokenType, Tuple[OAuthModelOption, ...]] = {
     OAuthTokenType.CODEX: _CODEX_MODEL_OPTIONS,
     OAuthTokenType.COPILOT: _COPILOT_MODEL_OPTIONS,
     OAuthTokenType.GITLAB: _GITLAB_MODEL_OPTIONS,
@@ -303,6 +303,6 @@ def delete_oauth_token(name: str) -> Dict[str, OAuthToken]:
     return tokens
 
 
-def oauth_models_for_type(token_type: OAuthTokenType) -> tuple[OAuthModelOption, ...]:
+def oauth_models_for_type(token_type: OAuthTokenType) -> Tuple[OAuthModelOption, ...]:
     """Return selectable model options for an OAuth token type."""
     return OAUTH_MODEL_OPTIONS.get(token_type, ())
