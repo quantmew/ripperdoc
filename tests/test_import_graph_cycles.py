@@ -9,7 +9,7 @@ from pathlib import Path
 TARGET_MODULES = [
     "ripperdoc.tools.mcp",
     "ripperdoc.tools.mcp.dynamic_mcp",
-    "ripperdoc.system_prompt",
+    "ripperdoc.core.system_prompt",
     "ripperdoc.core.agents",
 ]
 
