@@ -1,127 +1,78 @@
-"""MCP configuration loader, connection manager, and prompt helpers."""
+"""
+MCP configuration loader, connection manager, and prompt helpers.
 
-from __future__ import annotations
+This module re-exports from the refactored ``services/mcp/`` package for
+backward compatibility.
+"""
 
-import asyncio
-import contextvars
-import json
-import os
-import re
-import shlex
-import subprocess
-import sys
-import time
-from contextlib import AsyncExitStack
-from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TextIO, cast, get_args, get_origin
+from pathlib import Path as _Path
 
-from ripperdoc import __version__
-from ripperdoc.services.plugins import discover_plugins, expand_plugin_root_vars
-from ripperdoc.utils.filesystem.config_paths import config_dir_for_scope, config_file_for_scope
-from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.filesystem.path_utils import sanitize_project_path
-from ripperdoc.utils.token_estimation import estimate_tokens
-
-logger = get_logger()
-_MCP_STDERR_MODE_ENV = "RIPPERDOC_MCP_STDERR_MODE"
-_MCP_STDERR_MODE_DEFAULT = "log"
-_MCP_CONNECT_TIMEOUT_SEC_ENV = "RIPPERDOC_MCP_CONNECT_TIMEOUT_SEC"
-_MCP_CONNECT_TIMEOUT_SEC_DEFAULT = 8.0
-_MCP_CIRCUIT_BREAKER_FAILURES_ENV = "RIPPERDOC_MCP_CIRCUIT_BREAKER_FAILURES"
-_MCP_CIRCUIT_BREAKER_FAILURES_DEFAULT = 2
-_MCP_CIRCUIT_BREAKER_COOLDOWN_SEC_ENV = "RIPPERDOC_MCP_CIRCUIT_BREAKER_COOLDOWN_SEC"
-_MCP_CIRCUIT_BREAKER_COOLDOWN_SEC_DEFAULT = 30.0
-
-_mcp_runtime_server_overrides: Dict[str, Dict[str, "McpServerInfo"]] = {}
-_mcp_runtime_disabled_servers: Dict[str, set[str]] = {}
-_sdk_mcp_request_sender_var: contextvars.ContextVar[Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None] = contextvars.ContextVar(
-    "ripperdoc_sdk_mcp_request_sender",
-    default=None,
+from ripperdoc.services.mcp.types import (
+    ConfigScope,
+    McpResourceInfo,
+    McpServerInfo,
+    McpToolInfo,
+    TransportType,
 )
-_global_sdk_mcp_request_sender: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
+from ripperdoc.services.mcp.config import (
+    clear_mcp_runtime_overrides,
+    load_mcp_server_configs,
+    parse_mcp_config_option,
+    parse_mcp_server_configs,
+    set_mcp_runtime_overrides,
+    load_server_configs,
+    parse_server,
+    parse_servers,
+    _ensure_str_dict,
+    _load_json_file,
+    _normalize_command,
+    # _parse_server and _parse_servers renamed to parse_server/parse_servers
+    _project_scope_key,
+)
+from ripperdoc.services.mcp import types as _ripperdoc_mcp_types
+MCP_AVAILABLE = _ripperdoc_mcp_types.MCP_AVAILABLE
+from ripperdoc.services.mcp.client import (
+    _global_runtime,
+    _mcp_circuit_states,
+    McpRuntime,
+    _SdkMcpSession,
+    ensure_mcp_runtime,
+    get_existing_mcp_runtime,
+    get_mcp_stderr_log_path,
+    get_mcp_stderr_mode,
+    shutdown_mcp_runtime,
+    clear_sdk_mcp_request_sender,
+    set_sdk_mcp_request_sender,
+    get_sdk_mcp_request_sender,
+)
+from ripperdoc.services.mcp.utils import (
+    estimate_mcp_tokens,
+    find_mcp_resource,
+    format_mcp_instructions,
+    load_mcp_servers,
+    load_mcp_servers_async,
+)
+from ripperdoc.services.mcp.mcp_string_utils import (
+    build_mcp_tool_name,
+    get_mcp_prefix,
+    mcp_info_from_string,
+)
+from ripperdoc.services.mcp.normalization import (
+    normalize_name_for_mcp,
+)
+from ripperdoc.services.mcp.env_expansion import (
+    expand_env_vars_in_string,
+)
 
+_load_server_configs = load_server_configs
 
-try:
-    import mcp.types as mcp_types  # type: ignore[import-not-found]
-    from mcp.client.session import ClientSession  # type: ignore[import-not-found]
-    from mcp.client.sse import sse_client  # type: ignore[import-not-found]
-    from mcp.client.stdio import StdioServerParameters, stdio_client  # type: ignore[import-not-found]
-    from mcp.client.streamable_http import streamable_http_client  # type: ignore[import-not-found]
+# Backward-compat aliases
+_parse_server = parse_server
+_parse_servers = parse_servers
 
-    MCP_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):  # pragma: no cover - handled gracefully at runtime
-    MCP_AVAILABLE = False
-    ClientSession = object  # type: ignore
-    mcp_types = None  # type: ignore
-    logger.debug("[mcp] MCP SDK not available at import time")
-
-
-@dataclass
-class McpToolInfo:
-    name: str
-    description: str = ""
-    input_schema: Optional[Dict[str, Any]] = None
-    annotations: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class McpResourceInfo:
-    uri: str
-    name: Optional[str] = None
-    description: str = ""
-    mime_type: Optional[str] = None
-    size: Optional[int] = None
-    text: Optional[str] = None
-
-
-@dataclass
-class McpServerInfo:
-    name: str
-    type: str = "stdio"
-    url: Optional[str] = None
-    description: str = ""
-    command: Optional[str] = None
-    args: List[str] = field(default_factory=list)
-    env: Dict[str, str] = field(default_factory=dict)
-    headers: Dict[str, str] = field(default_factory=dict)
-    tools: List[McpToolInfo] = field(default_factory=list)
-    resources: List[McpResourceInfo] = field(default_factory=list)
-    status: str = "configured"
-    error: Optional[str] = None
-    instructions: Optional[str] = None
-    server_version: Optional[str] = None
-    capabilities: Dict[str, Any] = field(default_factory=dict)
-
-
-def _looks_like_json_schema(value: Any) -> bool:
-    """Return True when a dict already resembles a JSON Schema object."""
-    if not isinstance(value, dict):
-        return False
-    schema_keys = {
-        "$schema",
-        "$defs",
-        "$ref",
-        "type",
-        "properties",
-        "required",
-        "items",
-        "anyOf",
-        "oneOf",
-        "allOf",
-        "enum",
-        "additionalProperties",
-    }
-    return any(key in value for key in schema_keys)
-
-
-def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
-    """Coerce Agent SDK shorthand schemas into JSON Schema.
-
-    The SDK accepts compact shapes like ``{"numbers": list}``, while MCP tool
-    definitions must expose standard JSON Schema for the model to understand the
-    expected argument structure.
-    """
+# Keep _coerce_sdk_schema here since it's locally defined
+def _coerce_sdk_schema(value: object) -> dict:
+    """Coerce Agent SDK shorthand schemas into JSON Schema."""
     if value is None:
         return {}
 
@@ -133,8 +84,19 @@ def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
         except (TypeError, ValueError, AttributeError):
             pass
 
+    from typing import Dict, List, Optional, cast, get_args, get_origin
+
+    def _looks_like_json_schema(val: object) -> bool:
+        if not isinstance(val, dict):
+            return False
+        schema_keys = {
+            "$schema", "$defs", "$ref", "type", "properties", "required",
+            "items", "anyOf", "oneOf", "allOf", "enum", "additionalProperties",
+        }
+        return bool(schema_keys & set(val.keys()))
+
     if _looks_like_json_schema(value):
-        return cast(dict[str, Any], value)
+        return cast(dict, value)
 
     origin = get_origin(value)
     if origin is not None:
@@ -147,32 +109,33 @@ def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
             return {"type": "object", "additionalProperties": additional}
 
     if isinstance(value, dict):
-        properties: dict[str, Any] = {}
-        required: list[str] = []
+        properties: dict = {}
+        required: list = []
         for key, item in value.items():
-            key_str = str(key)
-            properties[key_str] = _coerce_sdk_schema(item)
-            required.append(key_str)
-        schema_dict: dict[str, Any] = {"type": "object", "properties": properties}
+            properties[str(key)] = _coerce_sdk_schema(item)
+            required.append(str(key))
+        schema: dict = {"type": "object", "properties": properties}
         if required:
-            schema_dict["required"] = required
-        return schema_dict
+            schema["required"] = required
+        return schema
 
     if isinstance(value, (list, tuple)):
         items = _coerce_sdk_schema(value[0]) if len(value) == 1 else {}
         return {"type": "array", "items": items}
 
-    if value in (str,):
-        return {"type": "string"}
-    if value in (int,):
-        return {"type": "integer"}
-    if value in (float,):
-        return {"type": "number"}
-    if value in (bool,):
-        return {"type": "boolean"}
-    if value in (list, List):
+    type_map = {
+        str: {"type": "string"},
+        int: {"type": "integer"},
+        float: {"type": "number"},
+        bool: {"type": "boolean"},
+    }
+    for typ, schema_val in type_map.items():
+        if value is typ:
+            return schema_val
+
+    if value is list:
         return {"type": "array", "items": {}}
-    if value in (dict, Dict):
+    if value is dict:
         return {"type": "object", "additionalProperties": {}}
 
     if isinstance(value, type):
@@ -181,1360 +144,18 @@ def _coerce_sdk_schema(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _get_sdk_mcp_request_sender() -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None:
-    sender = _sdk_mcp_request_sender_var.get()
-    if sender is not None:
-        return sender
-    return _global_sdk_mcp_request_sender
-
-
-def set_sdk_mcp_request_sender(
-    sender: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None,
-) -> None:
-    """Register the stdio control callback used to reach SDK-backed MCP servers."""
-    global _global_sdk_mcp_request_sender
-    _global_sdk_mcp_request_sender = sender
-    _sdk_mcp_request_sender_var.set(sender)
-
-
-def clear_sdk_mcp_request_sender() -> None:
-    """Clear the current SDK-backed MCP control callback."""
-    set_sdk_mcp_request_sender(None)
-
-
-def parse_mcp_config_option(
-    raw_value: str | Path | None,
-    *,
-    base_dir: Optional[Path] = None,
-) -> Dict[str, "McpServerInfo"]:
-    """Parse `--mcp-config` style JSON/path input into server configs."""
-    if raw_value is None:
-        return {}
-    if isinstance(raw_value, Path):
-        raw_text = raw_value.read_text(encoding="utf-8")
-    else:
-        candidate = str(raw_value).strip()
-        if not candidate:
-            return {}
-        candidate_path = Path(candidate)
-        if not candidate.lstrip().startswith("{") and not candidate.lstrip().startswith("["):
-            if not candidate_path.is_absolute() and base_dir is not None:
-                candidate_path = (base_dir / candidate_path).resolve()
-            if candidate_path.exists():
-                raw_text = candidate_path.read_text(encoding="utf-8")
-            else:
-                raw_text = candidate
-        else:
-            raw_text = candidate
-    parsed = json.loads(raw_text)
-    return parse_mcp_server_configs(parsed)
-
-
-def _load_json_file(path: Path) -> Dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text())
-        if isinstance(data, dict):
-            return data
-        return {}
-    except (OSError, json.JSONDecodeError):
-        logger.exception("Failed to load JSON", extra={"path": str(path)})
-        return {}
-
-
-def _ensure_str_dict(raw: object) -> Dict[str, str]:
-    if not isinstance(raw, dict):
-        return {}
-    result: Dict[str, str] = {}
-    for key, value in raw.items():
-        try:
-            result[str(key)] = str(value)
-        except (TypeError, ValueError) as exc:
-            logger.warning(
-                "[mcp] Failed to coerce env/header value to string: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"key": key},
-            )
-            continue
-    return result
-
-
-def _normalize_command(raw_command: Any, raw_args: Any) -> tuple[Optional[str], List[str]]:
-    """Normalize MCP server command/args.
-
-    Supports:
-    - command as list -> first element is executable, rest are args
-    - command as string with spaces -> shlex.split into executable/args (when args empty)
-    - command as plain string -> used as-is
-    """
-    args: List[str] = []
-    if isinstance(raw_args, list):
-        args = [str(a) for a in raw_args]
-
-    # Command provided as list: treat first token as command.
-    if isinstance(raw_command, list):
-        tokens = [str(t) for t in raw_command if str(t)]
-        if not tokens:
-            return None, args
-        return tokens[0], tokens[1:] + args
-
-    if not isinstance(raw_command, str):
-        return None, args
-
-    command_str = raw_command.strip()
-    if not command_str:
-        return None, args
-
-    if not args and (" " in command_str or "\t" in command_str):
-        try:
-            tokens = shlex.split(command_str)
-        except ValueError:
-            tokens = [command_str]
-        if tokens:
-            return tokens[0], tokens[1:]
-
-    return command_str, args
-
-
-def _parse_server(name: str, raw: Dict[str, Any]) -> McpServerInfo:
-    server_type = str(raw.get("type") or raw.get("transport") or "").strip().lower()
-    command, args = _normalize_command(raw.get("command"), raw.get("args"))
-    url = str(raw.get("url") or raw.get("uri") or "").strip() or None
-
-    if not server_type:
-        if url:
-            server_type = "sse"
-        elif command:
-            server_type = "stdio"
-        else:
-            server_type = "stdio"
-
-    description = str(raw.get("description") or "")
-    env = _ensure_str_dict(raw.get("env"))
-    headers = _ensure_str_dict(raw.get("headers"))
-    instructions = raw.get("instructions")
-
-    return McpServerInfo(
-        name=name,
-        type=server_type,
-        url=url,
-        description=description,
-        command=command,
-        args=[str(a) for a in args] if args else [],
-        env=env,
-        headers=headers,
-        instructions=str(instructions) if isinstance(instructions, str) else None,
-    )
-
-
-def _parse_servers(data: Dict[str, Any]) -> Dict[str, McpServerInfo]:
-    servers: Dict[str, McpServerInfo] = {}
-    for key in ("servers", "mcpServers"):
-        raw_servers = data.get(key)
-        if not isinstance(raw_servers, dict):
-            continue
-        for name, raw in raw_servers.items():
-            if not isinstance(raw, dict):
-                continue
-            server_name = str(name).strip()
-            if not server_name:
-                continue
-            servers[server_name] = _parse_server(server_name, raw)
-    if servers:
-        return servers
-
-    # Support direct top-level map of server_name -> config.
-    for name, raw in data.items():
-        if not isinstance(raw, dict):
-            continue
-        if not any(key in raw for key in ("command", "args", "url", "uri", "type", "transport")):
-            continue
-        server_name = str(name).strip()
-        if not server_name:
-            continue
-        servers[server_name] = _parse_server(server_name, raw)
-    return servers
-
-
-def _project_scope_key(project_path: Optional[Path]) -> str:
-    path = project_path or Path.cwd()
-    try:
-        return str(path.resolve())
-    except (OSError, RuntimeError):
-        return str(path)
-
-
-def set_mcp_runtime_overrides(
-    project_path: Optional[Path] = None,
-    *,
-    servers: Optional[Dict[str, "McpServerInfo"]] = None,
-    disabled: Optional[set[str]] = None,
-) -> None:
-    """Set runtime-only MCP server overrides for a project scope."""
-    key = _project_scope_key(project_path)
-    if servers is None:
-        _mcp_runtime_server_overrides.pop(key, None)
-    else:
-        _mcp_runtime_server_overrides[key] = {
-            str(name): replace(server) for name, server in servers.items()
-        }
-
-    if disabled is None:
-        _mcp_runtime_disabled_servers.pop(key, None)
-    else:
-        _mcp_runtime_disabled_servers[key] = {str(name) for name in disabled if str(name).strip()}
-
-
-def clear_mcp_runtime_overrides(project_path: Optional[Path] = None) -> None:
-    """Clear runtime-only MCP server overrides for a project scope."""
-    key = _project_scope_key(project_path)
-    _mcp_runtime_server_overrides.pop(key, None)
-    _mcp_runtime_disabled_servers.pop(key, None)
-
-
-def _load_server_configs(project_path: Optional[Path]) -> Dict[str, McpServerInfo]:
-    project_path = project_path or Path.cwd()
-    managed_mcp_path = config_file_for_scope("managed", "managed-mcp.json", project_path=project_path)
-    candidates = [
-        config_file_for_scope("user", "mcp.json"),
-        Path.home() / ".mcp.json",
-        config_file_for_scope("project", "mcp.json", project_path=project_path),
-        project_path / ".mcp.json",
-    ]
-
-    merged: Dict[str, McpServerInfo] = {}
-    for path in candidates:
-        data = _load_json_file(path)
-        merged.update(_parse_servers(data))
-
-    plugin_result = discover_plugins(project_path=project_path)
-    for plugin_error in plugin_result.errors:
-        logger.warning(
-            "[mcp] Plugin discovery warning: %s (%s)",
-            plugin_error.path,
-            plugin_error.reason,
-        )
-
-    for plugin in plugin_result.plugins:
-        for mcp_path in plugin.mcp_paths:
-            resolved_path = mcp_path
-            if resolved_path.is_dir():
-                if (resolved_path / ".mcp.json").exists():
-                    resolved_path = resolved_path / ".mcp.json"
-                elif (resolved_path / "mcp.json").exists():
-                    resolved_path = resolved_path / "mcp.json"
-            data = _load_json_file(resolved_path)
-            if not data:
-                continue
-            expanded = expand_plugin_root_vars(data, plugin.root)
-            if isinstance(expanded, dict):
-                merged.update(_parse_servers(expanded))
-
-        for inline_entry in plugin.mcp_inline:
-            expanded_inline = expand_plugin_root_vars(inline_entry, plugin.root)
-            if isinstance(expanded_inline, dict):
-                merged.update(_parse_servers(expanded_inline))
-
-    # Managed MCP has highest precedence and cannot be overridden by user/project/plugin scopes.
-    managed_payload = _load_json_file(managed_mcp_path)
-    if managed_payload:
-        merged.update(_parse_servers(managed_payload))
-
-    logger.debug(
-        "[mcp] Loaded MCP server configs",
-        extra={
-            "project_path": str(project_path),
-            "server_count": len(merged),
-            "candidates": [str(path) for path in candidates],
-            "managed_mcp_path": str(managed_mcp_path),
-        },
-    )
-    key = _project_scope_key(project_path)
-    overrides = _mcp_runtime_server_overrides.get(key)
-    if overrides is not None:
-        merged = {
-            str(name): replace(server)
-            for name, server in overrides.items()
-            if str(name).strip()
-        }
-
-    disabled = _mcp_runtime_disabled_servers.get(key)
-    if disabled:
-        for server_name in list(disabled):
-            merged.pop(server_name, None)
-
-    return merged
-
-
-def load_mcp_server_configs(project_path: Optional[Path] = None) -> Dict[str, McpServerInfo]:
-    """Load effective MCP server configs (disk + plugin + runtime overrides)."""
-    return _load_server_configs(project_path)
-
-
-def parse_mcp_server_configs(raw: Any) -> Dict[str, McpServerInfo]:
-    """Parse MCP server config payloads from control requests."""
-    if raw is None:
-        return {}
-    if isinstance(raw, dict):
-        if "servers" in raw or "mcpServers" in raw:
-            return _parse_servers(raw)
-        if all(isinstance(value, dict) for value in raw.values()):
-            return _parse_servers({"servers": raw})
-        if "name" in raw and isinstance(raw.get("name"), str):
-            name = str(raw.get("name") or "").strip()
-            if not name:
-                return {}
-            entry: Dict[str, Any] = dict(raw)
-            entry.pop("name", None)
-            return {name: _parse_server(name, entry)}
-        return {}
-
-    if isinstance(raw, list):
-        parsed: Dict[str, McpServerInfo] = {}
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name") or "").strip()
-            if not name:
-                continue
-            entry = dict(item)
-            entry.pop("name", None)
-            parsed[name] = _parse_server(name, entry)
-        return parsed
-
-    return {}
-
-
-@dataclass
-class _SdkMcpCallToolResult:
-    content: list[dict[str, Any]]
-    structuredContent: dict[str, Any] | None = None
-    isError: bool = False
-
-
-@dataclass
-class _SdkMcpToolDefinition:
-    name: str
-    description: str = ""
-    inputSchema: dict[str, Any] | None = None
-    annotations: dict[str, Any] | None = None
-
-
-@dataclass
-class _SdkMcpListToolsResult:
-    tools: list[_SdkMcpToolDefinition]
-
-
-class _SdkMcpSession:
-    """Minimal MCP client for SDK-backed in-process servers exposed over control requests."""
-
-    def __init__(
-        self,
-        server_name: str,
-        sender: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
-    ) -> None:
-        self.server_name = server_name
-        self._sender = sender
-        self._request_id = 0
-
-    async def _send_message(self, message: dict[str, Any]) -> dict[str, Any]:
-        response = await self._sender(self.server_name, message)
-        payload = response.get("mcp_response", response)
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"Invalid MCP response for server '{self.server_name}'")
-        error = payload.get("error")
-        if isinstance(error, dict):
-            raise RuntimeError(str(error.get("message") or "Unknown MCP error"))
-        return payload
-
-    def _next_id(self) -> int:
-        request_id = self._request_id
-        self._request_id += 1
-        return request_id
-
-    async def initialize(self) -> dict[str, Any]:
-        request_id = self._next_id()
-        response = await self._send_message(
-            {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "ripperdoc", "version": __version__},
-                },
-            }
-        )
-        await self._send_message(
-            {
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized",
-                "params": {},
-            }
-        )
-        return cast(dict[str, Any], response.get("result") or {})
-
-    async def list_tools(self) -> _SdkMcpListToolsResult:
-        response = await self._send_message(
-            {
-                "jsonrpc": "2.0",
-                "id": self._next_id(),
-                "method": "tools/list",
-                "params": {},
-            }
-        )
-        result = response.get("result") or {}
-        raw_tools = result.get("tools") or []
-        tools: list[_SdkMcpToolDefinition] = []
-        for tool in raw_tools:
-            if not isinstance(tool, dict):
-                continue
-            tools.append(
-                _SdkMcpToolDefinition(
-                    name=str(tool.get("name") or ""),
-                    description=str(tool.get("description") or ""),
-                    inputSchema=_coerce_sdk_schema(tool.get("inputSchema")),
-                    annotations=tool.get("annotations")
-                    if isinstance(tool.get("annotations"), dict)
-                    else {},
-                )
-            )
-        return _SdkMcpListToolsResult(tools=tools)
-
-    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> _SdkMcpCallToolResult:
-        response = await self._send_message(
-            {
-                "jsonrpc": "2.0",
-                "id": self._next_id(),
-                "method": "tools/call",
-                "params": {
-                    "name": name,
-                    "arguments": arguments or {},
-                },
-            }
-        )
-        result = response.get("result") or {}
-        content = result.get("content")
-        return _SdkMcpCallToolResult(
-            content=content if isinstance(content, list) else [],
-            structuredContent=result.get("structuredContent")
-            if isinstance(result.get("structuredContent"), dict)
-            else None,
-            isError=bool(result.get("is_error") or result.get("isError")),
-        )
-
-
-def _mcp_stderr_mode() -> str:
-    raw = os.getenv(_MCP_STDERR_MODE_ENV, _MCP_STDERR_MODE_DEFAULT)
-    mode = str(raw or _MCP_STDERR_MODE_DEFAULT).strip().lower()
-    if mode in {"inherit", "stderr", "log", "silent", "off", "devnull"}:
-        return mode
-    return _MCP_STDERR_MODE_DEFAULT
-
-
-def _sanitize_server_filename(server_name: str) -> str:
-    value = re.sub(r"[^a-zA-Z0-9._-]+", "_", server_name.strip())
-    return value or "unknown-server"
-
-
-def _mcp_stderr_log_path(project_path: Path, server_name: str) -> Path:
-    safe_project = sanitize_project_path(project_path)
-    base_dir = config_dir_for_scope("user") / "logs" / "mcp_stderr" / safe_project
-    base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir / f"{_sanitize_server_filename(server_name)}.log"
-
-
-def get_mcp_stderr_mode() -> str:
-    """Return effective MCP stdio stderr routing mode."""
-    return _mcp_stderr_mode()
-
-
-def get_mcp_stderr_log_path(project_path: Path, server_name: str) -> Path:
-    """Return log file path used for a server's stdio stderr stream."""
-    return _mcp_stderr_log_path(project_path, server_name)
-
-
-@dataclass
-class _McpCircuitState:
-    failure_count: int = 0
-    open_until_monotonic: float = 0.0
-    last_error: Optional[str] = None
-
-
-_mcp_circuit_states: Dict[str, _McpCircuitState] = {}
-
-
-def _read_positive_float_env(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        value = float(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-    return value if value > 0 else default
-
-
-def _read_positive_int_env(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        value = int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-    return value if value > 0 else default
-
-
-def _mcp_connect_timeout_sec() -> float:
-    return _read_positive_float_env(_MCP_CONNECT_TIMEOUT_SEC_ENV, _MCP_CONNECT_TIMEOUT_SEC_DEFAULT)
-
-
-def _mcp_circuit_failures_threshold() -> int:
-    return _read_positive_int_env(
-        _MCP_CIRCUIT_BREAKER_FAILURES_ENV,
-        _MCP_CIRCUIT_BREAKER_FAILURES_DEFAULT,
-    )
-
-
-def _mcp_circuit_cooldown_sec() -> float:
-    return _read_positive_float_env(
-        _MCP_CIRCUIT_BREAKER_COOLDOWN_SEC_ENV,
-        _MCP_CIRCUIT_BREAKER_COOLDOWN_SEC_DEFAULT,
-    )
-
-
-def _mcp_circuit_key(project_path: Path, server_name: str) -> str:
-    try:
-        project_token = str(project_path.resolve())
-    except (OSError, RuntimeError):
-        project_token = str(project_path)
-    return f"{project_token}::{server_name}"
-
-
-def _mcp_circuit_open_remaining_sec(project_path: Path, server_name: str) -> float:
-    state = _mcp_circuit_states.get(_mcp_circuit_key(project_path, server_name))
-    if not state:
-        return 0.0
-    return max(state.open_until_monotonic - time.monotonic(), 0.0)
-
-
-def _record_mcp_server_success(project_path: Path, server_name: str) -> None:
-    _mcp_circuit_states.pop(_mcp_circuit_key(project_path, server_name), None)
-
-
-def _record_mcp_server_failure(
-    project_path: Path,
-    server_name: str,
-    error: str,
-    *,
-    timeout: bool,
-) -> None:
-    key = _mcp_circuit_key(project_path, server_name)
-    state = _mcp_circuit_states.get(key) or _McpCircuitState()
-    state.failure_count += 1
-    state.last_error = error
-    threshold = _mcp_circuit_failures_threshold()
-    if timeout or state.failure_count >= threshold:
-        state.open_until_monotonic = time.monotonic() + _mcp_circuit_cooldown_sec()
-    _mcp_circuit_states[key] = state
-
-
-class McpRuntime:
-    """Manages live MCP connections for the current event loop."""
-
-    def __init__(self, project_path: Path):
-        self.project_path = project_path
-        self._owner_loop = asyncio.get_running_loop()
-        self._exit_stack = AsyncExitStack()
-        self._exit_stack_lock = asyncio.Lock()
-        self.sessions: Dict[str, ClientSession] = {}
-        self.servers: List[McpServerInfo] = []
-        self._servers_lock = asyncio.Lock()
-        self._connection_tasks: Dict[str, asyncio.Task[None]] = {}
-        self._connect_started = False
-        self._all_connections_finished = asyncio.Event()
-        self._all_connections_finished.set()
-        self._closed = False
-        # Track MCP streams for proper cleanup ordering
-        # We need to close write streams BEFORE exiting the stdio_client context
-        # to allow the internal tasks to exit cleanly
-        self._mcp_write_streams: List[Any] = []
-        # Track the underlying async generators from @asynccontextmanager wrappers
-        # These need to be explicitly closed after exit stack cleanup to prevent
-        # shutdown_asyncgens() from trying to close them in a different task
-        self._raw_async_generators: List[Any] = []
-        # Keep opened stderr log handles for stdio MCP servers.
-        self._mcp_stderr_logs: List[TextIO] = []
-
-    def belongs_to_loop(self, loop: asyncio.AbstractEventLoop) -> bool:
-        return self._owner_loop is loop
-
-    async def connect(
-        self,
-        configs: Dict[str, McpServerInfo],
-        *,
-        wait_for_connections: bool = False,
-        wait_timeout: Optional[float] = None,
-    ) -> List[McpServerInfo]:
-        logger.info(
-            "[mcp] Connecting to MCP servers",
-            extra={
-                "project_path": str(self.project_path),
-                "server_count": len(configs),
-                "servers": list(configs.keys()),
-            },
-        )
-        await self._exit_stack.__aenter__()
-        if not MCP_AVAILABLE:
-            self._all_connections_finished.set()
-            for config in configs.values():
-                self.servers.append(
-                    replace(
-                        config,
-                        status="unavailable",
-                        error="MCP Python SDK not installed; install `mcp[cli]` with Python 3.10+.",
-                    )
-                )
-            return self.server_snapshot()
-
-        self._start_connecting(configs)
-
-        if wait_for_connections:
-            await self.wait_for_connections(timeout=wait_timeout)
-
-        logger.debug(
-            "[mcp] MCP connection summary",
-            extra={
-                "connected": [s.name for s in self.servers if s.status == "connected"],
-                "connecting": [s.name for s in self.servers if s.status == "connecting"],
-                "failed": [s.name for s in self.servers if s.status == "failed"],
-                "unavailable": [s.name for s in self.servers if s.status == "unavailable"],
-            },
-        )
-        return self.server_snapshot()
-
-    def _start_connecting(self, configs: Dict[str, McpServerInfo]) -> None:
-        if self._connect_started:
-            return
-        self._connect_started = True
-        self._all_connections_finished.clear()
-        self.servers = [
-            replace(
-                config,
-                tools=[],
-                resources=[],
-                status="connecting",
-                error=None,
-                capabilities={},
-            )
-            for config in configs.values()
-        ]
-
-        if not configs:
-            self._all_connections_finished.set()
-            return
-
-        for config in configs.values():
-            task = asyncio.create_task(self._connect_single_server(config))
-            self._connection_tasks[config.name] = task
-            self._attach_connect_done_callback(server_name=config.name, task=task)
-
-    def _attach_connect_done_callback(self, *, server_name: str, task: asyncio.Task[None]) -> None:
-        def _done_callback(done_task: asyncio.Task[None]) -> None:
-            self._on_connect_done(server_name, done_task)
-
-        task.add_done_callback(_done_callback)
-
-    def _on_connect_done(self, server_name: str, task: asyncio.Task[None]) -> None:
-        self._connection_tasks.pop(server_name, None)
-        if not self._connection_tasks:
-            self._all_connections_finished.set()
-        if task.cancelled():
-            return
-        error = task.exception()
-        if error is not None:
-            logger.warning(
-                "[mcp] Server connection task failed unexpectedly: %s: %s",
-                type(error).__name__,
-                error,
-                extra={"server": server_name},
-            )
-
-    async def _connect_single_server(self, config: McpServerInfo) -> None:
-        info = await self._connect_server_with_policy(config)
-        async with self._servers_lock:
-            for idx, server in enumerate(self.servers):
-                if server.name == info.name:
-                    self.servers[idx] = info
-                    break
-            else:
-                self.servers.append(info)
-
-    async def _connect_server_with_policy(self, config: McpServerInfo) -> McpServerInfo:
-        remaining_open = _mcp_circuit_open_remaining_sec(self.project_path, config.name)
-        if remaining_open > 0:
-            state = _mcp_circuit_states.get(_mcp_circuit_key(self.project_path, config.name))
-            last_error = state.last_error if state else None
-            message = f"Circuit breaker open ({remaining_open:.1f}s remaining)."
-            if last_error:
-                message = f"{message} Last error: {last_error}"
-            return replace(
-                config,
-                tools=[],
-                resources=[],
-                capabilities={},
-                status="failed",
-                error=message,
-            )
-
-        timeout_sec = _mcp_connect_timeout_sec()
-        try:
-            if timeout_sec > 0:
-                info = await asyncio.wait_for(self._connect_server(config), timeout=timeout_sec)
-            else:
-                info = await self._connect_server(config)
-        except asyncio.TimeoutError:
-            message = f"Connection timed out after {timeout_sec:.3g}s."
-            _record_mcp_server_failure(
-                self.project_path,
-                config.name,
-                message,
-                timeout=True,
-            )
-            logger.warning(
-                "[mcp] MCP server connect timeout",
-                extra={
-                    "server": config.name,
-                    "timeout_sec": timeout_sec,
-                },
-            )
-            return replace(
-                config,
-                tools=[],
-                resources=[],
-                capabilities={},
-                status="failed",
-                error=message,
-            )
-        except Exception as exc:  # noqa: BLE001 - isolate single-server failures
-            if isinstance(exc, asyncio.CancelledError):
-                raise
-            message = str(exc)
-            _record_mcp_server_failure(
-                self.project_path,
-                config.name,
-                message,
-                timeout=False,
-            )
-            logger.warning(
-                "[mcp] Unexpected MCP server connect error: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"server": config.name},
-            )
-            return replace(
-                config,
-                tools=[],
-                resources=[],
-                capabilities={},
-                status="failed",
-                error=message,
-            )
-
-        if info.status == "connected":
-            _record_mcp_server_success(self.project_path, config.name)
-        elif info.status == "failed":
-            lower_error = (info.error or "").lower()
-            _record_mcp_server_failure(
-                self.project_path,
-                config.name,
-                info.error or "Connection failed.",
-                timeout="timed out" in lower_error or "timeout" in lower_error,
-            )
-        return info
-
-    async def wait_for_connections(self, timeout: Optional[float] = None) -> None:
-        tasks = [task for task in self._connection_tasks.values() if not task.done()]
-        if not tasks:
-            return
-        if timeout is None:
-            await asyncio.gather(*tasks, return_exceptions=True)
-            return
-        done, pending = await asyncio.wait(tasks, timeout=timeout)
-        for task in done:
-            try:
-                task.result()
-            except Exception:  # pragma: no cover - logged in callback
-                continue
-        if pending:
-            logger.debug(
-                "[mcp] wait_for_connections timeout",
-                extra={"pending_servers": len(pending), "timeout": timeout},
-            )
-
-    def server_snapshot(self) -> List[McpServerInfo]:
-        return list(self.servers)
-
-    async def _list_roots_callback(self, *_: Any, **__: Any) -> Optional[Any]:
-        if not mcp_types:
-            return None
-        return mcp_types.ListRootsResult(
-            roots=[mcp_types.Root(uri=Path(self.project_path).resolve().as_uri())]  # type: ignore[arg-type]
-        )
-
-    def _stdio_errlog_target(self, server_name: str) -> Any:
-        mode = _mcp_stderr_mode()
-        if mode in {"inherit", "stderr"}:
-            return sys.stderr
-        if mode in {"silent", "off", "devnull"}:
-            return subprocess.DEVNULL
-
-        path = _mcp_stderr_log_path(self.project_path, server_name)
-        try:
-            handle = path.open("a", encoding="utf-8", buffering=1)
-        except (OSError, IOError, RuntimeError) as exc:
-            logger.warning(
-                "[mcp] Failed to open stderr log; falling back to /dev/null: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"server": server_name, "path": str(path)},
-            )
-            return subprocess.DEVNULL
-        self._mcp_stderr_logs.append(handle)
-        logger.debug(
-            "[mcp] Redirecting stdio server stderr to log file",
-            extra={"server": server_name, "path": str(path)},
-        )
-        return handle
-
-    async def _connect_server(self, config: McpServerInfo) -> McpServerInfo:
-        info = replace(config, tools=[], resources=[])
-        if not MCP_AVAILABLE or not mcp_types:
-            info.status = "unavailable"
-            info.error = "MCP Python SDK not installed."
-            return info
-
-        try:
-            read_stream = None
-            write_stream = None
-            logger.debug(
-                "[mcp] Connecting server",
-                extra={
-                    "server": config.name,
-                    "type": config.type,
-                    "command": config.command,
-                    "url": config.url,
-                },
-            )
-
-            if config.type == "sdk":
-                sender = _get_sdk_mcp_request_sender()
-                if sender is None:
-                    raise RuntimeError("SDK MCP transport is not available")
-                session = _SdkMcpSession(config.name, sender)
-                init_result = await session.initialize()
-                info.status = "connected"
-                info.instructions = cast(str | None, init_result.get("instructions")) or info.instructions
-                server_info = init_result.get("serverInfo")
-                if isinstance(server_info, dict):
-                    version = server_info.get("version")
-                    info.server_version = str(version) if version is not None else None
-                capabilities = init_result.get("capabilities")
-                info.capabilities = capabilities if isinstance(capabilities, dict) else {}
-                self.sessions[config.name] = cast(ClientSession, session)
-
-                tools_result = await session.list_tools()
-                info.tools = [
-                    McpToolInfo(
-                        name=tool.name,
-                        description=tool.description or "",
-                        input_schema=tool.inputSchema,
-                        annotations=tool.annotations or {},
-                    )
-                    for tool in tools_result.tools
-                    if tool.name
-                ]
-                logger.info(
-                    "[mcp] Connected to SDK MCP server",
-                    extra={
-                        "server": config.name,
-                        "status": info.status,
-                        "tools": len(info.tools),
-                    },
-                )
-                return info
-            elif config.type in ("sse", "sse-ide"):
-                if not config.url:
-                    raise ValueError("SSE MCP server requires a 'url'.")
-                cm = sse_client(config.url, headers=config.headers or None)
-                # Track the underlying async generator for explicit cleanup
-                if hasattr(cm, "gen"):
-                    self._raw_async_generators.append(cm.gen)
-                async with self._exit_stack_lock:
-                    read_stream, write_stream = await self._exit_stack.enter_async_context(cm)
-                self._mcp_write_streams.append(write_stream)
-            elif config.type in ("http", "streamable-http"):
-                if not config.url:
-                    raise ValueError("HTTP MCP server requires a 'url'.")
-                cm = streamable_http_client(  # type: ignore[call-arg]
-                    url=config.url,
-                    terminate_on_close=True,
-                )
-                # Track the underlying async generator for explicit cleanup
-                if hasattr(cm, "gen"):
-                    self._raw_async_generators.append(cm.gen)
-                async with self._exit_stack_lock:
-                    read_stream, write_stream, _ = await self._exit_stack.enter_async_context(cm)
-                self._mcp_write_streams.append(write_stream)
-            else:
-                if not config.command:
-                    raise ValueError("Stdio MCP server requires a 'command'.")
-                stdio_params = StdioServerParameters(
-                    command=config.command,
-                    args=config.args,
-                    env=config.env or None,
-                    cwd=self.project_path,
-                )
-                cm = stdio_client(stdio_params, errlog=self._stdio_errlog_target(config.name))
-                # Track the underlying async generator for explicit cleanup
-                if hasattr(cm, "gen"):
-                    self._raw_async_generators.append(cm.gen)
-                async with self._exit_stack_lock:
-                    read_stream, write_stream = await self._exit_stack.enter_async_context(cm)
-                self._mcp_write_streams.append(write_stream)
-
-            if read_stream is None or write_stream is None:
-                raise ValueError("Failed to create read/write streams for MCP server")
-
-            async with self._exit_stack_lock:
-                session = await self._exit_stack.enter_async_context(
-                    ClientSession(
-                        read_stream,
-                        write_stream,
-                        list_roots_callback=self._list_roots_callback,  # type: ignore[arg-type]
-                        client_info=mcp_types.Implementation(name="ripperdoc", version=__version__),
-                    )
-                )
-
-            init_result = await session.initialize()
-            capabilities = session.get_server_capabilities()
-            if capabilities is None:
-                capabilities = mcp_types.ServerCapabilities()
-
-            info.status = "connected"
-            info.instructions = init_result.instructions or info.instructions
-            info.server_version = getattr(init_result.serverInfo, "version", None)
-            info.capabilities = (
-                capabilities.model_dump() if hasattr(capabilities, "model_dump") else {}
-            )
-            self.sessions[config.name] = cast(ClientSession, session)
-
-            tools_result = await session.list_tools()
-            info.tools = [
-                McpToolInfo(
-                    name=tool.name,
-                    description=tool.description or "",
-                    input_schema=tool.inputSchema,
-                    annotations=(tool.annotations.model_dump() if tool.annotations else {}),
-                )
-                for tool in tools_result.tools
-            ]
-
-            if capabilities and getattr(capabilities, "resources", None):
-                resources_result = await session.list_resources()
-                info.resources = [
-                    McpResourceInfo(
-                        uri=str(resource.uri),
-                        name=resource.name,
-                        description=resource.description or "",
-                        mime_type=resource.mimeType,
-                        size=resource.size,
-                    )
-                    for resource in resources_result.resources
-                ]
-
-            logger.info(
-                "[mcp] Connected to MCP server",
-                extra={
-                    "server": config.name,
-                    "status": info.status,
-                    "tools": len(info.tools),
-                    "resources": len(info.resources),
-                    "capabilities": list(info.capabilities.keys()),
-                },
-            )
-        except (
-            OSError,
-            RuntimeError,
-            ConnectionError,
-            ValueError,
-            TimeoutError,
-        ) as exc:  # pragma: no cover - network/process errors
-            logger.warning(
-                "Failed to connect to MCP server: %s: %s",
-                type(exc).__name__,
-                exc,
-                extra={"server": config.name},
-            )
-            info.status = "failed"
-            info.error = str(exc)
-
-        return info
-
-    async def aclose(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        logger.debug(
-            "[mcp] Shutting down MCP runtime",
-            extra={"project_path": str(self.project_path), "session_count": len(self.sessions)},
-        )
-
-        connection_tasks = [task for task in self._connection_tasks.values() if not task.done()]
-        for task in connection_tasks:
-            task.cancel()
-        if connection_tasks:
-            await asyncio.gather(*connection_tasks, return_exceptions=True)
-        self._connection_tasks.clear()
-        self._all_connections_finished.set()
-
-        # CRITICAL: Close all MCP write streams FIRST to signal internal tasks to stop.
-        for write_stream in self._mcp_write_streams:
-            try:
-                await write_stream.aclose()
-            except BaseException:  # pragma: no cover
-                pass
-        self._mcp_write_streams.clear()
-
-        # Small delay to allow internal tasks to notice stream closure and exit
-        await asyncio.sleep(0.1)
-
-        # CRITICAL: Close the raw async generators BEFORE the exit stack cleanup.
-        # This prevents asyncio's shutdown_asyncgens() from trying to close them
-        # later, which would cause the "cancel scope in different task" error.
-        for gen in self._raw_async_generators:
-            try:
-                await gen.aclose()
-            except BaseException:  # pragma: no cover
-                pass
-        self._raw_async_generators.clear()
-
-        for errlog in self._mcp_stderr_logs:
-            try:
-                errlog.close()
-            except BaseException:  # pragma: no cover
-                pass
-        self._mcp_stderr_logs.clear()
-
-        # Now close the exit stack
-        try:
-            await self._exit_stack.aclose()
-        except BaseException as exc:  # pragma: no cover - defensive shutdown
-            logger.debug(
-                "[mcp] Suppressed MCP shutdown error during exit_stack.aclose()",
-                extra={"error": str(exc), "project_path": str(self.project_path)},
-            )
-
-        self.sessions.clear()
-        self.servers.clear()
-
-
-_runtime_var: contextvars.ContextVar[Optional[McpRuntime]] = contextvars.ContextVar(
-    "ripperdoc_mcp_runtime", default=None
-)
-# Fallback for synchronous contexts (e.g., run_until_complete) where contextvars
-# don't propagate values back to the caller.
-_global_runtime: Optional[McpRuntime] = None
-_runtime_init_task: Optional[asyncio.Task[McpRuntime]] = None
-_runtime_init_project: Optional[Path] = None
-
-
-def _current_loop_or_none() -> Optional[asyncio.AbstractEventLoop]:
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-
-
-def _runtime_matches_current_loop(runtime: McpRuntime) -> bool:
-    loop = _current_loop_or_none()
-    return loop is not None and runtime.belongs_to_loop(loop)
-
-
-def _clear_foreign_global_runtime_reference() -> None:
-    global _global_runtime
-    if _global_runtime is not None and not _runtime_matches_current_loop(_global_runtime):
-        _global_runtime = None
-
-
-def _get_runtime(*, require_current_loop: bool = False) -> Optional[McpRuntime]:
-    runtime = _runtime_var.get()
-    if runtime and (not require_current_loop or _runtime_matches_current_loop(runtime)):
-        return runtime
-    if _global_runtime and (
-        not require_current_loop or _runtime_matches_current_loop(_global_runtime)
-    ):
-        return _global_runtime
-    return None
-
-
-def get_existing_mcp_runtime(*, require_current_loop: bool = False) -> Optional[McpRuntime]:
-    """Return the current MCP runtime if it has already been initialized."""
-    return _get_runtime(require_current_loop=require_current_loop)
-
-
-async def ensure_mcp_runtime(
-    project_path: Optional[Path] = None,
-    *,
-    wait_for_connections: bool = False,
-    wait_timeout: Optional[float] = None,
-) -> McpRuntime:
-    global _runtime_init_task, _runtime_init_project
-    _clear_foreign_global_runtime_reference()
-    runtime = _get_runtime(require_current_loop=True)
-    project_path = project_path or Path.cwd()
-    if runtime and not runtime._closed and runtime.project_path == project_path:
-        _runtime_var.set(runtime)
-        logger.debug(
-            "[mcp] Reusing existing MCP runtime",
-            extra={
-                "project_path": str(project_path),
-                "server_count": len(runtime.servers),
-            },
-        )
-        if wait_for_connections:
-            await runtime.wait_for_connections(timeout=wait_timeout)
-        return runtime
-
-    # If an initialization task is already in flight for this project and loop, await it.
-    if _runtime_init_task is not None and not _runtime_init_task.done():
-        if (
-            _runtime_init_project == project_path
-            and _runtime_init_task.get_loop() is asyncio.get_running_loop()
-        ):
-            runtime = await _runtime_init_task
-            _runtime_var.set(runtime)
-            if wait_for_connections:
-                await runtime.wait_for_connections(timeout=wait_timeout)
-            return runtime
-
-    async def _initialize_runtime() -> McpRuntime:
-        existing = _get_runtime(require_current_loop=True)
-        if existing and not existing._closed:
-            await existing.aclose()
-
-        initialized_runtime = McpRuntime(project_path)
-        try:
-            logger.debug(
-                "[mcp] Creating MCP runtime",
-                extra={"project_path": str(project_path)},
-            )
-            configs = _load_server_configs(project_path)
-            await initialized_runtime.connect(configs, wait_for_connections=False)
-            _runtime_var.set(initialized_runtime)
-            # Keep a module-level reference so sync callers that hop event loops can reuse it.
-            global _global_runtime
-            _global_runtime = initialized_runtime
-
-            # Install custom exception handler to suppress MCP asyncgen cleanup errors.
-            # These errors occur due to anyio cancel scope issues when stdio_client async
-            # generators are finalized by Python's asyncgen hooks. The errors are harmless
-            # but noisy, so we suppress them here.
-            loop = asyncio.get_running_loop()
-            original_handler = loop.get_exception_handler()
-
-            def mcp_exception_handler(loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
-                asyncgen = context.get("asyncgen")
-                # Suppress MCP stdio_client asyncgen cleanup errors
-                if asyncgen and "stdio_client" in str(asyncgen):
-                    logger.debug("[mcp] Suppressed asyncgen cleanup error for stdio_client")
-                    return
-                # Call original handler for other errors
-                if original_handler:
-                    original_handler(loop, context)
-                else:
-                    loop.default_exception_handler(context)
-
-            loop.set_exception_handler(mcp_exception_handler)
-            logger.debug("[mcp] Installed custom exception handler for asyncgen cleanup")
-            return initialized_runtime
-        except BaseException:
-            # Ensure partially connected runtimes are cleaned up when initialization is cancelled/failed.
-            try:
-                await initialized_runtime.aclose()
-            except BaseException:
-                pass
-            raise
-
-    init_task = asyncio.create_task(_initialize_runtime())
-    _runtime_init_task = init_task
-    _runtime_init_project = project_path
-    try:
-        runtime = await init_task
-        _runtime_var.set(runtime)
-        if wait_for_connections:
-            await runtime.wait_for_connections(timeout=wait_timeout)
-        return runtime
-    finally:
-        if _runtime_init_task is init_task:
-            _runtime_init_task = None
-            _runtime_init_project = None
-
-
-async def shutdown_mcp_runtime() -> None:
-    global _runtime_init_task, _runtime_init_project
-    if _runtime_init_task is not None and not _runtime_init_task.done():
-        if _runtime_init_task.get_loop() is asyncio.get_running_loop():
-            _runtime_init_task.cancel()
-            try:
-                await _runtime_init_task
-            except (asyncio.CancelledError, RuntimeError, OSError, ConnectionError, ValueError):
-                pass
-        _runtime_init_task = None
-        _runtime_init_project = None
-
-    _clear_foreign_global_runtime_reference()
-    runtime = _get_runtime(require_current_loop=True)
-    if not runtime:
-        return
-    try:
-        await runtime.aclose()
-    except BaseException as exc:  # pragma: no cover - defensive for ExceptionGroup
-        logger.debug("[mcp] Suppressed MCP runtime shutdown error", extra={"error": str(exc)})
-    _runtime_var.set(None)
-    global _global_runtime
-    _global_runtime = None
-
-
-async def load_mcp_servers_async(
-    project_path: Optional[Path] = None,
-    *,
-    wait_for_connections: bool = False,
-    wait_timeout: Optional[float] = None,
-) -> List[McpServerInfo]:
-    runtime = await ensure_mcp_runtime(
-        project_path,
-        wait_for_connections=wait_for_connections,
-        wait_timeout=wait_timeout,
-    )
-    return runtime.server_snapshot()
-
-
-def _config_only_servers(project_path: Optional[Path]) -> List[McpServerInfo]:
-    return list(_load_server_configs(project_path).values())
-
-
-def load_mcp_servers(
-    project_path: Optional[Path] = None,
-    *,
-    wait_for_connections: bool = True,
-    wait_timeout: Optional[float] = None,
-) -> List[McpServerInfo]:
-    """Synchronous wrapper primarily for legacy call sites."""
-    try:
-        loop = asyncio.get_running_loop()
-        if loop.is_running():
-            runtime = _get_runtime()
-            if runtime and runtime.servers:
-                return runtime.server_snapshot()
-            return _config_only_servers(project_path)
-    except RuntimeError:
-        pass
-
-    async def _load_and_shutdown() -> List[McpServerInfo]:
-        try:
-            return await load_mcp_servers_async(
-                project_path,
-                wait_for_connections=wait_for_connections,
-                wait_timeout=wait_timeout,
-            )
-        finally:
-            await shutdown_mcp_runtime()
-
-    return asyncio.run(_load_and_shutdown())
-
-
-def find_mcp_resource(
-    servers: List[McpServerInfo],
-    server_name: str,
-    uri: str,
-) -> Optional[McpResourceInfo]:
-    server = next((s for s in servers if s.name == server_name), None)
-    if not server:
-        return None
-    return next((r for r in server.resources if r.uri == uri), None)
-
-
-def _summarize_tools(server: McpServerInfo) -> str:
-    if not server.tools:
-        return "no tools"
-    names = [tool.name for tool in server.tools[:6]]
-    suffix = ", ".join(names)
-    if len(server.tools) > 6:
-        suffix += f", and {len(server.tools) - 6} more"
-    return suffix
-
-
-def format_mcp_instructions(servers: List[McpServerInfo]) -> str:
-    """Build a concise MCP instruction block for the system prompt."""
-    if not servers:
-        return ""
-
-    connected_count = len([server for server in servers if server.status == "connected"])
-    lines: List[str] = []
-    if connected_count > 0:
-        lines.append(
-            "Connected MCP servers are available."
-        )
-    else:
-        lines.append(
-            "MCP servers are configured, but none are connected yet. Prefer non-MCP tools unless a server is [connected]."
-        )
-    lines.append(
-        "Use ListMcpServers to inspect statuses and ListMcpResources/ReadMcpResource when a server exposes resources."
-    )
-
-    for server in servers:
-        status = server.status or "unknown"
-        prefix = f"- {server.name} [{status}]"
-        if server.url:
-            prefix += f" {server.url}"
-        lines.append(prefix)
-
-        if status == "connected":
-            if server.instructions:
-                trimmed = server.instructions.strip()
-                if len(trimmed) > 260:
-                    trimmed = trimmed[:257] + "..."
-                lines.append(f"  Instructions: {trimmed}")
-            tool_summary = _summarize_tools(server)
-            lines.append(f"  Tools: {tool_summary}")
-            if server.resources:
-                lines.append(f"  Resources: {len(server.resources)} available")
-        elif status == "connecting":
-            lines.append("  Status: connecting (tool discovery in progress)")
-        elif server.error:
-            lines.append(f"  Error: {server.error}")
-
-    return "\n".join(lines)
-
-
-def estimate_mcp_tokens(servers: List[McpServerInfo]) -> int:
-    """Estimate token usage for MCP instructions."""
-    mcp_text = format_mcp_instructions(servers)
-    return estimate_tokens(mcp_text)
+Path = _Path
 
 
 __all__ = [
     "McpServerInfo",
     "McpToolInfo",
     "McpResourceInfo",
+    "ConfigScope",
+    "TransportType",
     "load_mcp_server_configs",
     "parse_mcp_server_configs",
+    "parse_mcp_config_option",
     "set_mcp_runtime_overrides",
     "clear_mcp_runtime_overrides",
     "get_existing_mcp_runtime",
@@ -1547,4 +168,13 @@ __all__ = [
     "estimate_mcp_tokens",
     "get_mcp_stderr_mode",
     "get_mcp_stderr_log_path",
+    "set_sdk_mcp_request_sender",
+    "clear_sdk_mcp_request_sender",
+    "get_sdk_mcp_request_sender",
+    "normalize_name_for_mcp",
+    "mcp_info_from_string",
+    "build_mcp_tool_name",
+    "get_mcp_prefix",
+    "expand_env_vars_in_string",
+    "_coerce_sdk_schema",
 ]

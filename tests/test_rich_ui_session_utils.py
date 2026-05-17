@@ -36,6 +36,9 @@ def _new_ui() -> RichUI:
     ui.conversation_messages = []
     ui._saved_conversation = None
     ui._pre_plan_mode = None
+    ui._thinking_mode_manually_set = False
+    ui._thinking_mode_enabled = False
+    ui._max_thinking_tokens_override = None
     return ui
 
 

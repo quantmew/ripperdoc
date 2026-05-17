@@ -371,7 +371,7 @@ class RichUI:
 
         Runs once during __init__ so the rprompt shows the correct state
         before the first user message."""
-        if not self._thinking_mode_manually_set and self._profile_supports_reasoning():
+        if not getattr(self, "_thinking_mode_manually_set", False) and self._profile_supports_reasoning():
             self._thinking_mode_enabled = True
 
     def _create_permission_checker(self) -> Any:
@@ -625,7 +625,13 @@ class RichUI:
         """Return a default thinking token budget when model supports reasoning.
 
         Priority: profile max_thinking_tokens > profile thinking_effort mapped > global default.
+        Returns 0 if thinking_effort explicitly disables thinking.
         """
+        model_profile = get_profile_for_pointer(self.model)
+        if model_profile is not None:
+            effort = (getattr(model_profile, "thinking_effort", None) or "").strip().lower()
+            if effort in {"none", "off", "disabled"}:
+                return 0
         profile_tokens = self._resolve_profile_thinking_tokens()
         if profile_tokens > 0:
             return profile_tokens
@@ -654,7 +660,7 @@ class RichUI:
         # Auto-enable thinking when model supports reasoning, unless user
         # manually toggled it off. The budget is resolved from profile config
         # (max_thinking_tokens or thinking_effort) or global default_thinking_tokens.
-        if not self._thinking_mode_manually_set and self._profile_supports_reasoning():
+        if not getattr(self, "_thinking_mode_manually_set", False) and self._profile_supports_reasoning():
             self._thinking_mode_enabled = True
             return self._default_thinking_tokens_for_model()
         if not self._thinking_mode_enabled:

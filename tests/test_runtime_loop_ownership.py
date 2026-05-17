@@ -3,6 +3,8 @@ import asyncio
 import pytest
 
 from ripperdoc.tools.mcp import dynamic_mcp
+from ripperdoc.services.mcp import client as mcp_client
+from ripperdoc.services.mcp import utils as mcp_utils
 from ripperdoc.utils import lsp, mcp
 
 
@@ -22,8 +24,8 @@ def test_sync_mcp_server_loader_shuts_down_runtime(monkeypatch):
     async def _fake_shutdown():
         shutdown_calls["count"] += 1
 
-    monkeypatch.setattr(mcp, "load_mcp_servers_async", _fake_load)
-    monkeypatch.setattr(mcp, "shutdown_mcp_runtime", _fake_shutdown)
+    monkeypatch.setattr(mcp_utils, "load_mcp_servers_async", _fake_load)
+    monkeypatch.setattr(mcp_client, "shutdown_mcp_runtime", _fake_shutdown)
 
     assert mcp.load_mcp_servers() == ["server-a"]
     assert shutdown_calls["count"] == 1
@@ -42,11 +44,11 @@ async def test_shutdown_mcp_runtime_discards_foreign_global_runtime(monkeypatch,
         async def aclose(self):
             raise AssertionError("foreign runtime must not be awaited")
 
-    monkeypatch.setattr(mcp, "_global_runtime", ForeignRuntime())
+    monkeypatch.setattr(mcp_client, "_global_runtime", ForeignRuntime())
 
     try:
         await mcp.shutdown_mcp_runtime()
-        assert mcp._global_runtime is None
+        assert mcp_client._global_runtime is None
 
         runtime = await mcp.ensure_mcp_runtime(tmp_path)
         assert runtime.project_path == tmp_path

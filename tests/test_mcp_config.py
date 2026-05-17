@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 from ripperdoc.utils import mcp
+from ripperdoc.services.mcp import config as mcp_config
+from ripperdoc.services.mcp import types as mcp_types_mod
 from ripperdoc.services.managed_settings import reset_managed_settings_cache
 
 
@@ -27,10 +29,10 @@ async def test_mcp_runtime_load_is_non_blocking_and_reports_connecting(monkeypat
     await mcp.shutdown_mcp_runtime()
     mcp._mcp_circuit_states.clear()
 
-    monkeypatch.setattr(mcp, "MCP_AVAILABLE", True)
+    monkeypatch.setattr(mcp_types_mod, "MCP_AVAILABLE", True)
     monkeypatch.setattr(
-        mcp,
-        "_load_server_configs",
+        mcp_config,
+        "load_server_configs",
         lambda _project_path: {
             "slow": mcp.McpServerInfo(name="slow", command="slow-server"),
         },
@@ -72,10 +74,10 @@ async def test_mcp_timeout_marks_failed_and_opens_circuit_breaker(monkeypatch, t
     monkeypatch.setenv("RIPPERDOC_MCP_CONNECT_TIMEOUT_SEC", "0.02")
     monkeypatch.setenv("RIPPERDOC_MCP_CIRCUIT_BREAKER_FAILURES", "1")
     monkeypatch.setenv("RIPPERDOC_MCP_CIRCUIT_BREAKER_COOLDOWN_SEC", "60")
-    monkeypatch.setattr(mcp, "MCP_AVAILABLE", True)
+    monkeypatch.setattr(mcp_types_mod, "MCP_AVAILABLE", True)
     monkeypatch.setattr(
-        mcp,
-        "_load_server_configs",
+        mcp_config,
+        "load_server_configs",
         lambda _project_path: {
             "timeout-server": mcp.McpServerInfo(name="timeout-server", command="slow-server"),
         },
