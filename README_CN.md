@@ -39,7 +39,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
 ## 核心功能
 
 ### 🛠️ 强大的工具系统
-- **30+ 内置工具** - 文件操作(Read、Write、Edit、MultiEdit)、代码搜索(Grep、Glob)、shell 执行(Bash、Background)、LSP 集成等
+- **内置工具** - 文件操作(Read、Write、Edit、MultiEdit)、代码搜索(Grep、Glob、LSP)、shell 执行(Bash、后台任务)、子代理委托、任务图、记忆等
 - **Jupyter 支持** - 直接编辑 .ipynb 笔记本,支持单元格操作
 - **后台任务** - 异步运行命令,监控输出和跟踪状态
 
@@ -196,12 +196,6 @@ paths: docs/**, src/**
 ---
 ```
 
-**内置技能:**
-- `pdf` - PDF 操作(提取文本/表格、创建、合并/拆分)
-- `pptx` - PowerPoint 演示文稿创建和编辑
-- `xlsx` - Excel 电子表格操作,支持公式
-- `cangjie` - 仓颉编程语言支持
-
 ### Hooks 系统
 
 在生命周期事件执行自定义脚本,支持决策控制:
@@ -269,6 +263,10 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - `/compact` - 压缩对话历史
 - `/fork` - 从当前状态创建新会话分支
 - `/resume` - 恢复之前的会话
+- `/rewind` - 回退到之前的状态
+- `/rename` - 重命名当前会话
+- `/copy` - 复制上一条助手回复到剪贴板
+- `/export` - 将会话导出到文件或剪贴板
 
 **配置命令:**
 - `/config` - 管理配置
@@ -279,6 +277,8 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - `/themes` - 更改 UI 主题
 - `/output_language` - 设置输出语言
 - `/output_style` - 设置输出样式
+- `/oauth` - 管理 OAuth 令牌
+- `/plugins` - 管理插件配置
 
 **信息命令:**
 - `/help` - 显示帮助信息
@@ -296,6 +296,8 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - `/context` - 管理上下文
 - `/memory` - 管理记忆
 - `/mcp` - MCP 服务器管理
+- `/add_dir` - 添加额外的工作目录
+- `/btw` - 在不中断主对话的情况下快速提问
 
 ## 项目导航
 
@@ -320,7 +322,7 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 
 - **CLI 层** (`ripperdoc/cli/`) - 终端界面、UI 组件、命令处理器
 - **核心层** (`ripperdoc/core/`) - 代理定义、配置、hooks、提供商
-- **工具层** (`ripperdoc/tools/`) - 30+ 用于文件操作、代码分析等的内置工具
+- **工具层** (`ripperdoc/tools/`) - 内置工具,用于文件操作、代码分析、编排等
 - **协议层** (`ripperdoc/protocol/`) - 用于 SDK 通信的 Stdio 协议处理器
 - **工具层** (`ripperdoc/utils/`) - 用于日志记录、权限、文件操作的共享工具
 
@@ -337,22 +339,37 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - `Grep` - 使用正则表达式模式搜索代码
 - `Glob` - 文件模式匹配
 - `LSP` - 语言服务器协议集成
+- `LS` - 列出文件和目录
 
 **Shell 操作:**
 - `Bash` - 执行 shell 命令
+- `BackgroundShell` - 异步在后台运行命令
 - `TaskStop` - 停止后台任务
 - `TaskOutput` - 从后台任务读取输出
+- `Sleep` - 暂停执行而不阻塞其他工具
 
-**代理功能:**
+**代理与编排:**
+- `Agent` - 委托给专业子代理
 - `TaskCreate/Update/Get/List` - 任务图管理
+- `TaskStop/Output` - 管理后台代理任务
 - `TeamCreate/Delete` - 多代理团队协调
 - `SendMessage` - 代理间消息传递
-- `Task` - 委托给专业子代理
+- `SendUserMessage` - 向用户发送通知
+
+**规划与隔离:**
+- `EnterPlanMode/ExitPlanMode` - 结构化规划工作流
+- `EnterWorktree/ExitWorktree` - 隔离的工作树环境
 
 **可扩展性:**
 - `Skill` - 按需加载技能包
 - `ToolSearch` - 发现和激活工具
 - `AskUserQuestion` - 交互式用户提示
+- `Memory` - 持久化跨会话记忆
+
+**管理:**
+- `Config` - 管理运行时配置
+- `MCP/MCPAuth` - MCP 服务器和认证管理
+- `CronCreate/Delete/List` - 调度重复任务
 
 ### 支持的提供商
 

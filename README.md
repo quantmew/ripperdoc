@@ -39,7 +39,7 @@ _an open-source, extensible AI coding agent that runs in your terminal_
 ## Core Features
 
 ### 🛠️ Powerful Tool System
-- **30+ Built-in Tools** - File operations (Read, Write, Edit, MultiEdit), code search (Grep, Glob), shell execution (Bash, Background), LSP integration, and more
+- **Built-in Tools** - File operations (Read, Write, Edit, MultiEdit), code search (Grep, Glob, LSP), shell execution (Bash, background tasks), subagent delegation, task graph, memory, and more
 - **Jupyter Support** - Direct .ipynb notebook editing with cell manipulation
 - **Background Tasks** - Run commands asynchronously with output monitoring and status tracking
 
@@ -199,12 +199,6 @@ paths: docs/**, src/**
 ---
 ```
 
-**Built-in Skills:**
-- `pdf` - PDF manipulation (extract text/tables, create, merge/split)
-- `pptx` - PowerPoint presentation creation and editing
-- `xlsx` - Excel spreadsheet operations with formulas
-- `cangjie` - 仓颉 programming language support
-
 ### Hooks System
 
 Execute custom scripts at lifecycle events with decision control:
@@ -272,6 +266,10 @@ Ripperdoc provides powerful slash commands for session management:
 - `/compact` - Compact conversation history
 - `/fork` - Create new session branch from current state
 - `/resume` - Resume a previous session
+- `/rewind` - Rewind conversation to a previous state
+- `/rename` - Rename current session
+- `/copy` - Copy last assistant response to clipboard
+- `/export` - Export conversation to file or clipboard
 
 **Configuration Commands:**
 - `/config` - Manage configuration
@@ -282,6 +280,8 @@ Ripperdoc provides powerful slash commands for session management:
 - `/themes` - Change UI theme
 - `/output_language` - Set output language
 - `/output_style` - Set output style
+- `/oauth` - Manage OAuth tokens
+- `/plugins` - Manage plugin configuration
 
 **Information Commands:**
 - `/help` - Show help information
@@ -299,6 +299,8 @@ Ripperdoc provides powerful slash commands for session management:
 - `/context` - Manage context
 - `/memory` - Manage memory
 - `/mcp` - MCP server management
+- `/add_dir` - Add additional working directories
+- `/btw` - Ask a quick side question without interrupting the main conversation
 
 ## Project Navigation
 
@@ -323,7 +325,7 @@ Ripperdoc provides powerful slash commands for session management:
 
 - **CLI Layer** (`ripperdoc/cli/`) - Terminal interface, UI components, command handlers
 - **Core Layer** (`ripperdoc/core/`) - Agent definitions, configuration, hooks, providers
-- **Tools Layer** (`ripperdoc/tools/`) - 30+ built-in tools for file operations, code analysis, etc.
+- **Tools Layer** (`ripperdoc/tools/`) - Built-in tools for file operations, code analysis, orchestration, and more
 - **Protocol Layer** (`ripperdoc/protocol/`) - Stdio protocol handler for SDK communication
 - **Utils Layer** (`ripperdoc/utils/`) - Shared utilities for logging, permissions, file operations
 
@@ -340,22 +342,37 @@ Ripperdoc provides powerful slash commands for session management:
 - `Grep` - Search code using regex patterns
 - `Glob` - File pattern matching
 - `LSP` - Language Server Protocol integration
+- `LS` - List files and directories
 
 **Shell Operations:**
 - `Bash` - Execute shell commands
+- `BackgroundShell` - Run commands asynchronously in the background
 - `TaskStop` - Stop background tasks
 - `TaskOutput` - Read output from background tasks
+- `Sleep` - Pause execution without blocking other tools
 
-**Agent Features:**
+**Agent & Orchestration:**
+- `Agent` - Delegate to specialized subagents
 - `TaskCreate/Update/Get/List` - Task graph management
+- `TaskStop/Output` - Manage background agent tasks
 - `TeamCreate/Delete` - Multi-agent team coordination
 - `SendMessage` - Inter-agent messaging
-- `Task` - Delegate to specialized subagents
+- `SendUserMessage` - Send notifications to user
+
+**Planning & Isolation:**
+- `EnterPlanMode/ExitPlanMode` - Structured planning workflow
+- `EnterWorktree/ExitWorktree` - Isolated worktree environment
 
 **Extensibility:**
 - `Skill` - Load skill bundles on-demand
 - `ToolSearch` - Discover and activate tools
 - `AskUserQuestion` - Interactive user prompts
+- `Memory` - Persistent cross-session memory
+
+**Management:**
+- `Config` - Manage runtime configuration
+- `MCP/MCPAuth` - MCP server and authentication management
+- `CronCreate/Delete/List` - Schedule recurring tasks
 
 ### Supported Providers
 
