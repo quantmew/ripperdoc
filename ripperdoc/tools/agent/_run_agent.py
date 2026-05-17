@@ -593,18 +593,17 @@ async def run_subagent_foreground(
             extra={"agent_id": record.agent_id, "team_name": record.team_name},
         )
     finally:
-        if handed_off_to_background:
-            return
-        if finalize_status == "running":
-            finalize_status = "completed"
-        finalize_record_from_messages(
-            record,
-            assistant_messages=assistant_messages,
-            tool_use_count=tool_use_count,
-            status=finalize_status,
-            error=finalize_error,
-            result_text=finalize_result_text,
-        )
+        if not handed_off_to_background:
+            if finalize_status == "running":
+                finalize_status = "completed"
+            finalize_record_from_messages(
+                record,
+                assistant_messages=assistant_messages,
+                tool_use_count=tool_use_count,
+                status=finalize_status,
+                error=finalize_error,
+                result_text=finalize_result_text,
+            )
 
 
 async def run_subagent_background(
