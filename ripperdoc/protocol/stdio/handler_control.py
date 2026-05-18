@@ -15,12 +15,12 @@ from ripperdoc.core.tool_defaults import get_default_tools_async
 from ripperdoc.utils.messaging.message_utils import format_pydantic_errors
 from ripperdoc.services.output_styles import resolve_output_style
 from ripperdoc.core.permission_engine import PermissionResult
-from ripperdoc.protocol.models import (
-    JsonRpcErrorCodes,
+from ripperdoc.protocol.model_types.helpers import model_to_dict
+from ripperdoc.protocol.model_types.jsonrpc import JsonRpcErrorCodes
+from ripperdoc.protocol.model_types.permissions import (
     PermissionResponseAllow,
     PermissionResponseDeny,
     ToolCallRequest,
-    model_to_dict,
 )
 from ripperdoc.utils.permissions import ToolRule
 from ripperdoc.tools.mcp.dynamic_mcp import (

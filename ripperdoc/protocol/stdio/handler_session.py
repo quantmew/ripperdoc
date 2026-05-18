@@ -36,15 +36,14 @@ from ripperdoc.core.hooks.llm_callback import build_hook_llm_callback
 from ripperdoc.core.hooks.manager import hook_manager
 from ripperdoc.core.hooks.state import bind_pending_message_queue, bind_hook_scopes
 from ripperdoc.core.query import QueryContext
-from ripperdoc.protocol.models import (
-    DEFAULT_PROTOCOL_VERSION,
-    JsonRpcErrorCodes,
+from ripperdoc.protocol.model_types.helpers import model_to_dict
+from ripperdoc.protocol.model_types.initialize import (
     InitializeParams,
     InitializeResult,
     InitializeServerInfo,
     ProtocolCapabilities,
-    model_to_dict,
 )
+from ripperdoc.protocol.model_types.jsonrpc import DEFAULT_PROTOCOL_VERSION, JsonRpcErrorCodes
 from .error_codes import resolve_protocol_request_error_code
 from ripperdoc.tools.mcp.dynamic_mcp import (
     load_dynamic_mcp_tools_async,

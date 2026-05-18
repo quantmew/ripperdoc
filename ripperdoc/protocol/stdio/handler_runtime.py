@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import ValidationError
 
 from ripperdoc.core.hooks.manager import hook_manager
-from ripperdoc.protocol.models import IncomingUserStreamMessage
+from ripperdoc.protocol.model_types.stream import IncomingUserStreamMessage
 from ripperdoc.services.background_shell import shutdown_background_shell
 from ripperdoc.utils.asyncio_compat import asyncio_timeout
 from ripperdoc.utils.lsp import shutdown_lsp_manager

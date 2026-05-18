@@ -28,7 +28,7 @@ from ripperdoc.utils.collaboration.teammate_state import (
 )
 from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messaging.messages import ConversationMessage
+from ripperdoc.utils.messaging.types import ConversationMessage
 
 from ripperdoc.tools.agent._constants import DEFAULT_AGENT_RUN_TTL_SEC
 

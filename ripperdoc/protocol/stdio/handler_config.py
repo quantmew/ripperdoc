@@ -18,7 +18,7 @@ from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.core.plan_mode import ensure_plan_file_directory
 from ripperdoc.core.system_prompt import build_system_prompt
 from ripperdoc.core.system_prompt_builder import compose_system_prompt, select_base_system_prompt
-from ripperdoc.protocol.models import UserMessageData, UserStreamMessage
+from ripperdoc.protocol.model_types.stream import UserMessageData, UserStreamMessage
 from ripperdoc.utils.messaging.messages import create_hook_additional_context_message
 from ripperdoc.utils.memory import build_memory_instructions
 

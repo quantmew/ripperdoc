@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Union
 
 from ripperdoc.utils.messaging.message_utils import resolve_model_profile
-from ripperdoc.protocol.models import (
+from ripperdoc.protocol.model_types.helpers import model_to_dict
+from ripperdoc.protocol.model_types.stream import (
     AssistantMessageData,
     AssistantStreamMessage,
     UserMessageData,
     UserStreamMessage,
-    model_to_dict,
 )
 
 

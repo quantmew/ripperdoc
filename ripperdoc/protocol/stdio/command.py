@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import click
 from ripperdoc import __version__
-from ripperdoc.protocol.models import DEFAULT_PROTOCOL_VERSION
+from ripperdoc.protocol.model_types.jsonrpc import DEFAULT_PROTOCOL_VERSION
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.sessions.session_history import (
     load_session_messages,

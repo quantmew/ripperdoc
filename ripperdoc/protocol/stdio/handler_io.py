@@ -17,11 +17,11 @@ from collections.abc import AsyncIterator
 from urllib.parse import urlparse, urlunparse
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
 
-from ripperdoc.protocol.models import (
+from ripperdoc.protocol.model_types.helpers import model_to_dict
+from ripperdoc.protocol.model_types.jsonrpc import (
     JsonRpcError,
     JsonRpcErrorCodes,
     JsonRpcResponseError,
-    model_to_dict,
 )
 from ripperdoc.utils.coerce import parse_boolish
 

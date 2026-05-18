@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ripperdoc.protocol.models import JsonRpcErrorCodes
+from ripperdoc.protocol.model_types.jsonrpc import JsonRpcErrorCodes
 
 
 _MCP_VALIDATION_EXCEPTIONS = (ValidationError, TypeError, ValueError, KeyError, IndexError)

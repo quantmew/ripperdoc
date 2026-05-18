@@ -11,7 +11,7 @@ from ripperdoc.utils.asyncio_compat import new_event
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.fileStateCache import FileStateCache
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messaging.messages import AttachmentMessage, ProgressMessage, UserMessage
+from ripperdoc.utils.messaging.types import AttachmentMessage, ProgressMessage, UserMessage
 from ripperdoc.utils.messaging.message_types import ConversationMessage
 from ripperdoc.utils.messaging.pending_messages import PendingMessageQueue
 

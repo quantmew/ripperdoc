@@ -31,7 +31,8 @@ from ripperdoc.tools.glob import GlobTool
 from ripperdoc.tools.grep import GrepTool
 from ripperdoc.tools.ls import LSTool
 from ripperdoc.tools.lsp import LspTool
-from ripperdoc.utils.messaging.messages import AssistantMessage, create_user_message
+from ripperdoc.utils.messaging.messages import create_user_message
+from ripperdoc.utils.messaging.types import AssistantMessage
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.filesystem.temp_paths import ripperdoc_mkstemp
 

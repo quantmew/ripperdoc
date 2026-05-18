@@ -43,11 +43,8 @@ def build_fork_messages(
 
     This preserves the parent's cache prefix while giving the fork its own directive.
     """
-    from ripperdoc.utils.messaging.messages import (
-        AssistantMessage,
-        UserMessage,
-        create_user_message,
-    )
+    from ripperdoc.utils.messaging.messages import create_user_message
+    from ripperdoc.utils.messaging.types import AssistantMessage
 
     # Find the last assistant message (the one with tool_use blocks)
     last_assistant = None
@@ -100,7 +97,7 @@ def _build_child_directive(directive: str) -> str:
 
 def _clone_assistant_message(msg: Any) -> Any:
     """Shallow-clone an assistant message with a new UUID."""
-    from ripperdoc.utils.messaging.messages import AssistantMessage
+    from ripperdoc.utils.messaging.types import AssistantMessage
 
     if isinstance(msg, AssistantMessage):
         payload = getattr(msg, "message", None)
