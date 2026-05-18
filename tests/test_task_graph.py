@@ -45,10 +45,11 @@ def test_task_graph_roundtrip_and_dependency_sync(tmp_path, monkeypatch):
 
     assert next_task is not None
     assert next_task.id == "2"
-    assert "total 2" in format_task_summary(tasks)
+    # Completed tasks excluded from summary; only pending task counts
+    assert "total 1" in format_task_summary(tasks)
 
 
-def test_task_graph_tools_flow_and_deleted_status(tmp_path, monkeypatch):
+def test_task_graph_tools_flow(tmp_path, monkeypatch):
     monkeypatch.setattr("ripperdoc.utils.collaboration.tasks.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
 
@@ -73,6 +74,15 @@ def test_task_graph_tools_flow_and_deleted_status(tmp_path, monkeypatch):
         assert created.data.task is not None
         task_id = created.data.task.id
 
+        # Verify task is visible while pending
+        listed = None
+        async for output in list_tool.call(TaskListInput(), context):
+            listed = output
+        assert listed is not None
+        assert listed.data.tasks
+        assert listed.data.tasks[0].id == task_id
+
+        # Complete the task
         updated = None
         async for output in update_tool.call(
             TaskUpdateInput(task_id=task_id, status="completed"),
@@ -85,23 +95,12 @@ def test_task_graph_tools_flow_and_deleted_status(tmp_path, monkeypatch):
         assert updated.data.status_change is not None
         assert updated.data.status_change.to_status == "completed"
 
-        listed = None
+        # Completed tasks should not appear in TaskList
+        listed_after = None
         async for output in list_tool.call(TaskListInput(), context):
-            listed = output
-
-        assert listed is not None
-        assert listed.data.tasks
-        assert listed.data.tasks[0].id == task_id
-
-        deleted = None
-        async for output in update_tool.call(
-            TaskUpdateInput(task_id=task_id, status="deleted"),
-            context,
-        ):
-            deleted = output
-
-        assert deleted is not None
-        assert deleted.data.success is True
+            listed_after = output
+        assert listed_after is not None
+        assert not listed_after.data.tasks
 
     asyncio.run(_run())
 

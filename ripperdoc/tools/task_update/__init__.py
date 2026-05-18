@@ -17,7 +17,6 @@ from ripperdoc.core.tool import (
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.collaboration.tasks import (
     TaskPatch,
-    delete_task,
     get_task,
     list_tasks,
     resolve_task_list_id,
@@ -29,7 +28,7 @@ from ripperdoc.utils.collaboration.teams import find_team_by_task_list_id, get_a
 
 logger = get_logger()
 
-TaskStatusWithDelete = Literal["pending", "in_progress", "completed", "deleted"]
+TaskStatusWithDelete = Literal["pending", "in_progress", "completed"]
 
 
 def _resolve_active_task_list_id() -> str:
@@ -187,31 +186,6 @@ class TaskUpdateTool(Tool[TaskUpdateInput, TaskUpdateOutput]):
             )
             yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
             return
-
-        if input_data.status == "deleted":
-            removed = delete_task(input_data.task_id, task_list_id=task_list_id)
-            output = TaskUpdateOutput(
-                success=removed,
-                task_id=input_data.task_id,
-                updated_fields=["status"] if removed else [],
-                error=None if removed else f"Task '{input_data.task_id}' not found.",
-                status_change=TaskUpdateStatusChange(
-                    from_status=previous_task.status,
-                    to_status="deleted",
-                )
-                if removed
-                else None,
-            )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
-            return
-
-        merged_blocks = list(previous_task.blocks)
-        if "add_blocks" in input_data.model_fields_set:
-            merged_blocks = _dedupe([*merged_blocks, *input_data.add_blocks])
-
-        merged_blocked_by = list(previous_task.blocked_by)
-        if "add_blocked_by" in input_data.model_fields_set:
-            merged_blocked_by = _dedupe([*merged_blocked_by, *input_data.add_blocked_by])
 
         if input_data.status == "completed":
             simulated = previous_task.model_copy(update={"blocked_by": merged_blocked_by})

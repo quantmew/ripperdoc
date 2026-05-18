@@ -182,6 +182,8 @@ class TaskListTool(Tool[TaskListInput, TaskListOutput]):
             metadata = task.metadata if isinstance(task.metadata, dict) else {}
             if metadata.get("_internal"):
                 continue
+            if task.status == "completed":
+                continue
             visible.append(task)
 
         visible.sort(key=lambda item: _task_id_sort_key(item.id))

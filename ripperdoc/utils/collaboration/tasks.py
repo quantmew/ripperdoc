@@ -890,23 +890,23 @@ def get_next_actionable_task(tasks: Sequence[TaskItem]) -> Optional[TaskItem]:
 
 
 def summarize_tasks(tasks: Sequence[TaskItem]) -> Dict[str, Any]:
-    """Return aggregate stats for a task list."""
+    """Return aggregate stats for a task list (only active tasks)."""
 
+    active = [t for t in tasks if t.status != "completed"]
     statuses = {
         "pending": 0,
         "in_progress": 0,
-        "completed": 0,
     }
-    for task in tasks:
+    for task in active:
         statuses[task.status] = statuses.get(task.status, 0) + 1
 
     owners: Dict[str, int] = {}
-    for task in tasks:
+    for task in active:
         key = task.owner or "unassigned"
         owners[key] = owners.get(key, 0) + 1
 
     return {
-        "total": len(tasks),
+        "total": len(active),
         "by_status": statuses,
         "by_owner": owners,
     }
@@ -917,8 +917,7 @@ def format_task_summary(tasks: Sequence[TaskItem]) -> str:
     return (
         f"Tasks updated (total {stats['total']}; "
         f"{stats['by_status'].get('pending', 0)} pending, "
-        f"{stats['by_status'].get('in_progress', 0)} in progress, "
-        f"{stats['by_status'].get('completed', 0)} completed)."
+        f"{stats['by_status'].get('in_progress', 0)} in progress)."
     )
 
 

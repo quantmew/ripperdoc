@@ -19,7 +19,6 @@ from ripperdoc.utils.collaboration.tasks import (
     TaskItem,
     TaskPatch,
     create_task,
-    delete_task,
     get_task,
     list_tasks,
     resolve_task_list_id,
@@ -51,7 +50,7 @@ __all__ = [
 
 logger = get_logger()
 
-TaskStatusWithDelete = Literal["pending", "in_progress", "completed", "deleted"]
+TaskStatusWithDelete = Literal["pending", "in_progress", "completed"]
 
 TASK_CREATE_PROMPT = dedent(
     """\
@@ -191,10 +190,6 @@ TASK_UPDATE_PROMPT = dedent(
       - You encountered unresolved errors
       - You couldn't find necessary files or dependencies
 
-    **Delete tasks:**
-    - When a task is no longer relevant or was created in error
-    - Setting status to `deleted` permanently removes the task
-
     **Update task details:**
     - When requirements change or become clearer
     - When establishing dependencies between tasks
@@ -213,8 +208,6 @@ TASK_UPDATE_PROMPT = dedent(
     ## Status Workflow
 
     Status progresses: `pending` → `in_progress` → `completed`
-
-    Use `deleted` to permanently remove a task.
 
     ## Staleness
 
@@ -574,7 +567,7 @@ class TaskUpdateTool(_BaseTaskGraphTool[TaskUpdateInput, TaskUpdateOutput]):
 
     async def description(self) -> str:
         return (
-            "Update task state/details/owner/dependencies, or delete task with status=deleted. "
+            "Update task state/details/owner/dependencies. "
             "Supports addBlocks/addBlockedBy incremental dependency updates."
         )
 
@@ -648,23 +641,6 @@ class TaskUpdateTool(_BaseTaskGraphTool[TaskUpdateInput, TaskUpdateOutput]):
                 task_id=input_data.task_id,
                 updated_fields=[],
                 error=f"Task '{input_data.task_id}' not found.",
-            )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
-            return
-
-        if input_data.status == "deleted":
-            removed = delete_task(input_data.task_id, task_list_id=task_list_id)
-            output = TaskUpdateOutput(
-                success=removed,
-                task_id=input_data.task_id,
-                updated_fields=["status"] if removed else [],
-                error=None if removed else f"Task '{input_data.task_id}' not found.",
-                status_change=TaskUpdateStatusChange(
-                    from_status=previous_task.status,
-                    to_status="deleted",
-                )
-                if removed
-                else None,
             )
             yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
             return
@@ -842,6 +818,8 @@ class TaskListTool(_BaseTaskGraphTool[TaskListInput, TaskListOutput]):
         for task in tasks:
             metadata = task.metadata if isinstance(task.metadata, dict) else {}
             if metadata.get("_internal"):
+                continue
+            if task.status == "completed":
                 continue
             visible.append(task)
 
