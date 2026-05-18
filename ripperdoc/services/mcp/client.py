@@ -368,7 +368,7 @@ class McpRuntime:
             },
         )
         await self._exit_stack.__aenter__()
-        if not MCP_AVAILABLE:
+        if not _mcp_types.MCP_AVAILABLE:
             self._all_connections_finished.set()
             for config in configs.values():
                 self.servers.append(
@@ -504,7 +504,7 @@ class McpRuntime:
 
     async def _connect_server(self, config: McpServerInfo) -> McpServerInfo:
         info = replace(config, tools=[], resources=[])
-        if not MCP_AVAILABLE or not mcp_types:
+        if not _mcp_types.MCP_AVAILABLE or not mcp_types:
             info.status = "unavailable"
             info.error = "MCP Python SDK not installed."
             return info

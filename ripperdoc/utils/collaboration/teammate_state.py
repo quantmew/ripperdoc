@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
+from ripperdoc.utils.asyncio_compat import new_event
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.collaboration.teams import send_team_message
 
@@ -195,7 +196,7 @@ def create_teammate_state(
         model=model,
         permission_mode="plan" if plan_mode_required else permission_mode,
         spinner_verb=_get_spinner_verb(agent_name),
-        abort_controller=asyncio.Event(),
+        abort_controller=new_event(),
     )
 
     with _TEAMMATE_STATES_LOCK:

@@ -30,11 +30,11 @@ from ripperdoc.utils.file_editing import (
     safe_record_snapshot,
     select_write_encoding,
 )
-from ripperdoc.tools.file_read import detect_file_encoding
 from ripperdoc.utils.secret_detection import detect_secrets
 from ripperdoc.tools.file_edit._prompt import get_edit_prompt
 from ripperdoc.tools.file_edit._utils import (
     _normalize_quotes,
+    detect_edit_read_encoding,
     determine_edit_encoding,
     validate_file_size,
 )
@@ -218,9 +218,7 @@ Input examples:
 
         resolved_path = Path(abs_path)
 
-        # Detect encoding
-        detected_encoding, _ = detect_file_encoding(str(resolved_path))
-        file_encoding = detected_encoding or "utf-8"
+        file_encoding = detect_edit_read_encoding(str(resolved_path))
 
         # Normalize quotes for matching
         normalized_old = _normalize_quotes(input_data.old_string)

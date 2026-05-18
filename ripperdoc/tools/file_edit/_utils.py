@@ -27,12 +27,23 @@ def _normalize_quotes(text: str) -> str:
 _MAX_FILE_SIZE_BYTES = 1_000_000_000  # 1GB
 
 
-def determine_edit_encoding(file_path: str, new_content: str) -> str:
-    """Determine encoding for editing a file."""
+def detect_edit_read_encoding(file_path: str) -> str:
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="strict") as handle:
+            handle.read()
+        return "utf-8"
+    except UnicodeDecodeError:
+        pass
+
     from ripperdoc.tools.file_read import detect_file_encoding
 
     detected_encoding, _ = detect_file_encoding(file_path)
-    encoding = detected_encoding or "utf-8"
+    return detected_encoding or "utf-8"
+
+
+def determine_edit_encoding(file_path: str, new_content: str) -> str:
+    """Determine encoding for editing a file."""
+    encoding = detect_edit_read_encoding(file_path)
 
     try:
         new_content.encode(encoding)

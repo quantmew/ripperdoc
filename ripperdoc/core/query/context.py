@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 from ripperdoc.core.tool import Tool
 from ripperdoc.core.plan_mode import resolve_plan_file_path
 from ripperdoc.core.hooks.config import HooksConfig, parse_hooks_config
+from ripperdoc.utils.asyncio_compat import new_event
 from ripperdoc.utils.coerce import parse_optional_int
 from ripperdoc.utils.fileStateCache import FileStateCache
 from ripperdoc.utils.log import get_logger
@@ -312,7 +313,7 @@ class QueryContext:
         # This avoids per-iteration mode flip-flops that can destabilize prompt prefixes.
         self.mcp_tool_search_enabled: Optional[bool] = None
         self.mcp_tool_search_reason: Optional[str] = None
-        self.abort_controller = asyncio.Event()
+        self.abort_controller = new_event()
         self.pending_message_queue: PendingMessageQueue = (
             pending_message_queue if pending_message_queue is not None else PendingMessageQueue()
         )

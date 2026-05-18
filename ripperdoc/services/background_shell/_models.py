@@ -6,6 +6,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
+from ripperdoc.utils.asyncio_compat import new_event
+
 
 @dataclass
 class BackgroundTask:
@@ -23,6 +25,6 @@ class BackgroundTask:
     killed: bool = False
     timed_out: bool = False
     reader_tasks: List[asyncio.Task] = field(default_factory=list)
-    done_event: asyncio.Event = field(default_factory=asyncio.Event)
+    done_event: asyncio.Event = field(default_factory=new_event)
     completion_callbacks: List[Callable[["BackgroundTask"], None]] = field(default_factory=list)
     notification_sent: bool = False

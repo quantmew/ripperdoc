@@ -38,6 +38,7 @@ from ripperdoc.services.oauth import (
     list_oauth_tokens,
     oauth_models_for_type,
 )
+from ripperdoc.utils.asyncio_compat import ensure_current_event_loop
 from ripperdoc.services.thinking_config import (
     OPENAI_REASONING_OPTIONS,
     ThinkingControlSpec,
@@ -168,6 +169,7 @@ class ModelFormScreen(ModalScreen[Optional[ModelFormResult]]):
         default_set_main: bool = False,
         default_set_quick: bool = False,
     ) -> None:
+        ensure_current_event_loop()
         super().__init__()
         self._mode = mode
         self._existing_name = existing_name

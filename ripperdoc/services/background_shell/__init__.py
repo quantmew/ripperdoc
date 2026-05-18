@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import atexit
 
+from ripperdoc.utils.asyncio_compat import new_event
 from ripperdoc.utils.shell.shell_utils import build_shell_command, find_suitable_shell
 from ripperdoc.utils.log import get_logger
 
@@ -41,7 +42,7 @@ class BackgroundTask:
     killed: bool = False
     timed_out: bool = False
     reader_tasks: List[asyncio.Task] = field(default_factory=list)
-    done_event: asyncio.Event = field(default_factory=asyncio.Event)
+    done_event: asyncio.Event = field(default_factory=new_event)
     completion_callbacks: List[Callable[["BackgroundTask"], None]] = field(default_factory=list)
     notification_sent: bool = False
 

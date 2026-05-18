@@ -59,4 +59,23 @@ def asyncio_timeout(delay: float) -> object:
     return _TimeoutCompat(delay)
 
 
-__all__ = ["asyncio_timeout"]
+def ensure_current_event_loop() -> asyncio.AbstractEventLoop:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+
+def new_event() -> asyncio.Event:
+    ensure_current_event_loop()
+    return asyncio.Event()
+
+
+__all__ = ["asyncio_timeout", "ensure_current_event_loop", "new_event"]
