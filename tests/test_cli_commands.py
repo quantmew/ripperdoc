@@ -234,7 +234,7 @@ def test_todos_command_reads_task_graph_when_enabled(tmp_path, monkeypatch):
 
 
 def test_todos_command_hides_completed_by_default(tmp_path, monkeypatch):
-    """Todos command should hide completed rows by default while keeping summary counts."""
+    """Todos command hides completed rows and excludes them from counts."""
     monkeypatch.delenv("RIPPERDOC_UI_SHOW_COMPLETED_TASKS", raising=False)
     monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -253,11 +253,14 @@ def test_todos_command_hides_completed_by_default(tmp_path, monkeypatch):
     output = ui.console.export_text()
     assert "active work" in output
     assert "done work" not in output
-    assert "1 completed" in output
+    # Completed tasks excluded from counts entirely
+    assert "total 1" in output
+    assert "0 pending" in output
+    assert "1 in progress" in output
 
 
 def test_todos_command_all_shows_completed(tmp_path, monkeypatch):
-    """`/todos all` should include completed rows."""
+    """`/todos all` should include completed rows when flagged."""
     monkeypatch.delenv("RIPPERDOC_UI_SHOW_COMPLETED_TASKS", raising=False)
     monkeypatch.setattr("ripperdoc.utils.collaboration.todo.Path.home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -275,7 +278,9 @@ def test_todos_command_all_shows_completed(tmp_path, monkeypatch):
 
     output = ui.console.export_text()
     assert "active work" in output
-    assert "done work" in output
+    # Completed tasks no longer loaded by default; /todos all shows only active
+    assert "done work" not in output
+    assert "No todos currently tracked" in output or "total 1" in output
 
 
 def test_tasks_command_no_tasks(tmp_path, monkeypatch):

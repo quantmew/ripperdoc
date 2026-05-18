@@ -44,7 +44,7 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
         )
         return True
 
-    visible_todos = todos if show_completed else [todo for todo in todos if todo.status != "completed"]
+    visible_todos = todos  # completed already filtered by load_todos()
 
     summary = escape(format_todo_summary(todos))
     lines = [escape(line) for line in format_todo_lines(visible_todos)]

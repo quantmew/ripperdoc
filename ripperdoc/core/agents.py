@@ -28,7 +28,8 @@ from ripperdoc.tools.lsp import LspTool
 
 from ripperdoc.tools.notebook_edit import NotebookEditTool
 from ripperdoc.tools.skill import SkillTool
-from ripperdoc.tools.todo import TodoReadTool, TodoWriteTool
+from ripperdoc.tools.todo_read import TodoReadTool
+from ripperdoc.tools.todo_write import TodoWriteTool
 from ripperdoc.tools.tool_search import ToolSearchTool
 from ripperdoc.tools.mcp import (
     ListMcpResourcesTool,

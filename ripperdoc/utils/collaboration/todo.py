@@ -84,12 +84,14 @@ def validate_todos(
 
 
 def load_todos(project_root: Optional[Path] = None) -> List[TodoItem]:
-    """Load todos from disk."""
+    """Load todos from disk (completed tasks excluded to align with Task V2)."""
     if is_task_system_enabled():
         task_items = list_tasks(project_root=project_root)
         if task_items:
             todos_from_tasks: List[TodoItem] = []
             for task in task_items:
+                if task.status == "completed":
+                    continue
                 metadata = task.metadata if isinstance(task.metadata, dict) else {}
                 priority = _normalize_todo_priority(
                     metadata.get("priority") or metadata.get("todo_priority")
@@ -130,7 +132,8 @@ def load_todos(project_root: Optional[Path] = None) -> List[TodoItem]:
             continue
 
     # Preserve stored order; do not reorder based on status/priority.
-    return todos
+    # Exclude completed tasks (Task V2 alignment)
+    return [todo for todo in todos if todo.status != "completed"]
 
 
 def save_todos(todos: Sequence[TodoItem], project_root: Optional[Path] = None) -> None:
@@ -188,18 +191,18 @@ def get_next_actionable(todos: Sequence[TodoItem]) -> Optional[TodoItem]:
 
 
 def summarize_todos(todos: Sequence[TodoItem]) -> dict:
-    """Return simple statistics for a todo collection."""
+    """Return simple statistics for a todo collection (completed excluded)."""
+    active = [t for t in todos if t.status != "completed"]
     return {
-        "total": len(todos),
+        "total": len(active),
         "by_status": {
-            "pending": len([t for t in todos if t.status == "pending"]),
-            "in_progress": len([t for t in todos if t.status == "in_progress"]),
-            "completed": len([t for t in todos if t.status == "completed"]),
+            "pending": len([t for t in active if t.status == "pending"]),
+            "in_progress": len([t for t in active if t.status == "in_progress"]),
         },
         "by_priority": {
-            "high": len([t for t in todos if t.priority == "high"]),
-            "medium": len([t for t in todos if t.priority == "medium"]),
-            "low": len([t for t in todos if t.priority == "low"]),
+            "high": len([t for t in active if t.priority == "high"]),
+            "medium": len([t for t in active if t.priority == "medium"]),
+            "low": len([t for t in active if t.priority == "low"]),
         },
     }
 
@@ -210,8 +213,7 @@ def format_todo_summary(todos: Sequence[TodoItem]) -> str:
     summary = (
         f"Todos updated (total {stats['total']}; "
         f"{stats['by_status']['pending']} pending, "
-        f"{stats['by_status']['in_progress']} in progress, "
-        f"{stats['by_status']['completed']} completed)."
+        f"{stats['by_status']['in_progress']} in progress)."
     )
 
     return summary

@@ -188,6 +188,7 @@ class TaskUpdateTool(Tool[TaskUpdateInput, TaskUpdateOutput]):
             return
 
         if input_data.status == "completed":
+            merged_blocked_by = _dedupe(previous_task.blocked_by + input_data.add_blocked_by)
             simulated = previous_task.model_copy(update={"blocked_by": merged_blocked_by})
             blockers = unresolved_blockers(simulated, list_tasks(task_list_id=task_list_id))
             if blockers:
