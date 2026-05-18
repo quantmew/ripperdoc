@@ -66,13 +66,13 @@ class TaskCreateTool(Tool[TaskCreateInput, TaskCreateOutput]):
         return "TaskCreate"
 
     async def description(self) -> str:
-        return (
-            "Create a new structured task. Use for multi-step or complex work. "
-            "Initial status is pending; assign owners/dependencies later via TaskUpdate."
-        )
+        return "Create a new task in the task list"
 
     def needs_permissions(self, _input_data: Optional[TaskCreateInput] = None) -> bool:
         return False
+
+    def is_concurrency_safe(self) -> bool:
+        return True
 
     @property
     def input_schema(self) -> type[TaskCreateInput]:

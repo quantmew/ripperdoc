@@ -25,13 +25,97 @@ from ripperdoc.utils.filesystem.config_paths import user_config_dir
 from ripperdoc.utils.coerce import parse_boolish
 from ripperdoc.utils.file_editing import file_lock
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.filesystem.path_utils import sanitize_project_path
 
 
 logger = get_logger()
 
 TaskStatus = Literal["pending", "in_progress", "completed"]
 _RUNTIME_TASK_SCOPE: Optional[Tuple[str, Path]] = None
+
+_HIGH_WATER_MARK_FILE = ".highwatermark"
+
+
+class ClaimTaskResult:
+    """Result of attempting to claim a task atomically."""
+    success: bool
+    reason: Optional[str] = None
+    task: Optional["TaskItem"] = None
+    busy_with_tasks: List[str] = []
+    blocked_by_tasks: List[str] = []
+
+    def __init__(
+        self,
+        success: bool,
+        reason: Optional[str] = None,
+        task: Optional["TaskItem"] = None,
+        busy_with_tasks: Optional[List[str]] = None,
+        blocked_by_tasks: Optional[List[str]] = None,
+    ):
+        self.success = success
+        self.reason = reason
+        self.task = task
+        self.busy_with_tasks = busy_with_tasks or []
+        self.blocked_by_tasks = blocked_by_tasks or []
+
+
+class AgentStatus:
+    """Agent status based on task ownership."""
+    agent_id: str
+    name: str
+    agent_type: Optional[str] = None
+    status: Literal["idle", "busy"]
+    current_tasks: List[str]
+
+    def __init__(
+        self,
+        agent_id: str,
+        name: str,
+        status: Literal["idle", "busy"],
+        current_tasks: Optional[List[str]] = None,
+        agent_type: Optional[str] = None,
+    ):
+        self.agent_id = agent_id
+        self.name = name
+        self.agent_type = agent_type
+        self.status = status
+        self.current_tasks = current_tasks or []
+
+
+class UnassignTasksResult:
+    """Result of unassigning tasks from a teammate."""
+    unassigned_tasks: List[Dict[str, str]]
+    notification_message: str
+
+    def __init__(
+        self,
+        unassigned_tasks: List[Dict[str, str]],
+        notification_message: str,
+    ):
+        self.unassigned_tasks = unassigned_tasks
+        self.notification_message = notification_message
+
+
+# Simple observer/event pattern for tasks-updated notifications
+_tasks_updated_listeners: List[callable] = []
+
+
+def on_tasks_updated(callback) -> callable:
+    """Register a listener for task updates. Returns unsubscribe function."""
+    _tasks_updated_listeners.append(callback)
+    def unsubscribe():
+        if callback in _tasks_updated_listeners:
+            _tasks_updated_listeners.remove(callback)
+    return unsubscribe
+
+
+def notify_tasks_updated() -> None:
+    """Notify listeners that tasks have been updated."""
+    for cb in list(_tasks_updated_listeners):
+        try:
+            cb()
+        except Exception:
+            pass
+_PROCESS_DEFAULT_SESSION_ID: str = uuid4().hex[:12]
 
 
 class TaskItem(BaseModel):
@@ -187,7 +271,11 @@ def resolve_task_list_id(
     if env_session_id and env_session_id.strip():
         return _session_scoped_task_list_id(root, env_session_id)
 
-    return sanitize_identifier(sanitize_project_path(root), fallback="default")
+    leader_name = get_leader_team_name()
+    if leader_name:
+        return sanitize_identifier(leader_name, fallback="default")
+
+    return _session_scoped_task_list_id(root, _PROCESS_DEFAULT_SESSION_ID)
 
 
 def task_list_dir(
@@ -215,9 +303,24 @@ def ensure_task_list_dir(
 
 
 def _task_filename(task_id: str) -> str:
-    safe = sanitize_identifier(task_id, fallback="task")
-    digest = hashlib.sha1(task_id.encode("utf-8")).hexdigest()[:8]
-    return f"{safe}-{digest}.json"
+    return f"{sanitize_identifier(task_id, fallback='task')}.json"
+
+
+def _high_water_mark_path(task_dir: Path) -> Path:
+    return task_dir / _HIGH_WATER_MARK_FILE
+
+
+def _read_high_water_mark(task_dir: Path) -> int:
+    try:
+        content = _high_water_mark_path(task_dir).read_text(encoding="utf-8").strip()
+        value = int(content)
+        return value if value > 0 else 0
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_high_water_mark(task_dir: Path, value: int) -> None:
+    _high_water_mark_path(task_dir).write_text(str(value), encoding="utf-8")
 
 
 def _task_file_path(task_dir: Path, task_id: str) -> Path:
@@ -292,11 +395,13 @@ def _normalize_ids(values: Sequence[str]) -> List[str]:
     return ordered
 
 
-def _next_numeric_task_id(tasks: Dict[str, "TaskItem"]) -> str:
-    numeric_ids = [int(task_id) for task_id in tasks if str(task_id).isdigit()]
-    if not numeric_ids:
-        return "1"
-    return str(max(numeric_ids) + 1)
+def _next_numeric_task_id(task_dir: Path, tasks: Dict[str, "TaskItem"]) -> str:
+    from_files = max(
+        (int(tid) for tid in tasks if str(tid).isdigit()),
+        default=0,
+    )
+    from_mark = _read_high_water_mark(task_dir)
+    return str(max(from_files, from_mark) + 1)
 
 
 def _load_task_map(task_dir: Path) -> Dict[str, TaskItem]:
@@ -443,7 +548,7 @@ def create_task(
     directory = task_list_dir(project_root, task_list_id, ensure=True)
     with _task_list_lock(directory):
         tasks = _load_task_map(directory)
-        resolved_task_id = (task_id or _next_numeric_task_id(tasks) or f"task_{uuid4().hex[:8]}").strip()
+        resolved_task_id = (task_id or _next_numeric_task_id(directory, tasks)).strip()
         if resolved_task_id in tasks:
             raise ValueError(f"Task id '{resolved_task_id}' already exists.")
 
@@ -472,7 +577,98 @@ def create_task(
             old_blocked_by=set(),
         )
         _save_tasks(directory, tasks, changed)
+        notify_tasks_updated()
         return task
+
+
+def block_task(
+    from_task_id: str,
+    to_task_id: str,
+    *,
+    project_root: Optional[Path] = None,
+    task_list_id: Optional[str] = None,
+) -> bool:
+    """Establish a dependency: from_task blocks to_task (to_task blockedBy from_task)."""
+
+    directory = task_list_dir(project_root, task_list_id, ensure=True)
+    with _task_list_lock(directory):
+        tasks = _load_task_map(directory)
+        from_task = tasks.get(from_task_id)
+        to_task = tasks.get(to_task_id)
+        if from_task is None or to_task is None:
+            return False
+
+        changed: Set[str] = set()
+
+        if to_task_id not in from_task.blocks:
+            from_task.blocks = _normalize_ids([*from_task.blocks, to_task_id])
+            from_task.version += 1
+            from_task.updated_at = time.time()
+            changed.add(from_task_id)
+
+        if from_task_id not in to_task.blocked_by:
+            to_task.blocked_by = _normalize_ids([*to_task.blocked_by, from_task_id])
+            to_task.version += 1
+            to_task.updated_at = time.time()
+            changed.add(to_task_id)
+
+        _save_tasks(directory, tasks, changed)
+        notify_tasks_updated()
+        return True
+
+
+def claim_task(
+    task_id: str,
+    claimant_agent_id: str,
+    *,
+    project_root: Optional[Path] = None,
+    task_list_id: Optional[str] = None,
+    check_agent_busy: bool = False,
+) -> ClaimTaskResult:
+    """Atomically claim a task. If check_agent_busy, also verifies claimant
+    doesn't already own another open task."""
+
+    directory = task_list_dir(project_root, task_list_id, ensure=True)
+    with _task_list_lock(directory):
+        tasks = _load_task_map(directory)
+        task = tasks.get(task_id)
+        if task is None:
+            return ClaimTaskResult(success=False, reason="task_not_found")
+
+        if task.owner and task.owner != claimant_agent_id:
+            return ClaimTaskResult(success=False, reason="already_claimed", task=task)
+
+        if task.status == "completed":
+            return ClaimTaskResult(success=False, reason="already_resolved", task=task)
+
+        unresolved_ids = {t.id for t in tasks.values() if t.status != "completed"}
+        blocked = [b for b in task.blocked_by if b in unresolved_ids]
+        if blocked:
+            return ClaimTaskResult(
+                success=False, reason="blocked", task=task, blocked_by_tasks=blocked,
+            )
+
+        if check_agent_busy:
+            agent_open = [
+                t for t in tasks.values()
+                if t.status != "completed"
+                and t.owner == claimant_agent_id
+                and t.id != task_id
+            ]
+            if agent_open:
+                return ClaimTaskResult(
+                    success=False,
+                    reason="agent_busy",
+                    task=task,
+                    busy_with_tasks=[t.id for t in agent_open],
+                )
+
+        task.owner = claimant_agent_id
+        task.version += 1
+        task.updated_at = time.time()
+        _save_tasks(directory, tasks, {task_id})
+        notify_tasks_updated()
+        return ClaimTaskResult(success=True, task=task)
 
 
 def update_task(
@@ -549,8 +745,81 @@ def update_task(
             old_blocked_by=previous_blocked_by,
         )
         _save_tasks(directory, tasks, changed)
+        notify_tasks_updated()
 
         return existing
+
+
+def get_agent_statuses(
+    team_name: str,
+) -> Optional[List[AgentStatus]]:
+    """Get idle/busy status for all agents in a team based on task ownership."""
+    from ripperdoc.utils.collaboration.teams import get_team
+
+    team = get_team(team_name)
+    if team is None:
+        return None
+
+    task_list_id = sanitize_identifier(team_name, fallback="default")
+    all_tasks = list_tasks(task_list_id=task_list_id)
+
+    unresolved_by_owner: Dict[str, List[str]] = {}
+    for task in all_tasks:
+        if task.status != "completed" and task.owner:
+            unresolved_by_owner.setdefault(task.owner, []).append(task.id)
+
+    results: List[AgentStatus] = []
+    for member in team.members:
+        name_tasks = unresolved_by_owner.get(member.name, [])
+        agent_id_tasks = unresolved_by_owner.get(member.agent_id, [])
+        current = list({*name_tasks, *agent_id_tasks})
+        results.append(AgentStatus(
+            agent_id=member.agent_id,
+            name=member.name,
+            agent_type=member.agent_type,
+            status="idle" if not current else "busy",
+            current_tasks=current,
+        ))
+    return results
+
+
+def unassign_teammate_tasks(
+    team_name: str,
+    teammate_id: str,
+    teammate_name: str,
+    reason: Literal["terminated", "shutdown"],
+) -> UnassignTasksResult:
+    """Unassign all open tasks from a teammate and reset them to pending."""
+
+    task_list_id = sanitize_identifier(team_name, fallback="default")
+    all_tasks = list_tasks(task_list_id=task_list_id)
+
+    resolved: List[Dict[str, str]] = []
+    for task in all_tasks:
+        if task.status == "completed":
+            continue
+        if task.owner == teammate_id or task.owner == teammate_name:
+            update_task(
+                task.id,
+                TaskPatch(owner=None, status="pending"),
+                task_list_id=task_list_id,
+            )
+            resolved.append({"id": task.id, "subject": task.subject})
+
+    action_verb = "was terminated" if reason == "terminated" else "has shut down"
+    notification = f"{teammate_name} {action_verb}."
+    if resolved:
+        task_list_str = ", ".join(f'#{t["id"]} "{t["subject"]}"' for t in resolved)
+        notification += (
+            f" {len(resolved)} task(s) were unassigned: {task_list_str}."
+            " Use TaskList to check availability and TaskUpdate with owner"
+            " to reassign them to idle teammates."
+        )
+
+    return UnassignTasksResult(
+        unassigned_tasks=resolved,
+        notification_message=notification,
+    )
 
 
 def delete_task(
@@ -568,6 +837,11 @@ def delete_task(
             return False
 
         tasks.pop(task_id, None)
+        numeric_id = int(task_id) if str(task_id).isdigit() else None
+        if numeric_id is not None:
+            current_mark = _read_high_water_mark(directory)
+            if numeric_id > current_mark:
+                _write_high_water_mark(directory, numeric_id)
         changed: Set[str] = {task_id}
         for candidate in tasks.values():
             before_blocks = list(candidate.blocks)
@@ -580,6 +854,7 @@ def delete_task(
                 changed.add(candidate.id)
 
         _save_tasks(directory, tasks, changed)
+        notify_tasks_updated()
         return True
 
 

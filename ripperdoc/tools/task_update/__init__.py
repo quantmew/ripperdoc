@@ -108,13 +108,13 @@ class TaskUpdateTool(Tool[TaskUpdateInput, TaskUpdateOutput]):
         return "TaskUpdate"
 
     async def description(self) -> str:
-        return (
-            "Update task state/details/owner/dependencies, or delete task with status=deleted. "
-            "Supports addBlocks/addBlockedBy incremental dependency updates."
-        )
+        return "Update a task in the task list"
 
     def needs_permissions(self, _input_data: Optional[TaskUpdateInput] = None) -> bool:
         return False
+
+    def is_concurrency_safe(self) -> bool:
+        return True
 
     @property
     def input_schema(self) -> type[TaskUpdateInput]:
@@ -165,15 +165,11 @@ class TaskUpdateTool(Tool[TaskUpdateInput, TaskUpdateOutput]):
 
     def render_result_for_assistant(self, output: TaskUpdateOutput) -> str:
         if not output.success:
-            return f"TaskUpdate failed for '{output.task_id}': {output.error or 'unknown error'}"
-        suffix = ""
-        if output.status_change is not None:
-            suffix = f" ({output.status_change.from_status} -> {output.status_change.to_status})"
-        updated = ", ".join(output.updated_fields) if output.updated_fields else "none"
-        return f"Updated task '{output.task_id}' fields: {updated}{suffix}"
+            return output.error or f"Task #{output.task_id} not found"
+        return f"Updated task #{output.task_id} {', '.join(output.updated_fields)}"
 
     def render_tool_use_message(self, input_data: TaskUpdateInput, _verbose: bool = False) -> str:
-        return f"Updating task {input_data.task_id}"
+        return ""
 
     async def call(
         self,
@@ -310,7 +306,29 @@ class TaskUpdateTool(Tool[TaskUpdateInput, TaskUpdateOutput]):
                 updated_fields=updated_fields,
                 status_change=status_change,
             )
-            yield ToolResult(data=output, result_for_assistant=self.render_result_for_assistant(output))
+
+            result_text = self.render_result_for_assistant(output)
+
+            # Verification nudge: when main thread closes 3+ tasks without a
+            # verification step, remind to spawn the verification agent.
+            if (
+                status_change is not None
+                and status_change.to_status == "completed"
+                and not context.agent_id
+            ):
+                all_tasks = list_tasks(task_list_id=task_list_id)
+                if len(all_tasks) >= 3 and all(
+                    t.status == "completed" for t in all_tasks
+                ):
+                    if not any("verif" in t.subject.lower() for t in all_tasks):
+                        result_text += (
+                            "\n\nNOTE: You just closed out 3+ tasks and none of"
+                            " them was a verification step. Before writing your"
+                            " final summary, spawn the verification agent"
+                            ' (subagent_type="verification").'
+                        )
+
+            yield ToolResult(data=output, result_for_assistant=result_text)
         except (ValueError, OSError, RuntimeError, KeyError, TypeError) as exc:
             logger.warning("[task_update] TaskUpdate failed: %s: %s", type(exc).__name__, exc)
             output = TaskUpdateOutput(

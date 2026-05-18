@@ -12,7 +12,6 @@ from ripperdoc.core.tool import (
     ToolOutput,
     ToolResult,
     ToolUseContext,
-    ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.collaboration.tasks import get_task, resolve_task_list_id
@@ -84,7 +83,7 @@ class TaskGetTool(Tool[TaskGetInput, TaskGetOutput]):
         return "TaskGet"
 
     async def description(self) -> str:
-        return "Get complete task details by task ID."
+        return "Get a task by ID from the task list"
 
     @property
     def input_schema(self) -> type[TaskGetInput]:
@@ -103,14 +102,24 @@ class TaskGetTool(Tool[TaskGetInput, TaskGetOutput]):
 
     def render_result_for_assistant(self, output: TaskGetOutput) -> str:
         if output.task is None:
-            return "Task not found."
-        return (
-            f"Task '{output.task.id}' ({output.task.status}): {output.task.subject} "
-            f"blockedBy={output.task.blocked_by}"
-        )
+            return "Task not found"
+        lines = [
+            f"Task #{output.task.id}: {output.task.subject}",
+            f"Status: {output.task.status}",
+            f"Description: {output.task.description}",
+        ]
+        if output.task.blocked_by:
+            lines.append(
+                f"Blocked by: {', '.join(f'#{b}' for b in output.task.blocked_by)}"
+            )
+        if output.task.blocks:
+            lines.append(
+                f"Blocks: {', '.join(f'#{b}' for b in output.task.blocks)}"
+            )
+        return "\n".join(lines)
 
     def render_tool_use_message(self, input_data: TaskGetInput, _verbose: bool = False) -> str:
-        return f"Reading task {input_data.task_id}"
+        return ""
 
     async def call(
         self,

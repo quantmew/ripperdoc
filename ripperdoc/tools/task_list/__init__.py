@@ -13,7 +13,6 @@ from ripperdoc.core.tool import (
     ToolResult,
     ToolUseExample,
     ToolUseContext,
-    ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.collaboration.tasks import TaskItem, list_tasks, resolve_task_list_id
@@ -128,10 +127,7 @@ class TaskListTool(Tool[TaskListInput, TaskListOutput]):
         return "TaskList"
 
     async def description(self) -> str:
-        return (
-            "List task board summary with id/subject/status/owner/blockedBy. "
-            "Filters internal tasks and strips completed blockers from blockedBy."
-        )
+        return "List all tasks in the task list"
 
     @property
     def input_schema(self) -> type[TaskListInput]:
@@ -158,17 +154,18 @@ class TaskListTool(Tool[TaskListInput, TaskListOutput]):
 
     def render_result_for_assistant(self, output: TaskListOutput) -> str:
         if not output.tasks:
-            return "No tasks stored yet."
-        lines = ["Tasks:"]
+            return "No tasks found"
+        lines: List[str] = []
         for task in output.tasks:
-            owner = f" @{task.owner}" if task.owner else ""
-            lines.append(
-                f"- [{task.id}] {task.subject}{owner} ({task.status}) blockedBy={task.blocked_by}"
-            )
+            owner = f" ({task.owner})" if task.owner else ""
+            blocked = ""
+            if task.blocked_by:
+                blocked = f" [blocked by {', '.join(f'#{b}' for b in task.blocked_by)}]"
+            lines.append(f"#{task.id} [{task.status}] {task.subject}{owner}{blocked}")
         return "\n".join(lines)
 
     def render_tool_use_message(self, _input_data: TaskListInput, _verbose: bool = False) -> str:
-        return "Listing tasks"
+        return ""
 
     async def call(
         self,
