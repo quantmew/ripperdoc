@@ -540,7 +540,7 @@ def _collect_skill_fork_requests(
     tool_results: Sequence[ConversationMessage],
     messages: Sequence[ConversationMessage],
 ) -> List[_SkillForkRequest]:
-    """Build Task tool requests for skills that require forked execution."""
+    """Build Agent tool requests for skills that require forked execution."""
     latest_user_prompt = _extract_latest_user_prompt_text(messages)
     requests: List[_SkillForkRequest] = []
 
@@ -1580,10 +1580,10 @@ async def _process_iteration_assistant_message(
 
     auto_fork_requests = _collect_skill_fork_requests(prepared.tool_results, messages)
     if auto_fork_requests:
-        task_tool = query_context.tool_registry.get("Task")
-        if task_tool is None:
+        agent_tool = query_context.tool_registry.get("Agent")
+        if agent_tool is None:
             logger.warning(
-                "[query] Skill requested fork execution but Task tool is unavailable",
+                "[query] Skill requested fork execution but Agent tool is unavailable",
                 extra={"count": len(auto_fork_requests)},
             )
         else:
@@ -1601,7 +1601,7 @@ async def _process_iteration_assistant_message(
                     MessageContent(
                         type="tool_use",
                         tool_use_id=f"auto-skill-fork-{batch_id}-{idx}",
-                        name="Task",
+                        name="Agent",
                         input=task_input,
                     )
                 )

@@ -103,6 +103,7 @@ ALLOWED_NODE_TYPES = STRUCTURAL_TYPES | SEPARATOR_TYPES | frozenset({
     "command_name",
     "simple_command",
     "word",
+    "number",
     "string",
     "string_content",
     "concatenation",
@@ -254,9 +255,9 @@ def _extract_simple_command(node: Node) -> Optional[SimpleCommand]:
                 cmd.argv.append(cmd_name)
             in_env_vars = False
 
-        elif child_type == "word":
+        elif child_type in ("word", "number"):
             # Check for env var assignment (VAR=value) at the start
-            if in_env_vars and "=" in child.text and not child.text.startswith("-"):
+            if child_type == "word" and in_env_vars and "=" in child.text and not child.text.startswith("-"):
                 parts = child.text.split("=", 1)
                 cmd.env_vars.append({"name": parts[0], "value": parts[1]})
             else:

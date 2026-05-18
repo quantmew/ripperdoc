@@ -132,6 +132,9 @@ class StdioControlMixin:
             request = {"value": request}
         request = dict(request)
 
+        if self._request_lock is None:
+            self._request_lock = asyncio.Lock()
+
         async with self._request_lock:
             try:
                 if method == "ping":

@@ -68,7 +68,7 @@ MCP_LIST_RESOURCES_TOOL_NAME = _safe_tool_name(ListMcpResourcesTool, "ListMcpRes
 MCP_READ_RESOURCE_TOOL_NAME = _safe_tool_name(ReadMcpResourceTool, "ReadMcpResource")
 LSP_TOOL_NAME = _safe_tool_name(LspTool, "LSP")
 SKILL_TOOL_NAME = _safe_tool_name(SkillTool, "Skill")
-TASK_TOOL_NAME = "Task"
+TASK_TOOL_NAME = "Agent"
 
 
 AGENT_DIR_NAME = "agents"
@@ -104,7 +104,7 @@ class AgentDefinition:
     memory: Optional[str] = None  # "user", "project", "local"
     background: bool = False
     initial_prompt: Optional[str] = None
-    omit_claude_md: bool = False
+    omit_agent_md: bool = False
 
 
 @dataclass
@@ -268,7 +268,7 @@ def _parse_agent_file(
     initial_prompt = frontmatter.get("initialPrompt") or frontmatter.get("initial_prompt")
     if not isinstance(initial_prompt, str):
         initial_prompt = None
-    omit_claude_md = parse_boolish(frontmatter.get("omitClaudeMd") or frontmatter.get("omit_claude_md"))
+    omit_agent_md = parse_boolish(frontmatter.get("omitClaudeMd") or frontmatter.get("omit_agent_md"))
 
     agent = AgentDefinition(
         agent_type=full_agent_name,
@@ -288,7 +288,7 @@ def _parse_agent_file(
         memory=memory,
         background=background,
         initial_prompt=initial_prompt,
-        omit_claude_md=omit_claude_md,
+        omit_agent_md=omit_agent_md,
     )
     return agent, None
 

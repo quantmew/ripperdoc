@@ -231,7 +231,7 @@ def _built_in_agents() -> List[AgentDefinition]:
             color="green",
             model="main",
             disallowed_tools=["Task", "ExitPlanMode", "Edit", "Write", "NotebookEdit"],
-            omit_claude_md=True,
+            omit_agent_md=True,
         ),
         AgentDefinition(
             agent_type="plan",
@@ -246,7 +246,7 @@ def _built_in_agents() -> List[AgentDefinition]:
             color="blue",
             model=None,
             disallowed_tools=["Task", "ExitPlanMode", "Edit", "Write", "NotebookEdit"],
-            omit_claude_md=True,
+            omit_agent_md=True,
         ),
         AgentDefinition(
             agent_type="verification",

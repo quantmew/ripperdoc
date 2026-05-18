@@ -64,7 +64,7 @@ def determine_write_encoding(file_path: str, content: str) -> str:
 class FileWriteToolInput(BaseModel):
     """Input schema for FileWriteTool."""
 
-    file_path: str = Field(description="Absolute path to the file to create")
+    file_path: str = Field(description="Absolute path to the file to write")
     content: str = Field(description="Content to write to the file")
 
 
@@ -86,8 +86,8 @@ class FileWriteTool(Tool[FileWriteToolInput, FileWriteToolOutput]):
         return "Write"
 
     async def description(self) -> str:
-        return """Create a new file with the specified content. This will overwrite
-the file if it already exists."""
+        return """Create a new file or completely rewrite an existing file with the specified content.
+Prefer Edit or MultiEdit for small changes to existing files."""
 
     @property
     def input_schema(self) -> type[FileWriteToolInput]:
@@ -103,10 +103,10 @@ the file if it already exists."""
                 },
             ),
             ToolUseExample(
-                description="Write a short markdown note",
+                description="Create a generated JSON config file",
                 example={
-                    "file_path": "/repo/docs/USAGE.md",
-                    "content": "# Usage\n\nRun `make test`.\n",
+                    "file_path": "/repo/generated/config.json",
+                    "content": '{\n  "enabled": true\n}\n',
                 },
             ),
         ]

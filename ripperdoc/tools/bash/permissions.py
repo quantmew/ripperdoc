@@ -400,10 +400,6 @@ def _check_sandbox_auto_allow(
             command,
         )
 
-    path_result = check_path_constraints(command, cwd, allowed_dirs)
-    if path_result.behavior == "ask":
-        return _apply_dont_ask(path_result, mode, command)
-
     return PermissionResult.allow(
         updated_input=input_data,
         reason={"type": "sandbox"},

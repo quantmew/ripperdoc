@@ -8,7 +8,7 @@ This module provides clear type distinctions between:
 
 from typing import Union, List
 
-from ripperdoc.utils.messaging.messages import (
+from ripperdoc.utils.messaging.types import (
     UserMessage,
     AssistantMessage,
     ProgressMessage,

@@ -152,7 +152,7 @@ Input examples:
         if not path.exists():
             return ValidationResult(
                 result=False,
-                message=f"File does not exist: {path}. Use MultiEdit tool to create new files.",
+                message=f"File does not exist: {path}. Use Write to create new files.",
             )
 
         # Check file access/ignore

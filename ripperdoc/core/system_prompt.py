@@ -114,7 +114,7 @@ def get_intro_section(
             - To give feedback, users should report the issue at {FEEDBACK_URL}
 
             # Looking up your own documentation
-            When the user asks what {APP_NAME} can do, how to use it (hooks, slash commands, MCP, SDKs), or requests SDK code samples, use the Task tool with a documentation-focused subagent (for example, subagent_type="docs") if available to consult official docs before answering.
+            When the user asks what {APP_NAME} can do, how to use it (hooks, slash commands, MCP, SDKs), or requests SDK code samples, use the Agent tool with a documentation-focused subagent (for example, subagent_type="docs") if available to consult official docs before answering.
 
             # Tone and style
             - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
@@ -219,7 +219,7 @@ def get_doing_tasks_section(
         lines.extend([
             "- NEVER propose changes to code you haven't read. If a user asks about or wants you to modify a file, read it first.",
             "- Use the available search tools to understand the codebase and the user's query. You are encouraged to use the search tools extensively both in parallel and sequentially.",
-            "- When exploring the codebase beyond a needle query, prefer using the Task tool with an exploration subagent if available instead of running raw search commands directly.",
+            "- When exploring the codebase beyond a needle query, prefer using the Agent tool with an exploration subagent if available instead of running raw search commands directly.",
             "- Implement the solution using all tools available to you.",
             "- Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection, and other OWASP top 10 vulnerabilities. If you notice that you wrote insecure code, immediately fix it.",
             "- Avoid over-engineering. Only make changes that are directly requested or clearly necessary. Keep solutions simple and focused.",
@@ -289,7 +289,7 @@ def get_using_tools_section(
 
     if task_available:
         lines.append(
-            "- Use the Task tool with configured subagents when the task matches an agent's description. Always set subagent_type."
+            "- Use the Agent tool with configured subagents when the task matches an agent's description. Always set subagent_type."
         )
 
     if TOOL_SEARCH_TOOL_NAME in tool_names:
@@ -517,7 +517,7 @@ def build_commit_workflow_prompt(
         When the user asks you to create a new git commit, follow these steps carefully:
 
         1. You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. ALWAYS run the following bash commands in parallel, each using the {bash_tool_name} tool:
-          - Run a git status command to see all untracked files.
+          - Run a git status command to see all untracked files. Do not use `-uall`.
           - Run a git diff command to see both staged and unstaged changes that will be committed.
           - Run a git log command to see recent commit messages, so that you can follow this repository's commit message style.
         2. Analyze all staged changes (both previously staged and newly added) and draft a commit message:
@@ -525,16 +525,19 @@ def build_commit_workflow_prompt(
           - Check for any sensitive information that shouldn't be committed
           - Draft a concise (1-2 sentences) commit message that focuses on the "why" rather than the "what"
           - Ensure it accurately reflects the changes and their purpose
-        3. You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. ALWAYS run the following commands in parallel:
-           - Add relevant untracked files to the staging area.
+        3. Stage and commit in order:
+           - Add only the relevant files to the staging area, preferably by explicit path.
            - Create the commit with a message{commit_message_suffix}
-           - Run git status to make sure the commit succeeded.
-        4. If the commit fails due to pre-commit hook changes, retry the commit ONCE to include these automated changes. If it fails again, it usually means a pre-commit hook is preventing the commit. If the commit succeeds but you notice that files were modified by the pre-commit hook, you MUST amend your commit to include them.
+           - After the commit completes, run git status to make sure the commit succeeded.
+        4. If the commit fails due to a pre-commit hook, the commit did not happen. Fix the underlying issue or include hook-generated changes, re-stage the relevant files, and create a new commit. Never amend a previous commit unless the user explicitly asks you to amend.
 
         Important notes:
         - NEVER update the git config
         - NEVER run additional commands to read or explore code, besides git bash commands
         - NEVER use the {todo_tool_name} or {task_tool_name} tools
+        - NEVER amend a commit unless the user explicitly asks you to amend
+        - NEVER skip hooks (--no-verify) or bypass signing unless the user explicitly asks you to do so
+        - Prefer staging specific files by name rather than using git add -A or git add .
         - DO NOT push to the remote repository unless the user explicitly asks you to do so
         - IMPORTANT: Never use git commands with the -i flag (like git rebase -i or git add -i) since they require interactive input which is not supported.
         - If there are no changes to commit (i.e., no untracked files and no modifications), do not create an empty commit
@@ -557,10 +560,10 @@ def build_commit_workflow_prompt(
            - Check if the current branch tracks a remote branch and is up to date with the remote
            - Run a git log command and `git diff [base-branch]...HEAD` to understand the full commit history
         2. Analyze all changes that will be included in the pull request, making sure to look at all relevant commits, and draft a pull request summary
-        3. You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. ALWAYS run the following commands in parallel:
-           - Create new branch if needed
+        3. Execute the publishing steps in dependency order:
+           - Create a new branch if needed
            - Push to remote with -u flag if needed
-           - Create PR using gh pr create with the format below. Use a HEREDOC to pass the body to ensure correct formatting.
+           - Create PR using gh pr create after the branch is available on the remote. Use a HEREDOC to pass the body to ensure correct formatting.
         <example>
         gh pr create --title "the pr title" --body "$(cat <<'EOF'
         ## Summary
@@ -838,7 +841,7 @@ def build_system_prompt(
                 agent_section = dedent(
                     f"""\
                     # Subagents
-                    Use the Task tool to delegate work to a specialized agent. Set `subagent_type` to one of:
+                    Use the Agent tool to delegate work to a specialized agent. Set `subagent_type` to one of:
                     {agent_lines}
 
                     Provide detailed prompts so the agent can work autonomously and return a concise report."""
@@ -849,7 +852,7 @@ def build_system_prompt(
                 type(exc).__name__,
                 exc,
             )
-            agent_section = "# Subagents\nTask tool available, but agent definitions could not be loaded."
+            agent_section = "# Subagents\nAgent tool available, but agent definitions could not be loaded."
 
     code_references = ""
     if keep_coding_instructions:

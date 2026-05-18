@@ -68,6 +68,20 @@ class AgentDraft:
     model: Optional[str] = None
 
 
+READ_ONLY_AGENT_LOCATIONS = {AgentLocation.BUILT_IN, AgentLocation.PLUGIN}
+EDITABLE_AGENT_LOCATIONS = {AgentLocation.USER, AgentLocation.PROJECT}
+
+
+def _is_read_only_agent(agent: AgentDefinition) -> bool:
+    return agent.location in READ_ONLY_AGENT_LOCATIONS
+
+
+def _read_only_agent_message(agent: AgentDefinition, action: str) -> str:
+    if agent.location == AgentLocation.PLUGIN:
+        return f"Plugin agents are read-only. Duplicate it into user/project scope if needed before {action}."
+    return f"Built-in agents cannot be {action}."
+
+
 class ConfirmScreen(ModalScreen[bool]):
     """Simple confirmation dialog."""
 
@@ -308,9 +322,12 @@ class AgentFormScreen(ModalScreen[Optional[AgentFormResult]]):
 
                 location_default = getattr(self._location_default, "value", AgentLocation.USER.value)
                 location_options = [
-                    (AgentLocation.USER.value, AgentLocation.USER.value),
-                    (AgentLocation.PROJECT.value, AgentLocation.PROJECT.value),
+                    (location.value, location.value)
+                    for location in (AgentLocation.USER, AgentLocation.PROJECT)
+                    if location in EDITABLE_AGENT_LOCATIONS
                 ]
+                if location_default not in {option[1] for option in location_options}:
+                    location_default = AgentLocation.USER.value
                 yield Static("Location", classes="field_label")
                 yield Select(location_options, value=location_default, id="location_select")
 
@@ -722,8 +739,8 @@ class AgentsApp(App[None]):
         if not agent:
             self._set_status("No agent selected.")
             return
-        if agent.location == AgentLocation.BUILT_IN:
-            self._set_status("Built-in agents cannot be edited.")
+        if _is_read_only_agent(agent):
+            self._set_status(_read_only_agent_message(agent, "editing"))
             return
         screen = AgentFormScreen("edit", existing_agent=agent)
         self.push_screen(screen, self._handle_edit_result)
@@ -736,8 +753,8 @@ class AgentsApp(App[None]):
         if not agent:
             self._set_status("No agent selected.")
             return
-        if agent.location == AgentLocation.BUILT_IN:
-            self._set_status("Built-in agents cannot be deleted.")
+        if _is_read_only_agent(agent):
+            self._set_status(_read_only_agent_message(agent, "deleting"))
             return
         screen = ConfirmScreen(f"Delete agent '{agent.agent_type}'?")
         self.push_screen(screen, self._handle_delete_confirm)

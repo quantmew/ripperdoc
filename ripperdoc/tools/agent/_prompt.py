@@ -1,4 +1,4 @@
-"""Prompt generation functions for the Task tool."""
+"""Prompt generation functions for the Agent tool."""
 
 from __future__ import annotations
 
@@ -35,9 +35,9 @@ def build_task_tool_prompt(
     background_fetch_tool_name: str,
     agent_block: str,
 ) -> str:
-    """Build the main Task tool prompt string.
+    """Build the main Agent tool prompt string.
 
-    Extracted from TaskTool.prompt() method.
+    Extracted from AgentTool.prompt() method.
     """
     return (
         f"Launch a new agent to handle complex, multi-step tasks autonomously. \n\n"
@@ -57,7 +57,7 @@ def build_task_tool_prompt(
         "- When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.\n"
         f"- Use run_in_background=true to launch an agent asynchronously. The tool will return an agent_id immediately for later retrieval.\n"
         f"- Check background progress/output by calling {background_fetch_tool_name} with task_id=<agent_id>.\n"
-        "- To continue a completed agent, call Task with resume=<agent_id> and a new prompt.\n"
+        f"- To continue a completed agent, call {task_tool_name} with resume=<agent_id> and a new prompt.\n"
         '- Use isolation="worktree" to run the task in a dedicated git worktree under .ripperdoc/worktrees/. If the subagent makes no changes, the worktree is auto-cleaned; if changes are made, worktree path/branch are returned.\n'
         "- Provide clear, detailed prompts so the agent can work autonomously and return exactly the information you need.\n"
         "- Agents can opt into parent context by setting fork_context: true in their frontmatter. When enabled, they receive the full conversation history before the tool call.\n"
@@ -112,7 +112,7 @@ def build_agent_prompt(
 ) -> str:
     """Build the subagent prompt string.
 
-    Extracted from TaskTool._build_agent_prompt() method.
+    Extracted from AgentTool._build_agent_prompt() method.
     """
     tool_names = ", ".join(tool.name for tool in tools if getattr(tool, "name", None))
     guidance = (
