@@ -14,8 +14,8 @@ PERMISSION_PROMPT_MIN_DIFF_LINES = 4
 PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"}
 
 # Tools that auto-memory write operations apply to
-AUTO_MEMORY_WRITE_TOOLS = {"Write", "Edit", "MultiEdit"}
+AUTO_MEMORY_WRITE_TOOLS = {"Write", "Edit"}
 
 # Plan mode tool restrictions
 PLAN_MODE_SPECIAL_ALLOWED_TOOLS = {"AskUserQuestion", "ExitPlanMode"}
-PLAN_MODE_PLAN_FILE_EDIT_TOOLS = {"Write", "Edit", "MultiEdit"}
+PLAN_MODE_PLAN_FILE_EDIT_TOOLS = {"Write", "Edit"}

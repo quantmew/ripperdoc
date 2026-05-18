@@ -37,7 +37,7 @@ class MessageDisplay:
             return []
 
         args_parts: List[str] = []
-        file_path_tools = {"Read", "Write", "Edit", "MultiEdit"}
+        file_path_tools = {"Read", "Write", "Edit"}
 
         def _format_arg(arg_key: str, arg_value: Any) -> str:
             if tool_name in file_path_tools and arg_key == "file_path":
@@ -82,17 +82,13 @@ class MessageDisplay:
                 args_parts.append(_format_arg(key, value))
             return args_parts
 
-        # Special handling for Edit and MultiEdit tools - don't show old_string
-        if tool_name in ["Edit", "MultiEdit"]:
+        # Special handling for Edit tool - don't show old_string
+        if tool_name == "Edit":
             for key, value in tool_args.items():
                 if key == "new_string":
-                    continue  # Skip new_string for Edit/MultiEdit tools
+                    continue  # Skip new_string for Edit tool
                 if key == "old_string":
-                    continue  # Skip old_string for Edit/MultiEdit tools
-                # For MultiEdit, also handle edits array
-                if key == "edits" and isinstance(value, list):
-                    args_parts.append(f"edits: {len(value)} operations")
-                    continue
+                    continue  # Skip old_string for Edit tool
                 args_parts.append(_format_arg(key, value))
             return args_parts
 

@@ -27,7 +27,7 @@ logger = get_logger()
 def _extract_tool_target_path(tool_name: str, parsed_input: Any) -> Optional[str]:
     """Return the primary filesystem target path for mutating file tools."""
 
-    if tool_name in {"Write", "Edit", "MultiEdit"} and hasattr(parsed_input, "file_path"):
+    if tool_name in {"Write", "Edit"} and hasattr(parsed_input, "file_path"):
         return str(getattr(parsed_input, "file_path"))
     if tool_name == "NotebookEdit" and hasattr(parsed_input, "notebook_path"):
         return str(getattr(parsed_input, "notebook_path"))

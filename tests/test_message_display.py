@@ -6,11 +6,11 @@ from ripperdoc.cli.ui.message_display import MessageDisplay
 
 
 def test_file_tools_show_full_file_path_without_prefix() -> None:
-    """Read/Write/Edit/MultiEdit should render raw file paths without key prefix."""
+    """Read/Write/Edit should render raw file paths without key prefix."""
     display = MessageDisplay(Console(record=True, width=240))
     long_path = "/data2/wangjun/github/research_knight/baselines/qa/some/really/long/path/that/should/not/be/truncated/for/file_tools.py"
 
-    for tool_name in ("Read", "Write", "Edit", "MultiEdit"):
+    for tool_name in ("Read", "Write", "Edit"):
         args = display.format_tool_args(tool_name, {"file_path": long_path})
         assert args == [long_path]
 

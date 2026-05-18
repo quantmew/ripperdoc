@@ -255,10 +255,10 @@ class ReadResultRenderer(ToolResultRenderer):
 
 
 class EditResultRenderer(ToolResultRenderer):
-    """Render Write/Edit/MultiEdit tool results."""
+    """Render Write/Edit tool results."""
 
     def can_handle(self, sender: str) -> bool:
-        return "Write" in sender or "Edit" in sender or "MultiEdit" in sender
+        return "Write" in sender or "Edit" in sender
 
     def _diff_style(self, *, bg_slot: str, fg_slot: str) -> str:
         """Resolve diff line style from active theme slots."""

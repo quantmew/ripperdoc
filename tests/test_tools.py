@@ -13,15 +13,11 @@ from pydantic import BaseModel
 from ripperdoc.tools.file_read import FileReadTool, FileReadToolInput
 from ripperdoc.tools.file_write import FileWriteTool, FileWriteToolInput
 from ripperdoc.tools.file_edit import FileEditTool, FileEditToolInput
-from ripperdoc.tools.multi_edit import (
-    MultiEditTool,
-    MultiEditToolInput,
-    EditOperation,
-)
 from ripperdoc.tools.glob import GlobTool, GlobToolInput
 from ripperdoc.tools.ls import LSTool, LSToolInput
 from ripperdoc.tools.bash import BashTool, BashToolInput
-from ripperdoc.tools.task_output import TaskOutputTool, TaskOutputInput
+# task_output module removed - see commit history
+# from ripperdoc.tools.task_output import TaskOutputTool, TaskOutputInput
 from ripperdoc.tools.task_stop import TaskStopTool, TaskStopInput
 from ripperdoc.tools.agent import AgentRunRecord, AgentTool, AgentToolInput
 from ripperdoc.tools.enter_worktree import EnterWorktreeTool, EnterWorktreeToolInput
@@ -133,89 +129,6 @@ async def test_file_edit_tool():
         # Verify edit
         assert Path(temp_path).read_text() == "Hello Python\n"
 
-    finally:
-        Path(temp_path).unlink()
-
-
-@pytest.mark.asyncio
-async def test_multi_edit_tool():
-    """Test applying multiple edits sequentially."""
-    tool = MultiEditTool()
-
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
-        f.write("hello world\nhello again\n")
-        temp_path = f.name
-
-    try:
-        input_data = MultiEditToolInput(
-            file_path=temp_path,
-            edits=[
-                EditOperation(old_string="hello", new_string="hi", replace_all=True),
-                EditOperation(old_string="hi again", new_string="hi there"),
-            ],
-        )
-        context = ToolUseContext()
-
-        result = None
-        async for output in tool.call(input_data, context):
-            result = output
-
-        assert result is not None
-        assert result.data.success is True
-        assert result.data.replacements_made == 3
-        assert "hi there" in Path(temp_path).read_text()
-    finally:
-        Path(temp_path).unlink()
-
-
-@pytest.mark.asyncio
-async def test_multi_edit_tool_create_file():
-    """Test creating a file via multi edit with empty old_string."""
-    tool = MultiEditTool()
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        file_path = str(Path(tmpdir) / "new.txt")
-        input_data = MultiEditToolInput(
-            file_path=file_path,
-            edits=[
-                EditOperation(old_string="", new_string="line1\n"),
-                EditOperation(old_string="line1", new_string="line1-mod"),
-            ],
-        )
-        context = ToolUseContext()
-
-        result = None
-        async for output in tool.call(input_data, context):
-            result = output
-
-        assert result is not None
-        assert result.data.success is True
-        assert Path(file_path).read_text() == "line1-mod\n"
-
-
-@pytest.mark.asyncio
-async def test_multi_edit_tool_failure_no_match():
-    """Multi edit should not write when a string is missing."""
-    tool = MultiEditTool()
-
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
-        f.write("content\n")
-        temp_path = f.name
-
-    try:
-        input_data = MultiEditToolInput(
-            file_path=temp_path,
-            edits=[EditOperation(old_string="missing", new_string="new")],
-        )
-        context = ToolUseContext()
-
-        result = None
-        async for output in tool.call(input_data, context):
-            result = output
-
-        assert result is not None
-        assert result.data.success is False
-        assert Path(temp_path).read_text() == "content\n"
     finally:
         Path(temp_path).unlink()
 
@@ -357,6 +270,7 @@ async def test_ls_tool_skips_heavy_directories():
         assert all(not entry.endswith("node_modules/large.js") for entry in result.data.entries)
 
 
+@pytest.mark.skip(reason="TaskOutput tool removed")
 @pytest.mark.asyncio
 async def test_bash_tool_background_and_output():
     """Background bash commands should return a task id and stream output later."""
@@ -392,6 +306,7 @@ async def test_bash_tool_background_and_output():
     assert "hi" in poll_result.data.task.output
 
 
+@pytest.mark.skip(reason="TaskOutput tool removed")
 @pytest.mark.asyncio
 async def test_bash_background_stdin_detached():
     """Background commands should not hold the controlling TTY/stdin open."""
@@ -428,6 +343,7 @@ async def test_bash_background_stdin_detached():
     assert "len=0" in poll_result.data.task.output
 
 
+@pytest.mark.skip(reason="TaskOutput tool removed")
 @pytest.mark.asyncio
 async def test_task_output_background_status_and_output():
     """TaskOutput should support non-blocking and blocking background checks."""
@@ -478,6 +394,7 @@ async def test_task_output_background_status_and_output():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="TaskOutput tool removed")
 @pytest.mark.usefixtures("reset_background_shell")
 async def test_background_bash_ignores_execution_timeout() -> None:
     """Background bash should keep running regardless of execution timeout input."""
@@ -519,6 +436,7 @@ async def test_background_bash_ignores_execution_timeout() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="TaskOutput tool removed")
 @pytest.mark.usefixtures("reset_background_shell")
 async def test_task_output_timeout_is_wait_timeout_only() -> None:
     """TaskOutput timeout should not imply the underlying task timed out."""

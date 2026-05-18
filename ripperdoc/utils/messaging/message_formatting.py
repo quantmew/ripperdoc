@@ -89,7 +89,7 @@ def format_tool_use_detail(name: str, tool_input: Any) -> str:
             if cmd:
                 cmd_preview = cmd[:200] + "..." if len(cmd) > 200 else cmd
                 summary_parts.append(f"command={cmd_preview}")
-        elif name in ("Read", "Write", "Edit", "MultiEdit"):
+        elif name in ("Read", "Write", "Edit"):
             path = tool_input.get("file_path", "")
             if path:
                 summary_parts.append(f"file={path}")

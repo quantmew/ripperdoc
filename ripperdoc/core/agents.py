@@ -25,7 +25,7 @@ from ripperdoc.tools.glob import GlobTool
 from ripperdoc.tools.grep import GrepTool
 from ripperdoc.tools.ls import LSTool
 from ripperdoc.tools.lsp import LspTool
-from ripperdoc.tools.multi_edit import MultiEditTool
+
 from ripperdoc.tools.notebook_edit import NotebookEditTool
 from ripperdoc.tools.skill import SkillTool
 from ripperdoc.tools.todo import TodoReadTool, TodoWriteTool
@@ -52,7 +52,6 @@ GLOB_TOOL_NAME = _safe_tool_name(GlobTool, "Glob")
 GREP_TOOL_NAME = _safe_tool_name(GrepTool, "Grep")
 READ_TOOL_NAME = _safe_tool_name(FileReadTool, "Read")
 FILE_EDIT_TOOL_NAME = _safe_tool_name(FileEditTool, "FileEdit")
-MULTI_EDIT_TOOL_NAME = _safe_tool_name(MultiEditTool, "MultiEdit")
 NOTEBOOK_EDIT_TOOL_NAME = _safe_tool_name(NotebookEditTool, "NotebookEdit")
 FILE_WRITE_TOOL_NAME = _safe_tool_name(FileWriteTool, "FileWrite")
 LS_TOOL_NAME = _safe_tool_name(LSTool, "LS")

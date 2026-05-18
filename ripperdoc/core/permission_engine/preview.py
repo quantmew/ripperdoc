@@ -46,7 +46,7 @@ def _format_input_preview(parsed_input: Any, tool_name: Optional[str] = None) ->
 
         return "\n  ".join(lines)
 
-    if tool_name in {"Edit", "MultiEdit"} and hasattr(parsed_input, "file_path"):
+    if tool_name == "Edit" and hasattr(parsed_input, "file_path"):
         edit_preview = _build_edit_permission_preview(parsed_input, tool_name=tool_name)
         if edit_preview:
             return edit_preview
@@ -71,7 +71,7 @@ def _format_input_preview(parsed_input: Any, tool_name: Optional[str] = None) ->
 
 
 def _build_edit_permission_preview(parsed_input: Any, *, tool_name: str) -> str:
-    """Render a before-apply preview for Edit/MultiEdit prompts."""
+    """Render a before-apply preview for Edit prompts."""
     file_path_raw = str(getattr(parsed_input, "file_path", "") or "")
     if not file_path_raw:
         return ""
@@ -361,7 +361,7 @@ def _compute_edit_preview(
 
 
 def _normalize_edit_operations(parsed_input: Any, *, tool_name: str) -> Optional[List[Dict[str, Any]]]:
-    """Normalize Edit/MultiEdit payloads into a common in-memory operation list."""
+    """Normalize Edit payload into a common in-memory operation list."""
     if tool_name == "Edit":
         return [
             {
@@ -370,20 +370,5 @@ def _normalize_edit_operations(parsed_input: Any, *, tool_name: str) -> Optional
                 "replace_all": bool(getattr(parsed_input, "replace_all", False)),
             }
         ]
-
-    if tool_name == "MultiEdit":
-        edits = getattr(parsed_input, "edits", None)
-        if edits is None:
-            return None
-        normalized: List[Dict[str, Any]] = []
-        for edit in edits:
-            normalized.append(
-                {
-                    "old_string": str(getattr(edit, "old_string", "")),
-                    "new_string": str(getattr(edit, "new_string", "")),
-                    "replace_all": bool(getattr(edit, "replace_all", False)),
-                }
-            )
-        return normalized
 
     return None

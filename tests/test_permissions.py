@@ -27,7 +27,6 @@ from ripperdoc.tools.bash import BashTool, BashToolInput
 from ripperdoc.tools.file_read import FileReadTool, FileReadToolInput
 from ripperdoc.tools.file_edit import FileEditTool, FileEditToolInput
 from ripperdoc.tools.file_write import FileWriteTool, FileWriteToolInput
-from ripperdoc.tools.multi_edit import MultiEditTool, MultiEditToolInput
 from ripperdoc.utils.memory import auto_memory_file_path
 
 
@@ -745,44 +744,6 @@ def test_edit_permission_prompt_shows_diff_preview_before_apply(tmp_path: Path, 
     assert re.search(r"<diff-del>\s*1\s+- a = 1</diff-del>", preview)
     assert re.search(r"<diff-add>\s*1 \+ a = 3</diff-add>", preview)
     assert target.read_text(encoding="utf-8") == "a = 1\nb = 2\n"
-
-
-def test_multiedit_permission_prompt_shows_diff_preview_before_apply(tmp_path: Path, monkeypatch):
-    """MultiEdit permission prompt should include combined diff preview."""
-    target = tmp_path / "sample_multi.py"
-    target.write_text("x = 1\ny = 2\n", encoding="utf-8")
-
-    captured: dict[str, str] = {}
-
-    def fake_prompt_choice(*args: Any, **kwargs: Any) -> str:  # noqa: ANN401
-        captured["message"] = str(kwargs.get("message", ""))
-        return "n"
-
-    monkeypatch.setattr("ripperdoc.core.permission_engine.prompt_choice", fake_prompt_choice)
-
-    checker = make_permission_checker(tmp_path, yolo_mode=False, prompt_fn=None)
-    result = asyncio.run(
-        checker(
-            MultiEditTool(),
-            MultiEditToolInput(
-                file_path=str(target),
-                edits=[
-                    {"old_string": "x = 1", "new_string": "x = 10"},
-                    {"old_string": "y = 2", "new_string": "y = 20"},
-                ],
-            ),
-        )
-    )
-
-    assert result.result is False
-    preview = captured.get("message", "")
-    assert "preview:" in preview
-    assert "-------------------" in preview
-    assert re.search(r"<diff-del>\s*1\s+- x = 1</diff-del>", preview)
-    assert re.search(r"<diff-add>\s*1 \+ x = 10</diff-add>", preview)
-    assert re.search(r"<diff-del>\s*2\s+- y = 2</diff-del>", preview)
-    assert re.search(r"<diff-add>\s*2 \+ y = 20</diff-add>", preview)
-    assert target.read_text(encoding="utf-8") == "x = 1\ny = 2\n"
 
 
 def test_write_permission_prompt_shows_diff_preview_before_apply(tmp_path: Path, monkeypatch):

@@ -8,11 +8,9 @@ from typing import Any, List, Optional
 from ripperdoc.core.tool import Tool
 
 from ripperdoc.tools.bash import BashTool
-from ripperdoc.tools.task_output import TaskOutputTool
 from ripperdoc.tools.task_stop import TaskStopTool
 from ripperdoc.tools.file_read import FileReadTool
 from ripperdoc.tools.file_edit import FileEditTool
-from ripperdoc.tools.multi_edit import MultiEditTool
 from ripperdoc.tools.notebook_edit import NotebookEditTool
 from ripperdoc.tools.file_write import FileWriteTool
 from ripperdoc.tools.glob import GlobTool
@@ -61,11 +59,10 @@ logger = get_logger()
 # Canonical tool names for --tools filtering
 BUILTIN_TOOL_NAMES = [
     "Bash",
-    "TaskOutput",
     "TaskStop",
     "Read",
     "Edit",
-    "MultiEdit",
+
     "NotebookEdit",
     "Write",
     "Glob",
@@ -146,11 +143,9 @@ def _build_base_tools() -> List[Tool[Any, Any]]:
     tasks_enabled = is_task_system_enabled()
     base_tools: List[Tool[Any, Any]] = [
         BashTool(),
-        TaskOutputTool(),
         TaskStopTool(),
         FileReadTool(),
         FileEditTool(),
-        MultiEditTool(),
         NotebookEditTool(),
         FileWriteTool(),
         GlobTool(),

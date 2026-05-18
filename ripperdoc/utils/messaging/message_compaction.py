@@ -42,12 +42,10 @@ TOOL_COMMANDS: Set[str] = {
     "Grep",
     "Glob",
     "LS",
-    "TaskOutput",
     "ListMcpServers",
     "ListMcpResources",
     "ReadMcpResource",
     # "FileEdit",
-    # "MultiEdit",
     # "NotebookEdit",
     # "FileWrite",
 }

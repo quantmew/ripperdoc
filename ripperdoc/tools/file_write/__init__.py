@@ -87,7 +87,7 @@ class FileWriteTool(Tool[FileWriteToolInput, FileWriteToolOutput]):
 
     async def description(self) -> str:
         return """Create a new file or completely rewrite an existing file with the specified content.
-Prefer Edit or MultiEdit for small changes to existing files."""
+Prefer Edit for small changes to existing files."""
 
     @property
     def input_schema(self) -> type[FileWriteToolInput]:

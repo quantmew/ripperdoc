@@ -159,7 +159,7 @@ def build_plan_mode_full_system_prompt(
     read_tools_text = ", ".join(read_tools) if read_tools else "read-only tools"
     plan_file = str(Path(plan_file_path))
     create_tool = "Write" if "Write" in tool_names else "Edit"
-    update_tool = "MultiEdit" if "MultiEdit" in tool_names else "Edit"
+    update_tool = "Edit"
     ask_tool = "AskUserQuestion" if "AskUserQuestion" in tool_names else "your question tool"
     approval_tool = "ExitPlanMode" if "ExitPlanMode" in tool_names else "the plan approval tool"
 
