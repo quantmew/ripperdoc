@@ -21,6 +21,7 @@ from ripperdoc.core import tool_defaults as tool_defaults_module
 from ripperdoc.cli.agents_cli import agents_cmd
 from ripperdoc.cli.bootstrap_cli import (
     _change_cwd_if_requested,
+    _check_root_bypass_permissions,
     _is_non_interactive_mode,
     _log_resume_state,
     _prepare_cli_runtime_inputs,
@@ -616,6 +617,7 @@ def cli(
         prompt=prompt,
     )
     effective_permission_mode = _resolve_permission_mode(yolo, permission_mode)
+    _check_root_bypass_permissions(effective_permission_mode)
     print_prompt = _resolve_root_extra_args(
         ctx=ctx, print_mode=print_mode, print_prompt=print_prompt
     )

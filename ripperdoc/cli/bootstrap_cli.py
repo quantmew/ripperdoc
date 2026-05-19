@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -52,6 +54,35 @@ _SDK_ONLY_OPTION_FLAGS: tuple[tuple[str, str], ...] = (
 def _resolve_permission_mode(yolo: bool, permission_mode: str) -> str:
     """Normalize effective permission mode, ensuring --yolo maps to bypass mode."""
     return "bypassPermissions" if yolo else permission_mode
+
+
+def _check_root_bypass_permissions(effective_permission_mode: str) -> None:
+    """Prevent bypassPermissions (yolo) mode when running as root/sudo."""
+    if effective_permission_mode != "bypassPermissions":
+        return
+
+    # Only enforced on Unix systems where geteuid is available
+    if not hasattr(os, "geteuid"):
+        return
+
+    if os.geteuid() != 0:
+        return
+
+    # Allow root in sandboxed environments
+    if os.environ.get("IS_SANDBOX") == "1":
+        return
+    if os.environ.get("CLAUDE_CODE_BUBBLEWRAP"):
+        return
+
+    click.echo(
+        click.style(
+            "--yolo / --permission-mode bypassPermissions cannot be used"
+            " with root/sudo privileges for security reasons",
+            fg="red",
+        ),
+        err=True,
+    )
+    sys.exit(1)
 
 
 def _is_stdio_mode_request(
