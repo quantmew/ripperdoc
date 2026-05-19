@@ -6,10 +6,12 @@ from ripperdoc.utils.messaging.conversation_compaction import (
     get_complete_tool_pairs_tail,
 )
 from ripperdoc.utils.messaging.message_formatting import render_transcript
-from ripperdoc.utils.messaging.messages import (
-    create_assistant_message,
+from ripperdoc.utils.messaging.attachments import (
     create_plan_file_reference_attachment_message,
     create_plan_mode_attachment_message,
+)
+from ripperdoc.utils.messaging.messages import (
+    create_assistant_message,
     create_user_message,
 )
 
