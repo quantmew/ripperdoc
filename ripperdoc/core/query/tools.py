@@ -74,7 +74,7 @@ DEFAULT_TOOL_TIMEOUT_SEC = float(os.getenv("RIPPERDOC_TOOL_TIMEOUT", "300"))  # 
 DEFAULT_CONCURRENT_TOOL_TIMEOUT_SEC = float(
     os.getenv("RIPPERDOC_CONCURRENT_TOOL_TIMEOUT", "600")
 )  # 10 minutes
-_INFINITE_TIMEOUT_TOOLS = {"AskUserQuestion"}
+_INFINITE_TIMEOUT_TOOLS = {"AskUserQuestion", "Agent"}
 _TOOL_CWD_LOCK = _AsyncReentrantLock()
 
 

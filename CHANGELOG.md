@@ -5,6 +5,37 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-05-19
+
+### Added
+- **Task reminder nudge system** - Periodic 10-turn reminder injection  that lists all current tasks when TaskCreate/TaskUpdate haven't been used recently, helping prevent stale tasks from lingering in the task list
+- **Agent tool infinite timeout** - Removed 300s timeout for the `Agent` tool (added to `_INFINITE_TIMEOUT_TOOLS` alongside `AskUserQuestion`), preventing premature termination of subagents like the explore agent
+  - `ClaimTaskResult`, `AgentStatus`, `UnassignTasksResult` models for inter-agent coordination
+  - `claim_task`, `block_task`, `get_agent_statuses`, `unassign_teammate_tasks` operations
+  - Observer/event pattern for task change notifications
+  - High water mark mechanism for numeric task ID generation
+  - Verification nudge when closing 3+ tasks in TaskUpdate
+
+### Changed
+- **Codebase modularization** - Continued restructuring for better maintainability:
+  - Split `models.py` into modular `model_types` package with migrated message type imports
+  - Split `permission_engine` into a modular package structure
+  - Refactored message type module, renaming `messages` import to `types`
+  - Moved `background_shell` from tools to services directory, unifying service layer structure
+  - Renamed Task-related tools and configurations to Agent, standardizing naming conventions
+- **Cron tools consolidation** - Merged CronCreate/CronDelete/CronList into a single `schedule_cron` module with shared cron expression helpers
+- **Task lifecycle simplification** - Removed "deleted" status from task lifecycle; tasks now flow through `pending → in_progress → completed` only; TaskList and summary views filter out completed tasks by default
+- **Documentation sync** - Updated README and README_CN with 10 missing slash commands, missing tools, and restructured tool categories
+
+### Fixed
+- **Asyncio initialization** - Ensure event loop exists before creating asyncio primitives
+- **Test path correction** - Update stale module path for system_prompt after refactor
+- **Subagent finalization** - Simplify early return guard in subagent finalization
+- **Task blocker check** - Fix blocker check logic in task management
+
+### Removed
+- **Deprecated tools** - Removed `MultiEdit` (merged into `Edit`), `TaskOutput`, `Config`, and `SendUserMessage` tools, along with associated imports, permission logic, preview rendering, and tests
+
 ## [0.6.0] - 2026-05-13
 
 ### Added
@@ -47,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Thinking mode controls** - Enhanced thinking mode controls with provider-specific configuration
 - **Stdio signal handling** - Improved stdio signal handling and MCP schema coercion
 - **Type safety improvements** - Enhanced type safety throughout the codebase
-- **Message handling alignment** - Aligned message handling with Claude Code patterns
+- **Message handling alignment** - Refined message handling patterns for improved consistency
 - **Session message handling** - Cache attribute lookups in session message handling for better performance
 
 ### Fixed
@@ -554,6 +585,7 @@ This release includes major architectural changes that introduce **incompatible 
 - Simple command execution
 - Basic project navigation
 
+[0.6.1]: https://github.com/quantmew/Ripperdoc/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/quantmew/Ripperdoc/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/quantmew/Ripperdoc/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/quantmew/Ripperdoc/compare/v0.5.1...v0.5.2

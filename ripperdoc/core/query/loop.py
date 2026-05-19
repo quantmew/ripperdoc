@@ -85,6 +85,7 @@ from ripperdoc.utils.messaging.messages import (
 
 from .context import QueryContext, _apply_skill_context_updates
 from .errors import _format_changed_file_notice
+from ripperdoc.core.task_reminder import build_task_reminder_messages
 from .permissions import ToolPermissionCallable, _check_tool_permissions
 from .tools import (
     _resolve_tool,
@@ -443,6 +444,7 @@ class _IterationPlan:
     full_system_prompt: str
     tools_for_model: List[Tool[Any, Any]]
     plan_mode_messages: List[AttachmentMessage] = field(default_factory=list)
+    task_reminder_messages: List[AttachmentMessage] = field(default_factory=list)
 
 
 @dataclass
@@ -1334,6 +1336,9 @@ def _build_iteration_plan(
         query_context=query_context,
         tools_for_model=tools_for_model,
     )
+    task_reminder_messages = build_task_reminder_messages(
+        messages=messages or (),
+    )
     logger.debug(
         "[query] Built system prompt",
         extra={
@@ -1341,6 +1346,7 @@ def _build_iteration_plan(
             "context_entries": len(context),
             "tool_count": len(tools_for_model),
             "plan_mode_messages": len(plan_mode_messages),
+            "task_reminder_messages": len(task_reminder_messages),
         },
     )
     return _IterationPlan(
@@ -1348,6 +1354,7 @@ def _build_iteration_plan(
         full_system_prompt=full_system_prompt,
         tools_for_model=tools_for_model,
         plan_mode_messages=plan_mode_messages,
+        task_reminder_messages=task_reminder_messages,
     )
 
 
@@ -2234,6 +2241,11 @@ async def _run_query_iteration(
     if plan.plan_mode_messages:
         messages.extend(plan.plan_mode_messages)
         for meta_message in plan.plan_mode_messages:
+            yield meta_message
+
+    if plan.task_reminder_messages:
+        messages.extend(plan.task_reminder_messages)
+        for meta_message in plan.task_reminder_messages:
             yield meta_message
 
     progress_queue: asyncio.Queue[Optional[ProgressMessage]] = asyncio.Queue(maxsize=10000)

@@ -15,7 +15,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
   <a href="https://pypi.org/project/ripperdoc/">
-    <img src="https://img.shields.io/badge/version-0.5.1-orange.svg">
+    <img src="https://img.shields.io/badge/version-0.6.1-orange.svg">
   </a>
 </p>
 
