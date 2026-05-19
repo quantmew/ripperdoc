@@ -1276,7 +1276,7 @@ class RichUI:
             threading.current_thread() is not self._loop_thread
             and not self._loop.is_closed()
         ):
-            return self._run_async(self._get_default_tools_async())
+            return self._run_async(self._get_default_tools_async())  # type: ignore[no-any-return]
         tools = get_default_tools(allowed_tools=self.allowed_tools)
         if self.disable_slash_commands:
             return [tool for tool in tools if getattr(tool, "name", None) != "Skill"]

@@ -26,6 +26,7 @@ from ripperdoc.services.background_shell._utils import (
     _get_tasks,
     _get_tasks_lock,
     _loop_time,
+    _monitor_task,
     _pump_stream,
     _run_completion_callbacks,
     _start_background_command,

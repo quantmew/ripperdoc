@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-def _compat_prompt_choice():
+def _compat_prompt_choice() -> Callable[..., Any]:
     compat_module = sys.modules.get("ripperdoc.core.permission_engine")
     return getattr(compat_module, "prompt_choice", default_prompt_choice)
 
@@ -121,7 +121,7 @@ def make_permission_checker(
                     return responder(input_prompt)
 
                 # Use the unified choice component
-                return _compat_prompt_choice()(
+                return _compat_prompt_choice()(  # type: ignore[no-any-return]
                     message=prompt,
                     options=options,
                     allow_esc=True,

@@ -43,7 +43,7 @@ def _load_servers(ui: Any) -> list[McpServerInfo]:
     if not callable(runner):
         return load_mcp_servers(ui.project_path)
     async def _load() -> list[McpServerInfo]:
-        return await load_mcp_servers_async(ui.project_path)
+        return await load_mcp_servers_async(ui.project_path)  # type: ignore[no-any-return]
     return cast(list[McpServerInfo], runner(_load()))
 
 

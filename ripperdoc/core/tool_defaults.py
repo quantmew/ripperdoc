@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, cast
 
 from ripperdoc.core.tool import Tool
 
@@ -254,7 +254,7 @@ async def get_default_tools_async(
         typed_dynamic_tools = [tool for tool in mcp_tools if isinstance(tool, Tool)]
         if typed_dynamic_tools:
             base_tools = merge_tools_with_dynamic(base_tools, typed_dynamic_tools)[:-1]
-            dynamic_tools = typed_dynamic_tools
+            dynamic_tools = cast(List[Tool[Any, Any]], typed_dynamic_tools)
     except (
         ImportError,
         ModuleNotFoundError,

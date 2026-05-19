@@ -139,7 +139,7 @@ def _mcp_status(
     errors: List[str] = []
 
     async def _load() -> List[Any]:
-        return await load_mcp_servers_async(project_path)
+        return await load_mcp_servers_async(project_path)  # type: ignore[no-any-return]
 
     try:
         if runner is None:

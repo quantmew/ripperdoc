@@ -6,7 +6,10 @@ import asyncio
 import contextlib
 import os
 import signal
-from typing import Any, AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator, List, Optional, TYPE_CHECKING, Union
+
+if TYPE_CHECKING:
+    from ripperdoc.core.tool import ToolProgress
 
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.shell.output_utils import (
@@ -82,7 +85,7 @@ async def execute_foreground_process(
     process: asyncio.subprocess.Process,
     start_time: float,
     timeout_seconds: float,
-) -> AsyncGenerator[tuple[bool, list[str], list[str], bool], Any]:
+) -> AsyncGenerator[Union[ToolProgress, tuple[list[str], list[str], bool]], Any]:
     """Execute process and yield progress updates."""
     stdout_lines: List[str] = []
     stderr_lines: List[str] = []
@@ -124,7 +127,7 @@ async def execute_foreground_process(
         while not queue.empty():
             label, text = queue.get_nowait()
             from ripperdoc.core.tool import ToolProgress
-            yield ToolProgress(content=f"{label}: {text}")  # type: ignore[misc]
+            yield ToolProgress(content=f"{label}: {text}")
 
         if now - last_progress_time >= PROGRESS_INTERVAL_SECONDS:
             combined_output = "".join(stdout_lines + stderr_lines)
@@ -132,7 +135,7 @@ async def execute_foreground_process(
                 preview = get_last_n_lines(combined_output, 5)
                 elapsed = format_duration((now - start_time) * 1000)
                 from ripperdoc.core.tool import ToolProgress
-                yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")  # type: ignore[misc]
+                yield ToolProgress(content=f"Running... ({elapsed})\n{preview}")
             last_progress_time = now
 
         if deadline is not None and now >= deadline:

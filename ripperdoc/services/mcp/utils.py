@@ -140,7 +140,7 @@ def load_mcp_servers(
 
     async def _load_and_shutdown() -> List[McpServerInfo]:
         try:
-            return await load_mcp_servers_async(
+            return await load_mcp_servers_async(  # type: ignore[no-any-return]
                 project_path,
                 wait_for_connections=wait_for_connections,
                 wait_timeout=wait_timeout,

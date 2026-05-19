@@ -622,6 +622,7 @@ class RemoteControlBridgeRunner:
         if self._token_manager is not None:
             self._token_manager.schedule(session_id, secret.session_ingress_token)
 
+        env_id = self.environment_id
         # Start heartbeat for lease extension
         if work_id and env_id:
             heartbeat = _HeartbeatWorker(

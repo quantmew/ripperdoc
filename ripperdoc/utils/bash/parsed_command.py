@@ -8,7 +8,7 @@ of the IParsedCommand interface.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, cast, List, Optional
 
 from ripperdoc.utils.bash.node import Node, PARSE_ABORTED, parse_command_raw
 from ripperdoc.utils.bash.bash_parser import get_bash_parser
@@ -157,6 +157,7 @@ class ParsedCommand(IParsedCommand):
         if root is PARSE_ABORTED:
             return None
 
+        assert isinstance(root, Node)
         return cls(original_command=command, ast_root=root)
 
     def get_pipe_segments(self) -> List[str]:
@@ -235,7 +236,7 @@ class ParsedCommand(IParsedCommand):
 
         result = parse_for_security_from_ast(self.original_command)
         if result.get("kind") == "simple":
-            return result.get("commands", [])
+            return cast(list[SimpleCommand], result.get("commands", []))
         return None
 
 

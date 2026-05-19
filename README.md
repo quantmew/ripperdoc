@@ -26,7 +26,7 @@ _an open-source, extensible AI coding agent that runs in your terminal_
 ## What Makes Ripperdoc Different?
 
 - **🔌 Model Agnostic** - Works with Anthropic Claude, OpenAI, Google Gemini, DeepSeek, and any OpenAI-compatible API
-- **🎣 Extensible Architecture** - 30+ built-in tools with hooks system for custom workflows
+- **🎣 Extensible Architecture** - 34 built-in tools with hooks system for custom workflows
 - **🤖 Multi-Agent Coordination** - Built-in task graph and team collaboration for complex workflows
 - **📚 Skill System** - Load capability bundles on-demand (PDF, Excel, PowerPoint, custom languages)
 - **🔌 MCP Integration** - First-class Model Context Protocol server support
@@ -39,9 +39,9 @@ _an open-source, extensible AI coding agent that runs in your terminal_
 ## Core Features
 
 ### 🛠️ Powerful Tool System
-- **Built-in Tools** - File operations (Read, Write, Edit, MultiEdit), code search (Grep, Glob, LSP), shell execution (Bash, background tasks), subagent delegation, task graph, memory, and more
+- **Built-in Tools** - File operations (Read, Write, Edit, NotebookEdit), code search (Grep, Glob, LSP, LS), shell execution (Bash with foreground/background modes), subagent delegation, task graph, memory, and more
 - **Jupyter Support** - Direct .ipynb notebook editing with cell manipulation
-- **Background Tasks** - Run commands asynchronously with output monitoring and status tracking
+- **Background Tasks** - Run commands asynchronously with real-time monitoring and status tracking
 
 ### 🤖 Multi-Agent Architecture
 - **Task Graph System** - Persistent task management with dependencies, blockers, and ownership
@@ -335,7 +335,6 @@ Ripperdoc provides powerful slash commands for session management:
 - `Read` - Read file contents with optional offset/limit
 - `Write` - Create new files or overwrite existing
 - `Edit` - Replace exact string matches in files
-- `MultiEdit` - Batch edit operations on single file
 - `NotebookEdit` - Edit Jupyter notebook cells
 
 **Code Analysis:**
@@ -345,19 +344,15 @@ Ripperdoc provides powerful slash commands for session management:
 - `LS` - List files and directories
 
 **Shell Operations:**
-- `Bash` - Execute shell commands
-- `BackgroundShell` - Run commands asynchronously in the background
+- `Bash` - Execute shell commands (foreground & background)
 - `TaskStop` - Stop background tasks
-- `TaskOutput` - Read output from background tasks
 - `Sleep` - Pause execution without blocking other tools
 
 **Agent & Orchestration:**
 - `Agent` - Delegate to specialized subagents
 - `TaskCreate/Update/Get/List` - Task graph management
-- `TaskStop/Output` - Manage background agent tasks
 - `TeamCreate/Delete` - Multi-agent team coordination
 - `SendMessage` - Inter-agent messaging
-- `SendUserMessage` - Send notifications to user
 
 **Planning & Isolation:**
 - `EnterPlanMode/ExitPlanMode` - Structured planning workflow
@@ -369,10 +364,14 @@ Ripperdoc provides powerful slash commands for session management:
 - `AskUserQuestion` - Interactive user prompts
 - `Memory` - Persistent cross-session memory
 
+**MCP Integration:**
+- `ListMcpServers/Resources` - List MCP servers and resources
+- `ReadMcpResource` - Read MCP resource content
+- `McpAuth` - MCP server authentication management
+
 **Management:**
-- `Config` - Manage runtime configuration
-- `MCP/MCPAuth` - MCP server and authentication management
 - `CronCreate/Delete/List` - Schedule recurring tasks
+- `TodoRead/TodoWrite` - Legacy todo management
 
 ### Supported Providers
 

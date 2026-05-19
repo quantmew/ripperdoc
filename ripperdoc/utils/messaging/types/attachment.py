@@ -444,7 +444,7 @@ _KnownAttachmentPayloadModel = Annotated[
     Discriminator("type"),
 ]
 
-_KNOWN_PAYLOAD_ADAPTER = TypeAdapter(_KnownAttachmentPayloadModel)
+_KNOWN_PAYLOAD_ADAPTER: TypeAdapter[Any] = TypeAdapter(_KnownAttachmentPayloadModel)
 
 # Full union type for annotations (includes Unknown for type hints)
 AttachmentPayloadModel = Union[
@@ -558,9 +558,9 @@ def _coerce_attachment_payload(payload: Any) -> AttachmentPayloadModel:
     if not isinstance(payload, dict):
         return UnknownAttachmentPayload(type="unknown", content=str(payload))
     try:
-        return _KNOWN_PAYLOAD_ADAPTER.validate_python(payload)
+        return cast(AttachmentPayloadModel, _KNOWN_PAYLOAD_ADAPTER.validate_python(payload))
     except ValidationError:
-        return UnknownAttachmentPayload(**payload)
+        return cast(AttachmentPayloadModel, UnknownAttachmentPayload(**payload))
 
 
 # ---------------------------------------------------------------------------

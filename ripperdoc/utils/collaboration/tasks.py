@@ -16,7 +16,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Literal, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Literal, Optional, Sequence, Set, Tuple
 from uuid import uuid4
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
@@ -96,13 +96,13 @@ class UnassignTasksResult:
 
 
 # Simple observer/event pattern for tasks-updated notifications
-_tasks_updated_listeners: List[callable] = []
+_tasks_updated_listeners: List[Callable[..., Any]] = []
 
 
-def on_tasks_updated(callback) -> callable:
+def on_tasks_updated(callback: Callable[[], None]) -> Callable[[], None]:
     """Register a listener for task updates. Returns unsubscribe function."""
     _tasks_updated_listeners.append(callback)
-    def unsubscribe():
+    def unsubscribe() -> None:
         if callback in _tasks_updated_listeners:
             _tasks_updated_listeners.remove(callback)
     return unsubscribe
@@ -771,10 +771,11 @@ def get_agent_statuses(
     results: List[AgentStatus] = []
     for member in team.members:
         name_tasks = unresolved_by_owner.get(member.name, [])
-        agent_id_tasks = unresolved_by_owner.get(member.agent_id, [])
+        agent_id = member.agent_id or member.name
+        agent_id_tasks = unresolved_by_owner.get(agent_id, [])
         current = list({*name_tasks, *agent_id_tasks})
         results.append(AgentStatus(
-            agent_id=member.agent_id,
+            agent_id=agent_id,
             name=member.name,
             agent_type=member.agent_type,
             status="idle" if not current else "busy",

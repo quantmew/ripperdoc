@@ -76,11 +76,11 @@ class StdioControlMixin:
 
     async def _load_mcp_servers_with_wait(self) -> List[McpServerInfo]:
         try:
-            return await load_mcp_servers_async(self._project_path, wait_for_connections=True)
+            return await load_mcp_servers_async(self._project_path, wait_for_connections=True)  # type: ignore[no-any-return]
         except TypeError as exc:
             if "wait_for_connections" not in str(exc):
                 raise
-            return await load_mcp_servers_async(self._project_path)
+            return await load_mcp_servers_async(self._project_path)  # type: ignore[no-any-return]
 
     async def _load_dynamic_mcp_tools_with_wait(self) -> List[Any]:
         try:

@@ -390,19 +390,19 @@ class StdioMessageMixin:
             }
 
         # Unknown block type - try to convert with generic approach
-        block_dict = {}
+        block_dict: dict[str, Any] = {}
         if hasattr(block, "type"):
-            block_Dict["type"] = block.type
+            block_dict["type"] = block.type
         if hasattr(block, "text"):
-            block_Dict["text"] = block.text
+            block_dict["text"] = block.text
         if hasattr(block, "id"):
-            block_Dict["id"] = block.id
+            block_dict["id"] = block.id
         if hasattr(block, "name"):
-            block_Dict["name"] = block.name
+            block_dict["name"] = block.name
         if hasattr(block, "input"):
-            block_Dict["input"] = block.input
+            block_dict["input"] = block.input
         if hasattr(block, "content"):
-            block_Dict["content"] = block.content
+            block_dict["content"] = block.content
         if hasattr(block, "is_error"):
-            block_Dict["is_error"] = block.is_error
+            block_dict["is_error"] = block.is_error
         return block_dict if block_dict else None

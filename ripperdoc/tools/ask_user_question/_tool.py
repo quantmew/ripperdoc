@@ -11,7 +11,7 @@ import asyncio
 import html
 import os
 import sys
-from typing import AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Set, Tuple, cast
 
 from pydantic import BaseModel, Field
 
@@ -44,7 +44,7 @@ from ripperdoc.utils.log import get_logger
 logger = get_logger()
 
 
-def _root_callable(name: str, fallback: Callable[..., Awaitable[object]]) -> Callable[..., Awaitable[object]]:
+def _root_callable(name: str, fallback: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
     package = sys.modules.get(__package__)
     candidate = getattr(package, name, None) if package is not None else None
     return candidate if callable(candidate) else fallback
@@ -315,7 +315,7 @@ async def prompt_single_choice_with_ui(
     if selection == BACK_VALUE:
         return BACK_VALUE
 
-    return selection
+    return cast(str, selection)
 
 
 async def prompt_multi_choice_with_ui(
@@ -546,7 +546,7 @@ async def _confirm_answers(questions: List[QuestionInput], answers: Dict[str, st
         esc_value="cancel",
         style_variant="ask_user_question",
     )
-    return selection == "submit"
+    return cast(str, selection) == "submit"
 
 
 async def collect_answers(

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from ripperdoc.core.system_prompt import build_environment_prompt
 
 
-def build_agent_listing(agents) -> str:
+def build_agent_listing(agents: list[Any]) -> str:
     """Build the agent listing block for the prompt."""
     agent_lines: List[str] = []
     for agent in agents:

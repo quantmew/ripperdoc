@@ -91,7 +91,7 @@ class StdioProtocolHandler(
         self._pending_requests: dict[str, Any] = {}
         self._request_tasks: dict[str, asyncio.Task[None]] = {}
         self._request_subtypes: dict[str, str] = {}
-        self._request_lock: Optional[asyncio.Lock] = None
+        self._request_lock: Optional[asyncio.Lock] = None  # type: ignore[assignment]
         self._inflight_tasks: set[asyncio.Task[None]] = set()
         self._custom_system_prompt: Optional[str] = None
         self._append_system_prompt: Optional[str] = None

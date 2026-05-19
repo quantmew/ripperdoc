@@ -408,7 +408,7 @@ class McpRuntime:
         for config in configs.values():
             task = asyncio.create_task(self._connect_single_server(config))
             self._connection_tasks[config.name] = task
-            task.add_done_callback(lambda _t, name=config.name: self._on_connect_done(name))
+            task.add_done_callback(lambda _t, name=config.name: self._on_connect_done(name))  # type: ignore[misc]
 
     def _on_connect_done(self, server_name: str) -> None:
         self._connection_tasks.pop(server_name, None)
@@ -529,7 +529,7 @@ class McpRuntime:
 
                 tools_result = await session.list_tools()
                 info.tools = [
-                    McpToolInfo(name=t.name, description=t.description, input_schema=t.inputSchema, annotations=t.annotations)
+                    McpToolInfo(name=t.name, description=t.description, input_schema=t.inputSchema, annotations=t.annotations or {})
                     for t in tools_result.tools if t.name
                 ]
                 return info
@@ -573,7 +573,7 @@ class McpRuntime:
 
             async with self._exit_stack_lock:
                 session = await self._exit_stack.enter_async_context(
-                    ClientSession(
+                    ClientSession(  # type: ignore[arg-type]
                         read_stream, write_stream,
                         list_roots_callback=self._list_roots_callback,
                         client_info=mcp_types.Implementation(name="ripperdoc", version=__version__),

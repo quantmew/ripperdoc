@@ -26,7 +26,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
 ## Ripperdoc 的独特之处?
 
 - **🔌 模型无关** - 支持 Anthropic Claude、OpenAI、Google Gemini、DeepSeek 以及任何 OpenAI 兼容 API
-- **🎣 可扩展架构** - 30+ 内置工具,配备 hooks 系统用于自定义工作流
+- **🎣 可扩展架构** - 34 内置工具,配备 hooks 系统用于自定义工作流
 - **🤖 多代理协调** - 内置任务图和团队协作,支持复杂工作流
 - **📚 技能系统** - 按需加载能力包(PDF、Excel、PowerPoint、自定义语言)
 - **🔌 MCP 集成** - 一流支持的模型上下文协议服务器
@@ -39,9 +39,9 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
 ## 核心功能
 
 ### 🛠️ 强大的工具系统
-- **内置工具** - 文件操作(Read、Write、Edit、MultiEdit)、代码搜索(Grep、Glob、LSP)、shell 执行(Bash、后台任务)、子代理委托、任务图、记忆等
+- **内置工具** - 文件操作(Read、Write、Edit、NotebookEdit)、代码搜索(Grep、Glob、LSP、LS)、shell 执行(Bash 支持前台/后台模式)、子代理委托、任务图、记忆等
 - **Jupyter 支持** - 直接编辑 .ipynb 笔记本,支持单元格操作
-- **后台任务** - 异步运行命令,监控输出和跟踪状态
+- **后台任务** - 异步运行命令,实时监控和状态跟踪
 
 ### 🤖 多代理架构
 - **任务图系统** - 持久化任务管理,支持依赖关系、阻塞项和所有权
@@ -332,7 +332,6 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - `Read` - 读取文件内容,支持可选的偏移量/限制
 - `Write` - 创建新文件或覆盖现有文件
 - `Edit` - 替换文件中的精确字符串匹配
-- `MultiEdit` - 对单个文件进行批量编辑操作
 - `NotebookEdit` - 编辑 Jupyter 笔记本单元格
 
 **代码分析:**
@@ -342,19 +341,15 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - `LS` - 列出文件和目录
 
 **Shell 操作:**
-- `Bash` - 执行 shell 命令
-- `BackgroundShell` - 异步在后台运行命令
+- `Bash` - 执行 shell 命令（支持前台/后台运行）
 - `TaskStop` - 停止后台任务
-- `TaskOutput` - 从后台任务读取输出
 - `Sleep` - 暂停执行而不阻塞其他工具
 
 **代理与编排:**
 - `Agent` - 委托给专业子代理
 - `TaskCreate/Update/Get/List` - 任务图管理
-- `TaskStop/Output` - 管理后台代理任务
 - `TeamCreate/Delete` - 多代理团队协调
 - `SendMessage` - 代理间消息传递
-- `SendUserMessage` - 向用户发送通知
 
 **规划与隔离:**
 - `EnterPlanMode/ExitPlanMode` - 结构化规划工作流
@@ -366,10 +361,14 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - `AskUserQuestion` - 交互式用户提示
 - `Memory` - 持久化跨会话记忆
 
+**MCP 集成:**
+- `ListMcpServers/Resources` - 列出 MCP 服务器和资源
+- `ReadMcpResource` - 读取 MCP 资源内容
+- `McpAuth` - MCP 服务器认证管理
+
 **管理:**
-- `Config` - 管理运行时配置
-- `MCP/MCPAuth` - MCP 服务器和认证管理
 - `CronCreate/Delete/List` - 调度重复任务
+- `TodoRead/TodoWrite` - 旧版待办事项管理
 
 ### 支持的提供商
 

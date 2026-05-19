@@ -17,7 +17,7 @@ def expand_env_vars_in_string(value: str) -> Tuple[str, List[str]]:
     """
     missing_vars: List[str] = []
 
-    def _replacer(match: re.Match) -> str:
+    def _replacer(match: re.Match[str]) -> str:
         var_content = match.group(1)
         # Split on :- to support default values
         parts = var_content.split(":-", 1)

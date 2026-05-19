@@ -8,7 +8,7 @@ Supports QR code rendering of the connect URL.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, List, Literal, Optional
 
 from rich.console import Console
 from rich.panel import Panel

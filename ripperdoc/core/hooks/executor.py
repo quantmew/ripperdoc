@@ -61,7 +61,6 @@ def _extract_message_text(message: AssistantMessage) -> str:
 def _build_hook_agent_tools() -> List[Any]:
     """Create a constrained toolset for agent-based hooks."""
     # Lazily import task tools to avoid import cycles during hooks bootstrap.
-    from ripperdoc.tools.task_output import TaskOutputTool
     from ripperdoc.tools.task_stop import TaskStopTool
 
     return [
@@ -70,7 +69,6 @@ def _build_hook_agent_tools() -> List[Any]:
         GrepTool(),
         LSTool(),
         BashTool(),
-        TaskOutputTool(),
         TaskStopTool(),
         LspTool(),
     ]

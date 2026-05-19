@@ -436,7 +436,7 @@ class AgentTool(Tool[AgentToolInput, AgentToolOutput]):
     # Prompt builder delegation
     # ------------------------------------------------------------------
 
-    def _build_agent_prompt(self, agent, tools, *, working_directory=None):
+    def _build_agent_prompt(self, agent: Any, tools: list[Any], *, working_directory: str | None = None) -> Any:
         from ripperdoc.tools.agent._prompt import build_agent_prompt
 
         return build_agent_prompt(agent.agent_type, tools, working_directory, agent.system_prompt)
@@ -633,7 +633,7 @@ class AgentTool(Tool[AgentToolInput, AgentToolOutput]):
             output_from_record=self._output_from_record,
             render_tool_result=self._render_tool_result,
             subagent_progress_sender=subagent_progress_sender,
-            available_tools_provider=self._available_tools_provider,
+            available_tools_provider=self._available_tools_provider,  # type: ignore[arg-type]
         ):
             yield output
 

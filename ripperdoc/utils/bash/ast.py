@@ -171,6 +171,7 @@ def parse_for_security_from_ast(
     if root is PARSE_ABORTED:
         return {"kind": "parse-unavailable"}
 
+    assert isinstance(root, Node)
     # Walk the tree with fail-closed allowlist
     try:
         commands = _extract_commands(root)

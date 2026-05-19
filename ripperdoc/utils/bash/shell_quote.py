@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 class ParseResult:
@@ -22,7 +22,7 @@ class ParseResult:
 
 def try_parse_shell_command(
     command: str,
-    env_callback: Optional[callable] = None,
+    env_callback: Optional[Callable[..., Any]] = None,
 ) -> ParseResult:
     """Parse a shell command into tokens, handling errors gracefully.
 

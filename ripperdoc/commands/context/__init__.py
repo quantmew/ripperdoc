@@ -51,7 +51,7 @@ def _handle(ui: Any, _: str) -> bool:
         )
 
     async def _load_servers() -> List[Any]:
-        return await load_mcp_servers_async(ui.project_path)
+        return await load_mcp_servers_async(ui.project_path)  # type: ignore[no-any-return]
 
     runner = getattr(ui, "run_async", None)
     if callable(runner):

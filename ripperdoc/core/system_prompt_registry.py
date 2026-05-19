@@ -102,6 +102,7 @@ def resolve_system_prompt_sections(
                 results.append(None)
                 continue
 
+            assert value is None or isinstance(value, str)
             # Cache if not cache-breaking
             if not section.cache_break:
                 _cache[section.name] = value
@@ -138,6 +139,7 @@ async def resolve_system_prompt_sections_async(
             if asyncio.iscoroutine(value):
                 value = await value
 
+            assert value is None or isinstance(value, str)
             if not section.cache_break:
                 _cache[section.name] = value
 

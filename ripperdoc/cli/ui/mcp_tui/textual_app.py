@@ -8,7 +8,7 @@ import shlex
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional, cast
 
 from rich.console import Group
 from rich.panel import Panel
@@ -675,7 +675,7 @@ class McpApp(App[None]):
     async def _load_servers(self, reset_runtime: bool = False) -> list[McpServerInfo]:
         if reset_runtime:
             await shutdown_mcp_runtime()
-        return await load_mcp_servers_async(self._project_path, wait_for_connections=False)
+        return cast(List[McpServerInfo], await load_mcp_servers_async(self._project_path, wait_for_connections=False))
 
     def _start_refresh(self, *, reset_runtime: bool) -> None:
         if self._refresh_worker and self._refresh_worker.state in (

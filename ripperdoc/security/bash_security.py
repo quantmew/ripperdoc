@@ -361,16 +361,16 @@ def _is_safe_heredoc(command: str) -> bool:
         r'\$\(cat[ \t]*<<(-?)[ \t]*(?:\'+([A-Za-z_]\w*)\'+|\\([A-Za-z_]\w*))'
     )
 
-    matches = []
-    for m in pattern.finditer(command):
-        delimiter = m.group(2) or m.group(3)
-        if not delimiter:
+    matches: list[dict[str, int | str | bool]] = []
+    for match in pattern.finditer(command):
+        delim = match.group(2) or match.group(3)
+        if not delim:
             continue
         matches.append({
-            "start": m.start(),
-            "end": m.end(),
-            "delimiter": delimiter,
-            "is_dash": m.group(1) == "-",
+            "start": match.start(),
+            "end": match.end(),
+            "delimiter": delim,
+            "is_dash": match.group(1) == "-",
         })
 
     if not matches:
@@ -379,13 +379,15 @@ def _is_safe_heredoc(command: str) -> bool:
     # Verify each heredoc match using line-based matching
     verified = []
     for m in matches:
-        start = m["start"]
+        start_byte = m["start"]
+        start_byte_i: int = start_byte if isinstance(start_byte, int) else 0
         operator_end = m["end"]
-        delimiter = m["delimiter"]
-        is_dash = m["is_dash"]
+        operator_end_i: int = operator_end if isinstance(operator_end, int) else 0
+        delimiter: str = str(m["delimiter"])
+        is_dash: bool = bool(m["is_dash"])
 
         # Check the opening line ends immediately after the delimiter
-        after_operator = command[operator_end:]
+        after_operator = command[operator_end_i:]
         open_line_end = after_operator.find("\n")
         if open_line_end == -1:
             return False
@@ -395,7 +397,7 @@ def _is_safe_heredoc(command: str) -> bool:
             return False
 
         # Body starts after the newline
-        body_start = operator_end + open_line_end + 1
+        body_start = operator_end_i + open_line_end + 1
         body = command[body_start:]
         body_lines = body.split("\n")
 
@@ -443,7 +445,7 @@ def _is_safe_heredoc(command: str) -> bool:
         else:
             return False
 
-        verified.append({"start": start, "end": end_pos})
+        verified.append({"start": start_byte_i, "end": end_pos})
 
     # Check for nested matches (reject)
     for outer in verified:

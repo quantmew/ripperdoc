@@ -67,7 +67,7 @@ def _ts_node_to_node(ts_node: Any, source_bytes: bytes) -> Node:
     return node
 
 
-def parse_command_raw(command: str, parser: Any, timeout_ms: int = 5000) -> Union[Node, type[object]]:
+def parse_command_raw(command: str, parser: Any, timeout_ms: int = 5000) -> Union[Node, object]:
     """Parse a bash command string into a Node tree.
 
     Args:
