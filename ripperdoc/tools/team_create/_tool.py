@@ -7,7 +7,7 @@ import random
 import string
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from ripperdoc.core.tool import (
     Tool,

@@ -32,7 +32,6 @@ def _resolve_active_task_list_id() -> str:
 
 
 def _is_team_task_context() -> bool:
-    from ripperdoc.utils.collaboration.teams import find_team_by_task_list_id
     team = find_team_by_task_list_id(_resolve_active_task_list_id())
     return team is not None
 

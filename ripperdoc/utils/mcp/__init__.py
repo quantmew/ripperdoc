@@ -31,7 +31,7 @@ from ripperdoc.services.mcp.config import (
 )
 from ripperdoc.services.mcp import types as _ripperdoc_mcp_types
 MCP_AVAILABLE = _ripperdoc_mcp_types.MCP_AVAILABLE
-from ripperdoc.services.mcp.client import (
+from ripperdoc.services.mcp.client import (  # noqa: E402
     _global_runtime,
     _mcp_circuit_states,
     McpRuntime,
@@ -45,22 +45,22 @@ from ripperdoc.services.mcp.client import (
     set_sdk_mcp_request_sender,
     get_sdk_mcp_request_sender,
 )
-from ripperdoc.services.mcp.utils import (
+from ripperdoc.services.mcp.utils import (  # noqa: E402
     estimate_mcp_tokens,
     find_mcp_resource,
     format_mcp_instructions,
     load_mcp_servers,
     load_mcp_servers_async,
 )
-from ripperdoc.services.mcp.mcp_string_utils import (
+from ripperdoc.services.mcp.mcp_string_utils import (  # noqa: E402
     build_mcp_tool_name,
     get_mcp_prefix,
     mcp_info_from_string,
 )
-from ripperdoc.services.mcp.normalization import (
+from ripperdoc.services.mcp.normalization import (  # noqa: E402
     normalize_name_for_mcp,
 )
-from ripperdoc.services.mcp.env_expansion import (
+from ripperdoc.services.mcp.env_expansion import (  # noqa: E402
     expand_env_vars_in_string,
 )
 
@@ -84,7 +84,7 @@ def _coerce_sdk_schema(value: object) -> dict:
         except (TypeError, ValueError, AttributeError):
             pass
 
-    from typing import Dict, List, Optional, cast, get_args, get_origin
+    from typing import Dict, List, cast, get_args, get_origin
 
     def _looks_like_json_schema(val: object) -> bool:
         if not isinstance(val, dict):
@@ -177,4 +177,12 @@ __all__ = [
     "get_mcp_prefix",
     "expand_env_vars_in_string",
     "_coerce_sdk_schema",
+    "_ensure_str_dict",
+    "_load_json_file",
+    "_normalize_command",
+    "_project_scope_key",
+    "_global_runtime",
+    "_mcp_circuit_states",
+    "McpRuntime",
+    "_SdkMcpSession",
 ]

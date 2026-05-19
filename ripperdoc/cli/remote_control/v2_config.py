@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from ripperdoc.utils.coerce import parse_boolish
 
 
 def _env_int(name: str, default: int) -> int:

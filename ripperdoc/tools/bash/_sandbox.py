@@ -7,7 +7,6 @@ from typing import Any, Optional, Tuple
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.shell.sandbox_utils import create_sandbox_wrapper, is_sandbox_available
 from ripperdoc.tools.bash._models import BashToolOutput
-from ripperdoc.tools.bash.sandbox_decision import should_use_sandbox
 
 logger = get_logger()
 

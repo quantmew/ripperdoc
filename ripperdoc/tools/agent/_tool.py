@@ -228,7 +228,7 @@ class AgentTool(Tool[AgentToolInput, AgentToolOutput]):
         return AgentToolInput
 
     async def prompt(self, yolo_mode: bool = False) -> str:
-        from ripperdoc.core.agents import clear_agent_cache, load_agent_definitions, READ_TOOL_NAME, GREP_TOOL_NAME, FILE_EDIT_TOOL_NAME
+        from ripperdoc.core.agents import clear_agent_cache, load_agent_definitions, READ_TOOL_NAME
         from ripperdoc.tools.agent._prompt import build_task_tool_prompt, build_agent_listing
 
         del yolo_mode

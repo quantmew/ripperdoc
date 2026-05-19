@@ -1,10 +1,8 @@
 """Tests for sed command validation."""
-import pytest
 
 from ripperdoc.tools.bash.sed_validation import (
     sed_command_is_allowed_by_allowlist,
     is_line_printing_command,
-    check_sed_constraints,
 )
 
 

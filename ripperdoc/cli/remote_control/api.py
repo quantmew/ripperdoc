@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -433,7 +433,6 @@ class RemoteControlApiClient:
     ) -> None:
         """Force-stop stale worker instances and re-queue a session on an environment."""
         safe_env = quote(validate_identifier(environment_id, "environmentId"), safe="")
-        safe_session = quote(validate_identifier(session_id, "sessionId"), safe="")
         status, data = self._request_json_with_refresh(
             "POST",
             f"/v1/environments/{safe_env}/bridge/reconnect",

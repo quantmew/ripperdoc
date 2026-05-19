@@ -25,7 +25,8 @@ from ripperdoc.core.plan_mode import (
     build_rejected_plan_user_message,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messaging.messages import create_plan_mode_attachment_message, create_user_message
+from ripperdoc.utils.messaging.attachments import create_plan_mode_attachment_message
+from ripperdoc.utils.messaging.messages import create_user_message
 
 logger = get_logger()
 

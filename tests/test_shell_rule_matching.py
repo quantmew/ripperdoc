@@ -1,10 +1,8 @@
 """Tests for shell rule matching."""
-import pytest
 
 from ripperdoc.utils.permissions.shell_rule_matching import (
     parse_permission_rule,
     match_wildcard_pattern,
-    permission_rule_extract_prefix,
 )
 
 

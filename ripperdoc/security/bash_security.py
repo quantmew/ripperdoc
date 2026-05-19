@@ -14,7 +14,7 @@ Each validator returns a PermissionResult with one of:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
@@ -485,8 +485,6 @@ def validate_obfuscated_flags(context: ValidationContext) -> PermissionResult:
 
     Detects flags that look different to our parser than to the actual command.
     """
-    from ripperdoc.utils.bash.shell_quote import try_parse_shell_command
-    from ripperdoc.utils.bash.commands import split_command
 
     command = context.original_command
 
@@ -809,7 +807,6 @@ def validate_proc_environ_access(context: ValidationContext) -> PermissionResult
 def validate_malformed_token_injection(context: ValidationContext) -> PermissionResult:
     """Check for malformed token injection via shell-quote parser differentials."""
     from ripperdoc.utils.bash.shell_quote import (
-        try_parse_shell_command,
         has_malformed_tokens,
         has_shell_quote_single_quote_bug,
     )

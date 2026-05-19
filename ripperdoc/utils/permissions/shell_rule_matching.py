@@ -8,11 +8,9 @@ for bash permission rules.
 from __future__ import annotations
 
 import fnmatch
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 
-from ripperdoc.security import PermissionResult
 
 
 # ============================================================================

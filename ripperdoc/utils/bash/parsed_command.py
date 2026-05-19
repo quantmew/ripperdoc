@@ -7,16 +7,14 @@ of the IParsedCommand interface.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, cast, List, Optional
+from dataclasses import dataclass
+from typing import cast, List, Optional
 
 from ripperdoc.utils.bash.node import Node, PARSE_ABORTED, parse_command_raw
 from ripperdoc.utils.bash.bash_parser import get_bash_parser
 from ripperdoc.utils.bash.ast import (
     parse_for_security_from_ast,
-    check_semantics,
     SimpleCommand,
-    Redirect as AstRedirect,
 )
 from ripperdoc.utils.bash.commands import (
     split_command_with_operators,

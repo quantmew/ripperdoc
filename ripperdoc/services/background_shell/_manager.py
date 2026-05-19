@@ -11,9 +11,8 @@ import concurrent.futures
 import contextlib
 import os
 import threading
-import time
 import weakref
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import atexit
 

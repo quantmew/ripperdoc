@@ -1,5 +1,4 @@
 """Tests for the tree-sitter AST parsing module."""
-import pytest
 
 from ripperdoc.utils.bash import (
     parse_for_security_from_ast,

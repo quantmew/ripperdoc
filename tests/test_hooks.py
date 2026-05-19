@@ -1,4 +1,3 @@
-from __future__ import annotations
 """Comprehensive tests for the hooks system.
 
 Tests cover:
@@ -10,6 +9,7 @@ Tests cover:
 - Environment variable substitution
 - Timeout handling
 """
+from __future__ import annotations
 
 import asyncio
 import json

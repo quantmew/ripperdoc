@@ -11,10 +11,9 @@ from typing import Union
 # MCP SDK availability
 MCP_AVAILABLE = False
 
-from dataclasses import dataclass, field
-from enum import Enum
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field  # noqa: E402
+from enum import Enum  # noqa: E402
+from typing import Any, Dict, List, Optional  # noqa: E402
 
 
 class ConfigScope(str, Enum):

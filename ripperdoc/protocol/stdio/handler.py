@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from ripperdoc.core.hooks.config import HooksConfig
 from ripperdoc.core.query import QueryContext

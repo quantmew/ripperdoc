@@ -2,22 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
 from ripperdoc.core.hooks.config import HooksConfig
 from ripperdoc.core.tool import Tool
 from ripperdoc.utils.collaboration.teams import (
-    TeamMember,
     send_team_message,
     set_team_member_active,
-    upsert_team_member,
 )
 from ripperdoc.utils.collaboration.teammate_state import (
     IdleReason,
@@ -327,8 +324,6 @@ def _send_idle_notification_to_team_lead(
     if not record.team_name:
         return
 
-    import json
-    from datetime import datetime, timezone
 
     notification = {
         "type": "idle_notification",

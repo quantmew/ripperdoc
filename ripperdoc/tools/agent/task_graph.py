@@ -1,5 +1,5 @@
-from __future__ import annotations
 """Task graph tool suite — re-exported from split modules for backward compatibility."""
+from __future__ import annotations
 
 from textwrap import dedent
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Set, Tuple, TypeVar, Union

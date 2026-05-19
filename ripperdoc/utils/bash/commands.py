@@ -9,10 +9,9 @@ from __future__ import annotations
 import re
 import secrets
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from ripperdoc.utils.bash.heredoc import extract_heredocs, restore_heredocs
-from ripperdoc.utils.bash.shell_quote import try_parse_shell_command
+from ripperdoc.utils.bash.heredoc import extract_heredocs
 
 
 def _generate_placeholders() -> Dict[str, str]:
@@ -103,9 +102,6 @@ def extract_output_redirections(command: str) -> OutputRedirectionsResult:
 
     # Pattern for output redirections: optional FD (0,1,2), then > or >>, then target
     # SECURITY: Match greedily from the end — bash resolves the LAST redirect.
-    pattern = re.compile(
-        r"(?P<fd>[012])?\s*(?P<op>>|>>|>&)\s*(?P<target>\S+)"
-    )
 
     def _extract_one(cmd: str) -> tuple[str, Optional[RedirectInfo]]:
         """Try to extract one redirection from the end of the command."""

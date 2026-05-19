@@ -6,7 +6,7 @@ import inspect
 import logging
 import asyncio
 from dataclasses import replace
-from typing import Any, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from pydantic import ValidationError
 
@@ -1254,7 +1254,6 @@ class StdioControlMixin:
         from ripperdoc.core.agents import load_agent_definitions
         from ripperdoc.commands import list_custom_commands, list_slash_commands
         from ripperdoc.services.plugins import discover_plugins
-        from ripperdoc.services.skills import filter_enabled_skills, load_all_skills
 
         error_count = 0
 
@@ -1356,10 +1355,8 @@ class StdioControlMixin:
 
         if not cancelled:
             for inflight in list(self._inflight_tasks):
-                tracked_id = None
-                for rid, t in list(self._request_tasks.items()):
+                for _rid, t in list(self._request_tasks.items()):
                     if t is inflight:
-                        tracked_id = rid
                         break
                 if inflight.done():
                     continue

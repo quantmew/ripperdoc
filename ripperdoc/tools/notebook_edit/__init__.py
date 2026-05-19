@@ -7,7 +7,6 @@ import json
 import os
 import random
 import string
-from textwrap import dedent
 from typing import AsyncGenerator, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
@@ -19,8 +18,9 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
-from ripperdoc.utils.log import get_logger
+from ripperdoc.tools.notebook_edit._prompt import NOTEBOOK_EDIT_PROMPT as NOTEBOOK_EDIT_DESCRIPTION
 from ripperdoc.utils.file_editing import resolve_input_path, safe_record_snapshot
+from ripperdoc.utils.log import get_logger
 
 
 logger = get_logger()
@@ -29,9 +29,6 @@ logger = get_logger()
 def _generate_cell_id() -> str:
     """Generate a short random cell id."""
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=12))
-
-
-from ripperdoc.tools.notebook_edit._prompt import NOTEBOOK_EDIT_PROMPT as NOTEBOOK_EDIT_DESCRIPTION
 
 
 class NotebookEditInput(BaseModel):

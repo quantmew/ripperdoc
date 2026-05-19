@@ -11,13 +11,11 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set
 
 from ripperdoc.utils.bash.shell_quote import try_parse_shell_command
 from ripperdoc.utils.bash.commands import (
-    split_command,
     extract_output_redirections,
-    get_command_subcommand_prefix,
 )
 from ripperdoc.security import PermissionResult
 

@@ -22,7 +22,6 @@ from ripperdoc.utils.lsp import (
     LspProtocolError,
     LspRequestError,
     ensure_lsp_manager,
-    uri_to_path,
 )
 from ripperdoc.tools.lsp._formatters import (
     format_code_actions,
@@ -31,7 +30,6 @@ from ripperdoc.tools.lsp._formatters import (
     format_hover,
     format_locations,
     format_workspace_symbols,
-    _symbol_kind_name,
 )
 from ripperdoc.tools.lsp._prompt import LSP_PROMPT as LSP_USAGE
 

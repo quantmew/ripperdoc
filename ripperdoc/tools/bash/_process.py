@@ -19,7 +19,6 @@ from ripperdoc.utils.shell.output_utils import (
 )
 from ripperdoc.utils.platform import IS_WINDOWS
 from ripperdoc.tools.bash._models import BashToolOutput
-from ripperdoc.tools.bash._output import build_background_launch_output, build_final_output
 
 logger = get_logger()
 

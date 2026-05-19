@@ -11,8 +11,7 @@ Cache key: (tool_name, tool.input_schema.model_json_schema() as JSON str)
 from __future__ import annotations
 
 import hashlib
-import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from ripperdoc.utils.log import get_logger
 

@@ -14,9 +14,9 @@ import subprocess
 import sys
 import time
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TextIO, Union, cast
+from typing import Any, Callable, Dict, List, Optional, TextIO, cast
 
 from ripperdoc import __version__
 from ripperdoc.services.mcp import config as _mcp_config_loader
@@ -50,7 +50,7 @@ _global_sdk_mcp_request_sender: (
 ) = None
 
 # Conditional MCP SDK import
-from ripperdoc.services.mcp import types as _mcp_types
+from ripperdoc.services.mcp import types as _mcp_types  # noqa: E402
 try:
     import mcp.types as mcp_types
     from mcp.client.session import ClientSession

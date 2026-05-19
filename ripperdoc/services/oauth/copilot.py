@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import urllib.parse
 import webbrowser
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple
 
 import httpx
 

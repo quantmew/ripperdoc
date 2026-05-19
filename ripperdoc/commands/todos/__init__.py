@@ -10,7 +10,6 @@ from ripperdoc.utils.collaboration.todo import (
     get_next_actionable,
     load_todos,
 )
-from ripperdoc.utils.collaboration.tasks import should_show_completed_tasks_in_ui
 
 from typing import Any
 from ripperdoc.commands.base import SlashCommand
@@ -20,11 +19,8 @@ def _handle(ui: Any, trimmed_arg: str) -> bool:
     console = ui.console
     todos = load_todos(ui.project_path)
     raw_arg = trimmed_arg.strip().lower()
-    tokens = set(raw_arg.split()) if raw_arg else set()
     next_only = raw_arg in ("next", "-n", "--next")
-    show_completed = should_show_completed_tasks_in_ui() or bool(
-        {"all", "--all", "completed", "--completed"} & tokens
-    )
+
 
     if not todos:
         console.print("  ⎿  [dim]No todos currently tracked[/]")

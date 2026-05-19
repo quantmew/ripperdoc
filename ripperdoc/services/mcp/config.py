@@ -8,21 +8,15 @@ supports plugin discovery, runtime overrides, and JSON/file parsing.
 from __future__ import annotations
 
 import json
-import os
 import shlex
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from ripperdoc import __version__
 from ripperdoc.services.mcp.types import (
-    ConfigScope,
-    McpResourceInfo,
     McpServerInfo,
-    McpToolInfo,
-    TransportType,
 )
 from ripperdoc.services.plugins import discover_plugins, expand_plugin_root_vars
-from ripperdoc.utils.filesystem.config_paths import config_dir_for_scope, config_file_for_scope
+from ripperdoc.utils.filesystem.config_paths import config_file_for_scope
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

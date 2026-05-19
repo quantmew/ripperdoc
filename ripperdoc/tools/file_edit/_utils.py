@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Optional
 
 # Unicode curly/smart quote to ASCII mapping

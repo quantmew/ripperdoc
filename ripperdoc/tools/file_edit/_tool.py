@@ -5,10 +5,9 @@ Allows the AI to edit files by replacing text.
 
 from __future__ import annotations
 
-import contextlib
 import os
 from pathlib import Path
-from typing import AsyncGenerator, Generator, List, Optional, TextIO
+from typing import AsyncGenerator, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -21,11 +20,9 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.platform import HAS_FCNTL
 from ripperdoc.utils.filesystem.path_ignore import check_path_for_tool
 from ripperdoc.utils.file_editing import (
     atomic_write_with_fallback,
-    file_lock,
     open_locked_file,
     safe_record_snapshot,
     select_write_encoding,
@@ -35,7 +32,6 @@ from ripperdoc.tools.file_edit._prompt import get_edit_prompt
 from ripperdoc.tools.file_edit._utils import (
     _normalize_quotes,
     detect_edit_read_encoding,
-    determine_edit_encoding,
     validate_file_size,
 )
 

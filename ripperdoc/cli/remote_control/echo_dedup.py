@@ -108,11 +108,6 @@ def handle_ingress_message(
 
     # control_request from the server (initialize, set_model, can_use_tool).
     if is_sdk_control_request(parsed):
-        request = parsed.get("request")
-        if isinstance(request, dict):
-            subtype = str(request.get("subtype") or "")
-        else:
-            subtype = ""
         if on_control_request is not None:
             on_control_request(parsed)
         return

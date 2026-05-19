@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import sys
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Tuple, Union, cast
+from typing import Any, Iterable, List, Optional, Tuple, cast
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, merge_completers

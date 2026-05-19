@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 

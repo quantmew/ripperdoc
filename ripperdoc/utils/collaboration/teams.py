@@ -15,7 +15,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Literal, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterator, List, Literal, Optional, Sequence, Tuple
 from uuid import uuid4
 from weakref import WeakSet
 

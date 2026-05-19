@@ -9,7 +9,6 @@ import pytest
 
 from ripperdoc.core.config import ModelProfile, ProtocolType
 from ripperdoc.core.hooks.manager import hook_manager
-from ripperdoc.core.tool_defaults import get_default_tools
 from ripperdoc.protocol.stdio import handler as handler_module
 from ripperdoc.protocol.stdio import handler_config, handler_query, handler_session
 from ripperdoc.utils.messaging.messages import create_assistant_message, create_progress_message

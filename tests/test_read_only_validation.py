@@ -1,11 +1,9 @@
 """Tests for read-only command validation."""
-import pytest
 
 from ripperdoc.tools.bash.read_only_validation import (
     is_command_read_only,
     is_command_safe_via_flag_parsing,
     contains_unquoted_expansion,
-    check_read_only_constraints,
 )
 
 

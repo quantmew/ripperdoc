@@ -6,8 +6,8 @@ Extracts heredocs before parsing to avoid shell-quote bugs.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Tuple
 
 
 @dataclass

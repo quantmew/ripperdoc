@@ -23,7 +23,6 @@ from ripperdoc.core.tool import (
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.tools.grep._utils import (
-    MAX_GREP_OUTPUT_CHARS,
     _grep_supports_pcre,
     _normalize_glob_for_grep,
     _parse_content_line,

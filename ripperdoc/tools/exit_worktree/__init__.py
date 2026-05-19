@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
@@ -64,7 +63,7 @@ async def _count_uncommitted_files(worktree_path: Path) -> int:
         )
         stdout, _ = await process.communicate()
         if process.returncode == 0:
-            lines = [l for l in stdout.decode("utf-8", errors="replace").split("\n") if l.strip()]
+            lines = [line for line in stdout.decode("utf-8", errors="replace").split("\n") if line.strip()]
             return len(lines)
     except (OSError, FileNotFoundError):
         pass

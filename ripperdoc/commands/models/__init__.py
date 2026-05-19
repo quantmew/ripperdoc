@@ -1,6 +1,6 @@
 import sys
 import textwrap
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 from rich import box
 from rich.layout import Layout

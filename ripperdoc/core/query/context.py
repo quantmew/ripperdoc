@@ -1,6 +1,5 @@
 """Query context and tool registry helpers."""
 
-import asyncio
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 

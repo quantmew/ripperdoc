@@ -9,7 +9,7 @@ Strictly follows the reference McpAuthTool.ts pattern:
 
 from __future__ import annotations
 
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import AsyncGenerator, Optional
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +18,6 @@ from ripperdoc.core.tool import (
     ToolUseContext,
     ToolResult,
     ToolOutput,
-    ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.mcp import McpServerInfo

@@ -13,7 +13,7 @@ Forked agents:
 from __future__ import annotations
 
 import os
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Sequence
 from uuid import uuid4
 
 from ripperdoc.utils.log import get_logger
@@ -44,7 +44,6 @@ def build_fork_messages(
     This preserves the parent's cache prefix while giving the fork its own directive.
     """
     from ripperdoc.utils.messaging.messages import create_user_message
-    from ripperdoc.utils.messaging.types import AssistantMessage
 
     # Find the last assistant message (the one with tool_use blocks)
     last_assistant = None

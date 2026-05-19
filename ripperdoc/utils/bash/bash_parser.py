@@ -5,7 +5,7 @@ Provides the tree-sitter bash grammar singleton and SHELL_KEYWORDS constant.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ripperdoc.utils.log import get_logger
 

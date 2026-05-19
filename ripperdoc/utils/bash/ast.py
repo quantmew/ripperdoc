@@ -13,9 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 from ripperdoc.utils.bash.node import Node, PARSE_ABORTED, parse_command_raw
-from ripperdoc.utils.bash.bash_parser import get_bash_parser, SHELL_KEYWORDS
-from ripperdoc.utils.bash.shell_quote import try_parse_shell_command
-from ripperdoc.utils.bash.tree_sitter_analysis import TreeSitterAnalysis, analyze_command
+from ripperdoc.utils.bash.bash_parser import get_bash_parser
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()

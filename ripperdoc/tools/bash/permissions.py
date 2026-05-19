@@ -13,18 +13,14 @@ Provides the full bash_tool_has_permission() pipeline:
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
-from ripperdoc.utils.bash.commands import split_command, get_command_subcommand_prefix
+from ripperdoc.utils.bash.commands import split_command
 from ripperdoc.utils.bash.ast import parse_for_security_from_ast, check_semantics
-from ripperdoc.utils.bash.parsed_command import ParsedCommand
-from ripperdoc.security import PermissionResult, bash_command_is_safe
+from ripperdoc.security import PermissionResult
 from ripperdoc.utils.permissions.shell_rule_matching import (
     parse_permission_rule,
     match_wildcard_pattern,
-    permission_rule_extract_prefix,
-    suggestion_for_exact_command,
-    suggestion_for_prefix,
 )
 from ripperdoc.tools.bash.command_helpers import (
     check_command_operator_permissions,
@@ -33,15 +29,11 @@ from ripperdoc.tools.bash.command_helpers import (
 )
 from ripperdoc.tools.bash.read_only_validation import (
     check_read_only_constraints,
-    is_command_read_only,
-    command_has_any_git,
 )
 from ripperdoc.tools.bash.sed_validation import check_sed_constraints
 from ripperdoc.tools.bash.mode_validation import check_permission_mode
 from ripperdoc.tools.bash.path_validation import check_path_constraints
-from ripperdoc.tools.bash.sandbox_decision import should_use_sandbox
 from ripperdoc.utils.filesystem.safe_get_cwd import safe_get_cwd
-from ripperdoc.utils.shell.sandbox_utils import is_sandbox_available
 
 
 # ============================================================================
@@ -173,7 +165,7 @@ def strip_comment_lines(command: str) -> str:
         Command with comment lines removed.
     """
     lines = command.split("\n")
-    non_comment = [l for l in lines if l.strip() and not l.strip().startswith("#")]
+    non_comment = [line for line in lines if line.strip() and not line.strip().startswith("#")]
     if not non_comment:
         return command
     return "\n".join(non_comment)
@@ -540,8 +532,6 @@ async def bash_tool_has_permission(
     # no hidden substitutions) or 'too-complex' — which tells us whether
     # splitCommand's output can be trusted.
     # ======================================================================
-    ast_root: Any = None
-    ast_parse_succeeded: bool = False
 
     from ripperdoc.utils.bash.shell_quote import try_parse_shell_command
 
@@ -567,8 +557,6 @@ async def bash_tool_has_permission(
 
     if ast_result["kind"] == "simple":
         ast_result = check_semantics(command, ast_result)
-        ast_parse_succeeded = True
-        ast_commands = ast_result.get("commands", [])
 
     if ast_result["kind"] == "parse-unavailable":
         # Legacy shell-quote pre-check (tree-sitter unavailable)

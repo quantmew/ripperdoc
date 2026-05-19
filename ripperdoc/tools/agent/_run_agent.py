@@ -38,7 +38,6 @@ from ripperdoc.tools.agent._agent_utils import (
     extract_text,
     summarize_tool_input,
 )
-from ripperdoc.tools.agent._constants import ONE_SHOT_BUILTIN_AGENT_TYPES
 
 logger = get_logger()
 

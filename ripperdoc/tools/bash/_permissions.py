@@ -6,11 +6,10 @@ permission pipeline.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 from ripperdoc.tools.bash._models import BashToolInput
 from ripperdoc.tools.bash.permissions import bash_tool_has_permission
-from ripperdoc.tools.bash.read_only_validation import is_command_read_only
 from ripperdoc.security import PermissionResult
 
 

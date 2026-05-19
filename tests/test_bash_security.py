@@ -1,5 +1,4 @@
 """Tests for bash security detection."""
-import pytest
 
 from ripperdoc.security import bash_command_is_safe, bash_command_is_safe_async
 

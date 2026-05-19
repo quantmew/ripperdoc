@@ -13,8 +13,7 @@ import os
 import sys
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from ripperdoc.utils.log import get_logger

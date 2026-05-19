@@ -16,7 +16,6 @@ from ripperdoc.utils.messaging.messages import (
 
 from ripperdoc.tools.agent._constants import (
     ALL_AGENT_DISALLOWED_TOOLS,
-    ASYNC_AGENT_ALLOWED_TOOLS,
     CUSTOM_AGENT_DISALLOWED_TOOLS,
 )
 

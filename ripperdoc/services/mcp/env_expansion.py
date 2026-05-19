@@ -5,7 +5,7 @@ Mirrors reference: services/mcp/envExpansion.ts
 
 import os
 import re
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 
 def expand_env_vars_in_string(value: str) -> Tuple[str, List[str]]:

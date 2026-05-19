@@ -10,12 +10,10 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ripperdoc.utils.bash.parsed_command import (
-    IParsedCommand,
     ParsedCommand,
-    RegexParsedCommand_DEPRECATED,
     build_parsed_command_from_root,
 )
-from ripperdoc.utils.bash.node import Node, PARSE_ABORTED
+from ripperdoc.utils.bash.node import PARSE_ABORTED
 from ripperdoc.utils.bash.commands import split_command, split_command_with_operators
 from ripperdoc.utils.bash.shell_quote import try_parse_shell_command
 from ripperdoc.security import PermissionResult

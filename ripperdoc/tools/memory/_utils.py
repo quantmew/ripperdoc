@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.memory import AUTO_MEMORY_FILE_NAME, auto_memory_directory_path
+from ripperdoc.utils.memory import auto_memory_directory_path
 
 logger = get_logger()
 

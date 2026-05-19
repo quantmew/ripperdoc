@@ -11,15 +11,15 @@ Provides the unified read-only constraint checking system with:
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 
 from ripperdoc.utils.bash.shell_quote import try_parse_shell_command
 from ripperdoc.utils.bash.commands import (
     split_command,
     extract_output_redirections,
-    get_command_subcommand_prefix,
 )
 from ripperdoc.security import PermissionResult, bash_command_is_safe
+from ripperdoc.tools.bash.sed_validation import sed_command_is_allowed_by_allowlist
 from ripperdoc.utils.permissions.read_only_command_validation import (
     CommandConfig,
     FLAG_ARG_NONE, FLAG_ARG_NUMBER, FLAG_ARG_STRING, FLAG_ARG_CHAR,
@@ -174,9 +174,6 @@ COMMAND_ALLOWLIST["grep"] = CommandConfig(safe_flags={
     "--line-buffered": FLAG_ARG_NONE,
     "--help": FLAG_ARG_NONE, "-V": FLAG_ARG_NONE, "--version": FLAG_ARG_NONE,
 })
-
-# sed (with additional callback)
-from ripperdoc.tools.bash.sed_validation import sed_command_is_allowed_by_allowlist
 
 COMMAND_ALLOWLIST["sed"] = CommandConfig(
     safe_flags={

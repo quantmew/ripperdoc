@@ -2,7 +2,7 @@
 
 import asyncio
 import inspect
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Union
 
 from ripperdoc.core.permission_engine import PermissionResult
 from ripperdoc.core.tool import Tool

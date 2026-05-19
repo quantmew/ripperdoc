@@ -11,7 +11,6 @@ from ripperdoc.core.tool import (
     ToolOutput,
     ToolResult,
     ToolUseContext,
-    ValidationResult,
 )
 from ripperdoc.tools.team_delete._prompt import TEAM_DELETE_PROMPT
 from ripperdoc.utils.collaboration.team_context import (

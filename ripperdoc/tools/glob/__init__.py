@@ -15,12 +15,11 @@ from ripperdoc.core.tool import (
     ToolUseExample,
     ValidationResult,
 )
+from ripperdoc.tools.glob._prompt import GLOB_PROMPT as GLOB_USAGE
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
 
-
-from ripperdoc.tools.glob._prompt import GLOB_PROMPT as GLOB_USAGE
 
 RESULT_LIMIT = 100
 

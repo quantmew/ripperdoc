@@ -8,7 +8,7 @@ is called.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
+from typing import Awaitable, Callable, Dict, List, Optional, Union
 
 from ripperdoc.utils.log import get_logger
 

@@ -19,13 +19,7 @@ from ripperdoc.core.tool import (
     ValidationResult,
 )
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.shell.bash_constants import (
-    get_bash_default_timeout_ms,
-    get_bash_max_timeout_ms,
-    get_bash_max_output_length,
-)
 from ripperdoc.utils.shell.exit_code_handlers import IGNORED_COMMANDS
-from ripperdoc.utils.shell.output_utils import format_duration, get_last_n_lines, sanitize_output
 from ripperdoc.utils.shell.sandbox_utils import is_sandbox_available
 from ripperdoc.tools.bash.read_only_validation import is_command_read_only
 from ripperdoc.utils.shell.shell_utils import build_shell_command, find_suitable_shell
@@ -37,7 +31,6 @@ from ripperdoc.tools.bash._models import (
     BashToolOutput,
     DEFAULT_TIMEOUT_MS,
     MAX_BASH_TIMEOUT_MS,
-    MAX_OUTPUT_CHARS,
 )
 from ripperdoc.tools.bash._sandbox import setup_sandbox
 from ripperdoc.tools.bash._permissions import (
@@ -52,11 +45,6 @@ from ripperdoc.tools.bash._output import (
 )
 from ripperdoc.tools.bash._process import (
     execute_foreground_process,
-    force_kill_process,
-    drain_stream,
-    KILL_GRACE_SECONDS,
-    PROGRESS_INTERVAL_SECONDS,
-    STREAM_READ_CHUNK_SIZE,
 )
 
 logger = get_logger()

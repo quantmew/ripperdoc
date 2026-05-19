@@ -12,11 +12,9 @@ from typing import TYPE_CHECKING, Any, List, Literal, Optional
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
 
 from ripperdoc.utils.log import get_logger
 
-from .utils import build_connect_url
 
 if TYPE_CHECKING:
     from .process import BridgeActivity
@@ -58,7 +56,7 @@ class BridgeStatusDisplay:
         self._environment_id = environment_id
 
         lines = [
-            f"[bold]Remote Control bridge started[/bold]",
+            "[bold]Remote Control bridge started[/bold]",
             f"  Workspace: {config.directory}",
             f"  Environment: {environment_id}",
             f"  Connect URL: {connect_url}",

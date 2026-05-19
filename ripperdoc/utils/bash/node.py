@@ -6,7 +6,7 @@ Provides a Pythonic wrapper around the tree-sitter library for bash parsing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Union
+from typing import Any, List, Union
 
 
 # Sentinel value indicating that parsing was aborted (e.g., timeout).

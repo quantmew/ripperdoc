@@ -75,13 +75,13 @@ from ripperdoc.utils.messaging.messages import (
     create_assistant_message,
     create_hook_additional_context_message,
     create_hook_notice_message,
-    create_plan_mode_attachment_message,
     create_progress_message,
     create_user_message,
     normalize_messages_for_api,
     INTERRUPT_MESSAGE,
     INTERRUPT_MESSAGE_FOR_TOOL_USE,
 )
+from ripperdoc.utils.messaging.attachments import create_plan_mode_attachment_message
 
 from .context import QueryContext, _apply_skill_context_updates
 from .errors import _format_changed_file_notice

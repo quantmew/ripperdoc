@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +458,6 @@ __all__ = [
     "contains_vulnerable_unc_path",
     "validate_flags",
     "GIT_READ_ONLY_COMMANDS",
-    "GH_READ_ONLY_COMMANDS",
     "DOCKER_READ_ONLY_COMMANDS",
     "RIPGREP_READ_ONLY_COMMANDS",
     "PYRIGHT_READ_ONLY_COMMANDS",

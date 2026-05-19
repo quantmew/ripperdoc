@@ -6,6 +6,12 @@ import itertools
 import os
 from typing import List, Optional, Tuple
 
+from charset_normalizer import from_bytes
+
+from ripperdoc.utils.log import get_logger
+
+logger = get_logger()
+
 
 def is_compact_line_prefix_enabled() -> bool:
     return os.getenv("RIPPERDOC_COMPACT_LINE_PREFIX_KILLSWITCH", "").lower() not in {
@@ -32,12 +38,6 @@ def strip_line_number_prefix(line: str) -> str:
 
     match = re.match(r"^\s*\d+[→\t](.*)$", line)
     return match.group(1) if match else line
-
-from charset_normalizer import from_bytes
-
-from ripperdoc.utils.log import get_logger
-
-logger = get_logger()
 
 
 def detect_file_encoding(file_path: str, max_bytes: Optional[int] = None) -> Tuple[Optional[str], float]:

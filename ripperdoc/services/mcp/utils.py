@@ -7,7 +7,7 @@ Provides instructions formatting, token estimation, and resource lookup.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from ripperdoc.services.mcp.types import McpResourceInfo, McpServerInfo
 from ripperdoc.utils.token_estimation import estimate_tokens

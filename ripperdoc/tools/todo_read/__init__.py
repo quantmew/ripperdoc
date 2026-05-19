@@ -16,7 +16,6 @@ from ripperdoc.core.tool import (
 from ripperdoc.utils.log import get_logger
 from ripperdoc.utils.collaboration.todo import (
     TodoItem,
-    TodoPriority,
     TodoStatus,
     format_todo_lines,
     format_todo_summary,

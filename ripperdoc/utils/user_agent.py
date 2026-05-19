@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Literal, Optional, Set, Union
+from typing import Any, Dict, Literal, Optional, Set
 
 from ripperdoc import __version__
 

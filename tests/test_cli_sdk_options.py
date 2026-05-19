@@ -15,7 +15,6 @@ from types import SimpleNamespace
 
 from ripperdoc.cli import cli as cli_module
 from ripperdoc.protocol.stdio import command as stdio_command
-from ripperdoc.core.tool_defaults import get_default_tools
 
 
 def test_cli_forwards_hidden_sdk_options_to_stdio_defaults(monkeypatch, tmp_path):

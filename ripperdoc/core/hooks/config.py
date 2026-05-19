@@ -47,11 +47,10 @@ from ripperdoc.core.hooks.events import HookEvent
 from ripperdoc.services.managed_settings import load_managed_settings
 from ripperdoc.services.plugins import discover_plugins, expand_plugin_root_vars
 from ripperdoc.utils.filesystem.config_paths import config_file_for_scope
+from ripperdoc.constants.hooks import DEFAULT_HOOK_TIMEOUT
 from ripperdoc.utils.log import get_logger
 
 logger = get_logger()
-
-from ripperdoc.constants.hooks import DEFAULT_HOOK_TIMEOUT
 
 # Re-export for backward compatibility
 __all__ = ["DEFAULT_HOOK_TIMEOUT"]

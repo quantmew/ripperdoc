@@ -13,7 +13,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Union
+from typing import Any, Dict, Iterable, List, Literal, Optional, Set
 
 from ripperdoc.core.agents import (
     ASK_USER_QUESTION_TOOL_NAME,
@@ -30,11 +30,6 @@ from ripperdoc.core.agents import (
 )
 from ripperdoc.core.system_prompt_registry import (
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-    SystemPromptSection,
-    clear_system_prompt_sections,
-    resolve_system_prompt_sections_async,
-    DANGEROUS_uncached_system_prompt_section,
-    system_prompt_section,
 )
 from ripperdoc.core.tool import Tool
 from ripperdoc.services.output_styles import resolve_output_style, style_adherence_reminder
@@ -787,9 +782,6 @@ def build_system_prompt(
 
             You have access to the {ask_tool_name} tool to ask the user questions when you need clarification, want to validate assumptions, or need to make a decision you're unsure about. When presenting options or plans, do not include time estimates—focus on what each option involves."""
         ).strip()
-
-    # Hooks section (also used in system section above via get_hooks_section())
-    hooks_block = ""  # Hooks note already included in get_system_section()
 
     # MCP instructions
     mcp_section = ""

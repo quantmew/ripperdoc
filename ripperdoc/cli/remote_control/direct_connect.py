@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from ripperdoc.utils.log import get_logger
 
@@ -124,7 +124,7 @@ class DirectConnectSessionManager:
                         else:
                             # Send error for unsupported subtypes
                             request_id = str(parsed.get("request_id") or "")
-                            self._send_error_response(request_id, f"Unsupported control request subtype")
+                            self._send_error_response(request_id, "Unsupported control request subtype")
                         continue
 
                     # Forward non-control messages
