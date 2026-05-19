@@ -101,6 +101,7 @@ from ripperdoc.utils.collaboration.task_notifications import (
     parse_task_notification,
 )
 from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
+from ripperdoc.utils.collaboration.teams import cleanup_session_teams
 from ripperdoc.utils.sessions.session_usage import rebuild_session_usage
 from ripperdoc.utils.collaboration.worktree import (
     cleanup_worktree_sessions,
@@ -2372,6 +2373,7 @@ class RichUI:
                         console.print(traceback.format_exc())
         finally:
             set_runtime_task_scope(session_id=None)
+            cleanup_session_teams()
             # Cancel any running tasks before shutdown
             if self.query_context:
                 abort_controller = getattr(self.query_context, "abort_controller", None)

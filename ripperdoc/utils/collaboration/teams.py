@@ -1002,6 +1002,7 @@ def cleanup_session_teams() -> List[str]:
         try:
             cleanup_team_directories(name)
             unregister_team_for_session_cleanup(name)
+            clear_active_team_name(name)
             cleaned.append(name)
         except Exception as exc:
             logger.warning(
@@ -1010,6 +1011,9 @@ def cleanup_session_teams() -> List[str]:
                 type(exc).__name__,
                 exc,
             )
+    # Clean up in-memory leader team name (defensive, prevents stale state)
+    from ripperdoc.utils.collaboration.tasks import clear_leader_team_name
+    clear_leader_team_name()
     return cleaned
 
 

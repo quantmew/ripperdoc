@@ -24,6 +24,7 @@ from ripperdoc.utils.collaboration.task_notifications import (
     parse_task_notification,
 )
 from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
+from ripperdoc.utils.collaboration.teams import cleanup_session_teams
 from ripperdoc.utils.collaboration.worktree import consume_session_worktrees, list_session_worktrees
 
 
@@ -588,6 +589,16 @@ class StdioRuntimeMixin:
 
         if not self._session_started:
             return
+
+        # Clean up teams created during this session (aligns with Claude Code)
+        try:
+            cleanup_session_teams()
+        except Exception as exc:
+            logger.warning(
+                "[stdio] Session team cleanup failed: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
 
         duration_seconds = None
         if self._session_start_time is not None:

@@ -47,6 +47,7 @@ from ripperdoc.utils.filesystem.git_utils import get_git_root
 from ripperdoc.utils.log import configure_debug_logging, enable_session_file_logging, get_logger
 from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
+from ripperdoc.utils.collaboration.teams import cleanup_session_teams
 from ripperdoc.utils.collaboration.worktree import (
     WorktreeSession,
     create_task_worktree,
@@ -891,6 +892,7 @@ def cli(
             return
     finally:
         set_runtime_task_scope(session_id=None)
+        cleanup_session_teams()
 
 
 cli.add_command(config_cmd, name="config")

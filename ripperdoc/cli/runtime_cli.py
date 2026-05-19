@@ -46,6 +46,7 @@ from ripperdoc.utils.messaging.messages import (
 )
 from ripperdoc.utils.sessions.session_history import SessionHistory
 from ripperdoc.utils.collaboration.tasks import set_runtime_task_scope
+from ripperdoc.utils.collaboration.teams import cleanup_session_teams
 from ripperdoc.utils.collaboration.worktree import (
     cleanup_worktree_sessions,
     consume_session_worktrees,
@@ -488,6 +489,7 @@ async def run_query(
         )
     finally:
         set_runtime_task_scope(session_id=None)
+        cleanup_session_teams()
         duration = max(time.time() - session_start_time, 0.0)
         try:
             await hook_manager.run_session_end_async(

@@ -922,38 +922,27 @@ def format_task_summary(tasks: Sequence[TaskItem]) -> str:
     )
 
 
-def _leader_team_path() -> Path:
-    return _config_root() / "tasks" / ".leader_team"
+_LEADER_TEAM_NAME: Optional[str] = None
 
 
 def set_leader_team_name(team_name: str) -> None:
-    """Persist the leader's active team name for task list resolution."""
+    """Set the leader's active team name (in-memory, session-scoped)."""
+    global _LEADER_TEAM_NAME
     clean = (team_name or "").strip()
     if not clean:
         return
-    path = _leader_team_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(clean + "\n", encoding="utf-8")
+    _LEADER_TEAM_NAME = clean
 
 
 def clear_leader_team_name() -> None:
-    """Remove the leader team name marker."""
-    path = _leader_team_path()
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    """Clear the leader team name."""
+    global _LEADER_TEAM_NAME
+    _LEADER_TEAM_NAME = None
 
 
 def get_leader_team_name() -> Optional[str]:
-    """Read the persisted leader team name, if any."""
-    path = _leader_team_path()
-    if not path.exists():
-        return None
-    try:
-        return path.read_text(encoding="utf-8").strip() or None
-    except OSError:
-        return None
+    """Return the in-memory leader team name, if any."""
+    return _LEADER_TEAM_NAME
 
 
 def reset_task_list(task_list_id: str) -> None:
