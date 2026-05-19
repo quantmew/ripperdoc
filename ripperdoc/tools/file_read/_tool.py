@@ -280,26 +280,34 @@ and limit to read only a portion of the file."""
                 return
 
             # --- Deduplication cache check ---
+            # Only suppress re-reads when the same range was previously read.
             file_state_cache = getattr(context, "file_state_cache", {})
             file_snapshot = file_state_cache.get(abs_file_path)
             if file_snapshot:
-                try:
-                    current_mtime = os.path.getmtime(abs_file_path)
-                    if current_mtime == file_snapshot.timestamp:
-                        output = FileReadToolOutput(
-                            content="[File unchanged since last read]",
-                            file_path=input_data.file_path,
-                            line_count=0,
-                            offset=0,
-                            limit=None,
-                        )
-                        yield ToolResult(
-                            data=output,
-                            result_for_assistant=output.content,
-                        )
-                        return
-                except OSError:
-                    pass
+                requested_offset = input_data.offset or 0
+                requested_limit = input_data.limit
+                same_range = (
+                    file_snapshot.offset == requested_offset
+                    and file_snapshot.limit == requested_limit
+                )
+                if same_range:
+                    try:
+                        current_mtime = os.path.getmtime(abs_file_path)
+                        if current_mtime == file_snapshot.timestamp:
+                            output = FileReadToolOutput(
+                                content="[File unchanged since last read]",
+                                file_path=input_data.file_path,
+                                line_count=0,
+                                offset=0,
+                                limit=None,
+                            )
+                            yield ToolResult(
+                                data=output,
+                                result_for_assistant=output.content,
+                            )
+                            return
+                    except OSError:
+                        pass
 
             # --- Regular text file reading ---
             file_size = os.path.getsize(input_data.file_path)
