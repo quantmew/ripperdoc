@@ -27,13 +27,13 @@ async def test_memory_tool_create_and_view_file(tmp_path: Path) -> None:
     tool = MemoryTool(memory_dir=tmp_path / "memories")
 
     create_validation = await tool.validate_input(
-        MemoryToolInput(command="create", path="facts.md", file_text="alpha\nbeta\n")
+        MemoryToolInput(command="create", path="facts.md", content="alpha\nbeta\n")
     )
     assert create_validation.result is True
 
     created = await _run_memory_tool(
         tool,
-        {"command": "create", "path": "facts.md", "file_text": "alpha\nbeta\n"},
+        {"command": "create", "path": "facts.md", "content": "alpha\nbeta\n"},
     )
     assert created.success is True
 
@@ -101,14 +101,14 @@ async def test_memory_tool_insert_rename_delete(tmp_path: Path) -> None:
 
     inserted = await _run_memory_tool(
         tool,
-        {"command": "insert", "path": "facts.md", "insert_line": 2, "insert_text": "line2"},
+        {"command": "insert", "path": "facts.md", "insert_line": 2, "new_str": "line2"},
     )
     assert inserted.success is True
     assert (memory_dir / "facts.md").read_text(encoding="utf-8") == "line1\nline2\nline3\n"
 
     renamed = await _run_memory_tool(
         tool,
-        {"command": "rename", "old_path": "facts.md", "new_path": "topic/facts-renamed.md"},
+        {"command": "rename", "path": "facts.md", "new_path": "topic/facts-renamed.md"},
     )
     assert renamed.success is True
     assert (memory_dir / "topic" / "facts-renamed.md").exists()

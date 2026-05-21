@@ -72,24 +72,7 @@ class FileEditTool(Tool[FileEditToolInput, FileEditToolOutput]):
 
     async def description(self) -> str:
         return """Edit a file by replacing exact string matches. The old_string must
-match exactly (including whitespace and indentation).
-
-Input examples:
-1. Rename a function definition once
-{
-  "file_path": "/repo/src/app.py",
-  "old_string": "def old_name(",
-  "new_string": "def new_name(",
-  "replace_all": false
-}
-
-2. Replace every occurrence of a constant across a file
-{
-  "file_path": "/repo/src/config.ts",
-  "old_string": "API_BASE = \\"http://localhost\\"",
-  "new_string": "API_BASE = \\"https://api.example.com\\"",
-  "replace_all": true
-}"""
+match exactly (including whitespace and indentation)."""
 
     @property
     def input_schema(self) -> type[FileEditToolInput]:

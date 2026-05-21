@@ -64,9 +64,11 @@ async def test_enter_and_exit_plan_mode_tools_invoke_callbacks(tmp_path) -> None
     assert enter_outputs[-1].data.entered is True
     assert str(plan_file) in enter_outputs[-1].data.message
 
+    plan_file.write_text("step1", encoding="utf-8")
+
     exit_tool = ExitPlanModeTool()
     exit_outputs = [
-        item async for item in exit_tool.call(ExitPlanModeToolInput(plan="step1"), context)
+        item async for item in exit_tool.call(ExitPlanModeToolInput(), context)
     ]
     assert callbacks == ["enter", "exit"]
     assert exit_outputs

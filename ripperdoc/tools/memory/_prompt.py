@@ -12,5 +12,5 @@ Input examples:
 {
   "command": "create",
   "path": "patterns.md",
-  "file_text": "# Patterns\\n\\n- Prefer ripgrep for repository search.\\n"
+  "content": "# Patterns\\n\\n- Prefer ripgrep for repository search.\\n"
 }"""

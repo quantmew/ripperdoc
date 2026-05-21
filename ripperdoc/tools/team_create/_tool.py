@@ -7,7 +7,7 @@ import random
 import string
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 
 from ripperdoc.core.tool import (
     Tool,
@@ -71,17 +71,10 @@ def _generate_unique_team_name(provided_name: str) -> str:
 class TeamCreateInput(BaseModel):
     team_name: str
     description: Optional[str] = None
-    team_description: Optional[str] = None
     team_lead: Optional[str] = None
     agent_type: Optional[str] = None
     cwd: Optional[str] = None
     model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def _normalize_compat_fields(self) -> "TeamCreateInput":
-        if not self.description and self.team_description:
-            self.description = self.team_description
-        return self
 
 
 class TeamCreateOutput(BaseModel):

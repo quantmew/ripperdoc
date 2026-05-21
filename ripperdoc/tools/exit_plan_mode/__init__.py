@@ -63,15 +63,10 @@ EXIT_PLAN_MODE_PROMPT = dedent(
 
 
 class ExitPlanModeToolInput(BaseModel):
-    """Input for the ExitPlanMode tool."""
+    """Input for the ExitPlanMode tool.
 
-    plan: Optional[str] = Field(
-        default=None,
-        description=(
-            "Deprecated fallback. If omitted, ExitPlanMode will read the plan from the active "
-            "plan file path exposed by plan mode."
-        ),
-    )
+    This tool takes no input parameters - it simply requests to enter plan mode.
+    """
 
 
 class ExitPlanModeToolOutput(BaseModel):
@@ -121,9 +116,7 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         input_data: ExitPlanModeToolInput,
         context: Optional[ToolUseContext] = None,  # noqa: ARG002
     ) -> ValidationResult:
-        """Validate that plan exists either inline or in the active plan file."""
-        if input_data.plan and input_data.plan.strip():
-            return ValidationResult(result=True)
+        """Validate that the plan file exists and is non-empty."""
         plan_file_path = (context.plan_file_path if context else None) or ""
         if plan_file_path:
             try:
@@ -162,13 +155,7 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         verbose: bool = False,  # noqa: ARG002
     ) -> str:
         """Render the tool use message for display."""
-        plan = input_data.plan or ""
-        snippet = f"{plan[:77]}..." if len(plan) > 80 else plan
-        return (
-            f"Share plan for approval: {snippet}"
-            if snippet
-            else "Share plan file for approval"
-        )
+        return "Share plan file for approval"
 
     async def call(
         self,
@@ -180,8 +167,8 @@ class ExitPlanModeTool(Tool[ExitPlanModeToolInput, ExitPlanModeToolOutput]):
         approved = True
         selected_mode: Optional[str] = None
         clear_context = False
-        plan_text = (input_data.plan or "").strip()
-        if not plan_text and context.plan_file_path:
+        plan_text = ""
+        if context.plan_file_path:
             try:
                 plan_text = Path(context.plan_file_path).read_text(encoding="utf-8").strip()
             except (OSError, IOError, UnicodeDecodeError):

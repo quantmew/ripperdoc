@@ -47,20 +47,12 @@ class MemoryToolInput(BaseModel):
             "For command=view, omit path or use '.' to list memory files."
         ),
     )
-    old_path: Optional[str] = Field(
-        default=None,
-        description="Source path for command=rename (Anthropic memory command shape).",
-    )
     view_range: Optional[List[int]] = Field(
         default=None,
         description=(
             "Optional [start_line, end_line] inclusive line range for command=view "
             "(1-based indexing)."
         ),
-    )
-    file_text: Optional[str] = Field(
-        default=None,
-        description="File content for command=create (Anthropic memory command shape).",
     )
     content: Optional[str] = Field(
         default=None,
@@ -81,10 +73,6 @@ class MemoryToolInput(BaseModel):
             "1-based line number for command=insert. Inserts before this line; "
             "use line_count+1 to append."
         ),
-    )
-    insert_text: Optional[str] = Field(
-        default=None,
-        description="Text to insert for command=insert (Anthropic memory command shape).",
     )
     new_path: Optional[str] = Field(
         default=None,
@@ -158,7 +146,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
                 example={
                     "command": "create",
                     "path": "patterns.md",
-                    "file_text": "# Patterns\n\n- Prefer ripgrep for repository search.\n",
+                    "content": "# Patterns\n\n- Prefer ripgrep for repository search.\n",
                 },
             ),
             ToolUseExample(
@@ -178,7 +166,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
             "new_string": "new_str",
             "oldString": "old_str",
             "newString": "new_str",
-            "source_path": "old_path",
+            "source_path": "path",
             "target_path": "new_path",
             "line": "insert_line",
         }
@@ -189,11 +177,11 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
             "Use this tool to manage persistent memory files across sessions.\n\n"
             "Commands:\n"
             "- view: show a file's content, or list directory entries when path is omitted.\n"
-            "- create: create a new file with content (file_text).\n"
-            "- str_replace: replace exact text in a file.\n"
-            "- insert: insert text (insert_text) before a specific line number.\n"
+            "- create: create a new file with content.\n"
+            "- str_replace: replace exact text in a file (old_str -> new_str).\n"
+            "- insert: insert text (new_str) before a specific line number (insert_line).\n"
             "- delete: remove a file or subdirectory.\n"
-            "- rename: move/rename a file or subdirectory (old_path -> new_path).\n\n"
+            "- rename: move/rename a file or subdirectory (path -> new_path).\n\n"
             f"All paths are restricted to the memory directory: {mem_root}\n"
             f"Keep `{AUTO_MEMORY_FILE_NAME}` concise and use topic files for details."
         )
@@ -225,7 +213,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
                 if self._create_text(input_data) is None:
                     return ValidationResult(
                         result=False,
-                        message="command=create requires file_text (or content).",
+                        message="command=create requires content.",
                     )
 
             if input_data.command == "str_replace":
@@ -249,7 +237,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
                 if self._insert_text(input_data) is None:
                     return ValidationResult(
                         result=False,
-                        message="command=insert requires insert_text (or new_str).",
+                        message="command=insert requires new_str.",
                     )
 
             if input_data.command == "rename":
@@ -263,7 +251,7 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
                 if not source_path:
                     return ValidationResult(
                         result=False,
-                        message="command=rename requires old_path (or path).",
+                        message="command=rename requires path.",
                     )
 
             if input_data.command == "view" and input_data.view_range is not None:
@@ -335,18 +323,12 @@ class MemoryTool(Tool[MemoryToolInput, MemoryToolOutput]):
         return display_path(path, self._memory_root())
 
     def _path_for_command(self, input_data: MemoryToolInput) -> Optional[str]:
-        if input_data.command == "rename":
-            return input_data.old_path or input_data.path
         return input_data.path
 
     def _create_text(self, input_data: MemoryToolInput) -> Optional[str]:
-        if input_data.file_text is not None:
-            return input_data.file_text
         return input_data.content
 
     def _insert_text(self, input_data: MemoryToolInput) -> Optional[str]:
-        if input_data.insert_text is not None:
-            return input_data.insert_text
         return input_data.new_str
 
     def _view(self, input_data: MemoryToolInput) -> MemoryToolOutput:
