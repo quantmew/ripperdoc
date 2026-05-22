@@ -5,6 +5,26 @@ All notable changes to Ripperdoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-05-23
+
+### Added
+- **LLM input prediction** - Added LLM input prediction support
+
+### Changed
+- **Compaction improvements** - Deduplicated compaction summary logic and added streaming progress bars with progress cleanup
+- **Tool parameter cleanup** - Removed deprecated tool input fields and unified parameter naming
+- **Team cleanup behavior** - Clean up teams at session end and use in-memory leader team name
+- **Code quality cleanup** - Replaced wildcard imports with explicit imports, removed dead code, batched type hint fixes, and updated documentation
+
+### Fixed
+- **Adaptive Anthropic thinking** - Support adaptive Anthropic thinking behavior
+- **Messaging import compatibility** - Restore legacy import surface in the messaging module
+- **Read tool cache behavior** - Ensure Read tool dedup cache respects offset and limit
+- **Root bypass mode guard** - Reject `bypassPermissions` mode when running as root or sudo
+
+### Removed
+- **Deprecated tools and features** - Removed the built-in Memory tool, cron scheduling, PDF Read support, and related code paths
+
 ## [0.6.1] - 2026-05-19
 
 ### Added
