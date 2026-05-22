@@ -27,7 +27,6 @@ from ripperdoc.utils.messaging.message_utils import (
     build_anthropic_system_blocks,
 )
 from ripperdoc.services.providers.errors import ProviderMappedError, ProviderTimeoutError
-from ripperdoc.tools.memory import MemoryTool
 
 
 class _DummyInput(BaseModel):
@@ -213,16 +212,6 @@ def test_classify_anthropic_error_accepts_provider_mapped_errors() -> None:
     )
     assert code == "rate_limit"
     assert "Rate limit exceeded" in message
-
-
-@pytest.mark.asyncio
-async def test_build_anthropic_tool_schemas_uses_standard_memory_tool_shape(tmp_path) -> None:
-    memory_tool = MemoryTool(memory_dir=tmp_path / "memory")
-    schemas = await build_anthropic_tool_schemas([memory_tool])
-    assert len(schemas) == 1
-    schema = schemas[0]
-    assert schema["name"] == "Memory"
-    assert "input_schema" in schema
 
 
 @pytest.mark.asyncio

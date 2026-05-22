@@ -32,7 +32,6 @@ from ripperdoc.tools.enter_plan_mode import EnterPlanModeTool
 from ripperdoc.tools.enter_worktree import EnterWorktreeTool
 from ripperdoc.tools.exit_plan_mode import ExitPlanModeTool
 from ripperdoc.tools.exit_worktree import ExitWorktreeTool
-from ripperdoc.tools.memory import MemoryTool
 from ripperdoc.tools.agent import AgentTool
 from ripperdoc.tools.tool_search import ToolSearchTool
 from ripperdoc.tools.sleep import SleepTool
@@ -79,7 +78,6 @@ BUILTIN_TOOL_NAMES = [
     "EnterWorktree",
     "ExitPlanMode",
     "ExitWorktree",
-    "Memory",
     "ToolSearch",
     "ListMcpServers",
     "ListMcpResources",
@@ -147,7 +145,6 @@ def _build_base_tools() -> List[Tool[Any, Any]]:
         EnterPlanModeTool(),
         EnterWorktreeTool(),
         ExitPlanModeTool(),
-        MemoryTool(),
         ToolSearchTool(),
         ExitWorktreeTool(),
         SleepTool(),

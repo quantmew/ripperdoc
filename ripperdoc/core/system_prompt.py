@@ -292,11 +292,6 @@ def get_using_tools_section(
             "- Use the ToolSearch tool to discover and activate deferred or MCP tools. Keep searches focused and load only 3-5 relevant tools."
         )
 
-    if "Memory" in tool_names:
-        lines.append(
-            "- Use the Memory tool for persistent cross-session memory files. Prefer it over generic file tools when saving, editing, or deleting memory notes."
-        )
-
     file_tool_hints: List[str] = []
     if read_tool_name in tool_names:
         file_tool_hints.append(f"{read_tool_name} for reading files")
