@@ -15,7 +15,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
   <a href="https://pypi.org/project/ripperdoc/">
-    <img src="https://img.shields.io/badge/version-0.6.1-orange.svg">
+    <img src="https://img.shields.io/badge/version-0.6.2-orange.svg">
   </a>
 </p>
 
@@ -26,7 +26,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
 ## Ripperdoc 的独特之处?
 
 - **🔌 模型无关** - 支持 Anthropic Claude、OpenAI、Google Gemini、DeepSeek 以及任何 OpenAI 兼容 API
-- **🎣 可扩展架构** - 34 内置工具,配备 hooks 系统用于自定义工作流
+- **🎣 可扩展架构** - 30+ 内置工具,配备 hooks 系统用于自定义工作流
 - **🤖 多代理协调** - 内置任务图和团队协作,支持复杂工作流
 - **📚 技能系统** - 按需加载能力包(PDF、Excel、PowerPoint、自定义语言)
 - **🔌 MCP 集成** - 一流支持的模型上下文协议服务器
@@ -39,7 +39,7 @@ _开源、可扩展的 AI 编程代理，在终端中运行_
 ## 核心功能
 
 ### 🛠️ 强大的工具系统
-- **内置工具** - 文件操作(Read、Write、Edit、NotebookEdit)、代码搜索(Grep、Glob、LSP、LS)、shell 执行(Bash 支持前台/后台模式)、子代理委托、任务图、记忆等
+- **内置工具** - 文件操作(Read、Write、Edit、NotebookEdit)、代码搜索(Grep、Glob、LSP、LS)、shell 执行(Bash 支持前台/后台模式)、子代理委托、任务图、MCP 集成等
 - **Jupyter 支持** - 直接编辑 .ipynb 笔记本,支持单元格操作
 - **后台任务** - 异步运行命令,实时监控和状态跟踪
 
@@ -125,6 +125,9 @@ ripperdoc [OPTIONS]
 - `RIPPERDOC_MODEL` - 默认使用的模型
 - `RIPPERDOC_TEMPERATURE` - 默认温度(0.0-2.0)
 - `RIPPERDOC_API_KEY` - 已配置提供商的 API 密钥
+- `RIPPERDOC_CONFIG_DIR` - 覆盖用户级 Ripperdoc 配置/数据存储位置
+- `RIPPERDOC_AUTOCOMPACT_PCT_OVERRIDE` - 覆盖自动压缩触发百分比(1-100,不超过默认阈值)
+- `RIPPERDOC_TMPDIR` - 覆盖内部临时目录根路径; Ripperdoc 使用 `<此路径>/ripperdoc/`
 - `RIPPERDOC_EXIT_AFTER_STOP_DELAY` - 在 stdio/SDK 模式下,运行时进入空闲后等待指定毫秒数自动退出(仅正整数生效)
 - `RIPPERDOC_REMOTE_CONTROL_BASE_URL` - Remote Control 控制面基础地址(用于 `ripperdoc remote-control`)
 - `RIPPERDOC_REMOTE_CONTROL_ACCESS_TOKEN` - Remote Control 控制面 Bearer Token
@@ -324,7 +327,7 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - **核心层** (`ripperdoc/core/`) - 代理定义、配置、hooks、提供商
 - **工具层** (`ripperdoc/tools/`) - 内置工具,用于文件操作、代码分析、编排等
 - **协议层** (`ripperdoc/protocol/`) - 用于 SDK 通信的 Stdio 协议处理器
-- **工具层** (`ripperdoc/utils/`) - 用于日志记录、权限、文件操作的共享工具
+- **实用层** (`ripperdoc/utils/`) - 用于日志记录、权限、文件操作的共享工具
 
 ### 工具类别
 
@@ -359,15 +362,13 @@ Ripperdoc 提供强大的斜杠命令用于会话管理:
 - `Skill` - 按需加载技能包
 - `ToolSearch` - 发现和激活工具
 - `AskUserQuestion` - 交互式用户提示
-- `Memory` - 持久化跨会话记忆
 
 **MCP 集成:**
 - `ListMcpServers/Resources` - 列出 MCP 服务器和资源
 - `ReadMcpResource` - 读取 MCP 资源内容
-- `McpAuth` - MCP 服务器认证管理
+- `mcp__<server>__authenticate` - 动态 MCP 服务器认证工具
 
 **管理:**
-- `CronCreate/Delete/List` - 调度重复任务
 - `TodoRead/TodoWrite` - 旧版待办事项管理
 
 ### 支持的提供商

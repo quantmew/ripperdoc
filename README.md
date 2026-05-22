@@ -15,7 +15,7 @@ _an open-source, extensible AI coding agent that runs in your terminal_
     <img src="https://img.shields.io/github/stars/quantmew/ripperdoc.svg" alt="GitHub stars">
   </a>
   <a href="https://pypi.org/project/ripperdoc/">
-    <img src="https://img.shields.io/badge/version-0.6.1-orange.svg">
+    <img src="https://img.shields.io/badge/version-0.6.2-orange.svg">
   </a>
 </p>
 
@@ -26,7 +26,7 @@ _an open-source, extensible AI coding agent that runs in your terminal_
 ## What Makes Ripperdoc Different?
 
 - **🔌 Model Agnostic** - Works with Anthropic Claude, OpenAI, Google Gemini, DeepSeek, and any OpenAI-compatible API
-- **🎣 Extensible Architecture** - 34 built-in tools with hooks system for custom workflows
+- **🎣 Extensible Architecture** - 30+ built-in tools with hooks system for custom workflows
 - **🤖 Multi-Agent Coordination** - Built-in task graph and team collaboration for complex workflows
 - **📚 Skill System** - Load capability bundles on-demand (PDF, Excel, PowerPoint, custom languages)
 - **🔌 MCP Integration** - First-class Model Context Protocol server support
@@ -39,7 +39,7 @@ _an open-source, extensible AI coding agent that runs in your terminal_
 ## Core Features
 
 ### 🛠️ Powerful Tool System
-- **Built-in Tools** - File operations (Read, Write, Edit, NotebookEdit), code search (Grep, Glob, LSP, LS), shell execution (Bash with foreground/background modes), subagent delegation, task graph, memory, and more
+- **Built-in Tools** - File operations (Read, Write, Edit, NotebookEdit), code search (Grep, Glob, LSP, LS), shell execution (Bash with foreground/background modes), subagent delegation, task graph, MCP integration, and more
 - **Jupyter Support** - Direct .ipynb notebook editing with cell manipulation
 - **Background Tasks** - Run commands asynchronously with real-time monitoring and status tracking
 
@@ -362,15 +362,13 @@ Ripperdoc provides powerful slash commands for session management:
 - `Skill` - Load skill bundles on-demand
 - `ToolSearch` - Discover and activate tools
 - `AskUserQuestion` - Interactive user prompts
-- `Memory` - Persistent cross-session memory
 
 **MCP Integration:**
 - `ListMcpServers/Resources` - List MCP servers and resources
 - `ReadMcpResource` - Read MCP resource content
-- `McpAuth` - MCP server authentication management
+- `mcp__<server>__authenticate` - Dynamic MCP server authentication tools
 
 **Management:**
-- `CronCreate/Delete/List` - Schedule recurring tasks
 - `TodoRead/TodoWrite` - Legacy todo management
 
 ### Supported Providers
