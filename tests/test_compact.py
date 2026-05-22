@@ -1,5 +1,9 @@
 """Tests for conversation compaction functionality."""
 
+from rich.console import Console
+
+from ripperdoc.cli.ui.rich_ui import session as rich_session
+from ripperdoc.cli.ui.rich_ui.session import RichUI
 from ripperdoc.utils.messaging.conversation_compaction import (
     extract_tool_ids_from_message,
     format_summary_response,
@@ -201,3 +205,69 @@ def test_render_transcript_summary_mode_filters_internal_attachments() -> None:
     assert "System (plan_file_reference):" in transcript
     assert "A plan file exists from plan mode at: /tmp/plan.md" in transcript
     assert "Plan mode still active" not in transcript
+
+
+async def test_manual_compact_stops_lazily_created_progress(monkeypatch) -> None:
+    class FakeHookResult:
+        should_block = False
+        should_continue = True
+
+    class FakeProgress:
+        instances = []
+
+        def __init__(self, *args, **kwargs):
+            self.started = False
+            self.stopped = False
+            self.task_id = 1
+            FakeProgress.instances.append(self)
+
+        def start(self):
+            self.started = True
+
+        def add_task(self, description, total):
+            return self.task_id
+
+        def update(self, task_id, **kwargs):
+            pass
+
+        def stop(self):
+            self.stopped = True
+
+    async def fake_run_pre_compact_async(**kwargs):
+        return FakeHookResult()
+
+    async def fake_compact_conversation(messages, custom_instructions, protocol, on_progress):
+        await on_progress("Summary complete", 1, 1)
+        return rich_session.CompactionResult(
+            messages=[create_user_message("summary")],
+            summary_text="summary",
+            continuation_prompt="continue",
+            tokens_before=10,
+            tokens_after=4,
+            tokens_saved=6,
+            micro_tokens_saved=0,
+            was_compacted=True,
+        )
+
+    async def fake_run_session_start_async(source):
+        pass
+
+    ui = RichUI.__new__(RichUI)
+    ui.console = Console(record=True)
+    ui.model = "test-model"
+    ui.session_id = "test-session"
+    ui.conversation_messages = [create_user_message("hello"), create_assistant_message("hi")]
+    ui._display_hook_system_message = lambda *args: None
+    ui._collect_hook_contexts = lambda result: []
+    ui._run_session_start_async = fake_run_session_start_async
+
+    monkeypatch.setattr(rich_session, "Progress", FakeProgress)
+    monkeypatch.setattr(rich_session, "get_profile_for_pointer", lambda model: None)
+    monkeypatch.setattr(rich_session.hook_manager, "run_pre_compact_async", fake_run_pre_compact_async)
+    monkeypatch.setattr(rich_session, "compact_conversation", fake_compact_conversation)
+
+    await ui._run_manual_compact("")
+
+    assert FakeProgress.instances
+    assert FakeProgress.instances[0].started is True
+    assert FakeProgress.instances[0].stopped is True

@@ -6,12 +6,15 @@ from types import SimpleNamespace
 from typing import AsyncGenerator
 
 import pytest
+
+from ripperdoc.core.config import ModelProfile, ProtocolType
 from pydantic import BaseModel
 
 from ripperdoc.utils.messaging.message_utils import build_anthropic_tool_schemas
 from ripperdoc.core.tool import Tool, ToolOutput, ToolUseContext
 from ripperdoc.services.providers.anthropic import (
     AnthropicClient,
+    _build_thinking_payload,
     _classify_anthropic_error,
     _content_blocks_from_response,
     _content_blocks_from_stream_state,
@@ -58,6 +61,27 @@ class _DummyTool(Tool[_DummyInput, str]):
         del input_data
         if False:
             yield
+
+
+def test_build_thinking_payload_uses_adaptive_for_supported_models() -> None:
+    profile = ModelProfile(protocol=ProtocolType.ANTHROPIC, model="claude-opus-4-6")
+
+    assert _build_thinking_payload(profile, 10_240) == {"type": "adaptive"}
+
+
+def test_build_thinking_payload_keeps_budget_for_legacy_models() -> None:
+    profile = ModelProfile(protocol=ProtocolType.ANTHROPIC, model="claude-sonnet-4-5")
+
+    assert _build_thinking_payload(profile, 10_240) == {
+        "type": "enabled",
+        "budget_tokens": 10_240,
+    }
+
+
+def test_build_thinking_payload_omits_when_disabled() -> None:
+    profile = ModelProfile(protocol=ProtocolType.ANTHROPIC, model="claude-opus-4-6")
+
+    assert _build_thinking_payload(profile, 0) is None
 
 
 def test_content_blocks_from_stream_state_includes_signature_when_available() -> None:

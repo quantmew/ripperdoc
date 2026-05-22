@@ -124,6 +124,16 @@ def _classify_anthropic_error(exc: Exception) -> tuple[str, str]:
     return "unknown_error", f"Unexpected error ({exc_type}): {exc_msg}"
 
 
+def _build_thinking_payload(
+    model_profile: ModelProfile, max_thinking_tokens: int
+) -> Optional[Dict[str, Any]]:
+    if max_thinking_tokens <= 0:
+        return None
+    if model_profile.supports_adaptive_thinking:
+        return {"type": "adaptive"}
+    return {"type": "enabled", "budget_tokens": max_thinking_tokens}
+
+
 def _content_blocks_from_stream_state(
     collected_text: List[str],
     collected_thinking: List[str],
@@ -420,9 +430,7 @@ class AnthropicClient(ProviderClient):
             enable_prompt_caching=prompt_caching_enabled,
         )
 
-        thinking_payload: Optional[Dict[str, Any]] = None
-        if max_thinking_tokens > 0:
-            thinking_payload = {"type": "enabled", "budget_tokens": max_thinking_tokens}
+        thinking_payload = _build_thinking_payload(model_profile, max_thinking_tokens)
 
         # Build common request kwargs
         request_kwargs: Dict[str, Any] = {

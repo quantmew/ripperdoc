@@ -41,6 +41,11 @@ def test_model_profile_reasoning_flag_is_inferred():
     assert profile.supports_reasoning is True
 
 
+def test_model_profile_adaptive_thinking_flag_is_inferred():
+    profile = ModelProfile(protocol=ProtocolType.ANTHROPIC, model="claude-opus-4-6")
+    assert profile.supports_adaptive_thinking is True
+
+
 def test_explicit_values_are_not_overridden():
     profile = ModelProfile(
         protocol=ProtocolType.OPENAI_COMPATIBLE,

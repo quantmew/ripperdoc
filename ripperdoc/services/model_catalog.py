@@ -35,6 +35,7 @@ class ModelCatalogEntry(BaseModel):
     mode: Optional[str] = None
     supports_reasoning: Optional[bool] = None
     supports_vision: Optional[bool] = None
+    supports_adaptive_thinking: Optional[bool] = None
     max_input_tokens: Optional[int] = None
     max_output_tokens: Optional[int] = None
     max_tokens: Optional[int] = None
@@ -222,12 +223,16 @@ def _candidate_score(
 def _parse_entry(key: str, row: Dict[str, Any]) -> ModelCatalogEntry:
     supports_reasoning = _field(row, "r", "supports_reasoning")
     supports_vision = _field(row, "v", "supports_vision")
+    supports_adaptive_thinking = _field(row, "at", "supports_adaptive_thinking")
     return ModelCatalogEntry(
         key=key,
         provider=_field(row, "p", "litellm_provider"),
         mode=_field(row, "m", "mode"),
         supports_reasoning=supports_reasoning if isinstance(supports_reasoning, bool) else None,
         supports_vision=supports_vision if isinstance(supports_vision, bool) else None,
+        supports_adaptive_thinking=supports_adaptive_thinking
+        if isinstance(supports_adaptive_thinking, bool)
+        else None,
         max_input_tokens=_to_int(_field(row, "in", "max_input_tokens")),
         max_output_tokens=_to_int(_field(row, "out", "max_output_tokens")),
         max_tokens=_to_int(_field(row, "mx", "max_tokens")),

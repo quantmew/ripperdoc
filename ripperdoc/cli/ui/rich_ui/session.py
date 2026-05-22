@@ -1509,16 +1509,10 @@ class RichUI:
                     extra={"session_id": self.session_id},
                 )
 
-            on_progress, progress = self._create_compaction_progress_callback()
             console.print("[dim]Compacting conversation...[/dim]")
-            try:
-                result = await compact_conversation(
-                    messages, custom_instructions=hook_instructions, protocol=protocol,
-                    on_progress=on_progress,
-                )
-            finally:
-                if progress is not None:
-                    progress.stop()
+            result = await compact_conversation(
+                messages, custom_instructions=hook_instructions, protocol=protocol,
+            )
 
             if isinstance(result, CompactionResult):
                 if self._saved_conversation is None:
@@ -2442,19 +2436,9 @@ class RichUI:
         self,
     ) -> tuple[
         Callable[[str, int, int], Awaitable[None]],
-        Optional[Progress],
+        Callable[[], None],
     ]:
-        """Create a lazy-init progress bar and on_progress callback for compaction.
-
-        The Progress bar is only created (and .start() called) on the first
-        invocation of the returned callback, which occurs during LLM streaming.
-        The caller MUST check ``progress is not None`` and call
-        ``progress.stop()`` in a finally block after compaction completes.
-
-        Returns:
-            (on_progress, progress_ref) — progress_ref is initially None and
-            set by the callback closure on first invocation.
-        """
+        """Create a lazy-init progress bar and lifecycle callbacks for compaction."""
         progress: Optional[Progress] = None
         task_id: Optional[TaskID] = None
 
@@ -2467,13 +2451,18 @@ class RichUI:
                     BarColumn(),
                     TextColumn("{task.completed}/{task.total} tokens"),
                     console=self.console,
+                    transient=True,
                 )
                 progress.start()
                 task_id = progress.add_task("", total=total)
             assert task_id is not None
             progress.update(task_id, description=description, completed=step, total=total)
 
-        return on_progress, progress
+        def stop_progress() -> None:
+            if progress is not None:
+                progress.stop()
+
+        return on_progress, stop_progress
 
     async def _run_manual_compact(self, custom_instructions: str) -> None:
         """Manual compaction: clear bulky tool output and summarize conversation."""
@@ -2521,7 +2510,7 @@ class RichUI:
                 else hook_instructions
             )
 
-        on_progress, progress = self._create_compaction_progress_callback()
+        on_progress, stop_progress = self._create_compaction_progress_callback()
         self.console.print("[dim]Compacting conversation...[/dim]")
         try:
             result = await compact_conversation(
@@ -2537,8 +2526,7 @@ class RichUI:
             self.console.print(f"[dim red]{traceback.format_exc()}[/dim red]")
             return
         finally:
-            if progress is not None:
-                progress.stop()
+            stop_progress()
 
         if isinstance(result, CompactionResult):
             self._saved_conversation = original_messages

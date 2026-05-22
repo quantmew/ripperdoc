@@ -125,6 +125,8 @@ class ModelProfile(BaseModel):
     supports_reasoning: Optional[bool] = None
     # Vision support flag. None = infer from packaged model catalog when available.
     supports_vision: Optional[bool] = None
+    # Adaptive thinking support flag. None = infer from packaged model catalog when available.
+    supports_adaptive_thinking: Optional[bool] = None
     # Pricing (per 1M tokens). Leave as 0 to skip cost calculation.
     price: ModelPrice = Field(default_factory=ModelPrice)
     currency: str = "USD"
@@ -161,6 +163,11 @@ class ModelProfile(BaseModel):
             self.supports_reasoning = metadata.supports_reasoning
         if self.supports_vision is None and metadata.supports_vision is not None:
             self.supports_vision = metadata.supports_vision
+        if (
+            self.supports_adaptive_thinking is None
+            and metadata.supports_adaptive_thinking is not None
+        ):
+            self.supports_adaptive_thinking = metadata.supports_adaptive_thinking
 
         if "max_tokens" not in fields_set and self.max_output_tokens is not None:
             self.max_tokens = min(self.max_output_tokens, 8192)
