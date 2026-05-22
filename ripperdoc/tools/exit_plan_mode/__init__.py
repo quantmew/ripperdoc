@@ -11,7 +11,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any, AsyncGenerator, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ripperdoc.core.tool import (
     Tool,

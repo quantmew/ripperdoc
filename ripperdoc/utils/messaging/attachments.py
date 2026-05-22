@@ -912,9 +912,8 @@ def _parse_pdf_reference_attachment(attachment: AttachmentMessage) -> List[UserM
     return _render_attachment_system_message(
         (
             f"PDF file: {filename} ({page_count} pages, {file_size}). "
-            "This PDF is too large to read all at once. You MUST use the Read tool with a page range "
-            "to read specific page windows. Start by reading the first few pages to understand the structure, "
-            "then read more as needed."
+            "PDF text extraction is not supported by the Read tool. Ask the user for extracted text "
+            "or use an available document-processing workflow if one is provided."
         ),
         attachment=attachment,
     )

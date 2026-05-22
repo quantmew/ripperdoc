@@ -36,7 +36,6 @@ from ripperdoc.tools.memory import MemoryTool
 from ripperdoc.tools.agent import AgentTool
 from ripperdoc.tools.tool_search import ToolSearchTool
 from ripperdoc.tools.sleep import SleepTool
-from ripperdoc.tools.schedule_cron import CronCreateTool, CronDeleteTool, CronListTool
 from ripperdoc.tools.mcp import (
     ListMcpResourcesTool,
     ListMcpServersTool,
@@ -86,9 +85,6 @@ BUILTIN_TOOL_NAMES = [
     "ListMcpResources",
     "ReadMcpResource",
     "Sleep",
-    "CronCreate",
-    "CronDelete",
-    "CronList",
     "Agent",
 ]
 
@@ -155,9 +151,6 @@ def _build_base_tools() -> List[Tool[Any, Any]]:
         ToolSearchTool(),
         ExitWorktreeTool(),
         SleepTool(),
-        CronCreateTool(),
-        CronDeleteTool(),
-        CronListTool(),
         ListMcpServersTool(),
         ListMcpResourcesTool(),
         ReadMcpResourceTool(),

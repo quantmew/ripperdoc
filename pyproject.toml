@@ -79,6 +79,10 @@ exclude = ["^tests/", "^setup\\.py$"]
 plugins = ["pydantic.mypy"]
 disable_error_code = ["attr-defined", "has-type"]
 
+[[tool.mypy.overrides]]
+module = ["qrcode", "yaml"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

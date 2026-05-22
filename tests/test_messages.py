@@ -271,6 +271,18 @@ def test_parse_attachment_message_file_image_does_not_add_truncation_note() -> N
     assert isinstance(msg.attachment.content, FileImageAttachmentContent)
 
 
+def test_parse_attachment_message_pdf_reference_does_not_recommend_read_pages() -> None:
+    msg = create_pdf_reference_attachment_message("a.pdf", page_count=20, file_size=1024)
+
+    rendered = parse_attachment_message(msg)
+
+    assert len(rendered) == 1
+    content = str(rendered[0].message.content)
+    assert "PDF text extraction is not supported by the Read tool" in content
+    assert "page range" not in content
+    assert "pages parameter" not in content
+
+
 def test_parse_attachment_message_mcp_resource_renders_full_content_blocks() -> None:
     msg = AttachmentMessage(
         attachment={

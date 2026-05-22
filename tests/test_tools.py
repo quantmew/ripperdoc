@@ -62,6 +62,11 @@ async def test_file_read_tool():
         Path(temp_path).unlink()
 
 
+def test_file_read_tool_input_has_no_pdf_pages_parameter():
+    """Read tool should not expose PDF-specific page selection."""
+    assert "pages" not in FileReadToolInput.model_fields
+
+
 @pytest.mark.asyncio
 async def test_file_write_tool():
     """Test writing a file."""

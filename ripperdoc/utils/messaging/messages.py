@@ -4,13 +4,15 @@ This module keeps the legacy import surface while implementation details live in
 focused messaging submodules.
 """
 
+# ruff: noqa: F401
+
 from __future__ import annotations
 
 import os
 from typing import Any, Dict, List, Optional, Set, Union
 
 from ripperdoc.utils.log import get_logger
-from ripperdoc.utils.messaging.attachments import (
+from ripperdoc.utils.messaging.attachments import (  # noqa: F401 — legacy re-export surface
     create_agent_mention_attachment_message,
     create_attachment_message,
     create_budget_usd_attachment_message,
@@ -56,7 +58,7 @@ from ripperdoc.utils.messaging.attachments import (
     parse_attachment_message,
     render_attachment_message,
 )
-from ripperdoc.utils.messaging.types import (
+from ripperdoc.utils.messaging.types import (  # noqa: F401 — legacy re-export surface
     AssistantMessage,
     AttachmentMessage,
     ConversationMessage,
@@ -66,7 +68,7 @@ from ripperdoc.utils.messaging.types import (
     ProgressMessage,
     UserMessage,
 )
-from ripperdoc.utils.messaging.types import (
+from ripperdoc.utils.messaging.types import (  # noqa: F401 — legacy re-export surface
     ATTACHMENT_EXPORT_HIDDEN_TYPES,
     ATTACHMENT_IGNORED_TYPES,
     ATTACHMENT_SUMMARY_HIDDEN_TYPES,

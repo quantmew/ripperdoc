@@ -16,7 +16,6 @@ Usage:
 - You can optionally specify a line offset and limit for large files or focused reads
 - Results are returned using cat -n format, with line numbers starting at 1
 - This tool can read image files (eg PNG, JPG, etc) and returns an image placeholder with metadata rather than rendered visual content.
-- This tool can extract text from PDF files (.pdf). Use the pages parameter to limit extraction to specific page ranges (e.g., pages: "1-5"). Maximum 20 pages per request.
 - This tool can read Jupyter notebooks (.ipynb files) and returns cell sources plus supported textual outputs.
 - This tool can only read files, not directories. To read a directory, use the LS tool when available.
 - You will regularly be asked to read screenshots. If the user provides a path to a screenshot, ALWAYS use this tool to inspect the file metadata/content available from the path.

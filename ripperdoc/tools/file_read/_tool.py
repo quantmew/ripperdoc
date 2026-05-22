@@ -29,7 +29,6 @@ from ripperdoc.utils.messaging.messages import (
     format_offset_exceeded_warning,
 )
 from ripperdoc.utils.image_utils import is_image_file, read_image_as_base64
-from ripperdoc.utils.pdf_utils import read_pdf_text
 from ripperdoc.tools.file_read._utils import (
     format_line_with_number,
     read_file_with_encoding,
@@ -53,11 +52,6 @@ class FileReadToolInput(BaseModel):
         default=None, description="Line number to start reading from (optional)"
     )
     limit: Optional[int] = Field(default=None, description="Number of lines to read (optional)")
-    pages: Optional[str] = Field(
-        default=None,
-        description="Page range for PDF files (e.g., '1-5', '3', '10-20'). Maximum 20 pages per request.",
-    )
-
 
 class FileReadToolOutput(BaseModel):
     """Output from file reading."""
@@ -67,7 +61,7 @@ class FileReadToolOutput(BaseModel):
     line_count: int
     offset: int
     limit: Optional[int]
-    content_type: str = "text"  # "text", "image", "pdf", "notebook"
+    content_type: str = "text"  # "text", "image", "notebook"
 
 
 class FileReadTool(Tool[FileReadToolInput, FileReadToolOutput]):
@@ -157,38 +151,6 @@ and limit to read only a portion of the file."""
         try:
             file_path_obj = Path(input_data.file_path)
             abs_file_path = os.path.abspath(input_data.file_path)
-
-            # --- PDF support ---
-            if file_path_obj.suffix.lower() == ".pdf":
-                pdf_text, pdf_error = read_pdf_text(file_path_obj, input_data.pages)
-                if pdf_error:
-                    error_output = FileReadToolOutput(
-                        content=pdf_error,
-                        file_path=input_data.file_path,
-                        line_count=0,
-                        offset=0,
-                        limit=None,
-                        content_type="pdf",
-                    )
-                    yield ToolResult(
-                        data=error_output,
-                        result_for_assistant=f"Error: {pdf_error}",
-                    )
-                    return
-
-                output = FileReadToolOutput(
-                    content=pdf_text,
-                    file_path=input_data.file_path,
-                    line_count=pdf_text.count("\n"),
-                    offset=0,
-                    limit=None,
-                    content_type="pdf",
-                )
-                yield ToolResult(
-                    data=output,
-                    result_for_assistant=self.render_result_for_assistant(output),
-                )
-                return
 
             # --- Image support ---
             if is_image_file(file_path_obj):
