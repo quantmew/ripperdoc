@@ -21,6 +21,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import FormattedText
 from rich.console import Console
 from rich.markup import escape
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID
 
 from ripperdoc.core.config import (
     get_effective_config,
@@ -47,7 +48,6 @@ from ripperdoc.cli.ui.choice import ChoiceOption, prompt_choice_async
 from ripperdoc.cli.ui.helpers import get_profile_for_pointer
 from ripperdoc.core.permission_engine import make_permission_checker
 from ripperdoc.core.plan_mode import ensure_plan_file_directory
-from ripperdoc.cli.ui.spinner import Spinner
 from ripperdoc.cli.ui.thinking_spinner import ThinkingSpinner
 from ripperdoc.cli.ui.context_display import context_usage_lines
 from ripperdoc.cli.ui.panels import create_welcome_panel, print_shortcuts
@@ -1483,7 +1483,6 @@ class RichUI:
 
         if usage_status.should_auto_compact:
             original_messages = list(messages)
-            spinner = Spinner(self.console, "Summarizing conversation...", spinner="dots")
             hook_instructions = ""
             try:
                 hook_result = await hook_manager.run_pre_compact_async(
@@ -1509,19 +1508,25 @@ class RichUI:
                     exc,
                     extra={"session_id": self.session_id},
                 )
+
+            on_progress, progress = self._create_compaction_progress_callback()
+            console.print("[dim]Compacting conversation...[/dim]")
             try:
-                spinner.start()
                 result = await compact_conversation(
-                    messages, custom_instructions=hook_instructions, protocol=protocol
+                    messages, custom_instructions=hook_instructions, protocol=protocol,
+                    on_progress=on_progress,
                 )
             finally:
-                spinner.stop()
+                if progress is not None:
+                    progress.stop()
 
             if isinstance(result, CompactionResult):
                 if self._saved_conversation is None:
                     self._saved_conversation = original_messages  # type: ignore[assignment]
+                pct = (result.tokens_saved / result.tokens_before * 100) if result.tokens_before else 0
                 console.print(
-                    f"[yellow]Auto-compacted conversation (saved ~{result.tokens_saved} tokens). "
+                    f"[yellow]Auto-compacted: {result.tokens_before} → {result.tokens_after} tokens "
+                    f"(saved {pct:.0f}%, ~{result.tokens_saved} tokens). "
                     f"Estimated usage: {result.tokens_after}/{max_context_tokens} tokens.[/yellow]"
                 )
                 logger.info(
@@ -2433,9 +2438,45 @@ class RichUI:
                 self._shutdown_event_loop_thread()
                 sys.unraisablehook = original_hook
 
+    def _create_compaction_progress_callback(
+        self,
+    ) -> tuple[
+        Callable[[str, int, int], Awaitable[None]],
+        Optional[Progress],
+    ]:
+        """Create a lazy-init progress bar and on_progress callback for compaction.
+
+        The Progress bar is only created (and .start() called) on the first
+        invocation of the returned callback, which occurs during LLM streaming.
+        The caller MUST check ``progress is not None`` and call
+        ``progress.stop()`` in a finally block after compaction completes.
+
+        Returns:
+            (on_progress, progress_ref) — progress_ref is initially None and
+            set by the callback closure on first invocation.
+        """
+        progress: Optional[Progress] = None
+        task_id: Optional[TaskID] = None
+
+        async def on_progress(description: str, step: int, total: int) -> None:
+            nonlocal progress, task_id
+            if progress is None:
+                progress = Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TextColumn("{task.completed}/{task.total} tokens"),
+                    console=self.console,
+                )
+                progress.start()
+                task_id = progress.add_task("", total=total)
+            assert task_id is not None
+            progress.update(task_id, description=description, completed=step, total=total)
+
+        return on_progress, progress
+
     async def _run_manual_compact(self, custom_instructions: str) -> None:
         """Manual compaction: clear bulky tool output and summarize conversation."""
-        from rich.markup import escape
 
         model_profile = get_profile_for_pointer(self.model)
         protocol = provider_protocol(model_profile.protocol) if model_profile else "openai"
@@ -2445,7 +2486,6 @@ class RichUI:
             return
 
         original_messages = list(self.conversation_messages)
-        spinner = Spinner(self.console, "Summarizing conversation...", spinner="dots")
 
         hook_instructions = ""
         try:
@@ -2480,12 +2520,15 @@ class RichUI:
                 if merged_instructions
                 else hook_instructions
             )
+
+        on_progress, progress = self._create_compaction_progress_callback()
+        self.console.print("[dim]Compacting conversation...[/dim]")
         try:
-            spinner.start()
             result = await compact_conversation(
                 self.conversation_messages,
                 merged_instructions,
                 protocol=protocol,
+                on_progress=on_progress,
             )
         except Exception as exc:
             import traceback
@@ -2494,14 +2537,16 @@ class RichUI:
             self.console.print(f"[dim red]{traceback.format_exc()}[/dim red]")
             return
         finally:
-            spinner.stop()
+            if progress is not None:
+                progress.stop()
 
         if isinstance(result, CompactionResult):
             self._saved_conversation = original_messages
             self.conversation_messages = result.messages
+            pct = (result.tokens_saved / result.tokens_before * 100) if result.tokens_before else 0
             self.console.print(
-                f"[green]✓ Conversation compacted[/green] "
-                f"(saved ~{result.tokens_saved} tokens). Use /resume to restore full history."
+                f"[green]✓ Compact complete:[/green] {result.tokens_before} → {result.tokens_after} tokens "
+                f"(saved {pct:.0f}%, ~{result.tokens_saved} tokens). Use /resume to restore full history."
             )
             await self._run_session_start_async("compact")
         elif isinstance(result, CompactionError):

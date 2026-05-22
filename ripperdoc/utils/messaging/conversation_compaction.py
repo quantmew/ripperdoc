@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Set, Tuple, Union
+from typing import Awaitable, Callable, List, Optional, Set, Tuple, Union
 
 from ripperdoc.core.query import query_llm
 from ripperdoc.utils.log import get_logger
+from ripperdoc.utils.token_estimation import estimate_tokens
 from ripperdoc.utils.messaging.message_compaction import (
     estimate_conversation_tokens,
     micro_compact_messages,
@@ -287,6 +288,7 @@ def get_complete_tool_pairs_tail(
 async def summarize_conversation(
     messages: List[ConversationMessage],
     custom_instructions: str = "",
+    on_progress: Optional[Callable[[str, int, int], Awaitable[None]]] = None,
 ) -> str:
     """Summarize the given conversation using the configured model.
 
@@ -296,6 +298,8 @@ async def summarize_conversation(
     Args:
         messages: The conversation messages to summarize (uses last 60).
         custom_instructions: Optional additional instructions for summarization.
+        on_progress: Optional async callback(description, step, total) for progress
+            display during streaming.
 
     Returns:
         The summary text, or empty string if summarization fails.
@@ -313,20 +317,60 @@ async def summarize_conversation(
         logger.warning("[compaction] transcript is empty, cannot summarize")
         return ""
 
-    # Use the detailed summary prompt from generate_summary_prompt
     system_prompt = "You are a helpful AI assistant tasked with summarizing conversations."
     user_prompt = generate_summary_prompt(custom_instructions)
     user_content = f"{user_prompt}\n\nHere is the conversation to summarize:\n\n{transcript}"
 
-    assistant_response = await query_llm(
-        messages=[create_user_message(user_content)],
-        system_prompt=system_prompt,
-        tools=[],
-        max_thinking_tokens=0,
-        model="quick",
-    )
+    if on_progress:
+        transcript_tokens = estimate_tokens(transcript)
+        estimated_output_tokens = max(250, min(10000, int(transcript_tokens * 0.55)))
+        logger.debug(
+            "summary progress estimate: transcript=%d_tokens → estimated_output=%d_tokens",
+            transcript_tokens, estimated_output_tokens,
+        )
+        chars_collected = 0
+
+        async def _summary_progress(chunk: str) -> None:
+            nonlocal chars_collected
+            chars_collected += len(chunk)
+            current_est_tokens = max(1, chars_collected // 4)
+            await on_progress(
+                f"Generating summary... (~{current_est_tokens:,} tokens)",
+                current_est_tokens, estimated_output_tokens,
+            )
+
+        await on_progress(
+            f"Generating summary (est. ~{estimated_output_tokens:,} tokens)...",
+            0, estimated_output_tokens,
+        )
+
+        assistant_response = await query_llm(
+            messages=[create_user_message(user_content)],
+            system_prompt=system_prompt,
+            tools=[],
+            max_thinking_tokens=0,
+            model="quick",
+            stream=True,
+            progress_callback=_summary_progress,
+        )
+    else:
+        assistant_response = await query_llm(
+            messages=[create_user_message(user_content)],
+            system_prompt=system_prompt,
+            tools=[],
+            max_thinking_tokens=0,
+            model="quick",
+        )
 
     result = extract_assistant_text(assistant_response)
+
+    if on_progress:
+        actual_tokens = estimate_tokens(result)
+        await on_progress(
+            f"Summary complete ({actual_tokens:,} tokens)",
+            actual_tokens, actual_tokens,
+        )
+
     logger.debug(
         "[compaction] summarize_conversation returned: length=%d",
         len(result) if result else 0,
@@ -340,6 +384,7 @@ async def compact_conversation(
     protocol: str = "anthropic",
     tail_count: int = RECENT_MESSAGES_AFTER_COMPACT,
     attachment_provider: Optional[Callable[[], List[ConversationMessage]]] = None,
+    on_progress: Optional[Callable[[str, int, int], Awaitable[None]]] = None,
 ) -> Union["CompactionResult", "CompactionError"]:
     """Compact a conversation by summarizing and rebuilding.
 
@@ -351,6 +396,8 @@ async def compact_conversation(
         protocol: The API protocol ("anthropic" or "openai").
         tail_count: Number of recent messages to preserve after compaction.
         attachment_provider: Optional callable to provide attachment messages.
+        on_progress: Optional async callback(description, step, total) for progress display.
+            Called only during the LLM summary phase, not during preparation or finalization.
 
     Returns:
         CompactionResult on success, CompactionError on failure.
@@ -367,12 +414,16 @@ async def compact_conversation(
     messages_for_summary = micro.messages
 
     # Summarize the conversation
-
     non_progress_messages = [
         m for m in messages_for_summary if getattr(m, "type", "") != "progress"
     ]
+
     try:
-        summary_text = await summarize_conversation(non_progress_messages, custom_instructions)
+        summary_text = await summarize_conversation(
+            non_progress_messages,
+            custom_instructions,
+            on_progress=on_progress,
+        )
     except Exception as exc:
         import traceback
 
@@ -387,7 +438,6 @@ async def compact_conversation(
             message=f"Error during compaction: {exc}",
             exception=exc,
         )
-
     if not summary_text.strip():
         return CompactionError(
             error_type="empty_summary",
